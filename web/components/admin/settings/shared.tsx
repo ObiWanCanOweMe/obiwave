@@ -94,6 +94,7 @@ export interface LlmForm {
   pickerAgent: boolean;
   noRepeatWindow: number;
   requestWebResolve: boolean;
+  strictRequests: boolean;
   agentTimeoutMs: number;
   pauseWhenEmpty: boolean;
   dailyTokenCap: number;

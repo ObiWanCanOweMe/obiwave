@@ -150,6 +150,9 @@ services:
       # to NULL analysis if neither is reachable. (tts-heavy is TTS-only; it no
       # longer carries the analyzer.) See music/analyzer.ts.
       - ANALYZE_URL=\${ANALYZE_URL:-http://analyzer:8080}
+      # Use \`url\` when ANALYZE_URL points at a remote host that can fetch
+      # Navidrome streams itself; default \`auto\` keeps shared-volume prefetch.
+      - ANALYZE_HANDOFF=\${ANALYZE_HANDOFF:-}
       # Per-container CPU/memory for the admin Stats page (GET /system) is read
       # from the docker-socket-proxy sidecar over TCP — the controller never
       # touches the raw Docker socket. Unset this to disable the panel.
@@ -501,6 +504,9 @@ services:
       # Probed, then a local venv; falls through cleanly to NULL analysis if
       # neither is reachable. (tts-heavy is TTS-only; no analyzer there.)
       - ANALYZE_URL=\${ANALYZE_URL:-http://analyzer:8080}
+      # Use \`url\` when ANALYZE_URL points at a remote host that can fetch
+      # Navidrome streams itself; default \`auto\` keeps shared-volume prefetch.
+      - ANALYZE_HANDOFF=\${ANALYZE_HANDOFF:-}
       # Per-container CPU/memory for the admin Stats page (GET /system) is read
       # from the docker-socket-proxy sidecar over TCP — the controller never
       # touches the raw Docker socket. Unset this to disable the panel.
@@ -811,6 +817,9 @@ services:
       # Acoustic-analysis sidecar (the \`analyzer\` service below, default-on).
       # Probed, then a local venv. (tts-heavy is TTS-only — no analyzer there.)
       - ANALYZE_URL=\${ANALYZE_URL:-http://analyzer:8080}
+      # Use \`url\` when ANALYZE_URL points at a remote host that can fetch
+      # Navidrome streams itself; default \`auto\` keeps shared-volume prefetch.
+      - ANALYZE_HANDOFF=\${ANALYZE_HANDOFF:-}
       # Per-container CPU/memory for the admin Stats page (GET /system) is read
       # from the docker-socket-proxy sidecar over TCP — the controller never
       # touches the raw Docker socket. Unset this to disable the panel.
@@ -1156,6 +1165,8 @@ SITE_URL=
 # off. A flag with no matching backend in the image is a clean no-op.
 # ANALYZE_AUDIO_EMBEDDING=   # 1/true = fill CLAP audio vectors (needs ANALYZER_HEAVY)
 # ANALYZE_VOCAL_ACTIVITY=    # 1/true = fill Demucs vocal ranges (needs ANALYZER_HEAVY)
+# ANALYZE_HANDOFF=url        # remote analyzer mode: Odin fetches stream URLs itself
+#                            # blank/auto/path = controller prefetches to shared volume
 #
 # Building from source instead of pulling? \`docker compose build analyzer\` with
 # ANALYZER_HEAVY=1 bakes the stack (or pass WITH_CLAP=1 / WITH_DEMUCS=1 directly).
@@ -1201,4 +1212,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `0.39.0`; // x-release-please-version
+export const CLI_VERSION = `0.40.0`; // x-release-please-version

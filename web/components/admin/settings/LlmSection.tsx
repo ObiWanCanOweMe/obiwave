@@ -209,6 +209,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         pickerAgent: form.llm.pickerAgent,
         noRepeatWindow: form.llm.noRepeatWindow,
         requestWebResolve: form.llm.requestWebResolve,
+        strictRequests: form.llm.strictRequests,
         agentTimeoutMs: form.llm.agentTimeoutMs,
         pauseWhenEmpty: form.llm.pauseWhenEmpty,
         dailyTokenCap: form.llm.dailyTokenCap,
@@ -987,6 +988,26 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             />
           </div>
         )}
+
+        <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
+          <div>
+            <div className="text-[13px] font-bold">Strict song requests</div>
+            <div className="mt-0.5 max-w-[480px] text-[11px] leading-[1.5] text-muted">
+              When on, listener requests that name a specific song or artist only
+              queue an exact library match. If the track or artist is missing,
+              the request is declined instead of substituting something similar.
+            </div>
+          </div>
+          <Seg
+            accent
+            value={form.llm.strictRequests ? 'on' : 'off'}
+            options={[
+              { id: 'off', label: 'Off' },
+              { id: 'on', label: 'On' },
+            ]}
+            onChange={v => setForm(f => ({ ...f, llm: { ...f.llm, strictRequests: v === 'on' } }))}
+          />
+        </div>
 
         <div className="field mt-4">
           <Label>No-repeat window (tracks)</Label>

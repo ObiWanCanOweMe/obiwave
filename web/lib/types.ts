@@ -115,6 +115,17 @@ export interface ListenerCount {
   [key: string]: unknown;
 }
 
+export interface PublicStreamInfo {
+  mount: string;
+  format: 'mp3';
+  bitrate?: number | null;
+  sampleRate?: number | null;
+  channels?: number | null;
+  opusEnabled: boolean;
+  flacEnabled: boolean;
+  aacEnabled: boolean;
+}
+
 /** `/now-playing` response. */
 export interface NowPlayingResponse {
   nowPlaying: NowPlayingTrack | null;
@@ -123,6 +134,7 @@ export interface NowPlayingResponse {
   activeShow?: ActiveShow | null;
   listeners?: ListenerCount | number;
   streamOnline?: boolean;
+  stream?: PublicStreamInfo;
   /** kbps of the first attached broadcast mount; null when offline. */
   streamBitrate?: number | null;
   /** Cumulative since-boot LLM token total — the player's token ticker. */

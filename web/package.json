@@ -1,6 +1,6 @@
 {
   "name": "sub-wave-web",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -9,7 +9,8 @@
     "start": "next start -p 7700",
     "lint": "eslint . && tsc --noEmit",
     "lint:fix": "eslint . --fix",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:audio-format": "node --experimental-strip-types scripts/audio-format.test.ts"
   },
   "dependencies": {
     "@next/third-parties": "^16.2.6",
