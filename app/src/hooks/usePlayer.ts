@@ -5,8 +5,7 @@
 // probe; native skips Opus for the same chained-Ogg reasons the web pins iOS to
 // MP3). The base URL comes from StationContext, not a build-time env.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import TrackPlayer, {
   Event,
   State,
@@ -15,22 +14,6 @@ import TrackPlayer, {
 import { addAudioRouteChangeListener } from '../../modules/airplay-route-picker';
 import { getLastLiveMeta, loadAndPlay, setupPlayer, teardown } from '@/audio/player';
 import type { StationApi } from '@/lib/api';
-import {
-  availabilityFor,
-  fallbackForLoadRejection,
-  resolveHydratedPreference,
-  shouldApplyHydratedPreference,
-  streamUrlFor,
-  type AudioFormat,
-  type FormatAvailability,
-  type StreamEnablement,
-} from '@/lib/audioFormat';
-import { loadFormatPreference, saveFormatPreference } from '@/lib/audioFormatStorage';
-import {
-  createFirstTuneReadiness,
-  createLatestLoadCoordinator,
-  type FirstTuneReadiness,
-} from '@/lib/audioFormatCoordinator';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 
 // Dev-build diagnostics for the audio pipeline (route handoffs, watchdog
@@ -50,14 +33,9 @@ export interface Player {
   stop: () => void;
   toggleMute: () => void;
   muted: boolean;
-  format: AudioFormat;
-  availability: FormatAvailability;
-  selectFormat: (format: AudioFormat) => void;
-  formatFailure: AudioFormat | null;
 }
 
 const WATCHDOG_MS = 6000;
-const FIRST_TUNE_CAPABILITY_TIMEOUT_MS = 5000;
 
 // Reconnect backoff for the error path, mirroring the web player. The first
 // retry stays quick (a blip mid-broadcast should recover in half a second),
@@ -65,9 +43,6 @@ const FIRST_TUNE_CAPABILITY_TIMEOUT_MS = 5000;
 // to a downed station must not hammer reconnects twice a second all night.
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 60_000;
-const DEFAULT_STREAM_ENABLEMENT: StreamEnablement = {
-  mp3: true, opus: false, aac: false, flac: false,
-};
 
 export function usePlayer(
   api: StationApi | null,
@@ -75,107 +50,20 @@ export function usePlayer(
   // Device-level reachability (from useConnectivity), threaded in so a regained
   // link triggers an immediate reconnect rather than waiting for the watchdog.
   isConnected: boolean | null = null,
-  streamEnablement: StreamEnablement | null = null,
 ): Player {
   const [tunedIn, setTunedIn] = useState(false);
   const [status, setStatus] = useState<PlayerStatus>('idle');
   const [volume, setVolumeState] = useState(initialVolume);
-  const [format, setFormat] = useState<AudioFormat>('mp3');
-  const [formatFailure, setFormatFailure] = useState<AudioFormat | null>(null);
   const preMuteVolume = useRef(initialVolume || 1);
 
   const tunedInRef = useRef(tunedIn);
   const apiRef = useRef(api);
-  const failedFormatsRef = useRef(new Set<AudioFormat>());
-  const formatRef = useRef<AudioFormat>('mp3');
-  const volumeRef = useRef(initialVolume);
-  const playbackGenerationRef = useRef(0);
-  const selectionRevisionRef = useRef(0);
-  const firstTuneReadinessRef = useRef<FirstTuneReadiness | null>(null);
-  const streamEnablementRef = useRef<StreamEnablement | null>(streamEnablement);
-  const hydratedPreferenceRef = useRef<{
-    base: string;
-    stored: AudioFormat | null;
-    selectionRevision: number;
-  } | null>(null);
   const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
-  type NativeLoad = {
-    format: AudioFormat;
-    base: string;
-    url: string;
-    headers: Record<string, string> | undefined;
-    volume: number;
-    generation: number;
-  };
-  const loadCoordinatorRef = useRef<ReturnType<typeof createLatestLoadCoordinator<NativeLoad>> | null>(null);
-  if (loadCoordinatorRef.current == null) {
-    loadCoordinatorRef.current = createLatestLoadCoordinator(async (load, isOwned) => {
-      await loadAndPlay({ url: load.url, headers: load.headers }, isOwned);
-      if (!isOwned()) return;
-      await TrackPlayer.setVolume(load.volume);
-    });
-  }
   // Consecutive failed reconnects since the last successful 'playing' — drives
   // the exponential backoff below.
   const retryCount = useRef(0);
   useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
   useEffect(() => { apiRef.current = api; }, [api]);
-  useEffect(() => { volumeRef.current = volume; }, [volume]);
-  useEffect(() => { streamEnablementRef.current = streamEnablement; }, [streamEnablement]);
-
-  const availability = useMemo(() => availabilityFor(
-    Platform.OS === 'ios' ? 'ios' : 'android',
-    streamEnablement ?? DEFAULT_STREAM_ENABLEMENT,
-    failedFormatsRef.current,
-    // formatFailure is the state signal for failedFormatsRef mutations.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [streamEnablement, formatFailure]);
-
-  useEffect(() => {
-    const base = api?.base;
-    // Invalidate every load owned by the previous station before its promise
-    // can reject into this station's session.
-    playbackGenerationRef.current += 1;
-    selectionRevisionRef.current += 1;
-    const hydrationSelectionRevision = selectionRevisionRef.current;
-    failedFormatsRef.current.clear();
-    firstTuneReadinessRef.current?.invalidate();
-    loadCoordinatorRef.current?.invalidate();
-    hydratedPreferenceRef.current = null;
-    setFormatFailure(null);
-    formatRef.current = 'mp3';
-    setFormat('mp3');
-    if (!base) {
-      firstTuneReadinessRef.current = null;
-      return;
-    }
-    const readiness = createFirstTuneReadiness(base, FIRST_TUNE_CAPABILITY_TIMEOUT_MS);
-    firstTuneReadinessRef.current = readiness;
-    if (streamEnablementRef.current) readiness.resolveCapabilities(streamEnablementRef.current);
-    const hydration = loadFormatPreference(base).then((stored) => {
-      readiness.resolveStorage(stored);
-      if (!shouldApplyHydratedPreference(
-        base, apiRef.current?.base, hydrationSelectionRevision, selectionRevisionRef.current,
-      )) return;
-      hydratedPreferenceRef.current = {
-        base, stored, selectionRevision: hydrationSelectionRevision,
-      };
-      const enablement = streamEnablementRef.current;
-      const nextAvailability = availabilityFor(
-        Platform.OS === 'ios' ? 'ios' : 'android',
-        enablement ?? DEFAULT_STREAM_ENABLEMENT,
-        failedFormatsRef.current,
-      );
-      const resolved = resolveHydratedPreference(
-        stored, nextAvailability, enablement !== null,
-        hydrationSelectionRevision, selectionRevisionRef.current,
-      );
-      if (resolved === null) return;
-      formatRef.current = resolved;
-      setFormat(resolved);
-    }).catch(() => { readiness.resolveStorage(null); });
-    void hydration;
-  }, [api?.base]);
 
   useEffect(() => { setupPlayer().catch(() => {}); }, []);
 
@@ -239,84 +127,6 @@ export function usePlayer(
   // reconnect() needs armWatchdog, which needs reconnect — bridge with a ref.
   const armWatchdogRef = useRef<(delay: number) => void>(() => {});
 
-  const loadOnce = useCallback(async (next: AudioFormat) => {
-    const a = apiRef.current;
-    if (!a) return;
-    const generation = ++playbackGenerationRef.current;
-    formatRef.current = next;
-    setFormat(next);
-    const result = await loadCoordinatorRef.current!.request({
-      format: next,
-      base: a.base,
-      url: streamUrlFor(a.streamUrls(), next),
-      headers: a.streamHeaders(),
-      volume: volumeRef.current,
-      generation,
-    });
-    if (result.status === 'superseded' || result.status === 'applied') return null;
-    return { error: result.error, generation, format: next, base: a.base };
-  }, []);
-
-  const loadFormat = useCallback(async (next: AudioFormat) => {
-    const rejection = await loadOnce(next);
-    if (!rejection) return;
-    const failed = fallbackForLoadRejection(
-      rejection.format, rejection.generation, playbackGenerationRef.current,
-      rejection.base, apiRef.current?.base, tunedInRef.current,
-    );
-    // An abandoned tune, another station, or a newer load superseded this
-    // rejection. It must not affect the current mount, availability, or retry.
-    if (!tunedInRef.current || rejection.base !== apiRef.current?.base
-      || rejection.generation !== playbackGenerationRef.current) return;
-    if (!failed) throw rejection.error;
-    failedFormatsRef.current.add(failed.failed);
-    setFormatFailure(failed.failed);
-    const fallbackRejection = await loadOnce(failed.fallback);
-    if (fallbackRejection && fallbackRejection.generation === playbackGenerationRef.current) {
-      throw fallbackRejection.error;
-    }
-  }, [loadOnce]);
-
-  // Enablement may refresh while a station remains selected. Preserve session
-  // failures, but ensure the exposed target and RNTP mount cannot remain on a
-  // format the station has just disabled.
-  useEffect(() => {
-    if (streamEnablement === null) return;
-    firstTuneReadinessRef.current?.resolveCapabilities(streamEnablement);
-    const currentAvailability = availabilityFor(
-      Platform.OS === 'ios' ? 'ios' : 'android', streamEnablement, failedFormatsRef.current,
-    );
-    const hydrated = hydratedPreferenceRef.current;
-    if (hydrated && hydrated.base === apiRef.current?.base) {
-      const resolved = resolveHydratedPreference(
-        hydrated.stored, currentAvailability, true,
-        hydrated.selectionRevision, selectionRevisionRef.current,
-      );
-      if (resolved !== null) {
-        const changed = formatRef.current !== resolved;
-        formatRef.current = resolved;
-        setFormat(resolved);
-        if (changed && tunedInRef.current) {
-          clearWatchdog();
-          setStatus('connecting');
-          loadFormat(resolved).catch(() => {
-            if (tunedInRef.current) armWatchdogRef.current(nextRetryDelay());
-          });
-          return;
-        }
-      }
-    }
-    if (currentAvailability[formatRef.current].available) return;
-    formatRef.current = 'mp3';
-    setFormat('mp3');
-    if (!tunedInRef.current) return;
-    clearWatchdog();
-    setStatus('connecting');
-    loadFormat('mp3').catch(() => {
-      if (tunedInRef.current) armWatchdogRef.current(nextRetryDelay());
-    });
-  }, [streamEnablement, clearWatchdog, loadFormat, nextRetryDelay]);
-
   const reconnect = useCallback(async () => {
     clearWatchdog();
     const a = apiRef.current;
@@ -324,13 +134,14 @@ export function usePlayer(
     plog('reconnect → loadAndPlay');
     setStatus('connecting');
     try {
-      await loadFormat(formatRef.current);
+      await loadAndPlay({ url: a.streamUrl(), headers: a.streamHeaders() });
+      await TrackPlayer.setVolume(volume);
     } catch {
       // A throw here may not surface as a PlaybackError event — re-arm
       // ourselves, with backoff, so a dead origin keeps retrying (slowly).
       if (tunedInRef.current) armWatchdogRef.current(nextRetryDelay());
     }
-  }, [clearWatchdog, loadFormat, nextRetryDelay]);
+  }, [clearWatchdog, volume, nextRetryDelay]);
 
   const armWatchdog = useCallback(
     (delay: number) => {
@@ -371,9 +182,6 @@ export function usePlayer(
       if (event.type === Event.PlaybackError) {
         if (tunedInRef.current) {
           setStatus('connecting');
-          // RNTP does not identify which historical load emitted this event.
-          // Treat it as a transport interruption only; promise rejections in
-          // loadFormat are the sole source of optional-format blacklisting.
           armWatchdog(nextRetryDelay());
         }
         return;
@@ -422,11 +230,6 @@ export function usePlayer(
 
   const stop = useCallback(() => {
     clearWatchdog();
-    // Any in-flight load now belongs to an abandoned tune session. Its later
-    // rejection must not blacklist a format or start a fallback load.
-    playbackGenerationRef.current += 1;
-    loadCoordinatorRef.current?.invalidate();
-    tunedInRef.current = false;
     setTunedIn(false);
     setStatus('idle');
     teardown().catch(() => {});
@@ -446,53 +249,21 @@ export function usePlayer(
     if (tunedInRef.current) stop();
   }, [api, stop]);
 
-  const tune = useCallback(async () => {
+  const tune = useCallback(() => {
     if (tunedInRef.current) {
       stop();
       return;
     }
     const a = apiRef.current;
     if (!a) return;
-    const base = a.base;
-    const readiness = firstTuneReadinessRef.current;
-    const readyFormat = readiness
-      ? await readiness.wait(Platform.OS === 'ios' ? 'ios' : 'android')
-      : 'mp3';
-    if (readyFormat === null) return;
-    if (apiRef.current?.base !== base) return;
     // A fresh tune-in restarts the backoff ladder.
     retryCount.current = 0;
-    tunedInRef.current = true;
     setTunedIn(true);
     setStatus('connecting');
-    formatRef.current = readyFormat;
-    setFormat(readyFormat);
-    loadFormat(readyFormat)
+    loadAndPlay({ url: a.streamUrl(), headers: a.streamHeaders() })
+      .then(() => TrackPlayer.setVolume(volume))
       .catch(() => { if (tunedInRef.current) armWatchdog(nextRetryDelay()); });
-  }, [stop, loadFormat, armWatchdog, nextRetryDelay]);
-
-  const selectFormat = useCallback((next: AudioFormat) => {
-    const a = apiRef.current;
-    if (!a) return;
-    const currentAvailability = availabilityFor(
-      Platform.OS === 'ios' ? 'ios' : 'android',
-      streamEnablement ?? DEFAULT_STREAM_ENABLEMENT,
-      failedFormatsRef.current,
-    );
-    if (!currentAvailability[next].available) return;
-    selectionRevisionRef.current += 1;
-    firstTuneReadinessRef.current?.select(next);
-    formatRef.current = next;
-    setFormat(next);
-    setFormatFailure(null);
-    void saveFormatPreference(a.base, next);
-    if (!tunedInRef.current) return;
-    clearWatchdog();
-    setStatus('connecting');
-    loadFormat(next).catch(() => {
-      if (tunedInRef.current) armWatchdog(nextRetryDelay());
-    });
-  }, [streamEnablement, clearWatchdog, loadFormat, armWatchdog, nextRetryDelay]);
+  }, [stop, volume, armWatchdog, nextRetryDelay]);
 
   const setVolume = useCallback((v: number) => {
     setVolumeState(Math.max(0, Math.min(1, v)));
@@ -520,9 +291,5 @@ export function usePlayer(
     stop,
     toggleMute,
     muted: volume === 0,
-    format,
-    availability,
-    selectFormat,
-    formatFailure,
   };
 }

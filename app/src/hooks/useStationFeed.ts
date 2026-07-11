@@ -11,7 +11,7 @@
 //   * unchanged payloads keep their previous object identity, so consumers'
 //     useMemo/React.memo actually hold between polls.
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppActive } from '@/hooks/useAppActive';
 import type { StationApi } from '@/lib/api';
 import { DEFAULT_STATION_LOCALE, type StationLocale } from '@/lib/format';
@@ -21,7 +21,6 @@ import type {
   ListenerCount,
   NowPlayingResponse,
   NowPlayingTrack,
-  PublicStreamInfo,
   SessionPayload,
   StationContext,
   StationState,
@@ -34,7 +33,6 @@ export interface StationFeed {
   activeShow: ActiveShow | null;
   listeners: ListenerCount | number | null;
   streamOnline: boolean | null;
-  stream: PublicStreamInfo | null;
   /** Cumulative since-boot LLM token total, or null before the first poll. */
   llmTokens: number | null;
   state: StationState;
@@ -59,7 +57,7 @@ const OFFLINE_CONFIRM_POLLS = 4;
 
 export function useStationFeed(
   api: StationApi | null,
-  opts?: { backgroundPoll?: boolean | RefObject<boolean> },
+  opts?: { backgroundPoll?: boolean },
 ): StationFeed {
   const backgroundPoll = opts?.backgroundPoll ?? false;
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
@@ -68,7 +66,6 @@ export function useStationFeed(
   const [activeShow, setActiveShow] = useState<ActiveShow | null>(null);
   const [listeners, setListeners] = useState<ListenerCount | number | null>(null);
   const [streamOnline, setStreamOnline] = useState<boolean | null>(null);
-  const [stream, setStream] = useState<PublicStreamInfo | null>(null);
   const [llmTokens, setLlmTokens] = useState<number | null>(null);
   const [state, setState] = useState<StationState>(EMPTY_STATE);
   const [session, setSession] = useState<SessionPayload>(EMPTY_SESSION);
@@ -106,7 +103,6 @@ export function useStationFeed(
     setActiveShow(null);
     setListeners(null);
     setStreamOnline(null);
-    setStream(null);
     setLlmTokens(null);
     setState(EMPTY_STATE);
     setSession(EMPTY_SESSION);
@@ -118,9 +114,7 @@ export function useStationFeed(
   useEffect(() => {
     if (!api) return;
     const background = !appActive;
-    const shouldPollInBackground =
-      typeof backgroundPoll === 'boolean' ? backgroundPoll : backgroundPoll.current;
-    if (background && !shouldPollInBackground) return;
+    if (background && !backgroundPoll) return;
     let cancelled = false;
 
     const applyNowPlaying = (npRes: NowPlayingResponse) => {
@@ -148,7 +142,6 @@ export function useStationFeed(
           if (offlinePollsRef.current >= OFFLINE_CONFIRM_POLLS) setStreamOnline(false);
         }
       }
-      setIfChanged('stream', npRes.stream ?? null, setStream);
       if (typeof npRes.llmTokens === 'number') setIfChanged('llmTokens', npRes.llmTokens, setLlmTokens);
       if (typeof npRes.timezone === 'string' && npRes.timezone) setTimezone(npRes.timezone);
       if (npRes.locale === 'en-US' || npRes.locale === 'en-GB') setLocale(npRes.locale);
@@ -209,7 +202,6 @@ export function useStationFeed(
     activeShow,
     listeners,
     streamOnline,
-    stream,
     llmTokens,
     state,
     session,
