@@ -5,6 +5,7 @@ import {
   bulkEmbeddingFailureMessage,
   withBulkEmbeddingRateLimit,
 } from '../src/music/embedding-bulk.js';
+import { isLocalEmbeddingProvider } from '../src/llm/provider.js';
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try { await fn(); console.log(`  ✓ ${name}`); }
@@ -22,6 +23,24 @@ await test('local providers retain the bounded operator-derived size', () => {
   assert.equal(bulkEmbeddingBatchSize(1, true), 8);
   assert.equal(bulkEmbeddingBatchSize(5, true), 10);
   assert.equal(bulkEmbeddingBatchSize(50, true), 64);
+});
+
+await test('remote HTTPS openai-compatible endpoints use the cloud batch', () => {
+  const local = isLocalEmbeddingProvider(
+    'openai-compatible',
+    'https://litellm.example.com/v1',
+  );
+  assert.equal(local, false);
+  assert.equal(bulkEmbeddingBatchSize(25, local), 64);
+});
+
+await test('HTTP self-hosted openai-compatible endpoints retain the local bounded batch', () => {
+  const local = isLocalEmbeddingProvider(
+    'openai-compatible',
+    'http://odin.example.test:4000/v1',
+  );
+  assert.equal(local, true);
+  assert.equal(bulkEmbeddingBatchSize(25, local), 50);
 });
 
 await test('Retry-After 60 retries the identical request after a safety margin', async () => {

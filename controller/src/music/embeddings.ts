@@ -71,13 +71,14 @@ export interface EmbeddingPerfAdvisory {
 // "embedding model" advisory. A heavy LOCAL model (bge-m3, *-large) is the quiet
 // cause of slow re-embeds + Ollama RAM thrash on a CPU/NAS box; cloud models are
 // never a perf concern (the work runs off-box), so `local` gates the warning.
-// Pure + name-based: never probes, never throws.
+// Pure config classification: never probes, never throws.
 export function embeddingPerfAdvisory(): EmbeddingPerfAdvisory {
   const { provider, model } = embeddingProviderInfo();
+  const { baseUrl } = resolveEmbeddingCfg();
   return {
     model,
     provider,
-    local: isLocalEmbeddingProvider(provider),
+    local: isLocalEmbeddingProvider(provider, baseUrl),
     heavy: isHeavyEmbeddingModel(model),
   };
 }

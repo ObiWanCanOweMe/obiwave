@@ -134,11 +134,15 @@ export function embeddingTextPrefixes(model: string): EmbeddingTextPrefixes {
 
 // Does this embedding provider run on the operator's own hardware (so model
 // weight is a CPU/RAM concern they pay for), vs a cloud API that does the work
-// off-box? Gates the heavy-model perf advisory — a big model on OpenAI/Google is
-// not the operator's performance problem. ollama / locca / openai-compatible are
-// the self-hosted transports.
-export function isLocalEmbeddingProvider(provider: string): boolean {
-  return provider === 'ollama' || provider === 'locca' || provider === 'openai-compatible';
+// off-box? Gates the heavy-model perf advisory and bulk batch sizing. Ollama and
+// Locca are always local. OpenAI-compatible is normally self-hosted, but SUB/WAVE
+// also represents remote LiteLLM gateways with that provider id; an explicit
+// HTTPS endpoint distinguishes that cloud leg while HTTP retains the local
+// homelab behaviour.
+export function isLocalEmbeddingProvider(provider: string, baseUrl = ''): boolean {
+  if (provider === 'ollama' || provider === 'locca') return true;
+  if (provider === 'openai-compatible') return !/^https:\/\//i.test(baseUrl.trim());
+  return false;
 }
 
 // Resolved embedding config. `settings.embedding` overrides settings.llm field
