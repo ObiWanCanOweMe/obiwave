@@ -38,6 +38,12 @@ import * as lastfm from './lastfm.js';
 import * as db from './library-db.js';
 import * as settings from '../settings.js';
 import * as embeddings from './embeddings.js';
+import {
+  bulkEmbeddingBatchSize,
+  bulkEmbeddingFailureMessage,
+  commitBulkEmbeddingBatch,
+  withBulkEmbeddingRateLimit,
+} from './embedding-bulk.js';
 import { selectSeeds } from './seed-selector.js';
 import { selectEnrichIds } from './enrich-scope.js';
 import { vote, fuseNeighbours } from './tag-propagator.js';
@@ -938,7 +944,8 @@ async function phaseEmbed(
   logEvent('info', `Building similarity vectors for ${unique.length.toLocaleString('en-GB')} tracks…`);
   reportProgress({ phase: 'embed', label: 'Embedding tracks', done: 0, total: unique.length });
 
-  const embedBatchSize = Math.max(8, Math.min(64, batchSize * 2));
+  const local = embeddings.embeddingPerfAdvisory().local;
+  const embedBatchSize = bulkEmbeddingBatchSize(batchSize, local);
   for (let i = 0; i < unique.length; i += embedBatchSize) {
     const batch = unique.slice(i, i + embedBatchSize);
     const songs = batch.map(id => db.getTrack(id)).filter((t): t is db.TrackRecord => !!t);
@@ -950,18 +957,38 @@ async function phaseEmbed(
     );
     let vecs: number[][];
     try {
-      vecs = await embeddings.embedDocTexts(texts, textMode);
-    } catch (err: any) {
-      console.error(`[tag] embedding batch failed at offset ${i}: ${err.message}`);
-      throw err;
+      vecs = await withBulkEmbeddingRateLimit(
+        () => embeddings.embedDocTexts(texts, textMode, { maxRetries: 0 }),
+        {
+          onWait: ({ seconds, attempt }) => {
+            const again = attempt > 1 ? ` (attempt ${attempt})` : '';
+            logEvent(
+              'warning',
+              `Embedding service rate limit reached — waiting ${seconds}s before retrying this batch${again}`,
+            );
+          },
+        },
+      );
+    } catch (err) {
+      const message = bulkEmbeddingFailureMessage(err);
+      logEvent('error', message);
+      throw new Error(message);
     }
-    for (let j = 0; j < songs.length; j++) {
-      db.upsertTrackVector(songs[j].id, vecs[j]);
-    }
-    if ((i + batch.length) % 500 === 0 || i + batch.length === unique.length) {
-      console.log(`[tag] embedded ${i + batch.length}/${unique.length}`);
-      reportProgress({ phase: 'embed', label: 'Embedding tracks', done: i + batch.length, total: unique.length });
-    }
+    const completed = i + batch.length;
+    commitBulkEmbeddingBatch({
+      result: vecs,
+      commit: vecs => {
+        for (let j = 0; j < songs.length; j++) {
+          db.upsertTrackVector(songs[j].id, vecs[j]);
+        }
+      },
+      onCommitted: () => {
+        if (completed % 500 === 0 || completed === unique.length) {
+          console.log(`[tag] embedded ${completed}/${unique.length}`);
+        }
+        reportProgress({ phase: 'embed', label: 'Embedding tracks', done: completed, total: unique.length });
+      },
+    });
   }
 }
 
