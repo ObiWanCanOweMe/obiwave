@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { generateText, APICallError } from 'ai';
+import { generateText, APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, snapV3Stability, modelTolerant, schemaHint } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
@@ -87,7 +87,7 @@ async function main() {
     }
   });
 
-  await test('LiteLLM sends only temperature when callers provide both sampling knobs', async () => {
+  await test('LiteLLM keeps tools but sends only temperature when callers provide both sampling knobs', async () => {
     let sent: any;
     const fetchImpl = async (_url: any, init: any) => {
       sent = JSON.parse(init.body);
@@ -98,9 +98,23 @@ async function main() {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
-    await generateText({ model, prompt: 'Say OK', temperature: 0.8, topP: 0.95, maxOutputTokens: 32 });
+    await generateText({
+      model,
+      prompt: 'Say OK',
+      temperature: 0.8,
+      topP: 0.95,
+      maxOutputTokens: 32,
+      tools: {
+        lookup: tool({
+          description: 'Look up a value',
+          inputSchema: z.object({ query: z.string() }),
+        }),
+      },
+    });
     assert.equal(sent.temperature, 0.8);
     assert.equal(sent.top_p, undefined);
+    assert.equal(sent.tools.length, 1);
+    assert.equal(sent.tools[0].function.name, 'lookup');
   });
 
   // ---- failover gate: isUnreachable ⊂ isTransient, but EXCLUDES 5xx/429 ----
