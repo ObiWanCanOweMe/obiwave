@@ -264,6 +264,25 @@ export function resolveModelId(cfg: any): string {
   );
 }
 
+// LiteLLM can route one OpenAI-compatible request to providers with different
+// sampling contracts. Anthropic rejects requests that contain both
+// `temperature` and `top_p`, so keep the explicit temperature and drop top_p
+// when callers supplied both. Other request fields pass through unchanged.
+export function liteLlmFetch(baseFetch: any = fetch) {
+  return (url: any, init: any) => {
+    if (init?.body && typeof init.body === 'string') {
+      try {
+        const body = JSON.parse(init.body);
+        if (body.temperature !== undefined && body.top_p !== undefined) {
+          delete body.top_p;
+          init = { ...init, body: JSON.stringify(body) };
+        }
+      } catch { /* not JSON — leave the request untouched */ }
+    }
+    return baseFetch(url, init);
+  };
+}
+
 export function createLiteLlmModel(cfg: any, fetchImpl: any = debugFetch) {
   const baseURL = effectiveLiteLlmBaseUrl(cfg);
   if (!baseURL) throw new Error('LiteLLM base URL is empty');
@@ -271,7 +290,7 @@ export function createLiteLlmModel(cfg: any, fetchImpl: any = debugFetch) {
     baseURL,
     apiKey: effectiveLiteLlmApiKey(cfg) || 'unused',
     name: 'litellm',
-    fetch: fetchImpl,
+    fetch: liteLlmFetch(fetchImpl),
   });
   return provider.chat(resolveModelId(cfg));
 }

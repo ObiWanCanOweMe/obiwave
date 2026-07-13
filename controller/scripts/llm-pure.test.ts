@@ -87,6 +87,22 @@ async function main() {
     }
   });
 
+  await test('LiteLLM sends only temperature when callers provide both sampling knobs', async () => {
+    let sent: any;
+    const fetchImpl = async (_url: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'vendor/model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
+    await generateText({ model, prompt: 'Say OK', temperature: 0.8, topP: 0.95, maxOutputTokens: 32 });
+    assert.equal(sent.temperature, 0.8);
+    assert.equal(sent.top_p, undefined);
+  });
+
   // ---- failover gate: isUnreachable ⊂ isTransient, but EXCLUDES 5xx/429 ----
   console.log('isUnreachable vs isTransient (the failover gate):');
   await test('500 is transient but NOT unreachable', () => {
