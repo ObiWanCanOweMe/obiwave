@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   bulkEmbeddingBatchSize,
   bulkEmbeddingFailureMessage,
@@ -81,6 +82,20 @@ await test('a permanently throttled batch stops after three waits', async () => 
   ));
   assert.equal(calls, 4);
   assert.equal(sleeps, 3);
+});
+
+await test('tagger wires bulk retry only around document embeddings', () => {
+  const tagger = readFileSync(new URL('../src/music/tag-library.ts', import.meta.url), 'utf8');
+  assert.match(tagger, /bulkEmbeddingBatchSize\(/);
+  assert.match(tagger, /withBulkEmbeddingRateLimit\(/);
+  assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);
+});
+
+await test('interactive query embeddings do not opt into bulk retry', () => {
+  const source = readFileSync(new URL('../src/music/embeddings.ts', import.meta.url), 'utf8');
+  const queryBody = source.slice(source.indexOf('export async function embedQueryText'));
+  assert.doesNotMatch(queryBody, /withBulkEmbeddingRateLimit/);
+  assert.doesNotMatch(queryBody, /maxRetries:\s*0/);
 });
 
 console.log('\nall bulk embedding rate-policy tests passed');

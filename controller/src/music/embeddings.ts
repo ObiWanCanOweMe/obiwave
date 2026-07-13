@@ -113,10 +113,21 @@ export function formatTrackText(song: SongMeta, enrich?: TrackEnrichment | null)
   return lines.join('\n');
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export interface EmbedTextOptions {
+  maxRetries?: number;
+}
+
+export async function embedTexts(
+  texts: string[],
+  options: EmbedTextOptions = {},
+): Promise<number[][]> {
   if (texts.length === 0) return [];
   const model = embeddingModel();
-  const { embeddings } = await embedMany({ model, values: texts });
+  const { embeddings } = await embedMany({
+    model,
+    values: texts,
+    ...(options.maxRetries != null ? { maxRetries: options.maxRetries } : {}),
+  });
   if (!Array.isArray(embeddings) || embeddings.length !== texts.length) {
     throw new Error(
       `embedMany returned ${embeddings?.length ?? 'no'} vectors for ${texts.length} texts`,
@@ -186,8 +197,12 @@ export function applyQueryPrefix(
 
 // Embed texts destined for the index (tracks). `mode` is the index's mode —
 // callers get it from embedding_meta via resolveIndexTextMode.
-export function embedDocTexts(texts: string[], mode: IndexTextMode): Promise<number[][]> {
-  return embedTexts(texts.map(t => applyDocPrefix(t, mode)));
+export function embedDocTexts(
+  texts: string[],
+  mode: IndexTextMode,
+  options: EmbedTextOptions = {},
+): Promise<number[][]> {
+  return embedTexts(texts.map(t => applyDocPrefix(t, mode)), options);
 }
 
 // Embed a search query against an index built in `indexMode`. Returns null
