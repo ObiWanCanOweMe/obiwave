@@ -2866,6 +2866,10 @@ function validateFestivalsStrict(raw) {
 export async function update(patch) {
   const cur = await load();
   const next = JSON.parse(JSON.stringify(cur));
+  const inheritedEmbeddingProvider = next.embedding.provider
+    || (EMBEDDING_PROVIDERS.includes(next.llm.provider) ? next.llm.provider : 'ollama');
+  const inheritedEmbeddingModel = next.embedding.model
+    || defaultEmbeddingModelForProvider(inheritedEmbeddingProvider);
   let restart = false;
 
   if ('jingleRatio' in patch) {
@@ -3346,9 +3350,6 @@ export async function update(patch) {
   }
   if ('llm' in patch) {
     const l = patch.llm || {};
-    const inheritedEmbeddingProvider = EMBEDDING_PROVIDERS.includes(next.llm.provider)
-      ? next.llm.provider
-      : 'ollama';
     applyLlmLegPatch(next.llm, l, 'llm');
     // Route the primary inline key into keys[provider] AFTER the provider is
     // resolved, so it's stored under the identity it belongs to (issue #657).
@@ -3395,15 +3396,6 @@ export async function update(patch) {
     }
     if (next.llm.provider === 'litellm' && !next.llm.model) {
       throw new Error('LiteLLM model is required');
-    }
-    // LiteLLM is chat-only. A fresh/default embedding config follows the chat
-    // provider, so pin that inheritance to the previous embedding-capable leg
-    // before LiteLLM can become the effective tagger provider.
-    if (next.llm.provider === 'litellm' && !next.embedding.provider) {
-      next.embedding.provider = inheritedEmbeddingProvider;
-      if (!next.embedding.model) {
-        next.embedding.model = defaultEmbeddingModelForProvider(inheritedEmbeddingProvider);
-      }
     }
     // Backup leg — same connection fields, validated identically. The
     // openai-compatible-needs-baseUrl rule is enforced only when the fallback
@@ -3656,6 +3648,14 @@ export async function update(patch) {
         next.scrobble.listenbrainz.baseUrl = trimmed;
       }
     }
+  }
+
+  // LiteLLM is chat-only. Enforce this after BOTH llm and embedding patches so
+  // neither an embedding-only clear nor a combined patch can re-enable chat
+  // provider inheritance. Preserve the prior effective embedding choice.
+  if (next.llm.provider === 'litellm' && !next.embedding.provider) {
+    next.embedding.provider = inheritedEmbeddingProvider;
+    if (!next.embedding.model) next.embedding.model = inheritedEmbeddingModel;
   }
 
   // Post-patch integrity sweep — a personas/shows change in this patch may

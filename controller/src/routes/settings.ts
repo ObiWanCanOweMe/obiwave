@@ -638,8 +638,17 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
     } else if (!resolvedApiKey) {
       await settings.load();
       const s = settings.get();
-      const leg = llmLegIdentity(req.body?.leg);
-      const savedLeg = leg === 'fallback' ? s.llm?.fallback : s.llm;
+      const hasExplicitLeg = Object.prototype.hasOwnProperty.call(req.body || {}, 'leg');
+      let savedLeg;
+      if (hasExplicitLeg) {
+        const leg = llmLegIdentity(req.body?.leg);
+        savedLeg = leg === 'fallback' ? s.llm?.fallback : s.llm;
+      } else {
+        // Backward compatibility for pre-leg clients: identify the fallback by
+        // its saved URL exactly as this endpoint did before explicit legs.
+        const fallbackUrl = String(s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
+        savedLeg = resolvedBaseUrl && resolvedBaseUrl === fallbackUrl ? s.llm?.fallback : s.llm;
+      }
       const legProvider = savedLeg?.provider;
       resolvedBaseUrl = resolvedBaseUrl || String(savedLeg?.baseUrl || '').trim().replace(/\/+$/, '');
       resolvedApiKey = settings.llmKeyFor(legProvider || 'openai-compatible');

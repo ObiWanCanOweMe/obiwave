@@ -56,6 +56,7 @@ const primary = await recordingGateway();
 const fallback = await recordingGateway();
 const onboarding = await recordingGateway();
 const environment = await recordingGateway();
+const compatFallback = await recordingGateway();
 let routeServer: http.Server | undefined;
 
 try {
@@ -131,6 +132,44 @@ try {
     method: 'GET', url: '/v1/models', authorization: 'Bearer unsaved-onboarding-token',
   });
 
+  const onboardingTestResponse = await post('/onboarding/test-llm', {
+    provider: 'litellm',
+    model: 'vendor/model',
+    baseUrl: onboarding.baseUrl,
+    apiKey: 'unsaved-onboarding-token',
+  });
+  assert.equal(onboardingTestResponse.status, 200);
+  assert.equal((await onboardingTestResponse.json()).ok, true);
+  assert.deepEqual(onboarding.requests[1], {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer unsaved-onboarding-token',
+  });
+  console.log('  ✓ mounted /onboarding/test-llm uses the unsaved URL and bearer token');
+
+  await settings.update({
+    llm: {
+      provider: 'ollama',
+      model: 'glm-5.1:cloud',
+      baseUrl: '',
+      fallback: {
+        enabled: true,
+        provider: 'openai-compatible',
+        model: 'vendor/model',
+        baseUrl: compatFallback.baseUrl,
+        apiKey: 'saved-compat-fallback-token',
+      },
+    },
+  });
+  const legacyProbe = await post('/settings/llm/probe-compat', {
+    provider: 'openai-compatible',
+    baseUrl: compatFallback.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal(legacyProbe.status, 200);
+  assert.equal((await legacyProbe.json()).ok, true);
+  assert.deepEqual(compatFallback.requests[0], {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-compat-fallback-token',
+  });
+
   await settings.update({
     llm: { provider: 'ollama', model: 'glm-5.1:cloud', baseUrl: '', fallback: { enabled: false } },
   });
@@ -149,5 +188,5 @@ try {
   if (routeServer) {
     await new Promise<void>((resolve) => routeServer!.close(() => resolve()));
   }
-  await Promise.all([primary.close(), fallback.close(), onboarding.close(), environment.close()]);
+  await Promise.all([primary.close(), fallback.close(), onboarding.close(), environment.close(), compatFallback.close()]);
 }
