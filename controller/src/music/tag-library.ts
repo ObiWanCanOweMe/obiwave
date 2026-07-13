@@ -41,6 +41,7 @@ import * as embeddings from './embeddings.js';
 import {
   bulkEmbeddingBatchSize,
   bulkEmbeddingFailureMessage,
+  commitBulkEmbeddingBatch,
   withBulkEmbeddingRateLimit,
 } from './embedding-bulk.js';
 import { selectSeeds } from './seed-selector.js';
@@ -973,13 +974,21 @@ async function phaseEmbed(
       logEvent('error', message);
       throw new Error(message);
     }
-    for (let j = 0; j < songs.length; j++) {
-      db.upsertTrackVector(songs[j].id, vecs[j]);
-    }
-    if ((i + batch.length) % 500 === 0 || i + batch.length === unique.length) {
-      console.log(`[tag] embedded ${i + batch.length}/${unique.length}`);
-      reportProgress({ phase: 'embed', label: 'Embedding tracks', done: i + batch.length, total: unique.length });
-    }
+    const completed = i + batch.length;
+    commitBulkEmbeddingBatch({
+      result: vecs,
+      commit: vecs => {
+        for (let j = 0; j < songs.length; j++) {
+          db.upsertTrackVector(songs[j].id, vecs[j]);
+        }
+      },
+      onCommitted: () => {
+        if (completed % 500 === 0 || completed === unique.length) {
+          console.log(`[tag] embedded ${completed}/${unique.length}`);
+        }
+        reportProgress({ phase: 'embed', label: 'Embedding tracks', done: completed, total: unique.length });
+      },
+    });
   }
 }
 

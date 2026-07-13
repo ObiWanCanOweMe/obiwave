@@ -15,6 +15,12 @@ export interface BulkEmbeddingRetryOptions {
   onWait?: (notice: BulkEmbeddingWaitNotice) => void;
 }
 
+export interface BulkEmbeddingCommitOptions<T> {
+  result: T;
+  commit: (result: T) => void;
+  onCommitted: () => void;
+}
+
 const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export function bulkEmbeddingBatchSize(tagBatchSize: number, local: boolean): number {
@@ -33,6 +39,11 @@ export function bulkEmbeddingFailureMessage(err: unknown): string {
   return isRateLimited(err as Parameters<typeof isRateLimited>[0])
     ? 'Embedding service rate limit could not be safely retried'
     : 'Embedding service request failed';
+}
+
+export function commitBulkEmbeddingBatch<T>(options: BulkEmbeddingCommitOptions<T>): void {
+  options.commit(options.result);
+  options.onCommitted();
 }
 
 export async function withBulkEmbeddingRateLimit<T>(

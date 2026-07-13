@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   bulkEmbeddingBatchSize,
   bulkEmbeddingFailureMessage,
+  commitBulkEmbeddingBatch,
   withBulkEmbeddingRateLimit,
 } from '../src/music/embedding-bulk.js';
 import { isLocalEmbeddingProvider } from '../src/llm/provider.js';
@@ -103,11 +104,62 @@ await test('a permanently throttled batch stops after three waits', async () => 
   assert.equal(sleeps, 3);
 });
 
+await test('a throttled cloud batch advances progress once, only after all upserts', async () => {
+  const rateLimit: any = Object.assign(new Error('rate limit'), {
+    statusCode: 429,
+    responseHeaders: { 'retry-after': '1' },
+  });
+  const vectors = Array.from({ length: 64 }, (_, i) => [i]);
+  let calls = 0;
+  let upserts = 0;
+  let progress = 0;
+  const progressUpdates: number[] = [];
+
+  const result = await withBulkEmbeddingRateLimit(
+    async () => {
+      calls += 1;
+      if (calls === 1) throw rateLimit;
+      return vectors;
+    },
+    {
+      sleep: async () => {
+        assert.equal(upserts, 0);
+        assert.equal(progress, 0);
+        assert.deepEqual(progressUpdates, []);
+      },
+    },
+  );
+
+  commitBulkEmbeddingBatch({
+    result,
+    commit: result => {
+      for (const vector of result) {
+        assert.deepEqual(vector, [upserts]);
+        upserts += 1;
+      }
+    },
+    onCommitted: () => {
+      assert.equal(upserts, 64);
+      progress += 64;
+      progressUpdates.push(progress);
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(upserts, 64);
+  assert.equal(progress, 64);
+  assert.deepEqual(progressUpdates, [64]);
+});
+
 await test('tagger wires bulk retry only around document embeddings', () => {
   const tagger = readFileSync(new URL('../src/music/tag-library.ts', import.meta.url), 'utf8');
   assert.match(tagger, /bulkEmbeddingBatchSize\(/);
-  assert.match(tagger, /withBulkEmbeddingRateLimit\(/);
+  assert.match(tagger, /commitBulkEmbeddingBatch\(/);
   assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);
+  assert.match(
+    tagger,
+    /commit: vecs => \{[\s\S]*?upsertTrackVector[\s\S]*?onCommitted: \(\) => \{[\s\S]*?reportProgress/,
+  );
 });
 
 await test('interactive query embeddings do not opt into bulk retry', () => {
