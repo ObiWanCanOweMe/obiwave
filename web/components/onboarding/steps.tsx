@@ -7,6 +7,7 @@ import { ModelCombobox } from '../admin/llm/ModelCombobox';
 import { PROVIDER_IDS } from '../admin/llm/providerMeta';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { LocationPicker } from '../LocationPicker';
+import { llmDraftForProviderChange } from './providerState';
 
 // Tiny presentation primitives kept local to the wizard — avoids dragging the
 // full admin UI library into a screen most operators see exactly once.
@@ -226,9 +227,15 @@ export function LlmStep({ w }: { w: WizardController }) {
             value={w.data.llm.provider}
             providerIds={PROVIDER_IDS}
             keyAware={false}
-            onChange={id =>
-              w.patch(d => ({ llm: { ...d.llm, provider: id }, llmTest: { ok: null } }))
-            }
+            onChange={id => {
+              setLiteModels([]);
+              setLiteError(null);
+              setLiteLoading(false);
+              w.patch(d => ({
+                llm: llmDraftForProviderChange(d.llm, id),
+                llmTest: { ok: null },
+              }));
+            }}
           />
         </div>
         {isOllama && (
