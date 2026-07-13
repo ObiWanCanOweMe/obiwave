@@ -74,3 +74,56 @@ Each regression was added before its production change and run against commit `f
 ## Concerns
 
 None.
+
+## Re-review follow-up
+
+Re-review base: `f17eddf`
+
+Implementation commit: `322cb0e` (`fix(llm): enforce final LiteLLM boundaries`)
+
+### Follow-up outcome
+
+All re-review findings were addressed in the same isolated feature worktree. No deployment, restart, live-provider change, root-state access, or real-secret access was performed.
+
+### Follow-up files changed
+
+- `controller/src/settings.ts` — moves the LiteLLM chat-only embedding invariant to the final post-patch boundary and preserves the prior effective embedding provider/model.
+- `controller/src/routes/settings.ts` — keeps explicit probe legs authoritative while restoring saved-URL matching for legacy non-LiteLLM probes that omit `leg`.
+- `controller/scripts/litellm-config.test.ts` — covers embedding-only and combined LLM+embedding clear patches while LiteLLM is active.
+- `controller/scripts/litellm-routes.test.ts` — covers omitted-leg authenticated fallback probing and the real mounted `/onboarding/test-llm` LiteLLM transport with a recording gateway.
+
+### Follow-up RED evidence
+
+1. `cd controller && npx tsx scripts/litellm-config.test.ts`
+   - Exit `1`.
+   - Both the embedding-only clear and combined LLM+embedding clear resolved to `{ provider: 'litellm', model: '' }` instead of `{ provider: 'ollama', model: 'nomic-embed-text' }`.
+2. `cd controller && npx tsx scripts/litellm-routes.test.ts`
+   - Exit `1`.
+   - The omitted-leg fallback probe reached the correct saved fallback URL but sent `Bearer no-key` instead of `Bearer saved-compat-fallback-token`.
+   - Before that expected failure, the newly mounted `/onboarding/test-llm` assertion passed and recorded exact `POST /v1/chat/completions` plus `Bearer unsaved-onboarding-token`. This finding was missing route coverage, not missing production transport behavior.
+
+### Follow-up GREEN evidence
+
+- `cd controller && npx tsx scripts/litellm-config.test.ts` — exit `0`; both clear-patch variants preserve effective Ollama embeddings.
+- `cd controller && npx tsx scripts/litellm-routes.test.ts` — exit `0`; omitted-leg compatibility and the mounted onboarding transport both pass with exact recorded path/header assertions.
+
+### Follow-up full verification
+
+- `cd controller && npm test` — exit `0`; all 38 test files passed.
+- `cd controller && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed with the unchanged repository baseline of 516 warnings and 0 errors.
+- `cd web && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation` — exit `0`; all relevant web regressions passed with the existing Node package-module-type warning.
+- `cd web && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed.
+- `cd web && npm run build` — exit `0`; Next.js 15.5.19 compiled, typechecked, generated all 81 static pages, and finalized the production build.
+- `git diff --check` — exit `0` before commit `322cb0e`.
+
+### Follow-up self-review
+
+- The embedding invariant now executes after both `llm` and `embedding` patch handlers, so neither patch order can make blank embedding inheritance resolve to LiteLLM.
+- The prior effective embedding provider/model is captured before mutation; fresh defaults remain `ollama`/`nomic-embed-text`, while an existing explicit embedding choice is preserved.
+- Explicit probe legs remain authoritative. Saved-URL matching runs only when a non-LiteLLM probe omits the `leg` field, retaining backward compatibility for older Admin clients.
+- The real onboarding test route uses the unsaved request-body URL/token, sends the token only as an Authorization header to the recording gateway, and does not persist it during the test.
+- Existing LiteLLM URL/token precedence, cache digesting, query-string exclusion, transport isolation, Google configuration, and live station state remain unchanged.
+
+### Follow-up concerns
+
+None.
