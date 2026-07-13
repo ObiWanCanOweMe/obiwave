@@ -216,7 +216,7 @@ router.post('/settings', requireAdmin, async (req, res) => {
     if (req.body?.tts?.remote?.url !== undefined) {
       await remoteTts.refresh();
     }
-    res.json(result);
+    res.json(settings.publicUpdateResult(result));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

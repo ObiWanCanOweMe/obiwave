@@ -2278,6 +2278,13 @@ export function getDefaults() {
   return DEFAULTS;
 }
 
+// Public shape for POST /settings. The internal update result includes the
+// complete saved settings so in-process callers can apply live changes, but it
+// must never cross the HTTP boundary because it contains provider key values.
+export function publicUpdateResult(result: { requiresRestart?: unknown }) {
+  return { requiresRestart: !!result?.requiresRestart };
+}
+
 // Resolve the operator-entered inline API key for a provider from the
 // per-provider map (issue #657). Returns '' when none is stored, in which case
 // the registry/embedding layer falls through to the provider's env var
