@@ -175,19 +175,20 @@ export function useWizard() {
     }
   }, [auth, data.llm, patch]);
 
-  // Probe a locca / openai-compatible server for its loaded model list so the
-  // operator can pick the model instead of typing it. Uses data.llm.baseUrl
-  // when set; otherwise the controller defaults to the locca host URL.
-  const discoverLocca = useCallback(async () => {
-    const qs = data.llm.baseUrl ? `?baseUrl=${encodeURIComponent(data.llm.baseUrl)}` : '';
-    const r = await auth.adminFetch(`/settings/llm/discover${qs}`);
+  // Probe a custom endpoint for its loaded model list so the operator can pick
+  // the model instead of typing it. LiteLLM resolves a blank URL from the
+  // controller environment; openai-compatible still requires an explicit URL.
+  const discoverCustomModels = useCallback(async () => {
+    const qs = new URLSearchParams({ provider: data.llm.provider });
+    if (data.llm.baseUrl) qs.set('baseUrl', data.llm.baseUrl);
+    const r = await auth.adminFetch(`/settings/llm/models?${qs}`);
     const j = (await r.json().catch(() => ({}))) as {
-      reachable?: boolean;
+      ok?: boolean;
       models?: string[];
       error?: string;
     };
-    return { reachable: !!j.reachable, models: j.models || [], error: j.error };
-  }, [auth, data.llm.baseUrl]);
+    return { reachable: !!j.ok, models: j.models || [], error: j.error };
+  }, [auth, data.llm.provider, data.llm.baseUrl]);
 
   const save = useCallback(async () => {
     // Stitch the apiKeys into the right env-var keys before sending.
@@ -215,9 +216,9 @@ export function useWizard() {
       llm: {
         provider: data.llm.provider,
         model: data.llm.model,
-        // Cloud keys go to apiKeys (state/secrets.env). settings.json keeps
-        // only the provider/model/url; never the key.
-        apiKey: '',
+        // Native cloud keys go to apiKeys (state/secrets.env). Custom gateway
+        // tokens are provider-scoped inline overrides in settings.json.
+        apiKey: data.llm.provider === 'litellm' ? data.llm.apiKey : '',
         baseUrl: data.llm.baseUrl,
         ollamaUrl: data.llm.ollamaUrl,
       },
@@ -254,7 +255,7 @@ export function useWizard() {
     goto,
     testNavidrome,
     testLlm,
-    discoverLocca,
+    discoverCustomModels,
     save,
   };
 }

@@ -164,7 +164,8 @@ export function LlmStep({ w }: { w: WizardController }) {
   const [busy, setBusy] = useState(false);
   const isOllama = w.data.llm.provider === 'ollama';
   const isLocca = w.data.llm.provider === 'locca';
-  const isCustom = w.data.llm.provider === 'openai-compatible';
+  const isLiteLlm = w.data.llm.provider === 'litellm';
+  const isCustom = w.data.llm.provider === 'openai-compatible' || isLiteLlm;
   const onTest = async () => {
     setBusy(true);
     try {
@@ -174,20 +175,42 @@ export function LlmStep({ w }: { w: WizardController }) {
     }
   };
   // Same unified model discovery the admin Settings tab uses. Enabled for the
-  // keyless-discoverable providers (ollama / locca / openai-compatible with a
-  // base URL / openrouter); cloud providers need their key saved on the box
-  // first, so they fall back to free-typing the model id.
-  const discoveryEnabled =
+  // Keyless-discoverable providers use the shared hook. LiteLLM uses the
+  // wizard helper below so a blank field can resolve the controller's
+  // environment-backed gateway URL and token.
+  const standardDiscoveryEnabled =
     isOllama || isLocca ||
-    (isCustom && !!w.data.llm.baseUrl.trim()) ||
+    (w.data.llm.provider === 'openai-compatible' && !!w.data.llm.baseUrl.trim()) ||
     w.data.llm.provider === 'openrouter';
-  const discovery = useModelDiscovery({
+  const standardDiscovery = useModelDiscovery({
     provider: w.data.llm.provider,
     baseUrl: w.data.llm.baseUrl,
     ollamaUrl: w.data.llm.ollamaUrl,
-    enabled: discoveryEnabled,
+    enabled: standardDiscoveryEnabled,
     adminFetch: w.auth.adminFetch,
   });
+  const [liteModels, setLiteModels] = useState<string[]>([]);
+  const [liteLoading, setLiteLoading] = useState(false);
+  const [liteError, setLiteError] = useState<string | null>(null);
+  const refreshLiteModels = async () => {
+    if (!isLiteLlm) return;
+    setLiteLoading(true);
+    setLiteError(null);
+    try {
+      const result = await w.discoverCustomModels();
+      setLiteModels(result.models);
+      setLiteError(result.reachable ? null : (result.error || 'Discovery failed'));
+    } catch (err: unknown) {
+      setLiteModels([]);
+      setLiteError(err instanceof Error ? err.message : 'Discovery failed');
+    } finally {
+      setLiteLoading(false);
+    }
+  };
+  const discoveryEnabled = standardDiscoveryEnabled || isLiteLlm;
+  const discovery = isLiteLlm
+    ? { models: liteModels, loading: liteLoading, error: liteError, refresh: refreshLiteModels }
+    : standardDiscovery;
   return (
     <div>
       <StepHeader
@@ -219,12 +242,22 @@ export function LlmStep({ w }: { w: WizardController }) {
           </Field>
         )}
         {isCustom && (
-          <Field label="Base URL" hint="e.g. http://localhost:8080/v1 (llama.cpp / vLLM / LM Studio)">
+          <Field
+            label={isLiteLlm ? 'LiteLLM base URL' : 'Base URL'}
+            hint={isLiteLlm
+              ? 'LiteLLM cloud gateway. Blank uses LITELLM_API_BASE or OPENAI_API_BASE from the controller environment.'
+              : 'e.g. http://localhost:8080/v1 (llama.cpp / vLLM / LM Studio)'}
+          >
             <TextInput
               value={w.data.llm.baseUrl}
-              onChange={e =>
-                w.patch(d => ({ llm: { ...d.llm, baseUrl: e.target.value }, llmTest: { ok: null } }))
-              }
+              placeholder={isLiteLlm ? 'https://gateway.example/v1' : undefined}
+              onChange={e => {
+                if (isLiteLlm) {
+                  setLiteModels([]);
+                  setLiteError(null);
+                }
+                w.patch(d => ({ llm: { ...d.llm, baseUrl: e.target.value }, llmTest: { ok: null } }));
+              }}
             />
           </Field>
         )}
@@ -243,7 +276,12 @@ export function LlmStep({ w }: { w: WizardController }) {
           </Field>
         )}
         {!isOllama && !isLocca && (
-          <Field label="API key" hint="Stored in state/secrets.env (mode 0600), not in settings.json">
+          <Field
+            label={isLiteLlm ? 'Bearer token' : 'API key'}
+            hint={isLiteLlm
+              ? 'Optional for keyless gateways. Saved as a provider-scoped LiteLLM override.'
+              : 'Stored in state/secrets.env (mode 0600), not in settings.json'}
+          >
             <TextInput
               type="password"
               value={w.data.llm.apiKey}
@@ -270,7 +308,7 @@ export function LlmStep({ w }: { w: WizardController }) {
               <TextInput
                 value={w.data.llm.model}
                 onChange={e => w.patch(d => ({ llm: { ...d.llm, model: e.target.value }, llmTest: { ok: null } }))}
-                placeholder={isOllama ? 'glm-5.1:cloud' : (isCustom || isLocca) ? 'model filename or id' : 'e.g. claude-sonnet-4 · gpt-4o-mini'}
+                placeholder={isOllama ? 'glm-5.1:cloud' : isLiteLlm ? 'provider/model-id' : (isCustom || isLocca) ? 'model filename or id' : 'e.g. claude-sonnet-4 · gpt-4o-mini'}
                 className="max-w-[360px] flex-1"
               />
             )}

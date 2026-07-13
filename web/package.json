@@ -10,7 +10,8 @@
     "lint": "eslint . && tsc --noEmit",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "test:audio-format": "node --experimental-strip-types scripts/audio-format.test.ts"
+    "test:audio-format": "node --experimental-strip-types scripts/audio-format.test.ts",
+    "test:llm-provider": "node --experimental-strip-types scripts/llm-provider-meta.test.ts"
   },
   "dependencies": {
     "@next/third-parties": "^16.2.6",
