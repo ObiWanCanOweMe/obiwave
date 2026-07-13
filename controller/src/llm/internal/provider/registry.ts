@@ -25,6 +25,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { config } from '../../../config.js';
+import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../../../litellm-config.js';
 import * as settings from '../../../settings.js';
 import { recordRawRequest, rawDebugEnabled } from '../telemetry/raw-debug.js';
 import { capabilitiesFor, appliedRepeatPenalty, appliedNumCtx } from './capabilities.js';
@@ -263,12 +264,28 @@ export function resolveModelId(cfg: any): string {
   );
 }
 
+export function createLiteLlmModel(cfg: any, fetchImpl: any = debugFetch) {
+  const baseURL = effectiveLiteLlmBaseUrl(cfg);
+  if (!baseURL) throw new Error('LiteLLM base URL is empty');
+  const provider = createOpenAI({
+    baseURL,
+    apiKey: effectiveLiteLlmApiKey(cfg) || 'unused',
+    name: 'litellm',
+    fetch: fetchImpl,
+  });
+  return provider.chat(resolveModelId(cfg));
+}
+
 // Returns an AI SDK LanguageModel for the given config (the active primary leg
 // by default). Passing an explicit cfg — the fallback leg — reuses the same
 // client cache, since the signature below already keys on every field.
 export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolean } = {}) {
   const id = resolveModelId(cfg);
-  const baseUrlSig = cfg.provider === 'locca' ? loccaBaseUrl(cfg) : (cfg.baseUrl || '');
+  const baseUrlSig = cfg.provider === 'locca'
+    ? loccaBaseUrl(cfg)
+    : cfg.provider === 'litellm'
+      ? effectiveLiteLlmBaseUrl(cfg)
+      : (cfg.baseUrl || '');
   // Construction-time no-think: two provider families can't suppress thinking
   // per-call, so a forced-tool leg needs its own reasoning-disabled INSTANCE.
   //   - OpenRouter (reasoningConstructionOnly): reasoning is fixed at model build.
@@ -299,6 +316,10 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
     }
     case 'openai-compatible': {
       model = openAICompatibleModel(cfg, id, cfg.baseUrl, 'openai-compatible', bodyNoThink);
+      break;
+    }
+    case 'litellm': {
+      model = createLiteLlmModel(cfg);
       break;
     }
     case 'locca': {

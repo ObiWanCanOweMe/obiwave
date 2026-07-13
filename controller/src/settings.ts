@@ -280,6 +280,7 @@ function validateTtsCorrectionsStrict(raw: any): Array<{ from: string; to: strin
 export const LLM_PROVIDERS = [
   'ollama',
   'openai-compatible',
+  'litellm',
   'locca',
   'openrouter',
   'requesty',
