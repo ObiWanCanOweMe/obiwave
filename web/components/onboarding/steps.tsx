@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { WizardController } from './useWizard';
 import { ProviderSelector } from '../admin/llm/ProviderSelector';
 import { ModelCombobox } from '../admin/llm/ModelCombobox';
 import { PROVIDER_IDS } from '../admin/llm/providerMeta';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { LocationPicker } from '../LocationPicker';
-import { llmDraftForProviderChange } from './providerState';
+import { isCurrentDiscoveryRequest, llmDraftForProviderChange } from './providerState';
 
 // Tiny presentation primitives kept local to the wizard — avoids dragging the
 // full admin UI library into a screen most operators see exactly once.
@@ -193,19 +193,31 @@ export function LlmStep({ w }: { w: WizardController }) {
   const [liteModels, setLiteModels] = useState<string[]>([]);
   const [liteLoading, setLiteLoading] = useState(false);
   const [liteError, setLiteError] = useState<string | null>(null);
+  const liteRequestGeneration = useRef(0);
+  const invalidateLiteDiscovery = () => {
+    liteRequestGeneration.current += 1;
+    setLiteModels([]);
+    setLiteError(null);
+    setLiteLoading(false);
+  };
   const refreshLiteModels = async () => {
     if (!isLiteLlm) return;
+    const requestGeneration = ++liteRequestGeneration.current;
     setLiteLoading(true);
     setLiteError(null);
     try {
       const result = await w.discoverCustomModels();
+      if (!isCurrentDiscoveryRequest(requestGeneration, liteRequestGeneration.current)) return;
       setLiteModels(result.models);
       setLiteError(result.reachable ? null : (result.error || 'Discovery failed'));
     } catch (err: unknown) {
+      if (!isCurrentDiscoveryRequest(requestGeneration, liteRequestGeneration.current)) return;
       setLiteModels([]);
       setLiteError(err instanceof Error ? err.message : 'Discovery failed');
     } finally {
-      setLiteLoading(false);
+      if (isCurrentDiscoveryRequest(requestGeneration, liteRequestGeneration.current)) {
+        setLiteLoading(false);
+      }
     }
   };
   const discoveryEnabled = standardDiscoveryEnabled || isLiteLlm;
@@ -228,9 +240,7 @@ export function LlmStep({ w }: { w: WizardController }) {
             providerIds={PROVIDER_IDS}
             keyAware={false}
             onChange={id => {
-              setLiteModels([]);
-              setLiteError(null);
-              setLiteLoading(false);
+              invalidateLiteDiscovery();
               w.patch(d => ({
                 llm: llmDraftForProviderChange(d.llm, id),
                 llmTest: { ok: null },
@@ -259,10 +269,7 @@ export function LlmStep({ w }: { w: WizardController }) {
               value={w.data.llm.baseUrl}
               placeholder={isLiteLlm ? 'https://gateway.example/v1' : undefined}
               onChange={e => {
-                if (isLiteLlm) {
-                  setLiteModels([]);
-                  setLiteError(null);
-                }
+                if (isLiteLlm) invalidateLiteDiscovery();
                 w.patch(d => ({ llm: { ...d.llm, baseUrl: e.target.value }, llmTest: { ok: null } }));
               }}
             />

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { llmDraftForProviderChange } from '../components/onboarding/providerState.ts';
+import {
+  isCurrentDiscoveryRequest,
+  llmDraftForProviderChange,
+} from '../components/onboarding/providerState.ts';
 
 const openAiDraft = {
   provider: 'openai',
@@ -14,4 +17,6 @@ assert.deepEqual(
   { ...openAiDraft, provider: 'litellm', apiKey: '' },
 );
 assert.deepEqual(llmDraftForProviderChange(openAiDraft, 'openai'), openAiDraft);
-console.log('✓ onboarding provider credentials stay provider-scoped');
+assert.equal(isCurrentDiscoveryRequest(2, 2), true);
+assert.equal(isCurrentDiscoveryRequest(1, 2), false);
+console.log('✓ onboarding provider state stays scoped and current');
