@@ -22,11 +22,14 @@ import {
   Users,
   Headphones,
   Plug,
+  Coffee,
+  MessageCircle,
 } from 'lucide-react';
 import { useAdminAuth } from '../../lib/adminAuth';
 import type { SignInResult } from '../../lib/adminAuth';
 import { useStationFeed } from '../../hooks/useStationFeed';
 import SignInForm from './SignInForm';
+import NavidromeBanner from './NavidromeBanner';
 import OdometerNumber from '../OdometerNumber';
 import BoothBuddy from '../BoothBuddy';
 import ThemeSwitcher from '../ThemeSwitcher';
@@ -156,6 +159,9 @@ export default function AdminShell({ children }: AdminShellProps) {
   return (
     <div className="admin-root paper">
       <ShellHeader pathname={pathname} signedIn onSignOut={signOut} />
+      {/* Persistent connectivity warning — visible on every admin page whenever
+          the live station can't reach Navidrome. Renders nothing when healthy. */}
+      <NavidromeBanner adminFetch={adminFetch} />
       <div className="shell-body">
         <nav className="shell-nav">
           {NAV_SECTIONS.map(section => (
@@ -220,6 +226,26 @@ export default function AdminShell({ children }: AdminShellProps) {
               <span className="nav-label">Android app</span>
               <span className="pill">↗</span>
             </Link>
+            <Link
+              href="https://discord.gg/vjVbVKnMBa"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="nav-item"
+            >
+              <MessageCircle className="nav-icon" size={15} strokeWidth={2} aria-hidden="true" />
+              <span className="nav-label">Discord</span>
+              <span className="pill">↗</span>
+            </Link>
+            <Link
+              href="https://ko-fi.com/pklair"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="nav-item"
+            >
+              <Coffee className="nav-icon" size={15} strokeWidth={2} aria-hidden="true" />
+              <span className="nav-label">Support</span>
+              <span className="pill">↗</span>
+            </Link>
           </div>
           <div className="nav-foot">
             sub / wave
@@ -254,58 +280,6 @@ export default function AdminShell({ children }: AdminShellProps) {
       </div>
       <Toaster />
     </div>
-  );
-}
-
-interface DoctorSummary {
-  counts: { ok: number; warn: number; fail: number; skip: number } | null;
-  overall: 'healthy' | 'attention' | 'critical' | null;
-}
-
-// Small health badge on the header's DJ Doc link — the count of failing/warning
-// findings from the last cached assessment (manual run or nightly auto-run), so
-// a degraded station surfaces without the operator opening the panel. Silent
-// when healthy or when no run has been cached yet.
-function DoctorBadge() {
-  const { adminFetch } = useAdminAuth();
-  const [summary, setSummary] = useState<DoctorSummary | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const r = await adminFetch('/doctor/summary');
-        const j = (await r.json().catch(() => null)) as DoctorSummary | null;
-        if (!cancelled) setSummary(j);
-      } catch {
-        /* header badge is best-effort */
-      }
-    };
-    load();
-    const timer = setInterval(load, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [adminFetch]);
-
-  const counts = summary?.counts;
-  if (!counts) return null;
-  const n = counts.fail || counts.warn;
-  if (!n) return null;
-  const critical = counts.fail > 0;
-  return (
-    <span
-      className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold ${
-        critical
-          ? 'bg-[var(--accent)] text-white'
-          : 'border border-[var(--accent)] text-[var(--accent)]'
-      }`}
-      title={`${counts.fail} fail · ${counts.warn} warn`}
-      aria-label={`Station health: ${counts.fail} failing, ${counts.warn} warnings`}
-    >
-      {n}
-    </span>
   );
 }
 
@@ -390,7 +364,6 @@ function ShellHeader({ pathname, signedIn, onSignOut }: ShellHeaderProps) {
           >
             <BoothBuddy mood="onair" size={16} />
             <span className="caption">DJ Doc</span>
-            <DoctorBadge />
           </Link>
           <ThemeSwitcher variant="admin" />
           <Link
