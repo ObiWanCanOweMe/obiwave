@@ -537,6 +537,75 @@ router.get('/settings/llm/discover', requireAdmin, async (req, res) => {
   }
 });
 
+type LlmLegIdentity = 'primary' | 'fallback' | 'onboarding';
+
+function llmLegIdentity(value: unknown): LlmLegIdentity {
+  const leg = String(value || 'primary');
+  if (leg === 'primary' || leg === 'fallback' || leg === 'onboarding') return leg;
+  throw new Error('leg must be primary, fallback, or onboarding');
+}
+
+async function resolveLiteLlmRouteConfig(input: {
+  leg: LlmLegIdentity;
+  baseUrl?: unknown;
+  apiKey?: unknown;
+}) {
+  await settings.load();
+  const s = settings.get();
+  const savedLeg = input.leg === 'primary'
+    ? s.llm
+    : input.leg === 'fallback'
+      ? s.llm?.fallback
+      : undefined;
+  const savedIsLiteLlm = savedLeg?.provider === 'litellm';
+  const suppliedBaseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
+  const suppliedApiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  return {
+    baseUrl: effectiveLiteLlmBaseUrl({
+      baseUrl: suppliedBaseUrl || (savedIsLiteLlm ? savedLeg.baseUrl : ''),
+    }),
+    apiKey: effectiveLiteLlmApiKey({
+      apiKey: suppliedApiKey || (savedIsLiteLlm ? settings.llmKeyFor('litellm') : ''),
+    }),
+  };
+}
+
+// Authenticated LiteLLM discovery. POST keeps an unsaved onboarding token in
+// the request body (never the query string) and makes leg selection explicit.
+router.post('/settings/llm/models', requireAdmin, async (req, res) => {
+  const provider = String(req.body?.provider || '').trim();
+  if (provider !== 'litellm') {
+    return res.status(400).json({ ok: false, models: [], provider, error: 'POST discovery is only supported for litellm' });
+  }
+  try {
+    const leg = llmLegIdentity(req.body?.leg);
+    const cfg = await resolveLiteLlmRouteConfig({
+      leg,
+      baseUrl: req.body?.baseUrl,
+      apiKey: req.body?.apiKey,
+    });
+    if (!cfg.baseUrl) throw new Error('LiteLLM base URL is required');
+    const headers: Record<string, string> = {};
+    if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+    const r = await fetchWithTimeout(`${cfg.baseUrl}/models`, {
+      timeoutMs: 10_000,
+      bodyDeadline: true,
+      headers,
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = (await r.json()) as { data?: unknown };
+    const models = Array.isArray(data?.data)
+      ? (data.data as { id?: unknown }[])
+          .map((m) => m?.id)
+          .filter((id): id is string => typeof id === 'string')
+          .sort()
+      : [];
+    res.json({ ok: true, models, provider });
+  } catch (err: unknown) {
+    res.json({ ok: false, models: [], provider, error: (err as { message?: string })?.message || 'unreachable' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /settings/llm/probe-compat — live probe for an openai-compatible key.
 // Body: { apiKey: string, baseUrl: string, model: string }
@@ -556,31 +625,23 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
     let resolvedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : '';
     let resolvedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
     if (isLiteLlm) {
-      await settings.load();
-      const s = settings.get();
-      const savedLeg = s.llm?.provider === 'litellm'
-        ? s.llm
-        : s.llm?.fallback?.provider === 'litellm'
-          ? s.llm.fallback
-          : {};
-      resolvedBaseUrl = effectiveLiteLlmBaseUrl({ baseUrl: resolvedBaseUrl || savedLeg.baseUrl });
-      resolvedApiKey = effectiveLiteLlmApiKey({
-        apiKey: resolvedApiKey || settings.llmKeyFor('litellm'),
+      const cfg = await resolveLiteLlmRouteConfig({
+        leg: llmLegIdentity(req.body?.leg),
+        baseUrl,
+        apiKey,
       });
+      resolvedBaseUrl = cfg.baseUrl;
+      resolvedApiKey = cfg.apiKey;
       if (!resolvedBaseUrl) {
         return res.status(400).json({ ok: false, message: 'baseUrl is required', latencyMs: 0 });
       }
     } else if (!resolvedApiKey) {
       await settings.load();
       const s = settings.get();
-      const fallbackUrl = (s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
-      const targetUrl = baseUrl.trim().replace(/\/+$/, '');
-      // Match the target server to a leg, then read that leg's provider's inline
-      // key from the per-provider map (issue #657). Falls back to the
-      // openai-compatible slot when neither leg's URL matches.
-      const legProvider = (targetUrl && targetUrl === fallbackUrl)
-        ? s.llm?.fallback?.provider
-        : s.llm?.provider;
+      const leg = llmLegIdentity(req.body?.leg);
+      const savedLeg = leg === 'fallback' ? s.llm?.fallback : s.llm;
+      const legProvider = savedLeg?.provider;
+      resolvedBaseUrl = resolvedBaseUrl || String(savedLeg?.baseUrl || '').trim().replace(/\/+$/, '');
       resolvedApiKey = settings.llmKeyFor(legProvider || 'openai-compatible');
     }
 

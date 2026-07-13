@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useAdminAuth } from '@/lib/adminAuth';
+import { AsyncResultGeneration } from '@/lib/asyncResultGeneration';
 
 // Shape of every wizard step in one place — easier to pass around than
 // individual setState callbacks. Each step component reads/writes via the
@@ -110,6 +111,7 @@ export function useWizard() {
   const auth = useAdminAuth();
   const [data, setData] = useState<WizardData>(DEFAULT_DATA);
   const [stepIdx, setStepIdx] = useState(0);
+  const llmTestGeneration = useRef(new AsyncResultGeneration());
 
   const step = STEP_ORDER[stepIdx];
   const next = useCallback(() => setStepIdx(i => Math.min(i + 1, STEP_ORDER.length - 1)), []);
@@ -122,7 +124,17 @@ export function useWizard() {
   const patch = useCallback((p: Partial<WizardData> | ((d: WizardData) => Partial<WizardData>)) => {
     setData(d => {
       const incoming = typeof p === 'function' ? p(d) : p;
-      return { ...d, ...incoming };
+      const next = { ...d, ...incoming };
+      if (
+        next.llm.provider !== d.llm.provider
+        || next.llm.model !== d.llm.model
+        || next.llm.apiKey !== d.llm.apiKey
+        || next.llm.baseUrl !== d.llm.baseUrl
+        || next.llm.ollamaUrl !== d.llm.ollamaUrl
+      ) {
+        llmTestGeneration.current.invalidate();
+      }
+      return next;
     });
   }, []);
 
@@ -157,6 +169,7 @@ export function useWizard() {
     // 60s client cap sits just above the controller's 45s generateText abort,
     // so a slow/unreachable model surfaces the server's error rather than a
     // bare client timeout — and the button can never hang forever.
+    const generation = llmTestGeneration.current.begin();
     try {
       const r = await auth.adminFetch('/onboarding/test-llm', {
         method: 'POST',
@@ -166,11 +179,11 @@ export function useWizard() {
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; sample?: string; error?: string };
       const result = { ok: !!j.ok, msg: j.ok ? `responded: "${j.sample}"` : (j.error || `controller returned HTTP ${r.status}`) };
-      patch({ llmTest: result });
+      if (llmTestGeneration.current.isCurrent(generation)) patch({ llmTest: result });
       return result;
     } catch (err: unknown) {
       const result = { ok: false, msg: fetchErrorMsg(err) };
-      patch({ llmTest: result });
+      if (llmTestGeneration.current.isCurrent(generation)) patch({ llmTest: result });
       return result;
     }
   }, [auth, data.llm, patch]);
@@ -179,16 +192,23 @@ export function useWizard() {
   // the model instead of typing it. LiteLLM resolves a blank URL from the
   // controller environment; openai-compatible still requires an explicit URL.
   const discoverCustomModels = useCallback(async () => {
-    const qs = new URLSearchParams({ provider: data.llm.provider });
-    if (data.llm.baseUrl) qs.set('baseUrl', data.llm.baseUrl);
-    const r = await auth.adminFetch(`/settings/llm/models?${qs}`);
+    const r = await auth.adminFetch('/settings/llm/models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: data.llm.provider,
+        leg: 'onboarding',
+        baseUrl: data.llm.baseUrl,
+        apiKey: data.llm.apiKey,
+      }),
+    });
     const j = (await r.json().catch(() => ({}))) as {
       ok?: boolean;
       models?: string[];
       error?: string;
     };
     return { reachable: !!j.ok, models: j.models || [], error: j.error };
-  }, [auth, data.llm.provider, data.llm.baseUrl]);
+  }, [auth, data.llm.provider, data.llm.baseUrl, data.llm.apiKey]);
 
   const save = useCallback(async () => {
     // Stitch the apiKeys into the right env-var keys before sending.

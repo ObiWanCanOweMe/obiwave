@@ -299,9 +299,10 @@ export function LlmStep({ w }: { w: WizardController }) {
             <TextInput
               type="password"
               value={w.data.llm.apiKey}
-              onChange={e =>
+              onChange={e => {
+                if (isLiteLlm) invalidateLiteDiscovery();
                 w.patch(d => ({ llm: { ...d.llm, apiKey: e.target.value }, llmTest: { ok: null } }))
-              }
+              }}
             />
           </Field>
         )}

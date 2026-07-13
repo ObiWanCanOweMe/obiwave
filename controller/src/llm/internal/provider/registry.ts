@@ -24,6 +24,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { createHash } from 'node:crypto';
 import { config } from '../../../config.js';
 import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../../../litellm-config.js';
 import * as settings from '../../../settings.js';
@@ -316,7 +317,13 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
   const caps = capabilitiesFor(cfg.provider);
   const constructionNoThink = opts.forceNoThink === true && caps.reasoningConstructionOnly === true;
   const bodyNoThink = opts.forceNoThink === true && caps.samplingViaBody === true;
-  const sig = `${cfg.provider}|${id}|${cfg.apiKey || ''}|${ollamaBaseUrl(cfg)}|${baseUrlSig}|${cfg.reasoning ? 'r1' : 'r0'}|${(constructionNoThink || bodyNoThink) ? 'nt1' : 'nt0'}|ctx${appliedNumCtx(cfg) ?? ''}`;
+  // LiteLLM can source its token from the live environment. Include only a
+  // digest in the cache signature so an in-process key rotation rebuilds the
+  // SDK client without putting the raw secret in a cache key or diagnostic.
+  const keySig = cfg.provider === 'litellm'
+    ? createHash('sha256').update(effectiveLiteLlmApiKey(cfg)).digest('hex')
+    : (cfg.apiKey || '');
+  const sig = `${cfg.provider}|${id}|${keySig}|${ollamaBaseUrl(cfg)}|${baseUrlSig}|${cfg.reasoning ? 'r1' : 'r0'}|${(constructionNoThink || bodyNoThink) ? 'nt1' : 'nt0'}|ctx${appliedNumCtx(cfg) ?? ''}`;
 
   const cached = clientCache.get(sig);
   if (cached) return cached;

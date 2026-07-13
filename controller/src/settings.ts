@@ -313,6 +313,21 @@ export const EMBEDDING_PROVIDERS = [
   'requesty',
 ];
 
+function defaultEmbeddingModelForProvider(provider: string): string {
+  switch (provider) {
+    case 'openai':
+    case 'openai-compatible':
+      return 'text-embedding-3-small';
+    case 'google':
+      return 'text-embedding-004';
+    case 'openrouter':
+    case 'requesty':
+      return 'openai/text-embedding-3-small';
+    default:
+      return 'nomic-embed-text';
+  }
+}
+
 // Coerce a stored Ollama context-window value. 0 disables (use Ollama's own
 // default); any other number is clamped to a sane [2048, 131072] band and
 // floored to an integer. Non-numeric/NaN falls back to `def`. Shared by the
@@ -3331,6 +3346,9 @@ export async function update(patch) {
   }
   if ('llm' in patch) {
     const l = patch.llm || {};
+    const inheritedEmbeddingProvider = EMBEDDING_PROVIDERS.includes(next.llm.provider)
+      ? next.llm.provider
+      : 'ollama';
     applyLlmLegPatch(next.llm, l, 'llm');
     // Route the primary inline key into keys[provider] AFTER the provider is
     // resolved, so it's stored under the identity it belongs to (issue #657).
@@ -3377,6 +3395,15 @@ export async function update(patch) {
     }
     if (next.llm.provider === 'litellm' && !next.llm.model) {
       throw new Error('LiteLLM model is required');
+    }
+    // LiteLLM is chat-only. A fresh/default embedding config follows the chat
+    // provider, so pin that inheritance to the previous embedding-capable leg
+    // before LiteLLM can become the effective tagger provider.
+    if (next.llm.provider === 'litellm' && !next.embedding.provider) {
+      next.embedding.provider = inheritedEmbeddingProvider;
+      if (!next.embedding.model) {
+        next.embedding.model = defaultEmbeddingModelForProvider(inheritedEmbeddingProvider);
+      }
     }
     // Backup leg — same connection fields, validated identically. The
     // openai-compatible-needs-baseUrl rule is enforced only when the fallback

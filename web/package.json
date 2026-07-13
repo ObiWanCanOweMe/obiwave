@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test:audio-format": "node --experimental-strip-types scripts/audio-format.test.ts",
     "test:llm-provider": "node --experimental-strip-types scripts/llm-provider-meta.test.ts",
-    "test:onboarding-provider-state": "node --experimental-strip-types scripts/onboarding-provider-state.test.ts"
+    "test:onboarding-provider-state": "node --experimental-strip-types scripts/onboarding-provider-state.test.ts",
+    "test:async-generation": "node --experimental-strip-types scripts/async-result-generation.test.ts"
   },
   "dependencies": {
     "@next/third-parties": "^16.2.6",

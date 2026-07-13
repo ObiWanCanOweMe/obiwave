@@ -1,8 +1,9 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { AsyncResultGeneration } from '../../../lib/asyncResultGeneration';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -46,8 +47,20 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [compatFallbackKeyTest, setCompatFallbackKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [compatKeyTesting, setCompatKeyTesting] = useState(false);
   const [compatFallbackKeyTesting, setCompatFallbackKeyTesting] = useState(false);
-  useEffect(() => { setCompatKeyInput(''); setCompatKeyTest(null); }, [form.llm.provider]);
-  useEffect(() => { setCompatFallbackKeyInput(''); setCompatFallbackKeyTest(null); }, [form.llm.fallback.provider]);
+  const primaryProbeGeneration = useRef(new AsyncResultGeneration());
+  const fallbackProbeGeneration = useRef(new AsyncResultGeneration());
+  useEffect(() => { setCompatKeyInput(''); }, [form.llm.provider]);
+  useEffect(() => { setCompatFallbackKeyInput(''); }, [form.llm.fallback.provider]);
+  useEffect(() => {
+    primaryProbeGeneration.current.invalidate();
+    setCompatKeyTest(null);
+    setCompatKeyTesting(false);
+  }, [form.llm.provider, form.llm.baseUrl, form.llm.model, compatKeyInput]);
+  useEffect(() => {
+    fallbackProbeGeneration.current.invalidate();
+    setCompatFallbackKeyTest(null);
+    setCompatFallbackKeyTesting(false);
+  }, [form.llm.fallback.provider, form.llm.fallback.baseUrl, form.llm.fallback.model, compatFallbackKeyInput]);
 
   const primaryCustomProvider = form.llm.provider === 'openai-compatible' || form.llm.provider === 'litellm';
   const fallbackCustomProvider = form.llm.fallback.provider === 'openai-compatible' || form.llm.fallback.provider === 'litellm';
@@ -99,6 +112,8 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const primaryDiscovery = useModelDiscovery({
     provider: form.llm.provider,
+    leg: 'primary',
+    apiKey: compatKeyInput,
     baseUrl: form.llm.baseUrl,
     ollamaUrl: form.llm.ollamaUrl,
     enabled: primaryDiscoveryEnabled,
@@ -119,6 +134,8 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const fallbackDiscovery = useModelDiscovery({
     provider: form.llm.fallback.provider,
+    leg: 'fallback',
+    apiKey: compatFallbackKeyInput,
     baseUrl: form.llm.fallback.baseUrl,
     ollamaUrl: form.llm.fallback.ollamaUrl,
     enabled: fallbackDiscoveryEnabled,
@@ -178,6 +195,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   };
 
   const testCompatKey = async (
+    leg: 'primary' | 'fallback',
     provider: string,
     apiKey: string,
     baseUrl: string,
@@ -185,23 +203,27 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     baseUrlAvailable: boolean,
     setTesting: (v: boolean) => void,
     setResult: (r: { ok: boolean; message: string; latencyMs: number } | null) => void,
+    generationState: AsyncResultGeneration,
   ) => {
     if (!baseUrlAvailable) { setResult({ ok: false, message: 'Set a Base URL first', latencyMs: 0 }); return; }
     if (!model.trim()) { setResult({ ok: false, message: 'Set a Model first', latencyMs: 0 }); return; }
+    const generation = generationState.begin();
     setTesting(true);
     setResult(null);
     try {
       const r = await adminFetch('/settings/llm/probe-compat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
+        body: JSON.stringify({ leg, provider, apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
       });
       const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setResult(j);
+      if (generationState.isCurrent(generation)) setResult(j);
     } catch (e) {
-      setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      if (generationState.isCurrent(generation)) {
+        setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      }
     } finally {
-      setTesting(false);
+      if (generationState.isCurrent(generation)) setTesting(false);
     }
   };
 
@@ -399,6 +421,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   <Btn
                     onClick={() =>
                       testCompatKey(
+                        'primary',
                         form.llm.provider,
                         compatKeyInput || '',
                         form.llm.baseUrl,
@@ -406,6 +429,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                         primaryCustomUrlAvailable,
                         setCompatKeyTesting,
                         setCompatKeyTest,
+                        primaryProbeGeneration.current,
                       )
                     }
                     disabled={compatKeyTesting || !primaryCustomUrlAvailable}
@@ -730,6 +754,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                       <Btn
                         onClick={() =>
                           testCompatKey(
+                            'fallback',
                             form.llm.fallback.provider,
                             compatFallbackKeyInput || '',
                             form.llm.fallback.baseUrl,
@@ -737,6 +762,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                             fallbackCustomUrlAvailable,
                             setCompatFallbackKeyTesting,
                             setCompatFallbackKeyTest,
+                            fallbackProbeGeneration.current,
                           )
                         }
                         disabled={compatFallbackKeyTesting || !fallbackCustomUrlAvailable}
