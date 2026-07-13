@@ -10,6 +10,7 @@ import { STATE_DIR, config } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
 import { DEFAULT_THEME_ID, isValidThemeId, listThemes } from './themes.js';
 import { isValidTimezone, setStationTimezone, zonedParts } from './time.js';
+import { effectiveLiteLlmBaseUrl } from './litellm-config.js';
 
 // Where uploaded persona avatars live. One file per persona, basename =
 // `<personaId>.<ext>`. The dedicated upload route is the only writer; the
@@ -3364,6 +3365,12 @@ export async function update(patch) {
     if (next.llm.provider === 'openai-compatible' && !next.llm.baseUrl) {
       throw new Error('llm.baseUrl is required when provider is "openai-compatible"');
     }
+    if (next.llm.provider === 'litellm' && !effectiveLiteLlmBaseUrl(next.llm)) {
+      throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+    }
+    if (next.llm.provider === 'litellm' && !next.llm.model) {
+      throw new Error('LiteLLM model is required');
+    }
     // Backup leg — same connection fields, validated identically. The
     // openai-compatible-needs-baseUrl rule is enforced only when the fallback
     // is enabled, so a half-filled, disabled backup never blocks a save.
@@ -3385,6 +3392,20 @@ export async function update(patch) {
         throw new Error(
           'llm.fallback.baseUrl is required when its provider is "openai-compatible"',
         );
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !effectiveLiteLlmBaseUrl(next.llm.fallback)
+      ) {
+        throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !next.llm.fallback.model
+      ) {
+        throw new Error('LiteLLM model is required');
       }
     }
   }
