@@ -28,6 +28,21 @@ export const AUDIO_MIME_TYPES: Record<AudioFormat, string> = {
   flac: 'audio/ogg; codecs=flac',
 };
 
+/** Translate the public station metadata into the playback engine's format
+ * switches. MP3 is the universal floor even before the first feed poll. */
+export function streamEnablementFor(stream: {
+  opusEnabled?: boolean;
+  aacEnabled?: boolean;
+  flacEnabled?: boolean;
+} | null | undefined): StreamEnablement {
+  return {
+    mp3: true,
+    opus: stream?.opusEnabled === true,
+    aac: stream?.aacEnabled === true,
+    flac: stream?.flacEnabled === true,
+  };
+}
+
 const FORMAT_SET = new Set<AudioFormat>(AUDIO_FORMATS.map(x => x.id));
 
 export function deriveSiblingMounts(mp3: string): AudioStreamUrls {

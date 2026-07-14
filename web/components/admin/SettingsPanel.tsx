@@ -38,7 +38,7 @@ import { ScrobbleSection } from './settings/ScrobbleSection';
 
 const SECTIONS = [
   { id: 'station',  label: 'Station', hint: 'name · location · locale', icon: Radio },
-  { id: 'theme',    label: 'Theme', hint: 'station-wide palette', icon: Palette },
+  { id: 'theme',    label: 'Skin & Themes', hint: 'player skin · palette', icon: Palette },
   { id: 'festivals', label: 'Festivals', hint: 'calendar · mood', icon: CalendarDays },
   { id: 'llm',      label: 'LLM provider', hint: 'model routing', icon: Cpu },
   { id: 'tts',      label: 'TTS voice', hint: 'default engine', icon: Mic },
@@ -496,6 +496,28 @@ export default function SettingsPanel() {
               <strong className="tracking-[0.12em] uppercase">controller error</strong>
               <div className="mt-1">{err}</div>
             </div>
+          </div>
+        )}
+        {pendingRestart && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-vermilion bg-vermilion/10 px-4 py-3 text-[12px] text-ink"
+          >
+            <AlertTriangle className="size-4 shrink-0 text-vermilion" strokeWidth={2} aria-hidden />
+            <span className="min-w-0 flex-1">
+              <strong className="tracking-[0.08em] uppercase">Saved — not yet on air.</strong>{' '}
+              The live stream is still running the previous mixer settings (bitrate, format,
+              crossfade, jingle frequency). Restart the mixer to apply what you saved.
+            </span>
+            <Btn
+              sm
+              tone="danger"
+              className="ml-auto"
+              onClick={() => setConfirmRestart(true)}
+              disabled={busy || !data}
+            >
+              Restart mixer to apply
+            </Btn>
           </div>
         )}
         {!data && !err && (

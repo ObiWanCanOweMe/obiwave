@@ -266,7 +266,7 @@ export interface SettingsData {
       enrichment?: Partial<EmbeddingEnrichmentForm>;
     };
     sfx?: { enabled?: boolean };
-    ui?: { boothBuddy?: boolean };
+    ui?: { boothBuddy?: boolean; skin?: string; tuneInOverlay?: boolean };
     scrobble?: {
       lastfm?: Partial<ScrobbleLastfmForm>;
       listenbrainz?: Partial<ScrobbleListenbrainzForm>;

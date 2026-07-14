@@ -662,7 +662,7 @@ const SKILL_SLUG_RE = /^[a-z0-9-]{1,40}$/;
 // Exported for the community-persona install route (routes/personas.ts), which
 // gives a friendly 409 before settings.update() would throw on an oversize roster.
 export const PERSONA_LIMIT = 48;
-const SHOWS_LIMIT = 64;
+export const SHOWS_LIMIT = 64;
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
@@ -1108,7 +1108,13 @@ const DEFAULTS = {
   // player reads these via GET /state (alongside the theme) and applies them
   // live; no restart. `boothBuddy` gates the DJ-line mascot — OFF by default,
   // so the line shows the classic ♪/◇ marker until an operator opts in.
-  ui: { boothBuddy: false },
+  // `skin` is the station-wide player-skin id — the web app owns the skin
+  // registry and falls back to its default on an unknown id, so the
+  // controller only stores a slug, never validates against a list.
+  // `tuneInOverlay` gates the full-bleed "Tap to tune in" gate — ON by default;
+  // OFF drops the takeover and listeners start via the skin's own play button
+  // (browsers still can't autoplay, so a tap is always required somewhere).
+  ui: { boothBuddy: false, skin: 'classic', tuneInOverlay: true },
   // Global DJ prompt template. '' means "use DEFAULT_DJ_PROMPT_TEMPLATE".
   // Always the RESOLVED text of the active djPrompts entry — kept so
   // renderDjPrompt() (and an older controller sharing the same settings.json)
@@ -1925,6 +1931,14 @@ export async function load() {
         typeof stored.ui?.boothBuddy === 'boolean'
           ? stored.ui.boothBuddy
           : DEFAULTS.ui.boothBuddy,
+      skin:
+        typeof stored.ui?.skin === 'string' && stored.ui.skin.trim()
+          ? stored.ui.skin.trim()
+          : DEFAULTS.ui.skin,
+      tuneInOverlay:
+        typeof stored.ui?.tuneInOverlay === 'boolean'
+          ? stored.ui.tuneInOverlay
+          : DEFAULTS.ui.tuneInOverlay,
     },
     personas,
     activePersonaId,
@@ -3595,6 +3609,17 @@ export async function update(patch) {
     const ui = patch.ui || {};
     if (ui.boothBuddy !== undefined) {
       next.ui.boothBuddy = !!ui.boothBuddy;
+    }
+    if (ui.skin !== undefined) {
+      // Slug only — the web registry resolves it and falls back on unknowns,
+      // so an invalid value is dropped rather than erroring the whole patch.
+      const slug = String(ui.skin).trim().toLowerCase();
+      if (/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)) {
+        next.ui.skin = slug;
+      }
+    }
+    if (ui.tuneInOverlay !== undefined) {
+      next.ui.tuneInOverlay = !!ui.tuneInOverlay;
     }
   }
   if ('webhooks' in patch) {
