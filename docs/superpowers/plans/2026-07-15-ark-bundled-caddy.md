@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Consumes: `validatePortainerCompose(source: string): string[]`.
-- Produces: errors for a missing/incorrect Caddy image, missing Caddy dependencies or volumes, internal host publications, missing Caddy bindings, and unapproved bindings.
+- Produces: errors for a missing/incorrect Caddy image, missing Caddy dependencies or volumes, any non-Caddy `ports:` declaration, missing Caddy bindings, and unapproved bindings.
 
 - [ ] **Step 1: Rewrite the valid fixture for bundled Caddy**
 
@@ -59,14 +59,23 @@ Add this fixture service before `broadcast`:
       - caddy-config:/config
 ```
 
-Remove `ports:` from the fixture's `broadcast`, `controller`, and `web` services. Add `caddy-data:` and `caddy-config:` to its top-level `volumes:`. Rename the acceptance test to `accepts the full seven-service Caddy production contract`, and include `caddy` in the exact first-party image test.
+Make Caddy the fixture's only service with a `ports:` key: remove the existing declarations from `broadcast`, `controller`, and `web`, and do not declare `ports:` on any other service. Add `caddy-data:` and `caddy-config:` to its top-level `volumes:`. Rename the acceptance test to `accepts the full seven-service Caddy production contract`, and include `caddy` in the exact first-party image test.
 
 Replace the old port tests with:
 
 ```js
-test('rejects internal services that publish host ports', () => {
-  for (const service of ['web', 'controller', 'broadcast']) {
-    const marker = `  ${service}:\n`;
+const nonCaddyServices = [
+  'broadcast',
+  'controller',
+  'docker-socket-proxy',
+  'web',
+  'tts-heavy',
+  'analyzer',
+];
+
+test('rejects non-Caddy services that publish host ports', () => {
+  for (const service of nonCaddyServices) {
+    const marker = `\n  ${service}:\n`;
     const invalid = valid.replace(
       marker,
       `${marker}    ports:\n      - "10.20.0.9:9999:9999"\n`,
@@ -95,7 +104,7 @@ Run:
 node --test scripts/ci/validate-portainer-compose.test.mjs
 ```
 
-Expected: FAIL because the validator reports `manifest contains unexpected service caddy`, requires the superseded three-port topology, and does not reject internal publications.
+Expected: FAIL because the validator reports `manifest contains unexpected service caddy`, requires the superseded three-port topology, and does not reject non-Caddy `ports:` declarations.
 
 - [ ] **Step 3: Implement the minimal policy**
 
@@ -113,7 +122,6 @@ const approvedPorts = [
   '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80',
 ];
 const servicePorts = new Map([['caddy', approvedPorts]]);
-const internalServices = ['web', 'controller', 'broadcast'];
 ```
 
 Add these service requirements:
@@ -127,11 +135,11 @@ Add these service requirements:
 ['caddy', 'caddy-config:/config', 'service caddy is missing its config volume'],
 ```
 
-Require `caddy-data` and `caddy-config` in the named-volume loop. After collecting `portsByService`, add:
+Require `caddy-data` and `caddy-config` in the named-volume loop. Reject an active service-level `ports:` key on every parsed service except Caddy, independent of the value syntax:
 
 ```js
-for (const service of internalServices) {
-  if ((portsByService.get(service) ?? []).length > 0) {
+for (const [service, block] of blocks) {
+  if (service !== 'caddy' && /^    ports\s*:/m.test(block)) {
     errors.push(`service ${service} must not publish host ports`);
   }
 }

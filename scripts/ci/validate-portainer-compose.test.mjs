@@ -91,6 +91,15 @@ function assertRejects(source, expected) {
   assert.ok(errorsFor(source).includes(expected), `expected ${expected}`);
 }
 
+const nonCaddyServices = [
+  'broadcast',
+  'controller',
+  'docker-socket-proxy',
+  'web',
+  'tts-heavy',
+  'analyzer',
+];
+
 test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
 });
@@ -153,8 +162,8 @@ test('rejects material topology removals', () => {
   }
 });
 
-test('rejects internal services that publish host ports', () => {
-  for (const service of ['web', 'controller', 'broadcast']) {
+test('rejects non-Caddy services that publish host ports', () => {
+  for (const service of nonCaddyServices) {
     const marker = `\n  ${service}:\n`;
     const invalid = valid.replace(
       marker,
@@ -164,8 +173,8 @@ test('rejects internal services that publish host ports', () => {
   }
 });
 
-test('rejects internal services that publish host ports with flow syntax', () => {
-  for (const service of ['web', 'controller', 'broadcast']) {
+test('rejects non-Caddy services that publish host ports with flow syntax', () => {
+  for (const service of nonCaddyServices) {
     const marker = `\n  ${service}:\n`;
     const invalid = valid.replace(
       marker,
@@ -175,8 +184,8 @@ test('rejects internal services that publish host ports with flow syntax', () =>
   }
 });
 
-test('rejects internal services that publish host ports with multiline flow syntax', () => {
-  for (const service of ['web', 'controller', 'broadcast']) {
+test('rejects non-Caddy services that publish host ports with multiline flow syntax', () => {
+  for (const service of nonCaddyServices) {
     const marker = `\n  ${service}:\n`;
     const invalid = valid.replace(
       marker,

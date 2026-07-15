@@ -25,7 +25,6 @@ const approvedPorts = [
   '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80',
 ];
 const servicePorts = new Map([['caddy', approvedPorts]]);
-const internalServices = ['web', 'controller', 'broadcast'];
 
 const serviceRequirements = [
   ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
@@ -156,8 +155,8 @@ export function validatePortainerCompose(source) {
     if (!active.includes(marker)) errors.push(`manifest is missing ${marker}`);
   }
 
-  for (const service of internalServices) {
-    if (/^    ports\s*:/m.test(blocks.get(service) ?? '')) {
+  for (const [service, block] of blocks) {
+    if (service !== 'caddy' && /^    ports\s*:/m.test(block)) {
       errors.push(`service ${service} must not publish host ports`);
     }
   }
