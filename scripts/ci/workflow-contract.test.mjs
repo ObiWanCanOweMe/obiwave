@@ -21,6 +21,10 @@ test('official JavaScript actions use the Node 24 runtime', async () => {
     const workflow = await readFile(new URL(workflowFile, workflowDirectory), 'utf8');
     assert.doesNotMatch(workflow, /actions\/checkout@v4/, workflowFile);
     assert.doesNotMatch(workflow, /actions\/setup-node@v4/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/setup-buildx-action@v3/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/build-push-action@v6/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/login-action@v3/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/setup-qemu-action@v3/, workflowFile);
   }
 });
 
@@ -61,14 +65,14 @@ test('all nine exact tags pass a complete preflight before any build starts', ()
   ]) {
     assert.match(preflight, new RegExp(`- ${image.replaceAll('-', '\\-')}(?:\\n|$)`));
   }
-  assert.match(preflight, /uses: docker\/login-action@v3[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
+  assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
 });
 
 test('private image scans authenticate with package read permission', () => {
   assert.match(publish, /scan-images:[\s\S]*?permissions:[\s\S]*?packages: read/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
-  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v3[\s\S]*?uses: aquasecurity\/trivy-action/);
+  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
 });
 
 test('production timeout covers bounded target and rollback operations', () => {
