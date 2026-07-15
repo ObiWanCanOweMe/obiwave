@@ -1,0 +1,262 @@
+# SUB/WAVE — image-only Portainer stack for the bender host.
+#
+# Portainer must deploy this file in Web Editor mode. It is intentionally
+# checkout-free: all first-party services pull immutable, explicitly versioned
+# images, operator variables are supplied through Portainer's generated
+# stack.env, and persistent state uses bender's absolute host path.
+#
+# bender owns TLS and reverse-proxies one public origin to these bound services:
+#   /stream.mp3  → 10.20.0.9:${ICECAST_PORT:-7702} (disable buffering)
+#   /api/*       → 10.20.0.9:${CONTROLLER_PORT:-7701} (strip /api)
+#   everything   → 10.20.0.9:${WEB_PORT:-7700}
+#
+# Each public service is bound on bender's fixed IPv4 and IPv6 addresses.
+# Set SUBWAVE_VERSION in the Portainer stack environment to an existing image
+# tag; interpolation fails before deployment when it is missing.
+
+x-state: &state-mount /mnt/NVMe/container-data/subwave/state:/var/sub-wave
+
+# Cap container log growth. Without this the default json-file driver keeps an
+# unbounded log per container, which on a long-running station eventually fills
+# the host disk. 10m × 3 files = ~30MB ceiling per service. Applied to every
+# service below via `logging: *default-logging`.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # -------------------------------------------------------------------------
+  # BROADCAST — icecast2 + liquidsoap in one container
+  # -------------------------------------------------------------------------
+  # The icecast HTTP port is bound to the host so the operator's reverse
+  # proxy can front /stream.mp3. Liquidsoap is internal to this container.
+  broadcast:
+    image: ghcr.io/obiwancanoweme/subwave-broadcast:${SUBWAVE_VERSION:?required}
+    container_name: sub-wave-broadcast
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:-}
+      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:-}
+      - ICECAST_RELAY_PASSWORD=${ICECAST_RELAY_PASSWORD:-}
+      # Concurrent-listener ceiling for icecast (<limits><clients>).
+      # Empty/unset → 100 (the historical default).
+      - ICECAST_MAX_CLIENTS=${ICECAST_MAX_CLIENTS:-}
+      - TZ=${TZ:-Europe/London}
+    ports:
+      - "10.20.0.9:${ICECAST_PORT:-7702}:7702"
+      - "[2600:1700:3210:5314:10:20:0:9]:${ICECAST_PORT:-7702}:7702"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - *state-mount
+      - /mnt/NVMe/container-data/subwave/state/logs:/var/log/liquidsoap
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7702/status-json.xsl > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
+  # -------------------------------------------------------------------------
+  # CONTROLLER — AI DJ brain, bound to host for your reverse proxy
+  # -------------------------------------------------------------------------
+  controller:
+    image: ghcr.io/obiwancanoweme/subwave-controller:${SUBWAVE_VERSION:?required}
+    container_name: sub-wave-controller
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      broadcast:
+        condition: service_healthy
+      # Bring the socket-proxy up whenever the controller is (re)created — even a
+      # selective `up -d controller` — so the Stats system panel works without a
+      # separate full `up -d`. Remove this entry too if you drop the proxy below.
+      docker-socket-proxy:
+        condition: service_started
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-Europe/London}
+      - STATE_DIR=/var/sub-wave
+      - SOUNDS_DIR=/sounds
+      # Optional sidecar for Chatterbox + PocketTTS. Gated by --profile tts-heavy
+      # below; unreachable URL → fall back to Piper (no harm done).
+      - TTS_HEAVY_URL=${TTS_HEAVY_URL:-http://tts-heavy:8080}
+      # Acoustic-analysis sidecar (the `analyzer` service below, default-on).
+      # Probed, then a local venv; falls through cleanly to NULL analysis if
+      # neither is reachable. (tts-heavy is TTS-only; no analyzer there.)
+      - ANALYZE_URL=${ANALYZE_URL:-http://analyzer:8080}
+      # Use `url` when ANALYZE_URL points at a remote host that can fetch
+      # Navidrome streams itself; default `auto` keeps shared-volume prefetch.
+      - ANALYZE_HANDOFF=${ANALYZE_HANDOFF:-}
+      # Per-container CPU/memory for the admin Stats page (GET /system) is read
+      # from the docker-socket-proxy sidecar over TCP — the controller never
+      # touches the raw Docker socket. Unset this to disable the panel.
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    env_file:
+      - stack.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "10.20.0.9:${CONTROLLER_PORT:-7701}:7701"
+      - "[2600:1700:3210:5314:10:20:0:9]:${CONTROLLER_PORT:-7701}:7701"
+    volumes:
+      - *state-mount
+    # curl is present in the controller image (see docker/Dockerfile.controller).
+    # /health is served at the router root on :7701 (routes/public.ts). Lets web
+    # gate on the controller being ready via depends_on: service_healthy.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7701/health > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # -------------------------------------------------------------------------
+  # DOCKER-SOCKET-PROXY — locked-down Docker API for the Stats system panel
+  # -------------------------------------------------------------------------
+  # Owns the real /var/run/docker.sock and exposes a read-only, GET-only slice
+  # of the Docker Engine API over TCP (CONTAINERS section only; POST and every
+  # other section refused by default). The controller reads per-container
+  # CPU/memory through it via DOCKER_HOST=tcp://docker-socket-proxy:2375, so the
+  # controller image itself never holds the socket. No host port — only
+  # reachable on the internal compose network. Optional: remove this service
+  # (plus the controller's DOCKER_HOST and its docker-socket-proxy depends_on
+  # entry above) to drop the Stats system panel.
+  docker-socket-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0
+    container_name: sub-wave-docker-proxy
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # -------------------------------------------------------------------------
+  # WEB — Next.js listener UI, bound to host for your reverse proxy
+  # -------------------------------------------------------------------------
+  web:
+    image: ghcr.io/obiwancanoweme/subwave-web:${SUBWAVE_VERSION:?required}
+    container_name: sub-wave-web
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      # Wait for the controller to pass its healthcheck — the homepage renders
+      # per-request against the controller (CONTROLLER_INTERNAL_URL below), so
+      # starting web before the controller is ready serves broken first pages.
+      controller:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - SUBWAVE_HOMEPAGE=${SUBWAVE_HOMEPAGE:-player}
+      - SITE_URL=${SITE_URL:-}
+      # Google Analytics Measurement ID at RUNTIME (web/lib/ga.ts). Plumbs the
+      # operator's NEXT_PUBLIC_GA_ID from the stack environment into a runtime
+      # var, so analytics turn on with a `web` recreate. Published images may
+      # also have a value baked at build time.
+      - GA_ID=${NEXT_PUBLIC_GA_ID:-}
+      # Server-side base URL for generateMetadata on the force-dynamic homepage
+      # to read the live station name from the controller. Internal compose
+      # network name — not exposed to the browser (which uses /api via Caddy).
+      - CONTROLLER_INTERNAL_URL=http://controller:7701
+    ports:
+      - "10.20.0.9:${WEB_PORT:-7700}:7700"
+      - "[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:7700"
+    # Same-origin (/api, /stream.mp3) is the default baked into the image.
+    # Your external proxy is responsible for routing those paths to controller
+    # and broadcast — see the header comment for the route table.
+
+  # -------------------------------------------------------------------------
+  # TTS-HEAVY (optional) — sidecar for Chatterbox + PocketTTS
+  # -------------------------------------------------------------------------
+  # See docker-compose.yml for the full rationale (issue #103). NOT started
+  # by default. Enable this stack with the `tts-heavy` profile in Portainer.
+  # The controller falls back to Piper when the URL is unreachable.
+  tts-heavy:
+    image: ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}
+    # amd64-only image (heavy PyTorch stack); pinned so it runs under emulation
+    # on arm64 hosts. The other services are multi-arch and auto-select.
+    platform: linux/amd64
+    container_name: sub-wave-tts-heavy
+    restart: unless-stopped
+    logging: *default-logging
+    # OOM containment: cap the resident set so a runaway model load (a huge
+    # reference WAV, a wedged PyTorch allocation) is killed inside this
+    # container instead of triggering the host OOM-killer and taking broadcast
+    # or the controller down with it. Default is generous — real Chatterbox +
+    # PocketTTS peaks sit well under it. Raise/lower via TTS_HEAVY_MEM_LIMIT.
+    mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}
+    profiles: ["tts-heavy"]
+    environment:
+      - TTS_HEAVY_DEVICE=${TTS_HEAVY_DEVICE:-cpu}
+      - POCKET_TTS_VOICE=${POCKET_TTS_VOICE:-alba}
+      # Which heavy engines to actually load. Both are baked into the image;
+      # each costs RAM + a first-boot weight download + startup time, so set
+      # this to a single engine if you only use one. Comma-separated.
+      # e.g. TTS_HEAVY_ENGINES=pocket-tts runs PocketTTS only (no Chatterbox).
+      - TTS_HEAVY_ENGINES=${TTS_HEAVY_ENGINES:-chatterbox,pocket-tts}
+      # Optional — enables PocketTTS voice CLONING (issue #238). Cloning weights
+      # are gated on Hugging Face; accept the terms at
+      # huggingface.co/kyutai/pocket-tts and set HF_TOKEN in Portainer.
+      # Built-in voices need no token.
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - *state-mount
+      # Persist the per-engine Hugging Face caches across container recreates.
+      # Weights download at boot (the workers load the model before reporting
+      # ready) — without these volumes that multi-GB fetch repeats on every
+      # `up -d --build` / image pull / update. With them it happens once.
+      - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
+      - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
+
+  # -------------------------------------------------------------------------
+  # ANALYZER — acoustic-analysis sidecar (bpm / key / intro / loudness;
+  # + CLAP "sounds-like" embeddings and Demucs vocal-activity ranges).
+  # -------------------------------------------------------------------------
+  # Starts by default alongside the core services. The controller probes
+  # ANALYZE_URL (this service), then a local venv. Only the heavy *voices*
+  # (Chatterbox/PocketTTS) stay opt-in under the `tts-heavy` profile; acoustic
+  # analysis is default-on. To skip it, `docker compose stop analyzer`.
+  analyzer:
+    # Default: the LEAN, multi-arch image. ANALYZER_HEAVY=1 switches to
+    # the CLAP + Demucs `subwave-analyzer-heavy` image (amd64-only; on arm64 also
+    # set DOCKER_DEFAULT_PLATFORM=linux/amd64).
+    image: ghcr.io/obiwancanoweme/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:${SUBWAVE_VERSION:?required}
+    container_name: sub-wave-analyzer
+    restart: unless-stopped
+    logging: *default-logging
+    # OOM containment: cap the resident set so a runaway analysis (a long track,
+    # a CLAP/Demucs allocation spike on the heavy image) is killed inside this
+    # container instead of triggering the host OOM-killer and taking broadcast or
+    # the controller down with it. Default is generous — librosa passes sit well
+    # under it, and even CLAP + Demucs on the heavy image fit. Raise/lower via
+    # ANALYZER_MEM_LIMIT.
+    mem_limit: ${ANALYZER_MEM_LIMIT:-6g}
+    environment:
+      # Force CLAP / Demucs on for the whole pass. Usually unnecessary — the
+      # admin toggles drive these per request.
+      - ANALYZE_AUDIO_EMBEDDING=${ANALYZE_AUDIO_EMBEDDING:-}
+      - ANALYZE_VOCAL_ACTIVITY=${ANALYZE_VOCAL_ACTIVITY:-}
+      - CLAP_MODEL=${CLAP_MODEL:-}
+      - CLAP_MODEL_PATH=${CLAP_MODEL_PATH:-}
+      # Demucs model + analysis-window overrides (worker reads both; see
+      # .env.example "Optional model overrides").
+      - DEMUCS_MODEL=${DEMUCS_MODEL:-}
+      - ANALYZE_SECONDS=${ANALYZE_SECONDS:-}
+      - ANALYZE_CLAP_WINDOWS=${ANALYZE_CLAP_WINDOWS:-}
+      - ANALYZE_OUTRO_SECONDS=${ANALYZE_OUTRO_SECONDS:-}
+      # CLAP isn't gated, but an anonymous HF Hub download is rate-limited and
+      # slow. Same var as tts-heavy — set HF_TOKEN=hf_... in Portainer once
+      # and both sidecars pick it up.
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - *state-mount
+      - analyzer-cache:/opt/analyzer/hf-cache
+
+volumes:
+  tts-heavy-chatterbox-cache:
+  tts-heavy-pocket-cache:
+  analyzer-cache:
