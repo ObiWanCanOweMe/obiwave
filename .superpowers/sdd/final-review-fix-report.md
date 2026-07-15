@@ -1,147 +1,129 @@
-# Final Whole-Branch Review Fix Report
+# LiteLLM final-review fix report
 
-Date: 2026-07-15
+Date: 2026-07-13
 
-## Status
+Base commit: `fa7bd02`
 
-All requested final-review findings were addressed in the
-`agent/ark-bundled-caddy` worktree. No connection, reload, deployment, tag,
-release, push, or other mutation was made against bender, Portainer, ark, or the
-live station.
+Implementation commit: `d46c438` (`fix(llm): close final LiteLLM review gaps`)
 
-## Commit
+## Outcome
 
-- `808d09c6ff71de68402fe7f878d433c911afd11e` — `fix: harden ark Caddy proxy contract`
+All final-review findings were fixed in the `feat/litellm-cloud-provider` worktree. No deployment, service restart, live-provider change, root-state access, or real-secret access was performed.
 
-## Changes
+## Files changed
 
-- `scripts/ci/validate-portainer-compose.test.mjs`
-  - Added regression coverage for a quoted service-level `"ports"` key.
-  - Added regression coverage for a service-level YAML merge that can inherit
-    an anchored `ports` declaration.
-  - Added exact bender trusted-proxy environment regressions.
-  - Added the generic Caddyfile contract for optional proxy-range expansion and
-    strict forwarded-IP parsing.
-- `scripts/ci/validate-portainer-compose.mjs`
-  - Rejects quoted and unquoted active `ports` keys on every non-Caddy service.
-  - Rejects quoted and unquoted service-level merge keys on every non-Caddy
-    service as potential hidden publication paths.
-  - Requires the exact ark Caddy `TRUSTED_PROXY_RANGES` value while preserving
-    the existing exact Caddy binding/cardinality policy.
-- `deploy/portainer/docker-compose.yml`
-  - Sets `TRUSTED_PROXY_RANGES` to
-    `10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128` on Caddy.
-- `docker/Caddyfile`
-  - Adds optional parse-time `{$TRUSTED_PROXY_RANGES}` expansion to the generic
-    static trusted-proxy list.
-  - Enables `trusted_proxies_strict` in the same `servers` block.
-- `docs/deployment.md`
-  - Corrects the ark topology: bender forwards the complete origin to Caddy on
-    ark port 7700; only Caddy publishes exact ark IPv4/IPv6 host bindings; Caddy
-    owns API, streams, tune-in, and web routing.
-  - Documents bender's exact trusted source CIDRs and strict forwarded-IP
-    parsing.
-- `docs/superpowers/specs/2026-07-15-ark-bundled-caddy-design.md`
-  - Records the trusted-proxy decision.
-  - Corrects readiness wording: Caddy waits for web to start and for
-    controller/broadcast health; public retry probes tolerate the brief web
-    startup window.
+- `controller/src/settings.ts` — pins a fresh/inheriting embedding configuration to the previous embedding-capable provider and its default model before LiteLLM becomes the chat provider.
+- `controller/src/routes/settings.ts` — adds authenticated POST model discovery, explicit `primary`/`fallback`/`onboarding` leg identity, leg-scoped saved configuration resolution, environment fallback, and explicit probe leg selection.
+- `controller/src/llm/internal/provider/registry.ts` — includes a SHA-256 digest of the effective LiteLLM token in the model-client cache signature without storing/logging the raw token.
+- `controller/scripts/litellm-config.test.ts` — integration regression for safe effective embeddings after a default LiteLLM save.
+- `controller/scripts/litellm-cache.test.ts` — in-process environment-token rotation regression using a recording gateway.
+- `controller/scripts/litellm-routes.test.ts` — real mounted-route coverage for authenticated primary/fallback discovery, fallback probing, environment-only resolution, and unsaved onboarding discovery.
+- `web/hooks/useModelDiscovery.ts` — sends LiteLLM discovery as authenticated POST with leg/body token and invalidates stale requests on every dependency change.
+- `web/components/admin/settings/LlmSection.tsx` — supplies explicit discovery/probe legs and suppresses stale compatibility-probe results for provider, URL, token, or model changes.
+- `web/components/onboarding/useWizard.ts` — sends unsaved onboarding discovery credentials in the POST body and suppresses stale connection-test results.
+- `web/components/onboarding/steps.tsx` — invalidates LiteLLM discovery when the unsaved bearer token changes.
+- `web/lib/asyncResultGeneration.ts` — reusable monotonic async-result generation guard.
+- `web/scripts/async-result-generation.test.ts` — pure state regression for stale-result suppression.
+- `web/package.json` — exposes the new web regression command.
 
-## TDD Evidence
+## RED evidence
 
-RED command:
+Each regression was added before its production change and run against commit `fa7bd02` plus tests only.
 
-```bash
-node --test scripts/ci/validate-portainer-compose.test.mjs
-```
+1. `cd controller && npx tsx scripts/litellm-config.test.ts`
+   - Exit `1`.
+   - Expected `{ provider: 'ollama', model: 'nomic-embed-text' }`; actual `{ provider: 'litellm', model: '' }`.
+2. `cd controller && npx tsx scripts/litellm-cache.test.ts`
+   - Exit `1`.
+   - Expected Authorization tokens A then B; actual A then A, proving the cached client retained the old effective environment token.
+3. `cd controller && npx tsx scripts/litellm-routes.test.ts`
+   - Exit `1`.
+   - Authenticated `POST /settings/llm/models` returned `404`, proving the body-token/explicit-leg contract did not exist.
+4. `cd web && node --experimental-strip-types scripts/async-result-generation.test.ts`
+   - Exit `1`.
+   - Assertion failed because the async generation guard module did not exist.
 
-Result before production changes: exit 1, 12 tests total, 8 passed and the 4
-new regressions failed for the intended missing behavior:
+## Focused GREEN evidence
 
-- quoted non-Caddy `ports` key was not rejected;
-- service-level merge injection was not rejected;
-- exact bender trusted-proxy ranges were not required;
-- generic Caddyfile lacked env expansion and strict parsing.
+- `cd controller && npx tsx scripts/litellm-config.test.ts` — exit `0`.
+- `cd controller && npx tsx scripts/litellm-cache.test.ts` — exit `0`.
+- `cd controller && npx tsx scripts/litellm-routes.test.ts` — exit `0`; recording gateways observed exact `/v1/models` and `/v1/chat/completions` paths plus the expected primary, fallback, environment, and unsaved-onboarding Authorization headers.
+- `cd web && npm run test:async-generation` — exit `0`.
 
-GREEN command:
+## Full verification
 
-```bash
-node --test scripts/ci/validate-portainer-compose.test.mjs
-```
+- `cd controller && npm test` — exit `0`; all 38 test files passed.
+- `cd controller && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed. ESLint reported the repository's existing warning baseline (516 warnings, 0 errors).
+- `cd web && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation` — exit `0`; all relevant web regressions passed. Node emitted the existing package-module-type warning for strip-types scripts.
+- `cd web && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed.
+- `cd web && npm run build` — exit `0`; Next.js 15.5.19 compiled, typechecked, generated all 81 static pages, and finalized the production build.
+- `git diff --check` — exit `0` before the implementation commit.
 
-Result after the minimal policy/config changes: exit 0, 12/12 passed. The final
-fresh rerun also passed 12/12 with no failures.
+## Self-review
 
-## Verification
-
-Full deployment contract suite, run once after implementation:
-
-```bash
-node --test scripts/release/fork-tag.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs
-```
-
-Result: exit 0, 52/52 passed, 0 failed.
-
-Manifest policy:
-
-```bash
-node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
-```
-
-Result: exit 0; `validated deploy/portainer/docker-compose.yml`.
-
-Representative `.3` Compose render:
-
-```bash
-trap 'rm -f deploy/portainer/stack.env' EXIT
-: > deploy/portainer/stack.env
-SUBWAVE_VERSION=v0.42.0-obiwave.3 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org docker compose -f deploy/portainer/docker-compose.yml config --quiet
-```
-
-Result: exit 0. An initial direct render without the intentionally ignored
-Portainer-generated `stack.env` stub failed with the expected missing-file
-message; rerunning with the same temporary empty stub used by CI passed.
-
-Caddy adaptation with the optional variable unset:
-
-```bash
-docker run --rm -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 caddy adapt --config /etc/caddy/Caddyfile >/dev/null
-```
-
-Result: exit 0.
-
-Caddy adaptation with the exact ark value set:
-
-```bash
-docker run --rm -e 'TRUSTED_PROXY_RANGES=10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128' -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 caddy adapt --config /etc/caddy/Caddyfile >/dev/null
-```
-
-Result: exit 0.
-
-Whitespace validation:
-
-```bash
-git diff --check
-```
-
-Result: exit 0, no output.
-
-## Self-Review
-
-- Re-read the complete diff against every review requirement.
-- Confirmed Caddy remains the only service allowed active host publications and
-  that its two approved bindings and exact cardinality checks are unchanged.
-- Confirmed existing extension anchors remain valid; only non-Caddy
-  service-level merge keys are rejected.
-- Confirmed deployment-specific bender addresses exist only in the Portainer
-  manifest/docs/tests, not as hardcoded generic Caddyfile addresses.
-- Confirmed no web health check was added and readiness wording matches Compose
-  behavior.
-- Confirmed the worktree contained only the committed requested changes before
-  adding this report.
+- LiteLLM remains absent from `EMBEDDING_PROVIDERS`; the safe pin happens at `settings.update()`, so both Admin and onboarding save paths receive the same protection.
+- LiteLLM URL precedence is request-body override, selected saved leg URL, `LITELLM_API_BASE`, then `OPENAI_API_BASE`.
+- LiteLLM token precedence is request-body override, selected saved provider-scoped key, `LITELLM_API_KEY`, then `OPENAI_API_KEY`.
+- A stale LiteLLM key from an unselected leg is not used for environment-only resolution.
+- Unsaved onboarding tokens are transported only in a JSON POST body, never in query parameters.
+- Route responses and error messages contain no bearer tokens; cache signatures contain only a stable digest of the effective token.
+- LiteLLM still uses its isolated cloud transport and does not enter the self-hosted `openai-compatible` body-injection path.
+- Admin probes and onboarding connection tests invalidate late results on all relevant provider/URL/token/model inputs; discovery request cleanup also advances its generation synchronously.
+- Existing Google provider configuration and all live station state were untouched.
 
 ## Concerns
 
-None. The policy intentionally rejects all non-Caddy service-level YAML merges,
-which is stricter than inspecting the merged anchor contents and closes the
-hidden-publication escape without disturbing the existing top-level anchors.
+None.
+
+## Re-review follow-up
+
+Re-review base: `f17eddf`
+
+Implementation commit: `322cb0e` (`fix(llm): enforce final LiteLLM boundaries`)
+
+### Follow-up outcome
+
+All re-review findings were addressed in the same isolated feature worktree. No deployment, restart, live-provider change, root-state access, or real-secret access was performed.
+
+### Follow-up files changed
+
+- `controller/src/settings.ts` — moves the LiteLLM chat-only embedding invariant to the final post-patch boundary and preserves the prior effective embedding provider/model.
+- `controller/src/routes/settings.ts` — keeps explicit probe legs authoritative while restoring saved-URL matching for legacy non-LiteLLM probes that omit `leg`.
+- `controller/scripts/litellm-config.test.ts` — covers embedding-only and combined LLM+embedding clear patches while LiteLLM is active.
+- `controller/scripts/litellm-routes.test.ts` — covers omitted-leg authenticated fallback probing and the real mounted `/onboarding/test-llm` LiteLLM transport with a recording gateway.
+
+### Follow-up RED evidence
+
+1. `cd controller && npx tsx scripts/litellm-config.test.ts`
+   - Exit `1`.
+   - Both the embedding-only clear and combined LLM+embedding clear resolved to `{ provider: 'litellm', model: '' }` instead of `{ provider: 'ollama', model: 'nomic-embed-text' }`.
+2. `cd controller && npx tsx scripts/litellm-routes.test.ts`
+   - Exit `1`.
+   - The omitted-leg fallback probe reached the correct saved fallback URL but sent `Bearer no-key` instead of `Bearer saved-compat-fallback-token`.
+   - Before that expected failure, the newly mounted `/onboarding/test-llm` assertion passed and recorded exact `POST /v1/chat/completions` plus `Bearer unsaved-onboarding-token`. This finding was missing route coverage, not missing production transport behavior.
+
+### Follow-up GREEN evidence
+
+- `cd controller && npx tsx scripts/litellm-config.test.ts` — exit `0`; both clear-patch variants preserve effective Ollama embeddings.
+- `cd controller && npx tsx scripts/litellm-routes.test.ts` — exit `0`; omitted-leg compatibility and the mounted onboarding transport both pass with exact recorded path/header assertions.
+
+### Follow-up full verification
+
+- `cd controller && npm test` — exit `0`; all 38 test files passed.
+- `cd controller && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed with the unchanged repository baseline of 516 warnings and 0 errors.
+- `cd web && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation` — exit `0`; all relevant web regressions passed with the existing Node package-module-type warning.
+- `cd web && npm run lint` — exit `0`; ESLint and `tsc --noEmit` passed.
+- `cd web && npm run build` — exit `0`; Next.js 15.5.19 compiled, typechecked, generated all 81 static pages, and finalized the production build.
+- `git diff --check` — exit `0` before commit `322cb0e`.
+
+### Follow-up self-review
+
+- The embedding invariant now executes after both `llm` and `embedding` patch handlers, so neither patch order can make blank embedding inheritance resolve to LiteLLM.
+- The prior effective embedding provider/model is captured before mutation; fresh defaults remain `ollama`/`nomic-embed-text`, while an existing explicit embedding choice is preserved.
+- Explicit probe legs remain authoritative. Saved-URL matching runs only when a non-LiteLLM probe omits the `leg` field, retaining backward compatibility for older Admin clients.
+- The real onboarding test route uses the unsaved request-body URL/token, sends the token only as an Authorization header to the recording gateway, and does not persist it during the test.
+- Existing LiteLLM URL/token precedence, cache digesting, query-string exclusion, transport isolation, Google configuration, and live station state remain unchanged.
+
+### Follow-up concerns
+
+None.

@@ -1,7 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { validatePortainerCompose } from './validate-portainer-compose.mjs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as validator from './validate-portainer-compose.mjs';
+
+const { validatePortainerCompose } = validator;
+
+const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
+const validResolved = {
+  services: {
+    caddy: {
+      environment: { TRUSTED_PROXY_RANGES: trustedProxyRanges },
+      ports: [
+        { host_ip: '10.20.0.9', published: '7700', target: 80 },
+        { host_ip: '2600:1700:3210:5314:10:20:0:9', published: 7700, target: '80' },
+      ],
+    },
+    web: {},
+  },
+};
 
 const valid = `
 x-state: &state-mount /mnt/NVMe/container-data/subwave/state:/var/sub-wave
@@ -94,14 +113,148 @@ function assertRejects(source, expected) {
   assert.ok(errorsFor(source).includes(expected), `expected ${expected}`);
 }
 
-const nonCaddyServices = [
-  'broadcast',
-  'controller',
-  'docker-socket-proxy',
-  'web',
-  'tts-heavy',
-  'analyzer',
-];
+function resolvedErrors(model) {
+  return validator.validateResolvedPortainerCompose?.(model) ?? [];
+}
+
+function renderCompose(source) {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-compose-policy-'));
+  const file = join(directory, 'compose.yml');
+  try {
+    writeFileSync(file, source);
+    const result = spawnSync('docker', ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('resolved model rejects a non-Caddy published port', () => {
+  const model = structuredClone(validResolved);
+  model.services.web.ports = [{ host_ip: '10.20.0.9', published: 9999, target: 9999 }];
+  assert.ok(
+    resolvedErrors(model).includes('resolved service web must not publish host ports'),
+  );
+});
+
+test('Docker-resolved tagged ports key cannot bypass non-Caddy port policy', () => {
+  const model = renderCompose(`
+services:
+  caddy:
+    image: alpine
+    environment:
+      TRUSTED_PROXY_RANGES: "${trustedProxyRanges}"
+    ports:
+      - "10.20.0.9:7700:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:7700:80"
+  web:
+    image: alpine
+    !!str ports:
+      - "10.20.0.9:9999:9999"
+`);
+  assert.ok(
+    resolvedErrors(model).includes('resolved service web must not publish host ports'),
+  );
+});
+
+test('Docker-resolved quoted and merged ports cannot bypass non-Caddy port policy', () => {
+  const cases = [
+    `
+services:
+  caddy:
+    image: alpine
+    environment:
+      TRUSTED_PROXY_RANGES: "${trustedProxyRanges}"
+    ports:
+      - "10.20.0.9:7700:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:7700:80"
+  web:
+    image: alpine
+    "ports": ["10.20.0.9:9999:9999"]
+`,
+    `
+x-port-leak: &port-leak
+  ports: ["10.20.0.9:9999:9999"]
+services:
+  caddy:
+    image: alpine
+    environment:
+      TRUSTED_PROXY_RANGES: "${trustedProxyRanges}"
+    ports:
+      - "10.20.0.9:7700:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:7700:80"
+  web:
+    <<: *port-leak
+    image: alpine
+`,
+  ];
+  for (const source of cases) {
+    assert.ok(
+      resolvedErrors(renderCompose(source)).includes('resolved service web must not publish host ports'),
+    );
+  }
+});
+
+test('Docker-resolved profiled services cannot bypass non-Caddy port policy', () => {
+  const model = renderCompose(`
+services:
+  caddy:
+    image: alpine
+    environment:
+      TRUSTED_PROXY_RANGES: "${trustedProxyRanges}"
+    ports:
+      - "10.20.0.9:7700:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:7700:80"
+  tts-heavy:
+    image: alpine
+    profiles: ["tts-heavy"]
+    ports: ["10.20.0.9:9999:9999"]
+`);
+  assert.ok(
+    resolvedErrors(model).includes('resolved service tts-heavy must not publish host ports'),
+  );
+});
+
+test('resolved model requires exact Caddy port ownership and cardinality', () => {
+  assert.deepEqual(resolvedErrors(validResolved), []);
+
+  const missing = structuredClone(validResolved);
+  missing.services.caddy.ports.pop();
+  assert.ok(resolvedErrors(missing).includes('resolved service caddy must publish exactly the approved ports'));
+
+  const duplicate = structuredClone(validResolved);
+  duplicate.services.caddy.ports.push({ ...duplicate.services.caddy.ports[0] });
+  assert.ok(resolvedErrors(duplicate).includes('resolved service caddy must publish exactly the approved ports'));
+
+  for (const [field, value] of [
+    ['host_ip', '10.20.0.10'],
+    ['published', '7701'],
+    ['target', 81],
+  ]) {
+    const wrong = structuredClone(validResolved);
+    wrong.services.caddy.ports[0][field] = value;
+    assert.ok(resolvedErrors(wrong).includes('resolved service caddy must publish exactly the approved ports'));
+  }
+
+  const wrongOwner = structuredClone(validResolved);
+  wrongOwner.services.web.ports = [wrongOwner.services.caddy.ports.pop()];
+  assert.ok(resolvedErrors(wrongOwner).includes('resolved service web must not publish host ports'));
+  assert.ok(resolvedErrors(wrongOwner).includes('resolved service caddy must publish exactly the approved ports'));
+});
+
+test('resolved model requires exact Caddy trusted proxy ranges', () => {
+  for (const value of [undefined, '10.20.0.15/32']) {
+    const model = structuredClone(validResolved);
+    if (value === undefined) delete model.services.caddy.environment.TRUSTED_PROXY_RANGES;
+    else model.services.caddy.environment.TRUSTED_PROXY_RANGES = value;
+    assert.ok(
+      resolvedErrors(model).includes('resolved service caddy has invalid bender trusted proxy ranges'),
+    );
+  }
+});
 
 test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
@@ -117,7 +270,6 @@ test('rejects mutable or checkout-coupled deployment', () => {
     'manifest references the upstream image namespace',
     'manifest contains a repository-relative state mount',
     'manifest depends on a repository .env file',
-    'manifest binds a published port to a wildcard address',
   ]) assertRejects(invalid, expected);
 });
 
@@ -165,71 +317,8 @@ test('rejects material topology removals', () => {
   }
 });
 
-test('rejects non-Caddy services that publish host ports', () => {
-  for (const service of nonCaddyServices) {
-    const marker = `\n  ${service}:\n`;
-    const invalid = valid.replace(
-      marker,
-      `${marker}    ports:\n      - "10.20.0.9:9999:9999"\n`,
-    );
-    assertRejects(invalid, `service ${service} must not publish host ports`);
-  }
-});
-
-test('rejects non-Caddy services that publish host ports with flow syntax', () => {
-  for (const service of nonCaddyServices) {
-    const marker = `\n  ${service}:\n`;
-    const invalid = valid.replace(
-      marker,
-      `${marker}    ports: ["10.20.0.9:9999:9999"]\n`,
-    );
-    assertRejects(invalid, `service ${service} must not publish host ports`);
-  }
-});
-
-test('rejects non-Caddy services that publish host ports with multiline flow syntax', () => {
-  for (const service of nonCaddyServices) {
-    const marker = `\n  ${service}:\n`;
-    const invalid = valid.replace(
-      marker,
-      `${marker}    ports: [\n      "10.20.0.9:9999:9999"\n    ]\n`,
-    );
-    assertRejects(invalid, `service ${service} must not publish host ports`);
-  }
-});
-
-test('rejects non-Caddy services that publish host ports with a quoted key', () => {
-  const invalid = valid.replace(
-    '\n  web:\n',
-    '\n  web:\n    "ports": ["10.20.0.9:9999:9999"]\n',
-  );
-  assertRejects(invalid, 'service web must not publish host ports');
-});
-
-test('rejects non-Caddy services that merge a potential hidden port publication', () => {
-  const invalid = valid
-    .replace('x-state:', 'x-port-leak: &port-leak\n  ports:\n    - "10.20.0.9:9999:9999"\n\nx-state:')
-    .replace('\n  web:\n', '\n  web:\n    <<: *port-leak\n');
-  assertRejects(invalid, 'service web must not merge service configuration');
-});
-
-test('requires bender exact trusted proxy ranges in the Caddy service environment', () => {
-  const exact = 'TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"';
-  assertRejects(valid.replace(`      ${exact}\n`, ''), 'service caddy is missing bender trusted proxy ranges');
-  assertRejects(valid.replace('10.20.0.14/32', '10.20.0.15/32'), 'service caddy is missing bender trusted proxy ranges');
-});
-
 test('generic Caddyfile expands optional trusted proxies and parses them strictly', () => {
   const caddyfile = readFileSync(new URL('../../docker/Caddyfile', import.meta.url), 'utf8');
   assert.match(caddyfile, /trusted_proxies static[\s\S]*\{\$TRUSTED_PROXY_RANGES\}/);
   assert.match(caddyfile, /^\s*trusted_proxies_strict\s*$/m);
-});
-
-test('rejects missing, off-contract, commented, or duplicated Caddy bindings', () => {
-  const ipv4 = '10.20.0.9:${WEB_PORT:-7700}:80';
-  const ipv6 = '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80';
-  assertRejects(valid.replace(`      - "${ipv4}"\n`, ''), `service caddy is missing published port ${ipv4}`);
-  assertRejects(valid.replace(ipv4, '0.0.0.0:${WEB_PORT:-7700}:80'), 'manifest binds a published port to a wildcard address');
-  assertRejects(valid.replace(`      - "${ipv6}"`, `      # - "${ipv6}"`), `service caddy is missing published port ${ipv6}`);
-  assertRejects(valid.replace(`      - "${ipv4}"`, `      - "${ipv4}"\n      - "${ipv4}"`), `manifest must publish port ${ipv4} exactly once`);
 });

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -7,7 +8,6 @@ const rules = [
   [/ghcr\.io\/perminder-klair\//, 'manifest references the upstream image namespace'],
   [/(?:\$\{STATE_DIR[^}]*\}|\.\/state):\/var\/sub-wave/, 'manifest contains a repository-relative state mount'],
   [/env_file:\s*(?:\n\s*-\s*)?\.\/\.env/, 'manifest depends on a repository .env file'],
-  [/(?:0\.0\.0\.0|\[::\]):(?:\$\{[^}]+\}|[0-9]+):[0-9]+/, 'manifest binds a published port to a wildcard address'],
 ];
 
 const serviceImages = new Map([
@@ -20,15 +20,8 @@ const serviceImages = new Map([
   ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:${SUBWAVE_VERSION:?required}'],
 ]);
 
-const approvedPorts = [
-  '10.20.0.9:${WEB_PORT:-7700}:80',
-  '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80',
-];
-const servicePorts = new Map([['caddy', approvedPorts]]);
-
 const serviceRequirements = [
   ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
-  ['caddy', 'TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"', 'service caddy is missing bender trusted proxy ranges'],
   ['caddy', 'web:\n        condition: service_started', 'service caddy is missing web service_started dependency'],
   ['caddy', 'controller:\n        condition: service_healthy', 'service caddy is missing controller service_healthy dependency'],
   ['caddy', 'broadcast:\n        condition: service_healthy', 'service caddy is missing broadcast service_healthy dependency'],
@@ -88,24 +81,6 @@ function serviceBlocks(source) {
   return new Map([...blocks].map(([name, linesForService]) => [name, linesForService.join('\n')]));
 }
 
-function publishedPorts(blocks) {
-  const ports = new Map();
-  for (const [service, block] of blocks) {
-    const serviceEntries = [];
-    const lines = block.split('\n');
-    for (let index = 0; index < lines.length; index += 1) {
-      if (!/^    ports:\s*$/.test(lines[index])) continue;
-      for (index += 1; index < lines.length && !/^    \S/.test(lines[index]); index += 1) {
-        const entry = lines[index].match(/^\s*-\s*(.+?)\s*$/);
-        if (entry) serviceEntries.push(entry[1].replace(/^(['"])(.*)\1$/, '$2'));
-      }
-      index -= 1;
-    }
-    ports.set(service, serviceEntries);
-  }
-  return ports;
-}
-
 function namedVolumes(source) {
   const lines = source.split('\n');
   const volumesAt = lines.findIndex((line) => /^volumes:\s*$/.test(line));
@@ -156,30 +131,47 @@ export function validatePortainerCompose(source) {
     if (!active.includes(marker)) errors.push(`manifest is missing ${marker}`);
   }
 
-  for (const [service, block] of blocks) {
-    if (service !== 'caddy') {
-      if (/^    (?:ports|"ports"|'ports')\s*:/m.test(block)) {
-        errors.push(`service ${service} must not publish host ports`);
-      }
-      if (/^    (?:<<|"<<"|'<<')\s*:/m.test(block)) {
-        errors.push(`service ${service} must not merge service configuration`);
-      }
+  return errors;
+}
+
+const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
+const approvedResolvedPorts = [
+  '10.20.0.9|7700|80',
+  '2600:1700:3210:5314:10:20:0:9|7700|80',
+].sort();
+
+function resolvedPorts(service) {
+  if (service?.ports == null) return [];
+  return Array.isArray(service.ports) ? service.ports : [service.ports];
+}
+
+function normalizedPort(port) {
+  const value = (field) => ['string', 'number'].includes(typeof port?.[field])
+    ? String(port[field])
+    : '';
+  return `${value('host_ip')}|${value('published')}|${value('target')}`;
+}
+
+export function validateResolvedPortainerCompose(model) {
+  const errors = [];
+  const services = model?.services && typeof model.services === 'object' ? model.services : {};
+  const caddy = services.caddy;
+
+  if (!caddy || typeof caddy !== 'object') {
+    errors.push('resolved manifest is missing service caddy');
+  } else {
+    const actualPorts = resolvedPorts(caddy).map(normalizedPort).sort();
+    if (JSON.stringify(actualPorts) !== JSON.stringify(approvedResolvedPorts)) {
+      errors.push('resolved service caddy must publish exactly the approved ports');
+    }
+    if (caddy.environment?.TRUSTED_PROXY_RANGES !== trustedProxyRanges) {
+      errors.push('resolved service caddy has invalid bender trusted proxy ranges');
     }
   }
-  const portsByService = publishedPorts(blocks);
-  const ports = [...portsByService.values()].flat();
-  for (const port of ports) {
-    if (!approvedPorts.includes(port)) errors.push(`manifest contains an unapproved published port ${port}`);
-  }
-  for (const [service, expectedPorts] of servicePorts) {
-    const actualPorts = portsByService.get(service) ?? [];
-    for (const port of expectedPorts) {
-      if (!actualPorts.includes(port)) errors.push(`service ${service} is missing published port ${port}`);
-    }
-  }
-  for (const port of approvedPorts) {
-    if (ports.filter((candidate) => candidate === port).length !== 1) {
-      errors.push(`manifest must publish port ${port} exactly once`);
+
+  for (const [service, configuration] of Object.entries(services)) {
+    if (service !== 'caddy' && resolvedPorts(configuration).length !== 0) {
+      errors.push(`resolved service ${service} must not publish host ports`);
     }
   }
   return errors;
@@ -187,7 +179,26 @@ export function validatePortainerCompose(source) {
 
 async function main() {
   const file = process.argv[2] ?? 'deploy/portainer/docker-compose.yml';
-  const errors = validatePortainerCompose(await readFile(file, 'utf8'));
+  const sourceErrors = validatePortainerCompose(await readFile(file, 'utf8'));
+  const result = spawnSync(
+    'docker',
+    ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'],
+    {
+      encoding: 'utf8',
+      env: process.env,
+    },
+  );
+  if (result.error) throw new Error(`docker compose config failed: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(`docker compose config failed: ${result.stderr.trim() || `exit ${result.status}`}`);
+  }
+  let model;
+  try {
+    model = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`docker compose config emitted invalid JSON: ${error.message}`);
+  }
+  const errors = [...sourceErrors, ...validateResolvedPortainerCompose(model)];
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`validated ${file}`);
 }

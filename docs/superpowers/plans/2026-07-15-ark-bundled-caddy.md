@@ -4,7 +4,7 @@
 
 **Goal:** Route the complete public SUB/WAVE origin through a bundled Caddy container on ark port 7700 so bender remains unchanged.
 
-**Architecture:** Add the existing fork-owned Caddy image to the image-only Portainer stack. Caddy alone publishes ark's required IPv4 and IPv6 bindings; web, controller, and broadcast remain internal, and the deployment contract enforces that topology before release.
+**Architecture:** Add the existing fork-owned Caddy image to the image-only Portainer stack. Caddy alone publishes ark's required IPv4 and IPv6 bindings; web, controller, and broadcast remain internal. The deployment contract renders Docker Compose's canonical JSON model with all profiles enabled and enforces port ownership, cardinality, and trusted-proxy configuration structurally before release; source text is inspected only for template-form invariants such as immutable image expressions.
 
 **Tech Stack:** Docker Compose, Caddy, Node.js built-in test runner, GitHub Actions, Portainer, GHCR
 
@@ -21,7 +21,7 @@
 ## File Structure
 
 - `scripts/ci/validate-portainer-compose.test.mjs`: regression examples for the seven-service Caddy topology.
-- `scripts/ci/validate-portainer-compose.mjs`: exact service, volume, dependency, and port policy.
+- `scripts/ci/validate-portainer-compose.mjs`: source-template policy plus structural validation of `docker compose config --format json`.
 - `deploy/portainer/docker-compose.yml`: image-only runtime deployed by Portainer on ark.
 
 ---
@@ -33,8 +33,13 @@
 - Modify: `scripts/ci/validate-portainer-compose.mjs`
 
 **Interfaces:**
-- Consumes: `validatePortainerCompose(source: string): string[]`.
-- Produces: errors for a missing/incorrect Caddy image, missing Caddy dependencies or volumes, any non-Caddy `ports:` declaration, missing Caddy bindings, and unapproved bindings.
+- Consumes: `validatePortainerCompose(source: string): string[]` for source-template invariants and `validateResolvedPortainerCompose(model: object): string[]` for Docker's resolved Compose model.
+- Produces: errors for a missing/incorrect Caddy image or source-template requirement, any resolved non-Caddy publication, incorrect resolved Caddy binding ownership/cardinality, and an incorrect resolved trusted-proxy value.
+
+> **Structural-validation amendment:** The source-key matching described in the
+> original steps below is superseded. Regression fixtures must be rendered by
+> Docker Compose, including tagged, quoted, and merged YAML keys, and policy is
+> applied to the resulting JSON object rather than enumerating YAML spellings.
 
 - [ ] **Step 1: Rewrite the valid fixture for bundled Caddy**
 
@@ -135,20 +140,15 @@ Add these service requirements:
 ['caddy', 'caddy-config:/config', 'service caddy is missing its config volume'],
 ```
 
-Require `caddy-data` and `caddy-config` in the named-volume loop. Reject an active service-level `ports:` key on every parsed service except Caddy, independent of the value syntax:
+Require `caddy-data` and `caddy-config` in the named-volume loop. For port policy,
+render `docker compose --profile '*' config --format json` and pass the parsed object to the
+resolved-model validator. Caddy must own exactly the two approved publications,
+all other services must resolve to zero publications, and Caddy must contain the
+exact bender trusted-proxy environment value. Do not inspect service-level YAML
+key spellings or reject merge syntax in source text.
 
 ```js
-for (const [service, block] of blocks) {
-  if (service !== 'caddy' && /^    ports\s*:/m.test(block)) {
-    errors.push(`service ${service} must not publish host ports`);
-  }
-}
-```
-
-Change the final approved-port count error to:
-
-```js
-errors.push(`manifest must publish port ${port} exactly once`);
+validateResolvedPortainerCompose(model);
 ```
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
@@ -217,8 +217,8 @@ Delete the complete `ports:` sections from `broadcast`, `controller`, and `web`.
 Run:
 
 ```bash
-node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
 touch deploy/portainer/stack.env
+SUBWAVE_VERSION=v0.42.0-obiwave.3 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
 SUBWAVE_VERSION=v0.42.0-obiwave.3 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org docker compose -f deploy/portainer/docker-compose.yml config --quiet
 rm deploy/portainer/stack.env
 ```

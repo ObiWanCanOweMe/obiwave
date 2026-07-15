@@ -74,7 +74,11 @@ have a healthy preceding version to verify.
 
 ## CI Contract
 
-Deployment-contract tests will require:
+Deployment-contract tests render `docker compose --profile '*' config --format json` and
+apply runtime topology policy to that resolved model, so YAML tags, quoted keys,
+and merges cannot bypass publication checks. Source-text checks remain only for
+template-form requirements such as exact immutable image expressions. The
+resolved contract will require:
 
 - the Portainer manifest to contain the immutable fork-owned Caddy image;
 - only Caddy to publish host ports;
