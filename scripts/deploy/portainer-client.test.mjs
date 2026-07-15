@@ -9,12 +9,21 @@ import {
   deployWithRollback,
   probeHealth,
   probeStream,
+  renderReleaseManifest,
   upsertEnv,
 } from './portainer-client.mjs';
 import { runRelease } from './portainer-release.mjs';
 
 const oldFile = 'services:\n  controller:\n    image: old\n';
 const newFile = 'services:\n  controller:\n    image: new\n';
+const releaseManifest = `services:
+  controller:
+    image: ghcr.io/obiwancanoweme/subwave-controller:\${SUBWAVE_VERSION:?required}
+`;
+const renderedManifest = `services:
+  controller:
+    image: ghcr.io/obiwancanoweme/subwave-controller:v0.42.0-obiwave.1
+`;
 const oldEnv = [
   { name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' },
   { name: 'SUBWAVE_VERSION', value: 'v0.41.0-obiwave.3' },
@@ -91,6 +100,45 @@ test('upsertEnv collapses duplicate target entries while preserving unrelated or
   ]);
   assert.equal(result.filter((entry) => entry.name === 'SUBWAVE_VERSION').length, 1);
   assert.equal(env[1].value, 'v0.40.0-obiwave.1');
+});
+
+test('renders every exact release placeholder with the immutable target tag', () => {
+  const twice = `${releaseManifest}${releaseManifest.replace('controller:', 'web:')}`;
+  const rendered = renderReleaseManifest(twice, 'v0.42.0-obiwave.1');
+
+  assert.equal(rendered.match(/v0\.42\.0-obiwave\.1/g)?.length, 2);
+  assert.doesNotMatch(rendered, /SUBWAVE_VERSION/);
+});
+
+test('rejects missing or unsupported release placeholders before deployment', () => {
+  assert.throws(
+    () => renderReleaseManifest('services: {}\n', 'v0.42.0-obiwave.1'),
+    /no exact SUBWAVE_VERSION placeholder/,
+  );
+  assert.throws(
+    () => renderReleaseManifest(
+      `${releaseManifest}\n# \${SUBWAVE_VERSION:-latest}\n`,
+      'v0.42.0-obiwave.1',
+    ),
+    /unresolved SUBWAVE_VERSION placeholder/,
+  );
+});
+
+test('rejects an invalid release manifest before reading Portainer state', async () => {
+  let snapshotCalled = false;
+  await assert.rejects(deployWithRollback({
+    client: {
+      snapshotStack: async () => {
+        snapshotCalled = true;
+        return { Env: [], StackFileContent: oldFile };
+      },
+    },
+    manifest: 'services: {}\n',
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+  }), /no exact SUBWAVE_VERSION placeholder/);
+  assert.equal(snapshotCalled, false);
 });
 
 test('Portainer update requests pruning and image pulls for the selected endpoint', async () => {
@@ -225,7 +273,8 @@ test('stream probe preserves the original read error when cancellation also fail
   );
 });
 
-test('deploys the checked-in manifest once after preserving the operator environment', async () => {
+test('deploys the rendered checked-in manifest with an unseeded operator environment', async () => {
+  const unseededEnv = [{ name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' }];
   const successfulUpdateCalls = [];
   const portainerFetch = async (url, options = {}) => {
     const parsed = new URL(url);
@@ -233,7 +282,7 @@ test('deploys the checked-in manifest once after preserving the operator environ
       successfulUpdateCalls.push({ url, ...options });
       return jsonResponse({});
     }
-    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: unseededEnv });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
     throw new Error(`Unexpected request: ${url}`);
   };
@@ -243,7 +292,7 @@ test('deploys the checked-in manifest once after preserving the operator environ
 
   const result = await deployWithRollback({
     client: clientFor(portainerFetch),
-    manifest: newFile,
+    manifest: releaseManifest,
     targetVersion: 'v0.42.0-obiwave.1',
     healthUrl: 'https://radio.example/health',
     streamUrl: 'https://radio.example/stream.mp3',
@@ -257,9 +306,10 @@ test('deploys the checked-in manifest once after preserving the operator environ
     { name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' },
     { name: 'SUBWAVE_VERSION', value: 'v0.42.0-obiwave.1' },
   ]);
-  assert.equal(update.StackFileContent, newFile);
+  assert.equal(update.StackFileContent, renderedManifest);
+  assert.doesNotMatch(update.StackFileContent, /SUBWAVE_VERSION/);
   assert.deepEqual(result, {
-    previousVersion: 'v0.41.0-obiwave.3',
+    previousVersion: null,
     targetVersion: 'v0.42.0-obiwave.1',
   });
 });
@@ -289,7 +339,7 @@ test('restores the full snapshot and verifies it after a failed target probe', a
   await assert.rejects(
     deployWithRollback({
       client: clientFor(portainerFetch),
-      manifest: newFile,
+      manifest: releaseManifest,
       targetVersion: 'v0.42.0-obiwave.1',
       healthUrl: 'https://radio.example/health',
       streamUrl: 'https://radio.example/stream.mp3',
@@ -332,7 +382,7 @@ test('a timed-out target update waits for a bounded grace period before rollback
 
   await assert.rejects(deployWithRollback({
     client,
-    manifest: newFile,
+    manifest: releaseManifest,
     targetVersion: 'v0.42.0-obiwave.1',
     healthUrl: 'https://radio.example/health',
     streamUrl: 'https://radio.example/stream.mp3',
@@ -374,7 +424,7 @@ test('an update timeout while reading the response body waits before rollback', 
 
   await assert.rejects(deployWithRollback({
     client,
-    manifest: newFile,
+    manifest: releaseManifest,
     targetVersion: 'v0.42.0-obiwave.1',
     healthUrl: 'https://radio.example/health',
     streamUrl: 'https://radio.example/stream.mp3',
@@ -406,7 +456,7 @@ test('a failed rollback is a typed incident with sanitized version metadata', as
 
   await assert.rejects(deployWithRollback({
     client,
-    manifest: newFile,
+    manifest: releaseManifest,
     targetVersion: 'v0.42.0-obiwave.1',
     healthUrl: 'https://radio.example/health',
     streamUrl: 'https://radio.example/stream.mp3',

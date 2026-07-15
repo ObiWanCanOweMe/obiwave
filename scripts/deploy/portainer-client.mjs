@@ -4,6 +4,8 @@ const DEFAULT_READ_TIMEOUT_MS = 15_000;
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 300_000;
 const DEFAULT_ROLLBACK_GRACE_MS = 15_000;
+const RELEASE_VERSION_TOKEN = '${SUBWAVE_VERSION:?required}';
+const UNRESOLVED_RELEASE_VERSION = /\$\{SUBWAVE_VERSION[^}]*\}/;
 
 export class PortainerRequestTimeoutError extends Error {
   constructor(operation, timeoutMs, options = {}) {
@@ -47,6 +49,17 @@ export function upsertEnv(env, name, value) {
   }
   if (!found) next.push({ name, value });
   return next;
+}
+
+export function renderReleaseManifest(manifest, targetVersion) {
+  if (!manifest.includes(RELEASE_VERSION_TOKEN)) {
+    throw new Error('Portainer manifest has no exact SUBWAVE_VERSION placeholder');
+  }
+  const rendered = manifest.replaceAll(RELEASE_VERSION_TOKEN, targetVersion);
+  if (UNRESOLVED_RELEASE_VERSION.test(rendered)) {
+    throw new Error('Portainer manifest has an unresolved SUBWAVE_VERSION placeholder');
+  }
+  return rendered;
 }
 
 export class PortainerClient {
@@ -215,11 +228,12 @@ export async function deployWithRollback({
   rollbackGraceMs = DEFAULT_ROLLBACK_GRACE_MS,
   sleep,
 }) {
+  const renderedManifest = renderReleaseManifest(manifest, targetVersion);
   const snapshot = await client.snapshotStack();
   const previousVersion = versionFrom(snapshot.Env);
   const target = {
     Env: upsertEnv(snapshot.Env, 'SUBWAVE_VERSION', targetVersion),
-    StackFileContent: manifest,
+    StackFileContent: renderedManifest,
   };
   const verification = {
     healthUrl,

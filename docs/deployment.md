@@ -291,11 +291,15 @@ checks every exact GHCR tag after login; the complete preflight must pass before
 any image build can start. Workflow concurrency serializes runs for the same
 qualified tag without cancellation. It then scans the authenticated private
 images and serially deploys production through the GitHub Environment. The
-deployment snapshots the current Portainer stack file and Environment,
-replaces `StackFileContent` with the checked-in release manifest, preserves the
-existing Environment except for updating `SUBWAVE_VERSION`, pulls and
-recreates the stack, and verifies both the public on-air health response and a
-non-empty MP3 stream through bender.
+deployment snapshots the current Portainer stack file and Environment. Before
+the Portainer update, the client replaces every exact
+`${SUBWAVE_VERSION:?required}` image placeholder with the validated release
+tag. The deployed stack revision is therefore self-contained even when the
+previous stack had no version variable. The client still records one
+`SUBWAVE_VERSION` Environment entry as operator metadata. It preserves the
+rest of the existing Environment, pulls and recreates the stack, and verifies
+both the public on-air health response and a non-empty MP3 stream through
+bender.
 
 If deployment or verification fails, the client restores the complete saved
 stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs
