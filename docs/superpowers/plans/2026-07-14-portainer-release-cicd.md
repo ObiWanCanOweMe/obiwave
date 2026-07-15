@@ -36,7 +36,7 @@
 - `.github/workflows/ci.yml`: every-push/every-PR checks.
 - `.github/workflows/lint.yml`: removed after consolidation.
 - `.github/workflows/publish-images.yml`: strict release publication and deployment.
-- `.github/workflows/publish-cli.yml`: strict fork tag trigger.
+- `.github/workflows/publish-cli.yml`: manual upstream CLI maintenance only.
 - `.github/workflows/scan-images.yml`: scan fork images by exact qualified tag.
 - `.github/workflows/cut-fork-release.yml`: validated manual fork release creation.
 - `docs/deployment.md` and `README.md`: operator documentation.
@@ -415,9 +415,9 @@ git commit -m "ci: validate every pull request and push"
 - Consumes production Environment secret `PORTAINER_API_KEY`.
 - Consumes production variables `PORTAINER_URL`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID`, `SUBWAVE_HEALTH_URL`, `SUBWAVE_STREAM_URL`.
 
-- [ ] **Step 1: Narrow both publication triggers**
+- [ ] **Step 1: Narrow image publication and keep CLI publication manual**
 
-Use this coarse trigger in image and CLI publishing workflows:
+Use this coarse trigger in the image publishing workflow:
 
 ```yaml
 push:
@@ -426,6 +426,11 @@ push:
 ```
 
 Add a `validate` job that calls `parseForkTag(github.ref_name)`. Every publication job requires `validate`; this parser, not the glob, is the release boundary.
+
+Keep `.github/workflows/publish-cli.yml` on `workflow_dispatch` only. Fork
+releases are image/Portainer-only: the CLI remains covered by CI lint and
+typechecking, but fork tags do not publish CLI binaries. The upstream installer
+and self-update behavior remain untouched.
 
 - [ ] **Step 2: Publish only exact image tags**
 

@@ -215,6 +215,12 @@ prerequisites, Cloudflare setup, updates, and backup.
 (search **SUB/WAVE** in the Apps tab) — or run the full split-container stack via
 the Compose Manager Plus plugin. Both in **[`docs/unraid.md`](docs/unraid.md)**.
 
+The `ObiWanCanOweMe/obiwave` fork also has an image-only, exact-tag release
+pipeline for its ark Portainer stack. It publishes fork images and performs a
+verified deployment with automatic rollback; it does not publish a fork CLI
+or change the upstream installer/self-update path. Operators should use the
+secret-free [fork release and Portainer runbook](docs/deployment.md#obiwave-fork-releases-on-ark).
+
 **Bring your own reverse proxy.** If you already run Traefik, nginx, or your
 own Caddy in your homelab, swap the bundled-Caddy compose for the BYO variant:
 
@@ -287,6 +293,7 @@ bin/subwave        Operator CLI entry: setup, status, doctor, lifecycle
 ## Documentation
 
 - **[`DEPLOY.md`](DEPLOY.md):** production deployment, updates, backup.
+- **[`docs/deployment.md`](docs/deployment.md):** deployment modes and the obiwave fork's Portainer release runbook.
 - **[`docs/unraid.md`](docs/unraid.md):** running on Unraid — one-click from Community Applications, or the Compose Manager Plus stack.
 - **[`docs/tts-heavy.md`](docs/tts-heavy.md):** the opt-in `tts-heavy` voices and the default-on acoustic `analyzer` service — what each does and how to toggle them.
 - **[`docs/navidrome-libraries.md`](docs/navidrome-libraries.md):** keeping audiobooks / seasonal collections off air with a dedicated, library-scoped Navidrome user.

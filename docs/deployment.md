@@ -194,6 +194,103 @@ the graphical operator UI.
 
 ---
 
+## obiwave fork releases on ark
+
+The `ObiWanCanOweMe/obiwave` fork has a separate, image-only release path for
+the station hosted on **ark**. Portainer manages that deployment as a **Web
+Editor** stack using `deploy/portainer/docker-compose.yml`; it is not a Git
+repository-backed stack and does not build from a checkout. Paste the compose
+file into the Web Editor and maintain the stack's operator settings in
+Portainer's **Environment variables** panel. Portainer renders those variables
+as `stack.env`, which the controller consumes through its `env_file` entry.
+Never commit `stack.env` or secret values.
+
+Persistent station data has one fixed ark host path:
+
+```text
+/mnt/NVMe/container-data/subwave/state:/var/sub-wave
+```
+
+The public services bind on both of ark's fixed addresses:
+
+```text
+IPv4: 10.20.0.9
+IPv6: 2600:1700:3210:5314:10:20:0:9
+web: 7700    controller: 7701    Icecast: 7702
+```
+
+**bender retains the edge role.** It terminates public TLS for
+`radio.kener.org` and proxies to ark: `/stream.mp3` to Icecast on `7702`
+without buffering, `/api/*` to the controller on `7701` with `/api` stripped,
+and everything else to the web service on `7700`. Moving the containers to ark
+does not move public DNS, certificates, or reverse-proxy ownership away from
+bender.
+
+### GitHub production environment
+
+Create a GitHub Actions Environment named `production`. Add one Environment
+secret, entering its value only at the interactive prompt:
+
+```bash
+gh secret set PORTAINER_API_KEY --env production --repo ObiWanCanOweMe/obiwave
+```
+
+Add these Environment variables. Copy the two numeric IDs from Portainer; do
+not put the API key in a variable or commit any real secret or deployment ID:
+
+```text
+PORTAINER_URL=https://portainer.kener.org
+PORTAINER_STACK_ID=numeric ID copied from Portainer
+PORTAINER_ENDPOINT_ID=numeric ark environment ID
+SUBWAVE_HEALTH_URL=https://radio.kener.org/api/health
+SUBWAVE_STREAM_URL=https://radio.kener.org/stream.mp3
+```
+
+The Portainer stack Environment must also contain `SUBWAVE_VERSION` and the
+normal operator configuration used by the compose file, including
+`ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`. Set `SUBWAVE_VERSION` to an image
+tag that already exists in `ghcr.io/obiwancanoweme`; do not use a floating
+tag.
+
+### Cut and deploy an exact fork release
+
+Fork production tags have exactly this form:
+`v<upstream-version>-obiwave.<positive-revision>`. A plain upstream tag such
+as `v0.42.0` cannot publish fork images or deploy this stack. For the initial
+fork release, run:
+
+```bash
+gh workflow run cut-fork-release.yml --repo ObiWanCanOweMe/obiwave -f version=0.42.0 -f revision=1 -f target=main
+```
+
+Upstream `v0.42.0` is already merged into the fork's `main` branch and already
+deployed as the baseline. The workflow verifies that upstream tag is an
+ancestor of `main`; it does **not** merge or deploy `v0.42.0` again. It creates
+the new exact tag `v0.42.0-obiwave.1` at the selected target. Do not run this
+command until the ark migration reaches its release checkpoint.
+
+That fork-qualified tag is the only automatic publication boundary. It builds
+and publishes the full fork image matrix under the exact tag, scans those
+images, then serially deploys production through the GitHub Environment. The
+deployment snapshots the current Portainer stack file and Environment,
+changes only `SUBWAVE_VERSION`, pulls and recreates the stack, and verifies
+both the public on-air health response and a non-empty MP3 stream through
+bender.
+
+If deployment or verification fails, the client restores the complete saved
+stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs
+the same public health and stream checks against the rollback. The release job
+still fails after a verified rollback. If rollback verification also fails,
+the job reports both failures for operator intervention.
+
+Fork releases intentionally publish **images and the Portainer deployment
+only**. The CLI remains linted and typechecked in normal CI, but
+`.github/workflows/publish-cli.yml` is manual `workflow_dispatch` maintenance
+only. Fork tags do not publish CLI binaries, and the upstream installer and
+self-update behavior remain untouched.
+
+---
+
 ## State layout
 
 Everything that survives `docker compose down` lives in `state/`:
