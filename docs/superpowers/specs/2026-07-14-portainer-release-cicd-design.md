@@ -15,6 +15,7 @@ Upstream `v0.42.0` has already been merged into `obiwave/develop` and deployed t
 - Production host: `ark`, managed as a Portainer stack.
 - Public edge: the reverse proxy on `bender.kener.org` serving `https://radio.kener.org`.
 - Persistent state: `/mnt/NVMe/container-data/subwave/state` on `ark`.
+- Ark port bindings: IPv4 `10.20.0.9` and IPv6 `2600:1700:3210:5314:10:20:0:9` only.
 - CI trigger: every pull request and every push.
 - Production trigger: only tags matching `vX.Y.Z-obiwave.N`.
 - Initial fork-qualified baseline: `v0.42.0-obiwave.1`.
@@ -33,7 +34,7 @@ All file-based IPC and durable application data use the bind mount:
 
 The same host directory must be mounted into every service that participates in SUB/WAVE's shared-state contract. The Portainer stack owns boot configuration through stack environment variables. Application settings and generated secrets remain in the state directory using SUB/WAVE's existing persistence model.
 
-The production stack uses the BYO-proxy topology. It publishes the web, controller, and broadcast ports on `ark`; it does not run the bundled Caddy service. The reverse proxy on `bender.kener.org` remains responsible for TLS and routes `radio.kener.org` as follows:
+The production stack uses the BYO-proxy topology. It publishes the web, controller, and broadcast ports on `ark`; it does not run the bundled Caddy service. Each published port is bound twice: to `10.20.0.9` and `[2600:1700:3210:5314:10:20:0:9]`. It must not bind those services to the IPv4 or IPv6 wildcard addresses. The reverse proxy on `bender.kener.org` remains responsible for TLS and routes `radio.kener.org` as follows:
 
 - `/stream.mp3` and other enabled stream mounts to the broadcast port on `ark`;
 - `/api/*` to the controller port, preserving the existing prefix-stripping behavior;
