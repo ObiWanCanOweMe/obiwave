@@ -268,12 +268,12 @@ as `v0.42.0` cannot publish fork images or deploy this stack. For the initial
 fork release, run:
 
 ```bash
-gh workflow run cut-fork-release.yml --repo ObiWanCanOweMe/obiwave -f version=0.42.0 -f revision=1 -f target=main
+gh workflow run cut-fork-release.yml --repo ObiWanCanOweMe/obiwave -f version=0.42.0 -f revision=1 -f target=develop
 ```
 
-Upstream `v0.42.0` is already merged into the fork's `main` branch and already
+Upstream `v0.42.0` is already merged into the fork's `develop` branch and already
 deployed as the baseline. The workflow verifies that upstream tag is an
-ancestor of `main`; it does **not** merge or deploy `v0.42.0` again. It creates
+ancestor of `develop`; it does **not** merge or deploy `v0.42.0` again. It creates
 the new exact tag `v0.42.0-obiwave.1` at the selected target. Do not run this
 command until the ark migration reaches its release checkpoint.
 
