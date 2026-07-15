@@ -93,24 +93,34 @@ export async function probeStream(url, options = {}) {
   const { fetchImpl, retryOptions } = probeOptions(options);
   return retry(async () => {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    if (response.status !== 200) {
-      throw new Error(`Stream probe failed with HTTP ${response.status}`);
-    }
-    const contentType = response.headers.get('content-type') ?? '';
-    if (!/^audio\/mpeg(?:\s*;|$)/i.test(contentType)) {
-      throw new Error(`Stream probe returned unexpected content type ${contentType || '(missing)'}`);
-    }
-    if (!response.body) throw new Error('Stream probe returned no response body');
-
-    const reader = response.body.getReader();
+    let reader;
+    let probeError;
     try {
+      reader = response.body?.getReader();
+      if (response.status !== 200) {
+        throw new Error(`Stream probe failed with HTTP ${response.status}`);
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!/^audio\/mpeg(?:\s*;|$)/i.test(contentType)) {
+        throw new Error(`Stream probe returned unexpected content type ${contentType || '(missing)'}`);
+      }
+      if (!reader) throw new Error('Stream probe returned no response body');
+
       while (true) {
         const { value, done } = await reader.read();
         if (value?.byteLength > 0) return;
         if (done) throw new Error('Stream probe returned an empty response body');
       }
+    } catch (error) {
+      probeError = error;
+      throw error;
     } finally {
-      await reader.cancel();
+      try {
+        if (reader) await reader.cancel();
+        else if (response.body) await response.body.cancel();
+      } catch (cancelError) {
+        if (!probeError) throw cancelError;
+      }
     }
   }, retryOptions);
 }

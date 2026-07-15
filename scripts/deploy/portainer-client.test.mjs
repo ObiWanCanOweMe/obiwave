@@ -89,6 +89,55 @@ test('probes require on-air JSON and a non-empty MP3 body chunk', async () => {
   assert.equal(cancelled.length, 1);
 });
 
+test('stream probe cancels response bodies rejected by HTTP status or content type', async () => {
+  for (const fixture of [
+    { status: 503, contentType: 'audio/mpeg', expected: /HTTP 503/ },
+    { status: 200, contentType: 'text/html', expected: /unexpected content type text\/html/ },
+  ]) {
+    let cancelled = 0;
+    const body = {
+      getReader() {
+        return {
+          read: async () => ({ value: new Uint8Array([1]), done: false }),
+          cancel: async () => { cancelled += 1; },
+        };
+      },
+    };
+    const fetchImpl = async () => ({
+      status: fixture.status,
+      headers: { get: () => fixture.contentType },
+      body,
+    });
+
+    await assert.rejects(
+      probeStream('https://radio.example/stream.mp3', { fetchImpl, attempts: 1 }),
+      fixture.expected,
+    );
+    assert.equal(cancelled, 1);
+  }
+});
+
+test('stream probe preserves the original read error when cancellation also fails', async () => {
+  const readError = new Error('stream read failed');
+  const fetchImpl = async () => ({
+    status: 200,
+    headers: { get: () => 'audio/mpeg' },
+    body: {
+      getReader() {
+        return {
+          read: async () => { throw readError; },
+          cancel: async () => { throw new Error('cancel failed'); },
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    probeStream('https://radio.example/stream.mp3', { fetchImpl, attempts: 1 }),
+    (error) => error === readError,
+  );
+});
+
 test('deploys the checked-in manifest once after preserving the operator environment', async () => {
   const successfulUpdateCalls = [];
   const portainerFetch = async (url, options = {}) => {
