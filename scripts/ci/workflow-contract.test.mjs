@@ -75,6 +75,14 @@ test('private image scans authenticate with package read permission', () => {
   assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
 });
 
+test('image scans pin Trivy to the reviewed immutable release commit', () => {
+  assert.doesNotMatch(scan, /aquasecurity\/trivy-action@0\.28\.0/);
+  assert.match(
+    scan,
+    /uses: aquasecurity\/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0\.36\.0/,
+  );
+});
+
 test('production timeout covers bounded target and rollback operations', () => {
   assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 30/);
 });
