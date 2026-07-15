@@ -28,6 +28,7 @@ const servicePorts = new Map([['caddy', approvedPorts]]);
 
 const serviceRequirements = [
   ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
+  ['caddy', 'TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"', 'service caddy is missing bender trusted proxy ranges'],
   ['caddy', 'web:\n        condition: service_started', 'service caddy is missing web service_started dependency'],
   ['caddy', 'controller:\n        condition: service_healthy', 'service caddy is missing controller service_healthy dependency'],
   ['caddy', 'broadcast:\n        condition: service_healthy', 'service caddy is missing broadcast service_healthy dependency'],
@@ -156,8 +157,13 @@ export function validatePortainerCompose(source) {
   }
 
   for (const [service, block] of blocks) {
-    if (service !== 'caddy' && /^    ports\s*:/m.test(block)) {
-      errors.push(`service ${service} must not publish host ports`);
+    if (service !== 'caddy') {
+      if (/^    (?:ports|"ports"|'ports')\s*:/m.test(block)) {
+        errors.push(`service ${service} must not publish host ports`);
+      }
+      if (/^    (?:<<|"<<"|'<<')\s*:/m.test(block)) {
+        errors.push(`service ${service} must not merge service configuration`);
+      }
     }
   }
   const portsByService = publishedPorts(blocks);

@@ -211,20 +211,26 @@ Persistent station data has one fixed ark host path:
 /mnt/NVMe/container-data/subwave/state:/var/sub-wave
 ```
 
-The public services bind on both of ark's fixed addresses:
+Only the bundled Caddy service publishes a host port, bound on both of ark's
+fixed addresses:
 
 ```text
-IPv4: 10.20.0.9
-IPv6: 2600:1700:3210:5314:10:20:0:9
-web: 7700    controller: 7701    Icecast: 7702
+10.20.0.9:7700 -> caddy:80
+[2600:1700:3210:5314:10:20:0:9]:7700 -> caddy:80
 ```
 
 **bender retains the edge role.** It terminates public TLS for
-`radio.kener.org` and proxies to ark: `/stream.mp3` to Icecast on `7702`
-without buffering, `/api/*` to the controller on `7701` with `/api` stripped,
-and everything else to the web service on `7700`. Moving the containers to ark
-does not move public DNS, certificates, or reverse-proxy ownership away from
-bender.
+`radio.kener.org` and forwards the complete origin to ark port `7700`; it does
+not split routes between SUB/WAVE services. Bundled Caddy owns `/api`, all
+enabled stream mounts, the tune-in files, and web routing over the internal
+Compose network. Web, controller, and Icecast publish no host ports.
+
+The ark Caddy service sets `TRUSTED_PROXY_RANGES` to bender's exact source
+CIDRs, `10.20.0.14/32` and
+`2600:1700:3210:5314:10:20:0:14/128`. Caddy uses strict forwarded-IP parsing,
+so only the trusted proxy chain can supply the client address used by logs and
+rate limits. Moving the containers to ark does not move public DNS,
+certificates, or TLS ownership away from bender.
 
 ### GitHub production environment
 

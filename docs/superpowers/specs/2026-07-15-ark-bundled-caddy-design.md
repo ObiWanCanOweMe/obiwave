@@ -50,12 +50,20 @@ Bender continues terminating public TLS and forwarding the complete origin to
 ark port 7700. No bender configuration, reload, or connection is part of this
 change.
 
+The generic Caddyfile keeps deployment-specific proxy addresses out of the
+image by expanding optional `TRUSTED_PROXY_RANGES` alongside its static trusted
+proxy list. The ark manifest sets that variable to bender's exact source CIDRs,
+`10.20.0.14/32` and `2600:1700:3210:5314:10:20:0:14/128`, and enables strict
+forwarded-IP parsing so client addresses are accepted only through the trusted
+proxy chain.
+
 ## Startup and Failure Behavior
 
-Caddy depends on web being started and on controller and broadcast passing
-their container health checks. This prevents the edge from accepting traffic
-before its upstreams are ready. Caddy uses its existing named data and config
-volumes; durable station state remains exclusively under
+Caddy waits for web to start and for controller and broadcast to pass their
+container health checks. Web does not expose a container health check, so a
+brief startup window can remain after Caddy starts; the release workflow's
+retrying public probes tolerate that window. Caddy uses its existing named data
+and config volumes; durable station state remains exclusively under
 `/mnt/NVMe/container-data/subwave/state`.
 
 The release workflow continues probing the public bender path. A failed target
@@ -71,6 +79,9 @@ Deployment-contract tests will require:
 - the Portainer manifest to contain the immutable fork-owned Caddy image;
 - only Caddy to publish host ports;
 - Caddy to bind port 7700 to ark's required IPv4 and IPv6 addresses;
+- the Caddy environment to trust bender's exact IPv4 and IPv6 source CIDRs;
+- the generic Caddyfile to expand optional trusted proxy ranges and use strict
+  forwarded-IP parsing;
 - web, controller, and broadcast to have no host port bindings;
 - the checked-in manifest to render successfully with representative values.
 

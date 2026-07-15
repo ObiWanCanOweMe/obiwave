@@ -31,6 +31,8 @@ services:
     container_name: sub-wave-caddy
     restart: unless-stopped
     logging: *default-logging
+    environment:
+      TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"
     depends_on:
       web:
         condition: service_started

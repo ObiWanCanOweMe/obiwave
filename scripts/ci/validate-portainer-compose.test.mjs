@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { validatePortainerCompose } from './validate-portainer-compose.mjs';
 
 const valid = `
@@ -13,6 +14,8 @@ services:
   caddy:
     image: ghcr.io/obiwancanoweme/subwave-caddy:\${SUBWAVE_VERSION:?required}
     logging: *default-logging
+    environment:
+      TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"
     depends_on:
       web:
         condition: service_started
@@ -193,6 +196,33 @@ test('rejects non-Caddy services that publish host ports with multiline flow syn
     );
     assertRejects(invalid, `service ${service} must not publish host ports`);
   }
+});
+
+test('rejects non-Caddy services that publish host ports with a quoted key', () => {
+  const invalid = valid.replace(
+    '\n  web:\n',
+    '\n  web:\n    "ports": ["10.20.0.9:9999:9999"]\n',
+  );
+  assertRejects(invalid, 'service web must not publish host ports');
+});
+
+test('rejects non-Caddy services that merge a potential hidden port publication', () => {
+  const invalid = valid
+    .replace('x-state:', 'x-port-leak: &port-leak\n  ports:\n    - "10.20.0.9:9999:9999"\n\nx-state:')
+    .replace('\n  web:\n', '\n  web:\n    <<: *port-leak\n');
+  assertRejects(invalid, 'service web must not merge service configuration');
+});
+
+test('requires bender exact trusted proxy ranges in the Caddy service environment', () => {
+  const exact = 'TRUSTED_PROXY_RANGES: "10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128"';
+  assertRejects(valid.replace(`      ${exact}\n`, ''), 'service caddy is missing bender trusted proxy ranges');
+  assertRejects(valid.replace('10.20.0.14/32', '10.20.0.15/32'), 'service caddy is missing bender trusted proxy ranges');
+});
+
+test('generic Caddyfile expands optional trusted proxies and parses them strictly', () => {
+  const caddyfile = readFileSync(new URL('../../docker/Caddyfile', import.meta.url), 'utf8');
+  assert.match(caddyfile, /trusted_proxies static[\s\S]*\{\$TRUSTED_PROXY_RANGES\}/);
+  assert.match(caddyfile, /^\s*trusted_proxies_strict\s*$/m);
 });
 
 test('rejects missing, off-contract, commented, or duplicated Caddy bindings', () => {
