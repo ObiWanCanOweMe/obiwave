@@ -164,6 +164,17 @@ test('rejects internal services that publish host ports', () => {
   }
 });
 
+test('rejects internal services that publish host ports with flow syntax', () => {
+  for (const service of ['web', 'controller', 'broadcast']) {
+    const marker = `\n  ${service}:\n`;
+    const invalid = valid.replace(
+      marker,
+      `${marker}    ports: ["10.20.0.9:9999:9999"]\n`,
+    );
+    assertRejects(invalid, `service ${service} must not publish host ports`);
+  }
+});
+
 test('rejects missing, off-contract, commented, or duplicated Caddy bindings', () => {
   const ipv4 = '10.20.0.9:${WEB_PORT:-7700}:80';
   const ipv6 = '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80';

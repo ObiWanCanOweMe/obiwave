@@ -94,6 +94,13 @@ function publishedPorts(blocks) {
     const serviceEntries = [];
     const lines = block.split('\n');
     for (let index = 0; index < lines.length; index += 1) {
+      const flowEntries = lines[index].match(/^    ports:\s*\[(.*?)\]\s*$/)?.[1];
+      if (flowEntries !== undefined) {
+        for (const entry of flowEntries.split(',').map((value) => value.trim()).filter(Boolean)) {
+          serviceEntries.push(entry.replace(/^(['"])(.*)\1$/, '$2'));
+        }
+        continue;
+      }
       if (!/^    ports:\s*$/.test(lines[index])) continue;
       for (index += 1; index < lines.length && !/^    \S/.test(lines[index]); index += 1) {
         const entry = lines[index].match(/^\s*-\s*(.+?)\s*$/);
