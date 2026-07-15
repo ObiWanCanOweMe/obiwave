@@ -43,9 +43,9 @@ the restore.
    mixed container UIDs used by the stack.
 2. Confirm Portainer stack 98 on endpoint 14 has its private `ghcr.io`
    credential and the required operator Environment values.
-3. Route `radio.kener.org` on bender to ark. The old stack is already stopped,
-   so this intentionally points the public verification URLs at the pending ark
-   deployment rather than at the retired host.
+3. Leave bender unchanged. Its existing `radio.kener.org` routing already
+   targets ark, so the public verification URLs exercise the new deployment
+   without a proxy edit or reload.
 4. Cut the first immutable fork release, `v0.42.0-obiwave.1`. The release
    workflow publishes, scans, and deploys the checked-in Portainer manifest to
    the placeholder stack, then verifies that deployment through bender.
