@@ -39,6 +39,7 @@ jobs:
         run: |
           TAG="$(VERSION="$VERSION" REVISION="$REVISION" node -e "import('./scripts/release/fork-tag.mjs').then(({ makeForkTag }) => process.stdout.write(makeForkTag(process.env.VERSION, process.env.REVISION)))")"
           BASE_TAG="v${VERSION}"
+          git fetch --no-tags https://github.com/perminder-klair/subwave.git "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}"
           git rev-parse --verify "refs/tags/${BASE_TAG}^{commit}" >/dev/null
           git merge-base --is-ancestor "$BASE_TAG" HEAD
           set +e
