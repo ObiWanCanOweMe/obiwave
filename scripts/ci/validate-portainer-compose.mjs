@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -7,10 +8,10 @@ const rules = [
   [/ghcr\.io\/perminder-klair\//, 'manifest references the upstream image namespace'],
   [/(?:\$\{STATE_DIR[^}]*\}|\.\/state):\/var\/sub-wave/, 'manifest contains a repository-relative state mount'],
   [/env_file:\s*(?:\n\s*-\s*)?\.\/\.env/, 'manifest depends on a repository .env file'],
-  [/(?:0\.0\.0\.0|\[::\]):(?:\$\{[^}]+\}|[0-9]+):[0-9]+/, 'manifest binds a published port to a wildcard address'],
 ];
 
 const serviceImages = new Map([
+  ['caddy', 'ghcr.io/obiwancanoweme/subwave-caddy:${SUBWAVE_VERSION:?required}'],
   ['broadcast', 'ghcr.io/obiwancanoweme/subwave-broadcast:${SUBWAVE_VERSION:?required}'],
   ['controller', 'ghcr.io/obiwancanoweme/subwave-controller:${SUBWAVE_VERSION:?required}'],
   ['docker-socket-proxy', 'ghcr.io/tecnativa/docker-socket-proxy:0.3.0'],
@@ -19,22 +20,13 @@ const serviceImages = new Map([
   ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:${SUBWAVE_VERSION:?required}'],
 ]);
 
-const approvedPorts = [
-  '10.20.0.9:${WEB_PORT:-7700}:7700',
-  '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:7700',
-  '10.20.0.9:${CONTROLLER_PORT:-7701}:7701',
-  '[2600:1700:3210:5314:10:20:0:9]:${CONTROLLER_PORT:-7701}:7701',
-  '10.20.0.9:${ICECAST_PORT:-7702}:7702',
-  '[2600:1700:3210:5314:10:20:0:9]:${ICECAST_PORT:-7702}:7702',
-];
-
-const servicePorts = new Map([
-  ['web', approvedPorts.slice(0, 2)],
-  ['controller', approvedPorts.slice(2, 4)],
-  ['broadcast', approvedPorts.slice(4, 6)],
-]);
-
 const serviceRequirements = [
+  ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
+  ['caddy', 'web:\n        condition: service_started', 'service caddy is missing web service_started dependency'],
+  ['caddy', 'controller:\n        condition: service_healthy', 'service caddy is missing controller service_healthy dependency'],
+  ['caddy', 'broadcast:\n        condition: service_healthy', 'service caddy is missing broadcast service_healthy dependency'],
+  ['caddy', 'caddy-data:/data', 'service caddy is missing its data volume'],
+  ['caddy', 'caddy-config:/config', 'service caddy is missing its config volume'],
   ['broadcast', 'logging: *default-logging', 'service broadcast is missing default log rotation'],
   ['broadcast', 'healthcheck:', 'service broadcast is missing a healthcheck'],
   ['broadcast', '*state-mount', 'service broadcast is missing the state mount'],
@@ -89,24 +81,6 @@ function serviceBlocks(source) {
   return new Map([...blocks].map(([name, linesForService]) => [name, linesForService.join('\n')]));
 }
 
-function publishedPorts(blocks) {
-  const ports = new Map();
-  for (const [service, block] of blocks) {
-    const serviceEntries = [];
-    const lines = block.split('\n');
-    for (let index = 0; index < lines.length; index += 1) {
-      if (!/^    ports:\s*$/.test(lines[index])) continue;
-      for (index += 1; index < lines.length && !/^    \S/.test(lines[index]); index += 1) {
-        const entry = lines[index].match(/^\s*-\s*(.+?)\s*$/);
-        if (entry) serviceEntries.push(entry[1].replace(/^(['"])(.*)\1$/, '$2'));
-      }
-      index -= 1;
-    }
-    ports.set(service, serviceEntries);
-  }
-  return ports;
-}
-
 function namedVolumes(source) {
   const lines = source.split('\n');
   const volumesAt = lines.findIndex((line) => /^volumes:\s*$/.test(line));
@@ -143,7 +117,7 @@ export function validatePortainerCompose(source) {
   }
 
   const volumes = namedVolumes(active);
-  for (const volume of ['tts-heavy-chatterbox-cache', 'tts-heavy-pocket-cache', 'analyzer-cache']) {
+  for (const volume of ['caddy-data', 'caddy-config', 'tts-heavy-chatterbox-cache', 'tts-heavy-pocket-cache', 'analyzer-cache']) {
     if (!volumes.has(volume)) errors.push(`manifest is missing named volume ${volume}`);
   }
 
@@ -157,26 +131,74 @@ export function validatePortainerCompose(source) {
     if (!active.includes(marker)) errors.push(`manifest is missing ${marker}`);
   }
 
-  const portsByService = publishedPorts(blocks);
-  const ports = [...portsByService.values()].flat();
-  for (const port of ports) {
-    if (!approvedPorts.includes(port)) errors.push(`manifest contains an unapproved published port ${port}`);
-  }
-  for (const [service, expectedPorts] of servicePorts) {
-    const actualPorts = portsByService.get(service) ?? [];
-    for (const port of expectedPorts) {
-      if (!actualPorts.includes(port)) errors.push(`service ${service} is missing published port ${port}`);
+  return errors;
+}
+
+const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
+const approvedResolvedPorts = [
+  '10.20.0.9|7700|80|tcp',
+  '2600:1700:3210:5314:10:20:0:9|7700|80|tcp',
+].sort();
+
+function resolvedPorts(service) {
+  if (service?.ports == null) return [];
+  return Array.isArray(service.ports) ? service.ports : [service.ports];
+}
+
+function normalizedPort(port) {
+  const value = (field) => ['string', 'number'].includes(typeof port?.[field])
+    ? String(port[field])
+    : '';
+  return `${value('host_ip')}|${value('published')}|${value('target')}|${value('protocol')}`;
+}
+
+export function validateResolvedPortainerCompose(model) {
+  const errors = [];
+  const services = model?.services && typeof model.services === 'object' ? model.services : {};
+  const caddy = services.caddy;
+
+  if (!caddy || typeof caddy !== 'object') {
+    errors.push('resolved manifest is missing service caddy');
+  } else {
+    const actualPorts = resolvedPorts(caddy).map(normalizedPort).sort();
+    if (JSON.stringify(actualPorts) !== JSON.stringify(approvedResolvedPorts)) {
+      errors.push('resolved service caddy must publish exactly the approved ports');
+    }
+    if (caddy.environment?.TRUSTED_PROXY_RANGES !== trustedProxyRanges) {
+      errors.push('resolved service caddy has invalid bender trusted proxy ranges');
     }
   }
-  for (const port of approvedPorts) {
-    if (ports.filter((candidate) => candidate === port).length !== 1) errors.push(`manifest is missing published port ${port}`);
+
+  for (const [service, configuration] of Object.entries(services)) {
+    if (service !== 'caddy' && resolvedPorts(configuration).length !== 0) {
+      errors.push(`resolved service ${service} must not publish host ports`);
+    }
   }
   return errors;
 }
 
 async function main() {
   const file = process.argv[2] ?? 'deploy/portainer/docker-compose.yml';
-  const errors = validatePortainerCompose(await readFile(file, 'utf8'));
+  const sourceErrors = validatePortainerCompose(await readFile(file, 'utf8'));
+  const result = spawnSync(
+    'docker',
+    ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'],
+    {
+      encoding: 'utf8',
+      env: process.env,
+    },
+  );
+  if (result.error) throw new Error(`docker compose config failed: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(`docker compose config failed: ${result.stderr.trim() || `exit ${result.status}`}`);
+  }
+  let model;
+  try {
+    model = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`docker compose config emitted invalid JSON: ${error.message}`);
+  }
+  const errors = [...sourceErrors, ...validateResolvedPortainerCompose(model)];
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`validated ${file}`);
 }

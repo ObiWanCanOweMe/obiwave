@@ -67,7 +67,10 @@ jobs:
         run: node --test scripts/release/fork-tag.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs
 
       - name: Validate Portainer manifest policy
-        run: node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
+        run: |
+          trap 'rm -f deploy/portainer/stack.env' EXIT
+          : > deploy/portainer/stack.env
+          SUBWAVE_VERSION=v0.42.0-obiwave.1 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
 
       - name: Render Portainer Compose configuration
         run: |
