@@ -85,3 +85,15 @@ test('fork release defaults to the fork release branch', () => {
     /target:\s*[\s\S]*?description: Branch, tag, or commit to release[\s\S]*?default: develop/,
   );
 });
+
+test('fork release fetches only the requested canonical upstream tag before validation', () => {
+  const fetchTag =
+    'git fetch --no-tags https://github.com/perminder-klair/subwave.git "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}"';
+  const fetchIndex = cutRelease.indexOf(fetchTag);
+  const validationIndex = cutRelease.indexOf(
+    'git rev-parse --verify "refs/tags/${BASE_TAG}^{commit}"',
+  );
+
+  assert.ok(fetchIndex >= 0, 'missing exact canonical upstream tag fetch');
+  assert.ok(validationIndex > fetchIndex, 'base tag must be fetched before it is validated');
+});
