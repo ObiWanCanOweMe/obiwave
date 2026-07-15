@@ -328,7 +328,7 @@ export class PortainerClient {
 }
 ```
 
-Add a 24-attempt, 5-second retry helper. `probeHealth` requires HTTP 200 and JSON status `on-air`. `probeStream` requires HTTP 200, `audio/mpeg`, and one non-empty body chunk before cancelling the reader. `deployWithRollback` snapshots first, changes only `SUBWAVE_VERSION`, updates with the checked-in manifest, probes both URLs, and restores and re-probes the snapshot after any failure.
+Add a 24-attempt, 5-second retry helper. `probeHealth` requires HTTP 200 and JSON status `on-air`. `probeStream` requires HTTP 200, `audio/mpeg`, and one non-empty body chunk before cancelling the reader. `deployWithRollback` snapshots first, replaces `StackFileContent` with the checked-in release manifest, preserves the existing Environment except for updating `SUBWAVE_VERSION`, probes both URLs, and restores and re-probes the snapshot after any failure.
 
 - [ ] **Step 4: Add the CLI**
 

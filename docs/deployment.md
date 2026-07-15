@@ -273,9 +273,10 @@ That fork-qualified tag is the only automatic publication boundary. It builds
 and publishes the full fork image matrix under the exact tag, scans those
 images, then serially deploys production through the GitHub Environment. The
 deployment snapshots the current Portainer stack file and Environment,
-changes only `SUBWAVE_VERSION`, pulls and recreates the stack, and verifies
-both the public on-air health response and a non-empty MP3 stream through
-bender.
+replaces `StackFileContent` with the checked-in release manifest, preserves the
+existing Environment except for updating `SUBWAVE_VERSION`, pulls and
+recreates the stack, and verifies both the public on-air health response and a
+non-empty MP3 stream through bender.
 
 If deployment or verification fails, the client restores the complete saved
 stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs
