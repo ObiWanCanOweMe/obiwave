@@ -252,6 +252,14 @@ normal operator configuration used by the compose file, including
 tag that already exists in `ghcr.io/obiwancanoweme`; do not use a floating
 tag.
 
+The fork GHCR packages are **private**. Confirm every `subwave-*` fork package
+is Private in GitHub Packages and does not inherit public repository access.
+In Portainer, create a `ghcr.io` registry credential with a dedicated classic PAT that has only
+`read:packages`, associate that registry with the ark environment, and keep the
+credential in Portainer's registry store. Never put that PAT in GitHub
+repository secrets, the stack Environment, `stack.env`, or the compose file.
+GitHub Actions uses its own scoped `GITHUB_TOKEN` for publication and scans.
+
 ### Cut and deploy an exact fork release
 
 Fork production tags have exactly this form:
@@ -270,8 +278,12 @@ the new exact tag `v0.42.0-obiwave.1` at the selected target. Do not run this
 command until the ark migration reaches its release checkpoint.
 
 That fork-qualified tag is the only automatic publication boundary. It builds
-and publishes the full fork image matrix under the exact tag, scans those
-images, then serially deploys production through the GitHub Environment. The
+and publishes the full fork image matrix under the exact tag only after the
+reusable CI gate repeats all package quality checks, deployment-contract tests,
+and image smoke builds for the tagged commit. Each matrix job checks its exact
+GHCR tag after login and refuses to overwrite an existing digest. It then scans
+the authenticated private images and serially deploys production through the
+GitHub Environment. The
 deployment snapshots the current Portainer stack file and Environment,
 replaces `StackFileContent` with the checked-in release manifest, preserves the
 existing Environment except for updating `SUBWAVE_VERSION`, pulls and
@@ -283,6 +295,24 @@ stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs
 the same public health and stream checks against the rollback. The release job
 still fails after a verified rollback. If rollback verification also fails,
 the job reports both failures for operator intervention.
+
+Portainer reads and probes use short per-request timeouts; a stack update gets
+up to five minutes. Each public probe is bounded to six ten-second attempts
+with five-second gaps. If an update itself times out, the client waits a
+bounded 15-second grace period before restoring the snapshot. Portainer's
+synchronous update API exposes no operation handle, so this reduces but cannot
+mathematically eliminate overlap with server-side work that outlives the
+client timeout. The 30-minute workflow budget covers target update and
+verification, rollback update and verification, grace, and snapshot overhead.
+Failure output contains versions and rollback status only; inspect Portainer
+directly for incident detail rather than printing API bodies, headers, stack
+Environment, manifests, or tokens into Actions logs.
+
+Release tags are immutable as a complete matrix. If publication stops after
+only some images were pushed, delete **every** GHCR package version carrying
+that release tag across the full release matrix, verify none remain, and rerun
+the workflow. Never rerun in a way that overwrites only the missing subset or
+reuses a partially published tag.
 
 Fork releases intentionally publish **images and the Portainer deployment
 only**. The CLI remains linted and typechecked in normal CI, but

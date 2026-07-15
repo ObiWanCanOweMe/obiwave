@@ -4,7 +4,12 @@ import { appendFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { parseForkTag } from '../release/fork-tag.mjs';
-import { PortainerClient, deployWithRollback } from './portainer-client.mjs';
+import {
+  DeploymentRolledBackError,
+  PortainerClient,
+  RollbackIncidentError,
+  deployWithRollback,
+} from './portainer-client.mjs';
 
 const REQUIRED_ENV = [
   'PORTAINER_URL',
@@ -26,6 +31,16 @@ function releaseConfig(env) {
   return Object.fromEntries(REQUIRED_ENV.map((name) => [name, env[name]]));
 }
 
+function displayVersion(value) {
+  if (!value) return '(not set or unrecognized)';
+  try {
+    parseForkTag(value);
+    return value;
+  } catch {
+    return '(not set or unrecognized)';
+  }
+}
+
 export async function runRelease({
   env = process.env,
   readFile: readFileImpl = readFile,
@@ -44,17 +59,43 @@ export async function runRelease({
   });
 
   log(`Deploying SUB/WAVE ${config.SUBWAVE_RELEASE_TAG}`);
-  const result = await deploy({
-    client,
-    manifest,
-    targetVersion: config.SUBWAVE_RELEASE_TAG,
-    healthUrl: config.SUBWAVE_HEALTH_URL,
-    streamUrl: config.SUBWAVE_STREAM_URL,
-  });
+  let result;
+  try {
+    result = await deploy({
+      client,
+      manifest,
+      targetVersion: config.SUBWAVE_RELEASE_TAG,
+      healthUrl: config.SUBWAVE_HEALTH_URL,
+      streamUrl: config.SUBWAVE_STREAM_URL,
+    });
+  } catch (error) {
+    if (error instanceof DeploymentRolledBackError) {
+      const previous = displayVersion(error.previousVersion);
+      log(`Target version: ${error.targetVersion}; restored previous version: ${previous}; rollback verified.`);
+      if (env.GITHUB_STEP_SUMMARY) {
+        await appendFileImpl(
+          env.GITHUB_STEP_SUMMARY,
+          `## Portainer deployment failed safely\n\n- Target version: \`${error.targetVersion}\`\n- Restored previous version: \`${previous}\`\n- Status: **Target failed; rollback verified**\n`,
+          'utf8',
+        );
+      }
+    } else if (error instanceof RollbackIncidentError) {
+      const previous = displayVersion(error.previousVersion);
+      log(`Target version: ${error.targetVersion}; previous version: ${previous}; ROLLBACK FAILED OR UNVERIFIED.`);
+      if (env.GITHUB_STEP_SUMMARY) {
+        await appendFileImpl(
+          env.GITHUB_STEP_SUMMARY,
+          `## Portainer rollback incident\n\n- Target version: \`${error.targetVersion}\`\n- Previous version: \`${previous}\`\n- Status: **ROLLBACK FAILED OR UNVERIFIED**\n- Action: operator intervention required; inspect Portainer directly.\n`,
+          'utf8',
+        );
+      }
+    }
+    throw error;
+  }
   log(`Verified SUB/WAVE ${result.targetVersion}`);
 
   if (env.GITHUB_STEP_SUMMARY) {
-    const previous = result.previousVersion ?? '(not set)';
+    const previous = displayVersion(result.previousVersion);
     await appendFileImpl(
       env.GITHUB_STEP_SUMMARY,
       `## Portainer deployment\n\n- Target version: \`${result.targetVersion}\`\n- Previous version: \`${previous}\`\n`,

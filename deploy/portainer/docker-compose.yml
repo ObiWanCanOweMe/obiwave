@@ -1,16 +1,17 @@
-# SUB/WAVE — image-only Portainer stack for the bender host.
+# SUB/WAVE — image-only Portainer stack for the ark host.
 #
 # Portainer must deploy this file in Web Editor mode. It is intentionally
 # checkout-free: all first-party services pull immutable, explicitly versioned
 # images, operator variables are supplied through Portainer's generated
-# stack.env, and persistent state uses bender's absolute host path.
+# stack.env, and persistent state uses ark's absolute host path.
 #
 # bender owns TLS and reverse-proxies one public origin to these bound services:
 #   /stream.mp3  → 10.20.0.9:${ICECAST_PORT:-7702} (disable buffering)
 #   /api/*       → 10.20.0.9:${CONTROLLER_PORT:-7701} (strip /api)
 #   everything   → 10.20.0.9:${WEB_PORT:-7700}
 #
-# Each public service is bound on bender's fixed IPv4 and IPv6 addresses.
+# Ark owns the persistent data and the fixed IPv4/IPv6 service binds. Bender
+# owns only public TLS and routing to those ark addresses.
 # Set SUBWAVE_VERSION in the Portainer stack environment to an existing image
 # tag; interpolation fails before deployment when it is missing.
 

@@ -44,8 +44,13 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
 
+  quality-gate:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
-    needs: validate
+    needs: [validate, quality-gate]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -133,6 +138,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Refuse to overwrite an existing immutable image tag
+        env:
+          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
+        run: node scripts/ci/assert-image-tag-absent.mjs "$IMAGE_REF"
+
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -158,22 +168,25 @@ jobs:
           echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
 
   scan-images:
-    needs: [validate, build]
+    needs: [validate, quality-gate, build]
     uses: ./.github/workflows/scan-images.yml
     with:
       release_tag: ${{ github.ref_name }}
     permissions:
       contents: read
+      packages: read
       security-events: write
 
   deploy-production:
-    needs: [validate, build, scan-images]
+    needs: [validate, quality-gate, build, scan-images]
     runs-on: ubuntu-latest
     environment: production
     concurrency:
       group: subwave-production
       cancel-in-progress: false
-    timeout-minutes: 15
+    # Worst case: 2 x 5-minute stack updates, target + rollback probe budgets,
+    # a post-timeout grace period, and snapshot overhead remain below 17 min.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

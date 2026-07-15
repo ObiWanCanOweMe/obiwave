@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DeploymentRolledBackError,
   PortainerClient,
+  RollbackIncidentError,
   deployWithRollback,
   probeHealth,
   probeStream,
@@ -32,14 +34,28 @@ function streamResponse(chunk = new Uint8Array([1, 2, 3])) {
   });
 }
 
-function clientFor(fetchImpl) {
+function clientFor(fetchImpl, options = {}) {
   return new PortainerClient({
     baseUrl: 'https://portainer.example/',
     apiKey: 'secret-token',
     stackId: '7',
     endpointId: '2',
     fetchImpl,
+    ...options,
   });
+}
+
+function releaseEnv(overrides = {}) {
+  return {
+    PORTAINER_URL: 'https://portainer.example',
+    PORTAINER_API_KEY: 'secret-token',
+    PORTAINER_STACK_ID: '7',
+    PORTAINER_ENDPOINT_ID: '2',
+    SUBWAVE_RELEASE_TAG: 'v0.42.0-obiwave.1',
+    SUBWAVE_HEALTH_URL: 'https://radio.example/health',
+    SUBWAVE_STREAM_URL: 'https://radio.example/stream.mp3',
+    ...overrides,
+  };
 }
 
 test('upsertEnv changes only the requested entry without mutating input', () => {
@@ -70,6 +86,35 @@ test('Portainer update requests pruning and image pulls for the selected endpoin
   assert.match(updateCall.url, /\/api\/stacks\/7\?endpointId=2$/);
 });
 
+test('Portainer uses separate short read and realistic update timeouts', async () => {
+  const timeoutSignals = [];
+  const signalFactory = (milliseconds) => {
+    timeoutSignals.push(milliseconds);
+    return new AbortController().signal;
+  };
+  const client = clientFor(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (options.method === 'PUT') return jsonResponse({});
+    if (parsed.pathname.endsWith('/file')) return jsonResponse({ StackFileContent: oldFile });
+    return jsonResponse({ Env: oldEnv });
+  }, { readTimeoutMs: 7_000, updateTimeoutMs: 240_000, signalFactory });
+
+  await client.snapshotStack();
+  await client.updateStack({ Env: oldEnv, StackFileContent: newFile });
+
+  assert.deepEqual(timeoutSignals.sort((a, b) => a - b), [7_000, 7_000, 240_000]);
+});
+
+test('Portainer HTTP errors do not include response bodies', async () => {
+  const client = clientFor(async () => new Response('token=do-not-print', { status: 500 }));
+
+  await assert.rejects(client.snapshotStack(), (error) => {
+    assert.match(error.message, /HTTP 500/);
+    assert.doesNotMatch(error.message, /do-not-print/);
+    return true;
+  });
+});
+
 test('probes require on-air JSON and a non-empty MP3 body chunk', async () => {
   const cancelled = [];
   const fetchImpl = async (url) => {
@@ -87,6 +132,26 @@ test('probes require on-air JSON and a non-empty MP3 body chunk', async () => {
   await probeHealth('https://radio.example/health', { fetchImpl, attempts: 1 });
   await probeStream('https://radio.example/stream.mp3', { fetchImpl, attempts: 1 });
   assert.equal(cancelled.length, 1);
+});
+
+test('probes use an independently injected short timeout', async () => {
+  const timeoutSignals = [];
+  const signalFactory = (milliseconds) => {
+    timeoutSignals.push(milliseconds);
+    return new AbortController().signal;
+  };
+  const fetchImpl = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await probeHealth('https://radio.example/health', {
+    fetchImpl, attempts: 1, probeTimeoutMs: 3_000, signalFactory,
+  });
+  await probeStream('https://radio.example/stream.mp3', {
+    fetchImpl, attempts: 1, probeTimeoutMs: 3_000, signalFactory,
+  });
+
+  assert.deepEqual(timeoutSignals, [3_000, 3_000]);
 });
 
 test('stream probe cancels response bodies rejected by HTTP status or content type', async () => {
@@ -211,13 +276,81 @@ test('restores the full snapshot and verifies it after a failed target probe', a
       retryDelayMs: 5_000,
       sleep: async (milliseconds) => sleeps.push(milliseconds),
     }),
-    /deployment verification failed.*rollback verified/i,
+    (error) => {
+      assert.ok(error instanceof DeploymentRolledBackError);
+      assert.equal(error.targetVersion, 'v0.42.0-obiwave.1');
+      assert.equal(error.previousVersion, 'v0.41.0-obiwave.3');
+      return true;
+    },
   );
 
   assert.equal(rolledBackUpdateCalls.length, 2);
   assert.equal(JSON.parse(rolledBackUpdateCalls[1].body).StackFileContent, oldFile);
   assert.deepEqual(JSON.parse(rolledBackUpdateCalls[1].body).Env, oldEnv);
   assert.deepEqual(sleeps, [5_000]);
+});
+
+test('a timed-out target update waits for a bounded grace period before rollback', async () => {
+  const updates = [];
+  const sleeps = [];
+  const client = clientFor(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/stacks/7' && options.method === 'PUT') {
+      updates.push(JSON.parse(options.body));
+      if (updates.length === 1) throw new DOMException('timed out', 'TimeoutError');
+      return jsonResponse({});
+    }
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
+    if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const probeFetch = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: newFile,
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl: probeFetch,
+    attempts: 1,
+    rollbackGraceMs: 12_000,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+  }), DeploymentRolledBackError);
+
+  assert.equal(updates.length, 2);
+  assert.deepEqual(updates[1].Env, oldEnv);
+  assert.equal(updates[1].StackFileContent, oldFile);
+  assert.deepEqual(sleeps, [12_000]);
+});
+
+test('a failed rollback is a typed incident with sanitized version metadata', async () => {
+  let updateCount = 0;
+  const client = {
+    snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
+    updateStack: async () => {
+      updateCount += 1;
+      if (updateCount === 1) throw new Error('target failed with token=secret');
+      throw new Error('rollback failed with manifest=secret');
+    },
+  };
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: newFile,
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    attempts: 1,
+  }), (error) => {
+    assert.ok(error instanceof RollbackIncidentError);
+    assert.equal(error.targetVersion, 'v0.42.0-obiwave.1');
+    assert.equal(error.previousVersion, 'v0.41.0-obiwave.3');
+    assert.doesNotMatch(error.message, /token|manifest|secret/);
+    return true;
+  });
 });
 
 test('release validation rejects malformed tags before any deployment work', async () => {
@@ -244,6 +377,57 @@ test('release validation rejects malformed tags before any deployment work', asy
     },
   }), /fork-qualified release tag/);
   assert.equal(touchedDeployment, false);
+});
+
+test('release reports a verified rollback without logging sensitive causes', async () => {
+  const logs = [];
+  const summaries = [];
+  const failure = new DeploymentRolledBackError({
+    targetVersion: 'v0.42.0-obiwave.1',
+    previousVersion: 'v0.41.0-obiwave.3',
+    cause: new Error('token=do-not-print'),
+  });
+
+  await assert.rejects(runRelease({
+    env: releaseEnv({ GITHUB_STEP_SUMMARY: '/tmp/summary' }),
+    readFile: async () => newFile,
+    clientFactory: () => ({}),
+    deploy: async () => { throw failure; },
+    log: (message) => logs.push(message),
+    appendFile: async (_path, value) => summaries.push(value),
+  }), (error) => error === failure);
+
+  const output = [...logs, ...summaries].join('\n');
+  assert.match(output, /Target version: `?v0\.42\.0-obiwave\.1`?/);
+  assert.match(output, /Restored previous version: `?v0\.41\.0-obiwave\.3`?/);
+  assert.match(output, /rollback verified/i);
+  assert.doesNotMatch(output, /do-not-print|token=/);
+});
+
+test('release clearly flags an unverified rollback incident without sensitive causes', async () => {
+  const logs = [];
+  const summaries = [];
+  const failure = new RollbackIncidentError({
+    targetVersion: 'v0.42.0-obiwave.1',
+    previousVersion: 'unexpected\nsecret-previous-value',
+    deploymentError: new Error('headers=do-not-print'),
+    rollbackError: new Error('response=do-not-print'),
+  });
+
+  await assert.rejects(runRelease({
+    env: releaseEnv({ GITHUB_STEP_SUMMARY: '/tmp/summary' }),
+    readFile: async () => newFile,
+    clientFactory: () => ({}),
+    deploy: async () => { throw failure; },
+    log: (message) => logs.push(message),
+    appendFile: async (_path, value) => summaries.push(value),
+  }), (error) => error === failure);
+
+  const output = [...logs, ...summaries].join('\n');
+  assert.match(output, /Target version: `?v0\.42\.0-obiwave\.1`?/);
+  assert.match(output, /Previous version: `?\(not set or unrecognized\)`?/);
+  assert.match(output, /ROLLBACK FAILED OR UNVERIFIED/);
+  assert.doesNotMatch(output, /do-not-print|headers=|response=|secret-previous-value/);
 });
 
 test('release validation reports all missing required configuration before deployment work', async () => {

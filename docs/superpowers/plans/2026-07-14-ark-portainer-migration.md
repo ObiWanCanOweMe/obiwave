@@ -17,6 +17,7 @@
 - Never run old and new controllers as simultaneous public broadcasters after the final sync.
 - Preserve the stopped old runtime and state until ark passes playback, admin, persistence, and restart checks.
 - Bender retains public TLS and routing for `radio.kener.org`.
+- Fork-owned GHCR packages remain private and require authenticated pulls.
 - Verify bender's SSH fingerprint out of band before accepting its currently untrusted host key.
 - Preserve `controller/scripts/__pycache__/`.
 
@@ -71,7 +72,40 @@ Expected: inventory and digests are non-empty; no file contents are captured.
 - Produces stable Portainer stack and endpoint IDs before the release workflow starts.
 - Produces a required-reviewer gate for the first production deployment.
 
-- [ ] **Step 1: Create a harmless Web Editor stack**
+- [ ] **Step 1: Validate the existing root environment without printing values**
+
+Run this from the live source checkout. It reports only a missing variable
+name, never a value:
+
+```bash
+for name in ADMIN_USER ADMIN_PASS SITE_URL; do
+  grep -Eq "^${name}=.+" .env || { printf 'Missing required variable name: %s\n' "$name" >&2; exit 1; }
+done
+```
+
+Expected: exit 0 confirms that `ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL` are
+present and non-empty. Do not run `cat .env`, `env`, `set`, or any command that
+copies values into the terminal, shell history, migration evidence, or chat.
+
+- [ ] **Step 2: Configure ark's private GHCR credential**
+
+Create a dedicated GitHub classic PAT with only `read:packages`. In Portainer,
+open **Registries → Add registry → Custom registry**, use `ghcr.io`, the PAT's
+GitHub username, and the PAT as the password, then restrict/associate the
+registry with the ark environment. Store the PAT only in Portainer's registry
+credential store. Never add it to GitHub repository/environment secrets, the
+stack Environment, `stack.env`, the Web Editor manifest, or a shell command.
+Do not use a personal all-scope token.
+
+In GitHub Packages, confirm every fork-owned `subwave-*` package is Private
+and does not inherit public repository access. The release and scan workflows
+use scoped `GITHUB_TOKEN` credentials; the dedicated read PAT is for Portainer
+only.
+
+Expected: ark can authenticate to the private `ghcr.io/obiwancanoweme`
+packages. This association must exist before the production approval.
+
+- [ ] **Step 3: Create a harmless Web Editor stack and seed its Environment**
 
 In Portainer, select ark and choose **Stacks → Add stack → Web editor**. Name it `subwave` and deploy exactly:
 
@@ -83,9 +117,24 @@ services:
     restart: unless-stopped
 ```
 
-Expected: the stack exists with one container, no published ports, and no state mounts. Record the numeric stack ID from the Portainer URL.
+Before clicking **Deploy the stack**, expand **Environment variables** and use
+Portainer's **Load variables from .env file** control to load the existing root
+`.env` directly from the trusted workstation. Do not paste its contents into
+the Web Editor. Add `SUBWAVE_VERSION=v0.42.0-obiwave.1` as a separate entry.
+Review the variable names in the authenticated Portainer UI and update
+host-specific values for ark, especially URLs/addresses that referred to the
+old Docker host; confirm `SITE_URL` remains the public
+`https://radio.kener.org`. Confirm the entries named `ADMIN_USER`,
+`ADMIN_PASS`, and `SITE_URL` exist without copying, screenshotting, or printing
+their values.
 
-- [ ] **Step 2: Find ark's numeric endpoint ID**
+Expected: the stack exists with one container, no published ports, and no
+state mounts; its Environment contains the full existing root `.env` plus the
+exact `SUBWAVE_VERSION`. Record the numeric stack ID from the Portainer URL.
+The later release update preserves every Environment entry and changes only
+`SUBWAVE_VERSION`.
+
+- [ ] **Step 4: Find ark's numeric endpoint ID**
 
 ```zsh
 read -rs 'PORTAINER_API_KEY?Portainer access token: '; printf '\n'; curl -fsS -H "X-API-Key: ${PORTAINER_API_KEY}" https://portainer.kener.org/api/endpoints | jq '.[] | {Id, Name, URL}'
@@ -93,7 +142,7 @@ read -rs 'PORTAINER_API_KEY?Portainer access token: '; printf '\n'; curl -fsS -H
 
 Expected: the response identifies ark and its numeric `Id`. Then run `unset PORTAINER_API_KEY`.
 
-- [ ] **Step 3: Configure GitHub's production Environment**
+- [ ] **Step 5: Configure GitHub's production Environment**
 
 In repository settings, add `PORTAINER_API_KEY` under **Settings → Environments → production → Environment secrets**. Add these Environment variables:
 
@@ -111,13 +160,15 @@ Configure yourself as a required reviewer for `production` before creating the i
 gh secret set PORTAINER_API_KEY --env production --repo ObiWanCanOweMe/obiwave
 ```
 
-- [ ] **Step 4: Confirm token scope and stack visibility**
+- [ ] **Step 6: Confirm token scope, stack visibility, and registry association**
 
 ```zsh
 read -rs 'PORTAINER_API_KEY?Portainer access token: '; printf '\n'; curl -fsS -H "X-API-Key: ${PORTAINER_API_KEY}" https://portainer.kener.org/api/stacks | jq '.[] | select(.Name == "subwave") | {Id, Name, EndpointId}'; unset PORTAINER_API_KEY
 ```
 
 Expected: exactly one `subwave` stack appears on the recorded ark endpoint.
+In Portainer, also reconfirm ark is associated with the dedicated GHCR
+credential before approving any release deployment.
 
 ### Task 3: Seed the State Dataset and Start the First Release
 
@@ -172,6 +223,13 @@ docker buildx imagetools inspect ghcr.io/obiwancanoweme/subwave-analyzer:v0.42.0
 ```
 
 Expected: every image resolves for linux/amd64 while the deployment job remains at its approval gate.
+
+All packages are private, so authenticate with a read-only GHCR credential
+before these inspections. Do not place that credential on a command line.
+If publication is partial, delete all GHCR package versions carrying
+`v0.42.0-obiwave.1` across the complete release matrix, verify the tag no
+longer resolves anywhere, and rerun the release. Never overwrite or retain
+only a subset of that release tag.
 
 ### Task 4: Prepare Bender's Exact Cutover
 
@@ -245,7 +303,10 @@ Run the active proxy's validation and reload commands found in Task 4. Immediate
 
 Approve `deploy production` for `v0.42.0-obiwave.1`. The workflow replaces the placeholder manifest, pulls exact-tag images, and probes through bender.
 
-Expected: the workflow succeeds and reports target version `v0.42.0-obiwave.1` with on-air health and `audio/mpeg` stream data.
+Expected: the workflow succeeds and reports target version
+`v0.42.0-obiwave.1` with on-air health and `audio/mpeg` stream data. The
+Portainer Environment still contains the seeded entries and only
+`SUBWAVE_VERSION` changed.
 
 If it fails, automatic rollback restores the harmless placeholder rather than the old host. Immediately restore bender's timestamped configuration, reload the proxy, start the old services with `docker compose start broadcast controller web analyzer`, and verify public health before investigating the ark failure.
 

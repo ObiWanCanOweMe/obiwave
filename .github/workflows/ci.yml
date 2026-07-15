@@ -3,13 +3,14 @@ name: CI
 on:
   pull_request:
   push:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
 
 jobs:
   quality:
@@ -63,7 +64,7 @@ jobs:
           node-version: '22'
 
       - name: Run deployment contract tests
-        run: node --test scripts/release/fork-tag.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/deploy/portainer-client.test.mjs
+        run: node --test scripts/release/fork-tag.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs
 
       - name: Validate Portainer manifest policy
         run: node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
