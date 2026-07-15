@@ -24,6 +24,7 @@ import {
   SectionHeader, ELEVENLABS_VS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
   type SfxData, type SfxForm, type JingleImportFailure, type JingleImportResult,
+  type LoudnessSource,
 } from './settings/shared';
 import { TtsSection } from './settings/TtsSection';
 import { LlmSection } from './settings/LlmSection';
@@ -37,7 +38,7 @@ import { ScrobbleSection } from './settings/ScrobbleSection';
 
 const SECTIONS = [
   { id: 'station',  label: 'Station', hint: 'name · location · locale', icon: Radio },
-  { id: 'theme',    label: 'Theme', hint: 'station-wide palette', icon: Palette },
+  { id: 'theme',    label: 'Skin & Themes', hint: 'player skin · palette', icon: Palette },
   { id: 'festivals', label: 'Festivals', hint: 'calendar · mood', icon: CalendarDays },
   { id: 'llm',      label: 'LLM provider', hint: 'model routing', icon: Cpu },
   { id: 'tts',      label: 'TTS voice', hint: 'default engine', icon: Mic },
@@ -125,6 +126,7 @@ export default function SettingsPanel() {
       loudness: {
         targetLufs: String(v.loudness?.targetLufs ?? -14),
         maxBoostDb: String(v.loudness?.maxBoostDb ?? 6),
+        source: v.loudness?.source ?? 'replaygain-then-measured',
       },
       station: v.station ?? '',
       timezone: v.timezone ?? '',
@@ -188,7 +190,7 @@ export default function SettingsPanel() {
         reasoning: !!v.llm?.reasoning,
         toolChoice: v.llm?.toolChoice === 'auto' ? 'auto' : 'required',
         pickerAgent: !!v.llm?.pickerAgent,
-        noRepeatWindow: typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 100,
+        noRepeatWindow: String(typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 100),
         requestWebResolve: !!v.llm?.requestWebResolve,
         strictRequests: !!v.llm?.strictRequests,
         agentTimeoutMs: typeof v.llm?.agentTimeoutMs === 'number' ? v.llm.agentTimeoutMs : 45000,
@@ -494,6 +496,28 @@ export default function SettingsPanel() {
               <strong className="tracking-[0.12em] uppercase">controller error</strong>
               <div className="mt-1">{err}</div>
             </div>
+          </div>
+        )}
+        {pendingRestart && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-vermilion bg-vermilion/10 px-4 py-3 text-[12px] text-ink"
+          >
+            <AlertTriangle className="size-4 shrink-0 text-vermilion" strokeWidth={2} aria-hidden />
+            <span className="min-w-0 flex-1">
+              <strong className="tracking-[0.08em] uppercase">Saved — not yet on air.</strong>{' '}
+              The live stream is still running the previous mixer settings (bitrate, format,
+              crossfade, jingle frequency). Restart the mixer to apply what you saved.
+            </span>
+            <Btn
+              sm
+              tone="danger"
+              className="ml-auto"
+              onClick={() => setConfirmRestart(true)}
+              disabled={busy || !data}
+            >
+              Restart mixer to apply
+            </Btn>
           </div>
         )}
         {!data && !err && (
@@ -810,6 +834,40 @@ export default function SettingsPanel() {
               <Card title="Loudness levelling" sub="per-track volume normalisation">
                 <div className="grid gap-3">
                   <div className="field">
+                    <Label>Loudness source</Label>
+                    <Select
+                      value={form.loudness.source}
+                      onValueChange={v =>
+                        setForm(f =>
+                          f
+                            ? {
+                                ...f,
+                                loudness: { ...f.loudness, source: v as LoudnessSource },
+                              }
+                            : f,
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-64">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="replaygain-then-measured">
+                          ReplayGain tags, then measured
+                        </SelectItem>
+                        <SelectItem value="replaygain">ReplayGain tags only</SelectItem>
+                        <SelectItem value="measured">Measured (acoustic analysis)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="field-hint">
+                      Where each track&rsquo;s loudness figure comes from. ReplayGain tags (read
+                      via Navidrome) are a whole-file stereo measurement — the most accurate when
+                      your library carries them. Measured values come from this station&rsquo;s
+                      acoustic analysis, which scans only the opening of each track. The default
+                      prefers the tag and falls back to the measurement for untagged files.
+                    </div>
+                  </div>
+                  <div className="field">
                     <Label>Target loudness</Label>
                     <div className="flex items-center gap-2">
                       <Input
@@ -858,6 +916,7 @@ export default function SettingsPanel() {
                             loudness: {
                               targetLufs: parseFloat(form.loudness.targetLufs),
                               maxBoostDb: parseFloat(form.loudness.maxBoostDb),
+                              source: form.loudness.source,
                             },
                           })
                         }

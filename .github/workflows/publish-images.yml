@@ -2,9 +2,8 @@ name: Publish images
 
 # Builds and pushes the first-party SUB/WAVE images to GHCR.
 #
-# Triggers:
-#   - push of a tag like v1.2.3 → versioned release (also tagged :latest)
-#   - manual workflow_dispatch    → ad-hoc rebuild from the chosen ref
+# Triggered only by fork-qualified release tags. The validate job is the
+# authoritative boundary; the tag glob is intentionally only a coarse filter.
 #
 # Images:
 #   ghcr.io/<owner>/subwave-caddy       (bakes docker/Caddyfile)
@@ -25,15 +24,73 @@ name: Publish images
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - 'v*-obiwave.*'
 
 permissions:
   contents: read
   packages: write
+  security-events: write
+
+concurrency:
+  group: publish-images-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate immutable fork release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
+
+  release-gate:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  tag-preflight:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - subwave-caddy
+          - subwave-broadcast
+          - subwave-controller
+          - subwave-web
+          - subwave-aio
+          - subwave-aio-heavy
+          - subwave-tts-heavy
+          - subwave-analyzer
+          - subwave-analyzer-heavy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prove the exact release tag is absent
+        env:
+          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
+        run: node scripts/ci/assert-image-tag-absent.mjs "$IMAGE_REF"
+
   build:
+    needs: [validate, release-gate, tag-preflight]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -107,18 +164,7 @@ jobs:
               WITH_CLAP=1
               WITH_DEMUCS=1
     steps:
-      # fetch-depth: 0 pulls full history + tags so `git describe` resolves the
-      # version on a workflow_dispatch from a branch (a tag push already has the
-      # tag at HEAD).
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The version stamped into the images (admin footer + controller). On a tag
-      # push `git describe` returns the tag (e.g. v0.31.0); a branch dispatch
-      # yields <tag>-<n>-g<sha>. Empty → builds fall back to package.json.
-      - id: version
-        run: echo "version=$(git describe --tags --always 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
 
       # QEMU provides the cross-arch emulation buildx needs to build the
       # linux/arm64 variant on the amd64 GitHub runner.
@@ -132,26 +178,62 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-,format=short
-
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           build-args: |
             ${{ matrix.build_args }}
-            SUBWAVE_BUILD_VERSION=${{ steps.version.outputs.version }}
+            SUBWAVE_BUILD_VERSION=${{ github.ref_name }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Record immutable image digest
+        run: |
+          echo '### Published image' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Image: `${{ matrix.image }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Tag: `${{ github.ref_name }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
+
+  scan-images:
+    needs: [validate, release-gate, tag-preflight, build]
+    uses: ./.github/workflows/scan-images.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+  deploy-production:
+    needs: [validate, release-gate, tag-preflight, build, scan-images]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: subwave-production
+      cancel-in-progress: false
+    # Worst case: 2 x 5-minute stack updates, target + rollback probe budgets,
+    # a post-timeout grace period, and snapshot overhead remain below 17 min.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Deploy immutable release through Portainer
+        run: node scripts/deploy/portainer-release.mjs
+        env:
+          PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
+          PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
+          SUBWAVE_RELEASE_TAG: ${{ github.ref_name }}
+          SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
+          SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}

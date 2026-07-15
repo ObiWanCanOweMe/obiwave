@@ -8,18 +8,20 @@
 
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { generateText, APICallError } from 'ai';
+import { generateText, APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
-import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, snapV3Stability, modelTolerant, schemaHint } from '../src/llm/internal/core/pure.js';
+import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, snapV3Stability, modelTolerant, schemaHint, clipText } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
 import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice } from '../src/llm/internal/provider/capabilities.js';
 import { agentPlan } from '../src/llm/internal/strategy/plan.js';
 import { introBudgetPhrase, enforceIntroBudget } from '../src/llm/internal/prompts/intro-budget.js';
 import { embeddingBaseUrl } from '../src/llm/internal/provider/embedding.js';
-import { DEFAULT_LOCCA_EMBED_BASE_URL, openAICompatibleFetch } from '../src/llm/internal/provider/registry.js';
-import { personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
+import { createLiteLlmModel, DEFAULT_LOCCA_EMBED_BASE_URL, openAICompatibleFetch } from '../src/llm/internal/provider/registry.js';
+import { effectiveLiteLlmBaseUrl, effectiveLiteLlmApiKey } from '../src/litellm-config.js';
+import { LLM_PROVIDERS, EMBEDDING_PROVIDERS, personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
 import { lengthMode, lengthPhrase } from '../src/llm/internal/prompts/system.js';
 import { showMusicLean } from '../src/llm/internal/prompts/picker.js';
+import { planSchema } from '../src/llm/internal/prompts/programme.js';
 import { resolveCloudModel } from '../src/llm/internal/speech/cloud-speech.js';
 
 let failures = 0;
@@ -31,6 +33,91 @@ function test(name: string, fn: () => void | Promise<void>) {
 }
 
 async function main() {
+  await test('LiteLLM URL precedence: saved override, then LITELLM, then OPENAI fallback', () => {
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: 'https://saved.example/v1' }, {
+      LITELLM_API_BASE: 'https://litellm.example/v1',
+      OPENAI_API_BASE: 'https://openai.example/v1',
+    }), 'https://saved.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {
+      LITELLM_API_BASE: 'https://litellm.example/v1/',
+      OPENAI_API_BASE: 'https://openai.example/v1',
+    }), 'https://litellm.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {
+      OPENAI_API_BASE: 'https://openai.example/v1/',
+    }), 'https://openai.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {}), '');
+  });
+
+  await test('LiteLLM token precedence is provider-scoped before environment fallbacks', () => {
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: 'saved' }, {
+      LITELLM_API_KEY: 'litellm-env', OPENAI_API_KEY: 'openai-env',
+    }), 'saved');
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: '' }, {
+      LITELLM_API_KEY: 'litellm-env', OPENAI_API_KEY: 'openai-env',
+    }), 'litellm-env');
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: '' }, {
+      OPENAI_API_KEY: 'openai-env',
+    }), 'openai-env');
+  });
+
+  await test('LiteLLM is a native cloud strategy with no body sampling injection', () => {
+    assert.equal(needsToolCallObject({ provider: 'litellm' }), false);
+    assert.equal(appliedRepeatPenalty({ provider: 'litellm', repeatPenalty: 1.2 }), null);
+    assert.equal(reasoningFor({ provider: 'litellm', model: 'vendor/model', reasoning: false }), undefined);
+  });
+
+  await test('LiteLLM is a chat provider but not an embedding provider', () => {
+    assert.equal(LLM_PROVIDERS.includes('litellm'), true);
+    assert.equal(EMBEDDING_PROVIDERS.includes('litellm'), false);
+  });
+
+  await test('LiteLLM sends a plain OpenAI chat body without local-only fields', async () => {
+    let sent: any;
+    const fetchImpl = async (_url: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'vendor/model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
+    await generateText({ model, prompt: 'Say OK', maxOutputTokens: 32 });
+    for (const key of ['repeat_penalty', 'chat_template_kwargs', 'reasoning_format', 'thinking', 'reasoning', 'parallel_tool_calls']) {
+      assert.equal(sent[key], undefined, `${key} must not be injected`);
+    }
+  });
+
+  await test('LiteLLM keeps tools but sends only temperature when callers provide both sampling knobs', async () => {
+    let sent: any;
+    const fetchImpl = async (_url: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'vendor/model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
+    await generateText({
+      model,
+      prompt: 'Say OK',
+      temperature: 0.8,
+      topP: 0.95,
+      maxOutputTokens: 32,
+      tools: {
+        lookup: tool({
+          description: 'Look up a value',
+          inputSchema: z.object({ query: z.string() }),
+        }),
+      },
+    });
+    assert.equal(sent.temperature, 0.8);
+    assert.equal(sent.top_p, undefined);
+    assert.equal(sent.tools.length, 1);
+    assert.equal(sent.tools[0].function.name, 'lookup');
+  });
+
   // ---- failover gate: isUnreachable ⊂ isTransient, but EXCLUDES 5xx/429 ----
   console.log('isUnreachable vs isTransient (the failover gate):');
   await test('500 is transient but NOT unreachable', () => {
@@ -1169,6 +1256,59 @@ async function main() {
     assert.equal(hint.includes(longDescription), false);
     assert.equal(hint.includes('the exact id'), false);
     assert.equal(hint.includes('"description"'), false);
+  });
+
+  console.log('clipText (soft length caps for model free-text):');
+  await test('clips over-length text on a word boundary', () => {
+    const s = 'one two three four five six seven eight nine ten';
+    const out = clipText(s, 20) as string;
+    assert.ok(out.length <= 20, `len ${out.length} <= 20`);
+    assert.equal(out, 'one two three four', 'trimmed to a whole word, no dangling partial');
+  });
+  await test('passes through text at or under the cap untouched', () => {
+    assert.equal(clipText('short', 20), 'short');
+    assert.equal(clipText('exactly-twenty-chars', 20), 'exactly-twenty-chars');
+  });
+  await test('hard-cuts when no early word boundary exists (one very long token)', () => {
+    const out = clipText('x'.repeat(50), 20) as string;
+    assert.equal(out.length, 20, 'a single long token still gets capped');
+  });
+  await test('leaves non-strings for the schema to reject', () => {
+    assert.equal(clipText(undefined, 20), undefined);
+    assert.equal(clipText(42, 20), 42);
+    assert.equal(clipText(null, 20), null);
+  });
+
+  console.log('programme planSchema (the 207-char angle regression — a soft cap, clipped not rejected):');
+  await test('clips an over-length angle/topic instead of throwing away the whole plan', () => {
+    const overLongAngle = 'contractual malice '.repeat(20).trim(); // ~380 chars
+    const overLongTopic = 'read the memo aloud '.repeat(20).trim();
+    const plan: any = planSchema(1).parse({
+      angle: overLongAngle,
+      introNote: 'set the tone',
+      features: [{ topic: overLongTopic, kind: 'memo-from-upstairs' }],
+      outroNote: 'walk out',
+    });
+    assert.ok(plan.angle.length <= 200, `angle clipped to <=200 (was ${overLongAngle.length})`);
+    assert.ok(plan.features[0].topic.length <= 240, 'topic clipped to <=240');
+    assert.equal(plan.features[0].kind, 'memo-from-upstairs', 'the rest of the plan survives intact');
+  });
+  await test('leaves a within-cap plan untouched', () => {
+    const plan: any = planSchema(1).parse({
+      angle: 'a tight editorial line',
+      introNote: 'open warm',
+      features: [{ topic: 'the b-side story', kind: null }],
+      outroNote: 'sign off',
+    });
+    assert.equal(plan.angle, 'a tight editorial line');
+    assert.equal(plan.features[0].kind, null);
+  });
+  await test('wire schema keeps the full `required` array under io:\'input\' — clip stays object-level, never per-field', () => {
+    const rendered: any = z.toJSONSchema(planSchema(1), { target: 'draft-7', io: 'input' });
+    assert.deepEqual(rendered.required.sort(), ['angle', 'features', 'introNote', 'outroNote']);
+    assert.deepEqual(rendered.properties.features.items.required.sort(), ['kind', 'topic']);
+    // maxLength is still advertised to the model — the cap is a nudge, kept.
+    assert.equal(rendered.properties.angle.maxLength, 200);
   });
 
   console.log(failures === 0 ? '\nAll llm-pure tests passed.' : `\n${failures} test(s) FAILED.`);

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface UseModelDiscoveryOpts {
   provider: string;
+  leg?: 'primary' | 'fallback' | 'onboarding';
+  apiKey?: string;
   baseUrl?: string;
   ollamaUrl?: string;
   scope?: 'embedding' | 'chat';
@@ -22,6 +24,8 @@ const DEBOUNCE_MS = 400;
 
 export function useModelDiscovery({
   provider,
+  leg = 'primary',
+  apiKey,
   baseUrl,
   ollamaUrl,
   scope,
@@ -47,11 +51,21 @@ export function useModelDiscovery({
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ provider });
-      if (baseUrl) params.set('baseUrl', baseUrl);
-      if (ollamaUrl) params.set('ollamaUrl', ollamaUrl);
-      if (scope) params.set('scope', scope);
-      const r = await adminFetch(`/settings/llm/models?${params}`, signal ? { signal } : undefined);
+      let r: Response;
+      if (provider === 'litellm') {
+        r = await adminFetch('/settings/llm/models', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider, leg, baseUrl: baseUrl || '', apiKey: apiKey || '' }),
+          ...(signal ? { signal } : {}),
+        });
+      } else {
+        const params = new URLSearchParams({ provider });
+        if (baseUrl) params.set('baseUrl', baseUrl);
+        if (ollamaUrl) params.set('ollamaUrl', ollamaUrl);
+        if (scope) params.set('scope', scope);
+        r = await adminFetch(`/settings/llm/models?${params}`, signal ? { signal } : undefined);
+      }
       const data = await r.json() as { ok: boolean; models: string[]; error?: string };
       if (reqId !== reqIdRef.current) return;
       if (data.ok) {
@@ -68,7 +82,7 @@ export function useModelDiscovery({
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [provider, baseUrl, ollamaUrl, scope, enabled, adminFetch]);
+  }, [provider, leg, apiKey, baseUrl, ollamaUrl, scope, enabled, adminFetch]);
 
   // Auto-discover on input change, debounced. The AbortController cancels an
   // in-flight request when the inputs change again before it resolves.
@@ -81,7 +95,11 @@ export function useModelDiscovery({
     }
     const ctrl = new AbortController();
     const t = setTimeout(() => { runFetch(ctrl.signal); }, DEBOUNCE_MS);
-    return () => { clearTimeout(t); ctrl.abort(); };
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+      reqIdRef.current += 1;
+    };
   }, [runFetch, enabled, provider]);
 
   // Manual refresh fires immediately (no debounce) and bumps the request id, so

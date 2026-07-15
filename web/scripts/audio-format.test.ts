@@ -11,6 +11,7 @@ import {
   preferenceKey,
   resolveFormatPreference,
   saveFormatPreference,
+  streamEnablementFor,
   type AudioFormat,
 } from '../lib/audioFormat.ts';
 
@@ -25,6 +26,17 @@ assert.deepEqual(
   { mp3: true, opus: false, aac: true, flac: false },
 );
 assert.equal(AUDIO_MIME_TYPES.flac, 'audio/ogg; codecs=flac');
+
+assert.deepEqual(streamEnablementFor(null), {
+  mp3: true, opus: false, aac: false, flac: false,
+});
+assert.deepEqual(streamEnablementFor({
+  opusEnabled: true,
+  aacEnabled: false,
+  flacEnabled: true,
+}), {
+  mp3: true, opus: true, aac: false, flac: true,
+});
 
 const enabled = { mp3: true, opus: true, aac: false, flac: true } as const;
 const supported = { mp3: true, opus: false, aac: true, flac: true } as const;

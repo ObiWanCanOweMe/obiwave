@@ -5,6 +5,7 @@
 import express from 'express';
 import { config } from './config.js';
 import * as settings from './settings.js';
+import * as blocklist from './music/blocklist.js';
 import * as jingles from './broadcast/jingles.js';
 import * as sfx from './broadcast/sfx.js';
 import { queue } from './broadcast/queue.js';
@@ -36,6 +37,8 @@ import { router as listenersRoutes } from './routes/listeners.js';
 import { router as webhooksRoutes } from './routes/webhooks.js';
 import { router as scrobbleRoutes } from './routes/scrobble.js';
 import { router as personasRoutes } from './routes/personas.js';
+import { router as showsRoutes } from './routes/shows.js';
+import { router as communityRoutes } from './routes/community.js';
 import { router as backupRoutes } from './routes/backup.js';
 import { router as audienceRoutes } from './routes/audience.js';
 import { router as systemRoutes } from './routes/system.js';
@@ -113,6 +116,8 @@ app.use(listenersRoutes);
 app.use(webhooksRoutes);
 app.use(scrobbleRoutes);
 app.use(personasRoutes);
+app.use(showsRoutes);
+app.use(communityRoutes);
 app.use(backupRoutes);
 app.use(audienceRoutes);
 app.use(systemRoutes);
@@ -173,6 +178,11 @@ app.listen(config.server.port, async () => {
   } catch (err) {
     console.error('[settings] load failed:', err.message);
   }
+
+  // Never-play blocklist — must be in memory before the scheduler's first
+  // auto-playlist build and the first queue push. load() itself never throws
+  // (a corrupt file starts empty), so no try/catch needed.
+  await blocklist.load();
 
   // Start the remote-TTS /health probe loop now that settings are loaded — its
   // URL lives in settings (not env), so it can't self-start at import time the

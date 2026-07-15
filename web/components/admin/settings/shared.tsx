@@ -92,7 +92,7 @@ export interface LlmForm {
   reasoning: boolean;
   toolChoice: string;
   pickerAgent: boolean;
-  noRepeatWindow: number;
+  noRepeatWindow: string;
   requestWebResolve: boolean;
   strictRequests: boolean;
   agentTimeoutMs: number;
@@ -166,9 +166,12 @@ export interface StreamForm {
   bitrate: string;
 }
 
+export type LoudnessSource = 'replaygain-then-measured' | 'replaygain' | 'measured';
+
 export interface LoudnessForm {
   targetLufs: string;
   maxBoostDb: string;
+  source: LoudnessSource;
 }
 
 export interface FormState {
@@ -228,7 +231,7 @@ export interface SettingsData {
       aacBitrate?: number;
       bitrate?: number;
     };
-    loudness?: { targetLufs?: number; maxBoostDb?: number };
+    loudness?: { targetLufs?: number; maxBoostDb?: number; source?: LoudnessSource };
     station?: string;
     timezone?: string;
     locale?: StationLocale;
@@ -263,7 +266,7 @@ export interface SettingsData {
       enrichment?: Partial<EmbeddingEnrichmentForm>;
     };
     sfx?: { enabled?: boolean };
-    ui?: { boothBuddy?: boolean };
+    ui?: { boothBuddy?: boolean; skin?: string; tuneInOverlay?: boolean };
     scrobble?: {
       lastfm?: Partial<ScrobbleLastfmForm>;
       listenbrainz?: Partial<ScrobbleListenbrainzForm>;

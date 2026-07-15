@@ -31,6 +31,7 @@ import { currentMode as budgetCurrentMode } from '../broadcast/dj-budget.js';
 import { skillCatalog } from '../skills/_agent.js';
 import { clearUserThemeCache, loadUserThemes, listThemesAnnotated, saveUserTheme, deleteUserTheme } from '../themes.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
+import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../litellm-config.js';
 
 export const router = express.Router();
 
@@ -160,6 +161,9 @@ router.get('/settings', requireAdmin, async (req, res) => {
       // via controller/.env, never typed into the admin surface.
       env: {
         OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
+        LITELLM_API_BASE: !!process.env.LITELLM_API_BASE,
+        OPENAI_API_BASE: !!process.env.OPENAI_API_BASE,
+        LITELLM_API_KEY: !!process.env.LITELLM_API_KEY,
         ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY,
         ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
         GOOGLE_GENERATIVE_AI_API_KEY: !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
@@ -212,7 +216,7 @@ router.post('/settings', requireAdmin, async (req, res) => {
     if (req.body?.tts?.remote?.url !== undefined) {
       await remoteTts.refresh();
     }
-    res.json(result);
+    res.json(settings.publicUpdateResult(result));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -285,6 +289,11 @@ function briefLlmError(err: unknown): string {
 // admin UI tests the key before saving, so the saved setting can't be trusted
 // mid-edit. The UI passes the provider it's editing; absent a hint we fall
 // back to the saved provider, then Tavily (the original sole owner of the key).
+//
+// Probe budget: OpenAI's Responses API (the default path for
+// createOpenAI()(model)) rejects max_output_tokens below 16 — a smaller test
+// budget fails key validation with "integer below minimum value" and blocks
+// saving the key entirely. 32 clears the floor on every provider.
 async function probeKey(
   key: (typeof SECRET_ENV_KEYS)[number],
   value: string,
@@ -299,7 +308,7 @@ async function probeKey(
       try {
         const model = activeModel('anthropic') || 'claude-haiku-4-5-20251001';
         const m = createAnthropic({ apiKey: value })(model);
-        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 8, abortSignal: AbortSignal.timeout(15000) });
+        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 32, abortSignal: AbortSignal.timeout(15000) });
         return { ok: true, message: `✓ Anthropic key valid · model responded` };
       } catch (err) { return { ok: false, message: briefLlmError(err) }; }
     }
@@ -307,7 +316,7 @@ async function probeKey(
       try {
         const model = activeModel('openai') || 'gpt-4o-mini';
         const m = createOpenAI({ apiKey: value })(model);
-        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 8, abortSignal: AbortSignal.timeout(15000) });
+        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 32, abortSignal: AbortSignal.timeout(15000) });
         return { ok: true, message: `✓ OpenAI key valid · model responded` };
       } catch (err) { return { ok: false, message: briefLlmError(err) }; }
     }
@@ -315,7 +324,7 @@ async function probeKey(
       try {
         const model = activeModel('google') || 'gemini-1.5-flash';
         const m = createGoogleGenerativeAI({ apiKey: value })(model);
-        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 8, abortSignal: AbortSignal.timeout(15000) });
+        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 32, abortSignal: AbortSignal.timeout(15000) });
         return { ok: true, message: `✓ Google key valid · model responded` };
       } catch (err) { return { ok: false, message: briefLlmError(err) }; }
     }
@@ -323,7 +332,7 @@ async function probeKey(
       try {
         const model = activeModel('deepseek') || 'deepseek-chat';
         const m = createDeepSeek({ apiKey: value })(model);
-        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 8, abortSignal: AbortSignal.timeout(15000) });
+        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 32, abortSignal: AbortSignal.timeout(15000) });
         return { ok: true, message: `✓ DeepSeek key valid · model responded` };
       } catch (err) { return { ok: false, message: briefLlmError(err) }; }
     }
@@ -331,7 +340,7 @@ async function probeKey(
       try {
         const model = activeModel('openrouter') || 'openai/gpt-4o-mini';
         const m = createOpenRouter({ apiKey: value })(model);
-        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 8, abortSignal: AbortSignal.timeout(15000) });
+        await generateText({ model: m, prompt: 'Reply with the single word OK.', maxOutputTokens: 32, abortSignal: AbortSignal.timeout(15000) });
         return { ok: true, message: `✓ OpenRouter key valid · model responded` };
       } catch (err) { return { ok: false, message: briefLlmError(err) }; }
     }
@@ -528,14 +537,84 @@ router.get('/settings/llm/discover', requireAdmin, async (req, res) => {
   }
 });
 
+type LlmLegIdentity = 'primary' | 'fallback' | 'onboarding';
+
+function llmLegIdentity(value: unknown): LlmLegIdentity {
+  const leg = String(value || 'primary');
+  if (leg === 'primary' || leg === 'fallback' || leg === 'onboarding') return leg;
+  throw new Error('leg must be primary, fallback, or onboarding');
+}
+
+async function resolveLiteLlmRouteConfig(input: {
+  leg: LlmLegIdentity;
+  baseUrl?: unknown;
+  apiKey?: unknown;
+}) {
+  await settings.load();
+  const s = settings.get();
+  const savedLeg = input.leg === 'primary'
+    ? s.llm
+    : input.leg === 'fallback'
+      ? s.llm?.fallback
+      : undefined;
+  const savedIsLiteLlm = savedLeg?.provider === 'litellm';
+  const suppliedBaseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
+  const suppliedApiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  return {
+    baseUrl: effectiveLiteLlmBaseUrl({
+      baseUrl: suppliedBaseUrl || (savedIsLiteLlm ? savedLeg.baseUrl : ''),
+    }),
+    apiKey: effectiveLiteLlmApiKey({
+      apiKey: suppliedApiKey || (savedIsLiteLlm ? settings.llmKeyFor('litellm') : ''),
+    }),
+  };
+}
+
+// Authenticated LiteLLM discovery. POST keeps an unsaved onboarding token in
+// the request body (never the query string) and makes leg selection explicit.
+router.post('/settings/llm/models', requireAdmin, async (req, res) => {
+  const provider = String(req.body?.provider || '').trim();
+  if (provider !== 'litellm') {
+    return res.status(400).json({ ok: false, models: [], provider, error: 'POST discovery is only supported for litellm' });
+  }
+  try {
+    const leg = llmLegIdentity(req.body?.leg);
+    const cfg = await resolveLiteLlmRouteConfig({
+      leg,
+      baseUrl: req.body?.baseUrl,
+      apiKey: req.body?.apiKey,
+    });
+    if (!cfg.baseUrl) throw new Error('LiteLLM base URL is required');
+    const headers: Record<string, string> = {};
+    if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+    const r = await fetchWithTimeout(`${cfg.baseUrl}/models`, {
+      timeoutMs: 10_000,
+      bodyDeadline: true,
+      headers,
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = (await r.json()) as { data?: unknown };
+    const models = Array.isArray(data?.data)
+      ? (data.data as { id?: unknown }[])
+          .map((m) => m?.id)
+          .filter((id): id is string => typeof id === 'string')
+          .sort()
+      : [];
+    res.json({ ok: true, models, provider });
+  } catch (err: unknown) {
+    res.json({ ok: false, models: [], provider, error: (err as { message?: string })?.message || 'unreachable' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /settings/llm/probe-compat — live probe for an openai-compatible key.
 // Body: { apiKey: string, baseUrl: string, model: string }
 // Always 200s with { ok, message, latencyMs }. The key is NOT saved.
 // ---------------------------------------------------------------------------
 router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
-  const { apiKey, baseUrl, model } = req.body || {};
-  if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
+  const { apiKey, baseUrl, model, provider } = req.body || {};
+  const isLiteLlm = provider === 'litellm';
+  if (!isLiteLlm && (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim())) {
     return res.status(400).json({ ok: false, message: 'baseUrl is required', latencyMs: 0 });
   }
   if (!model || typeof model !== 'string' || !model.trim()) {
@@ -543,29 +622,46 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
   }
   const t0 = Date.now();
   try {
+    let resolvedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : '';
     let resolvedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
-    if (!resolvedApiKey) {
+    if (isLiteLlm) {
+      const cfg = await resolveLiteLlmRouteConfig({
+        leg: llmLegIdentity(req.body?.leg),
+        baseUrl,
+        apiKey,
+      });
+      resolvedBaseUrl = cfg.baseUrl;
+      resolvedApiKey = cfg.apiKey;
+      if (!resolvedBaseUrl) {
+        return res.status(400).json({ ok: false, message: 'baseUrl is required', latencyMs: 0 });
+      }
+    } else if (!resolvedApiKey) {
       await settings.load();
       const s = settings.get();
-      const fallbackUrl = (s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
-      const targetUrl = baseUrl.trim().replace(/\/+$/, '');
-      // Match the target server to a leg, then read that leg's provider's inline
-      // key from the per-provider map (issue #657). Falls back to the
-      // openai-compatible slot when neither leg's URL matches.
-      const legProvider = (targetUrl && targetUrl === fallbackUrl)
-        ? s.llm?.fallback?.provider
-        : s.llm?.provider;
+      const hasExplicitLeg = Object.prototype.hasOwnProperty.call(req.body || {}, 'leg');
+      let savedLeg;
+      if (hasExplicitLeg) {
+        const leg = llmLegIdentity(req.body?.leg);
+        savedLeg = leg === 'fallback' ? s.llm?.fallback : s.llm;
+      } else {
+        // Backward compatibility for pre-leg clients: identify the fallback by
+        // its saved URL exactly as this endpoint did before explicit legs.
+        const fallbackUrl = String(s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
+        savedLeg = resolvedBaseUrl && resolvedBaseUrl === fallbackUrl ? s.llm?.fallback : s.llm;
+      }
+      const legProvider = savedLeg?.provider;
+      resolvedBaseUrl = resolvedBaseUrl || String(savedLeg?.baseUrl || '').trim().replace(/\/+$/, '');
       resolvedApiKey = settings.llmKeyFor(legProvider || 'openai-compatible');
     }
 
     const m = createOpenAI({
       apiKey: resolvedApiKey || 'no-key',
-      baseURL: baseUrl.trim().replace(/\/+$/, ''),
+      baseURL: resolvedBaseUrl,
     }).chat(model.trim());
     await generateText({
       model: m,
       prompt: 'Reply with the single word OK.',
-      maxOutputTokens: 8,
+      maxOutputTokens: 32,
       abortSignal: AbortSignal.timeout(15000),
     });
     res.json({ ok: true, message: '✓ Bearer token accepted · model responded', latencyMs: Date.now() - t0 });
@@ -641,6 +737,31 @@ router.get('/settings/llm/models', requireAdmin, async (req, res) => {
         const data = (await r.json()) as { data?: unknown };
         models = Array.isArray(data?.data)
           ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string')
+          : [];
+        break;
+      }
+
+      case 'litellm': {
+        await settings.load();
+        const s = settings.get();
+        const savedLeg = s.llm?.provider === 'litellm'
+          ? s.llm
+          : s.llm?.fallback?.provider === 'litellm'
+            ? s.llm.fallback
+            : {};
+        const url = effectiveLiteLlmBaseUrl({ baseUrl: baseUrl || savedLeg.baseUrl });
+        if (!url) throw new Error('LiteLLM base URL is required');
+        const apiKey = effectiveLiteLlmApiKey({ apiKey: settings.llmKeyFor('litellm') });
+        const headers: Record<string, string> = {};
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const r = await fetch(`${url}/models`, { signal: ctrl.signal, headers });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = (await r.json()) as { data?: unknown };
+        models = Array.isArray(data?.data)
+          ? (data.data as { id?: unknown }[])
+              .map((m) => m?.id)
+              .filter((id): id is string => typeof id === 'string')
+              .sort()
           : [];
         break;
       }

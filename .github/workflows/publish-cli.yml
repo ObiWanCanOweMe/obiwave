@@ -1,11 +1,13 @@
 name: Publish CLI binaries
 
 # Builds the standalone `subwave` CLI for linux + macOS (x64 + arm64) and
-# attaches the binaries to the GitHub Release matching the tag.
+# can attach binaries to an explicitly selected upstream GitHub Release.
 #
-# Triggers:
-#   - push of a tag like v1.2.3 → builds + uploads
-#   - manual workflow_dispatch → builds without uploading (smoke test)
+# Manual maintenance only: neither upstream nor fork-qualified tag pushes
+# trigger this workflow. Fork releases publish images and deploy through
+# Portainer; they deliberately do not publish fork-aware CLI or installer
+# assets. To maintain an upstream CLI release, dispatch this workflow against
+# that release tag explicitly.
 #
 # The install script at install.sh (served from cli.getsubwave.com → raw
 # GitHub URL → this repo) downloads the matching CLI binary from the latest
@@ -15,9 +17,6 @@ name: Publish CLI binaries
 # `run:` steps, so the standard command-injection vectors don't apply.
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -84,8 +83,8 @@ jobs:
           "cli/dist/$ASSET" --version
 
       - name: Upload binary artifact
-        # Share every built binary (not just on tags) so the smoke jobs can
-        # download and exec them on both tag pushes and workflow_dispatch runs.
+        # Share every built binary so the native smoke jobs can download and
+        # execute the matrix outputs before the workflow completes.
         # Short retention — these are throwaway CI artifacts, not releases.
         uses: actions/upload-artifact@v4
         with:

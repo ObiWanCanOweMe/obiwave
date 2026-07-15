@@ -188,6 +188,11 @@ export const config = {
     sfxFile: `${STATE_DIR}/sfx.txt`,
     autoPlaylist: `${STATE_DIR}/auto.m3u`,
     nowPlayingFile: `${STATE_DIR}/now-playing.json`,
+    // Written by radio.liq when a jingle starts feeding the jingle rotate
+    // (issue #997). Jingles play outside the controller's voice serialiser,
+    // so airVoice reads this to hold spoken segments until the stinger has
+    // cleared the air.
+    jinglePlayingFile: `${STATE_DIR}/jingle-playing.json`,
   },
   session: {
     // The live DJ session — a chat-history JSON the controller rewrites as
@@ -245,6 +250,20 @@ export const config = {
   search: {
     // Tavily API key for the web-search skill. Blank → the skill stays inert.
     apiKey: process.env.SEARCH_API_KEY || '',
+  },
+  // Community catalog (skills / personas / shows / stations) fetched live from
+  // the `community` repo — see community/registry.ts. Default is raw GitHub
+  // (Fastly-fronted, ~5-min cache, no build step — reliable and fresh). Override
+  // with COMMUNITY_CATALOG_URL to point at a fork, a self-hosted mirror, or the
+  // jsDelivr CDN (`https://cdn.jsdelivr.net/gh/getsubwave/community@main/catalog.json`).
+  community: {
+    catalogUrl:
+      process.env.COMMUNITY_CATALOG_URL ||
+      'https://raw.githubusercontent.com/getsubwave/community/main/catalog.json',
+    // In-memory TTL before a browse triggers a refetch. 30 min mirrors the
+    // weather / web-search memos; a manual refresh (POST /community/refresh)
+    // busts it immediately.
+    ttlMs: parseInt(process.env.COMMUNITY_CATALOG_TTL_MS || '', 10) || 30 * 60 * 1000,
   },
   server: {
     port: parseInt(process.env.PORT || '7701', 10),

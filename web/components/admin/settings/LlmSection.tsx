@@ -1,8 +1,9 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { AsyncResultGeneration } from '../../../lib/asyncResultGeneration';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -46,8 +47,28 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [compatFallbackKeyTest, setCompatFallbackKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [compatKeyTesting, setCompatKeyTesting] = useState(false);
   const [compatFallbackKeyTesting, setCompatFallbackKeyTesting] = useState(false);
-  useEffect(() => { setCompatKeyInput(''); setCompatKeyTest(null); }, [form.llm.provider]);
-  useEffect(() => { setCompatFallbackKeyInput(''); setCompatFallbackKeyTest(null); }, [form.llm.fallback.provider]);
+  const primaryProbeGeneration = useRef(new AsyncResultGeneration());
+  const fallbackProbeGeneration = useRef(new AsyncResultGeneration());
+  useEffect(() => { setCompatKeyInput(''); }, [form.llm.provider]);
+  useEffect(() => { setCompatFallbackKeyInput(''); }, [form.llm.fallback.provider]);
+  useEffect(() => {
+    primaryProbeGeneration.current.invalidate();
+    setCompatKeyTest(null);
+    setCompatKeyTesting(false);
+  }, [form.llm.provider, form.llm.baseUrl, form.llm.model, compatKeyInput]);
+  useEffect(() => {
+    fallbackProbeGeneration.current.invalidate();
+    setCompatFallbackKeyTest(null);
+    setCompatFallbackKeyTesting(false);
+  }, [form.llm.fallback.provider, form.llm.fallback.baseUrl, form.llm.fallback.model, compatFallbackKeyInput]);
+
+  const primaryCustomProvider = form.llm.provider === 'openai-compatible' || form.llm.provider === 'litellm';
+  const fallbackCustomProvider = form.llm.fallback.provider === 'openai-compatible' || form.llm.fallback.provider === 'litellm';
+  const liteLlmEnvBaseUrlSet = !!(data.env?.LITELLM_API_BASE || data.env?.OPENAI_API_BASE);
+  const primaryCustomUrlAvailable = !!form.llm.baseUrl.trim()
+    || (form.llm.provider === 'litellm' && liteLlmEnvBaseUrlSet);
+  const fallbackCustomUrlAvailable = !!form.llm.fallback.baseUrl.trim()
+    || (form.llm.fallback.provider === 'litellm' && liteLlmEnvBaseUrlSet);
 
   // Embeddings inherit settings.llm by default (embedding.provider === ''), so
   // switching the CHAT provider silently changes the EMBEDDING model too — which
@@ -85,12 +106,14 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const primaryDiscoveryEnabled =
     form.llm.provider === 'ollama'
     || form.llm.provider === 'locca'
-    || (form.llm.provider === 'openai-compatible' && !!form.llm.baseUrl.trim())
+    || (primaryCustomProvider && primaryCustomUrlAvailable)
     || (form.llm.provider === 'openrouter')
     || (!!primaryKeyVar && primaryKeySet);
 
   const primaryDiscovery = useModelDiscovery({
     provider: form.llm.provider,
+    leg: 'primary',
+    apiKey: compatKeyInput,
     baseUrl: form.llm.baseUrl,
     ollamaUrl: form.llm.ollamaUrl,
     enabled: primaryDiscoveryEnabled,
@@ -104,13 +127,15 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     form.llm.fallback.enabled && (
       form.llm.fallback.provider === 'ollama'
       || form.llm.fallback.provider === 'locca'
-      || (form.llm.fallback.provider === 'openai-compatible' && !!form.llm.fallback.baseUrl.trim())
+      || (fallbackCustomProvider && fallbackCustomUrlAvailable)
       || (form.llm.fallback.provider === 'openrouter')
       || (!!fallbackKeyVar && fallbackKeySet)
     );
 
   const fallbackDiscovery = useModelDiscovery({
     provider: form.llm.fallback.provider,
+    leg: 'fallback',
+    apiKey: compatFallbackKeyInput,
     baseUrl: form.llm.fallback.baseUrl,
     ollamaUrl: form.llm.fallback.ollamaUrl,
     enabled: fallbackDiscoveryEnabled,
@@ -170,28 +195,35 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   };
 
   const testCompatKey = async (
+    leg: 'primary' | 'fallback',
+    provider: string,
     apiKey: string,
     baseUrl: string,
     model: string,
+    baseUrlAvailable: boolean,
     setTesting: (v: boolean) => void,
     setResult: (r: { ok: boolean; message: string; latencyMs: number } | null) => void,
+    generationState: AsyncResultGeneration,
   ) => {
-    if (!baseUrl.trim()) { setResult({ ok: false, message: 'Set a Base URL first', latencyMs: 0 }); return; }
+    if (!baseUrlAvailable) { setResult({ ok: false, message: 'Set a Base URL first', latencyMs: 0 }); return; }
     if (!model.trim()) { setResult({ ok: false, message: 'Set a Model first', latencyMs: 0 }); return; }
+    const generation = generationState.begin();
     setTesting(true);
     setResult(null);
     try {
       const r = await adminFetch('/settings/llm/probe-compat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
+        body: JSON.stringify({ leg, provider, apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
       });
       const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setResult(j);
+      if (generationState.isCurrent(generation)) setResult(j);
     } catch (e) {
-      setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      if (generationState.isCurrent(generation)) {
+        setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      }
     } finally {
-      setTesting(false);
+      if (generationState.isCurrent(generation)) setTesting(false);
     }
   };
 
@@ -207,7 +239,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         reasoning: form.llm.reasoning,
         toolChoice: form.llm.toolChoice,
         pickerAgent: form.llm.pickerAgent,
-        noRepeatWindow: form.llm.noRepeatWindow,
+        noRepeatWindow: Math.max(0, parseInt(form.llm.noRepeatWindow, 10) || 0),
         requestWebResolve: form.llm.requestWebResolve,
         strictRequests: form.llm.strictRequests,
         agentTimeoutMs: form.llm.agentTimeoutMs,
@@ -216,7 +248,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         budgetSoftPct: form.llm.budgetSoftPct,
         exemptRequests: form.llm.exemptRequests,
         maxOutputTokens: form.llm.maxOutputTokens,
-        ...(form.llm.provider === 'openai-compatible' && compatKeyInput.trim()
+        ...(primaryCustomProvider && compatKeyInput.trim()
           ? { apiKey: compatKeyInput.trim() }
           : {}),
         fallback: {
@@ -228,7 +260,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           repeatPenalty: form.llm.fallback.repeatPenalty,
           baseUrl: form.llm.fallback.baseUrl,
           reasoning: form.llm.fallback.reasoning,
-          ...(form.llm.fallback.provider === 'openai-compatible' && compatFallbackKeyInput.trim()
+          ...(fallbackCustomProvider && compatFallbackKeyInput.trim()
             ? { apiKey: compatFallbackKeyInput.trim() }
             : {}),
         },
@@ -245,10 +277,10 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       const ok = await saveKey(fallbackKeyVar, fallbackKeyInput);
       if (ok) { notify.ok('API key saved'); setFallbackKeyInput(''); refresh(); }
     }
-    if (form.llm.provider === 'openai-compatible' && compatKeyInput.trim()) {
+    if (primaryCustomProvider && compatKeyInput.trim()) {
       setCompatKeyInput('');
     }
-    if (form.llm.fallback.provider === 'openai-compatible' && compatFallbackKeyInput.trim()) {
+    if (fallbackCustomProvider && compatFallbackKeyInput.trim()) {
       setCompatFallbackKeyInput('');
     }
   };
@@ -349,27 +381,32 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             </div>
           )}
 
-          {form.llm.provider === 'openai-compatible' && (
+          {primaryCustomProvider && (
             <div className="field">
-              <Label>Server base URL</Label>
+              <Label>{form.llm.provider === 'litellm' ? 'LiteLLM base URL' : 'Server base URL'}</Label>
               <Input
                 value={form.llm.baseUrl}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
                   setForm(f => ({ ...f, llm: { ...f.llm, baseUrl: e.target.value } }))
                 }
-                placeholder="http://192.168.1.101:8080/v1"
+                placeholder={form.llm.provider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                 className="max-w-[360px]"
               />
               <div className="field-hint">
-                Any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…),
-                including the <code>/v1</code> suffix. Must be reachable from the
-                controller container. Use the host’s LAN or Tailscale IP, not
-                <code>127.0.0.1</code>.
+                {form.llm.provider === 'litellm' ? (
+                  <>Your LiteLLM cloud gateway URL, including the <code>/v1</code> suffix.
+                    Leave blank to use <code>LITELLM_API_BASE</code> or <code>OPENAI_API_BASE</code>.</>
+                ) : (
+                  <>Any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…),
+                    including the <code>/v1</code> suffix. Must be reachable from the
+                    controller container. Use the host’s LAN or Tailscale IP, not
+                    <code>127.0.0.1</code>.</>
+                )}
               </div>
             </div>
           )}
 
-          {form.llm.provider === 'openai-compatible' && (
+          {primaryCustomProvider && (
             <>
               <div className="field">
                 <Label>Bearer token</Label>
@@ -378,26 +415,30 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                     type="password"
                     value={compatKeyInput}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setCompatKeyInput(e.target.value)}
-                    placeholder={(data.values?.llm as { keys?: Record<string, unknown> })?.keys?.['openai-compatible'] === 'set' ? '•••••• (on file)' : 'Bearer token (optional)'}
+                    placeholder={(data.values?.llm as { keys?: Record<string, unknown> })?.keys?.[form.llm.provider] === 'set' ? '•••••• (on file)' : 'Bearer token (optional)'}
                     className="max-w-[360px]"
                   />
                   <Btn
                     onClick={() =>
                       testCompatKey(
+                        'primary',
+                        form.llm.provider,
                         compatKeyInput || '',
                         form.llm.baseUrl,
                         form.llm.model,
+                        primaryCustomUrlAvailable,
                         setCompatKeyTesting,
                         setCompatKeyTest,
+                        primaryProbeGeneration.current,
                       )
                     }
-                    disabled={compatKeyTesting || !form.llm.baseUrl.trim()}
+                    disabled={compatKeyTesting || !primaryCustomUrlAvailable}
                   >
                     {compatKeyTesting ? 'Testing…' : 'Test connection'}
                   </Btn>
                 </div>
                 <div className="field-hint">
-                  Optional — only needed when the server requires bearer authentication.
+                  Optional — only needed when the {form.llm.provider === 'litellm' ? 'gateway' : 'server'} requires bearer authentication.
                   Saved to <code>settings.json</code>, takes effect on next save.
                 </div>
               </div>
@@ -516,12 +557,12 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   disabled={!primaryDiscoveryEnabled && form.llm.provider !== 'ollama'}
                   placeholder={
                     !primaryDiscoveryEnabled
-                      ? (form.llm.provider === 'openai-compatible' ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
+                      ? (primaryCustomProvider ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
                       : form.llm.provider === 'ollama'
                         ? 'nemotron-3-super:cloud'
                         : form.llm.provider === 'deepseek'
                           ? 'deepseek-v4-flash'
-                          : form.llm.provider === 'openai-compatible' || form.llm.provider === 'locca'
+                          : primaryCustomProvider || form.llm.provider === 'locca'
                             ? 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf'
                             : 'model id'
                   }
@@ -539,7 +580,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               {primaryDiscovery.models.length > 0
                 ? `${primaryDiscovery.models.length} model${primaryDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
                 : !primaryDiscoveryEnabled
-                  ? (form.llm.provider === 'openai-compatible'
+                  ? (primaryCustomProvider
                       ? 'Set a base URL above to discover available models.'
                       : 'Set an API key above to discover and select a model.')
                   : primaryDiscovery.error
@@ -675,25 +716,30 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 </div>
               )}
 
-              {form.llm.fallback.provider === 'openai-compatible' && (
+              {fallbackCustomProvider && (
                 <div className="field">
-                  <Label>Backup server base URL</Label>
+                  <Label>{form.llm.fallback.provider === 'litellm' ? 'Backup LiteLLM base URL' : 'Backup server base URL'}</Label>
                   <Input
                     value={form.llm.fallback.baseUrl}
                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
                       setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, baseUrl: e.target.value } } }))
                     }
-                    placeholder="http://192.168.1.101:8080/v1"
+                    placeholder={form.llm.fallback.provider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                     className="max-w-[360px]"
                   />
                   <div className="field-hint">
-                    OpenAI-compatible server URL including the <code>/v1</code>
-                    suffix, required for this provider.
+                    {form.llm.fallback.provider === 'litellm' ? (
+                      <>LiteLLM cloud gateway URL including the <code>/v1</code> suffix.
+                        Leave blank to use <code>LITELLM_API_BASE</code> or <code>OPENAI_API_BASE</code>.</>
+                    ) : (
+                      <>OpenAI-compatible server URL including the <code>/v1</code>
+                        suffix, required for this provider.</>
+                    )}
                   </div>
                 </div>
               )}
 
-              {form.llm.fallback.provider === 'openai-compatible' && (
+              {fallbackCustomProvider && (
                 <>
                   <div className="field">
                     <Label>Bearer token</Label>
@@ -702,26 +748,30 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                         type="password"
                         value={compatFallbackKeyInput}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => setCompatFallbackKeyInput(e.target.value)}
-                        placeholder={(data.values?.llm as { keys?: Record<string, unknown> })?.keys?.['openai-compatible'] === 'set' ? '•••••• (on file)' : 'Bearer token (optional)'}
+                        placeholder={(data.values?.llm as { keys?: Record<string, unknown> })?.keys?.[form.llm.fallback.provider] === 'set' ? '•••••• (on file)' : 'Bearer token (optional)'}
                         className="max-w-[360px]"
                       />
                       <Btn
                         onClick={() =>
                           testCompatKey(
+                            'fallback',
+                            form.llm.fallback.provider,
                             compatFallbackKeyInput || '',
                             form.llm.fallback.baseUrl,
                             form.llm.fallback.model,
+                            fallbackCustomUrlAvailable,
                             setCompatFallbackKeyTesting,
                             setCompatFallbackKeyTest,
+                            fallbackProbeGeneration.current,
                           )
                         }
-                        disabled={compatFallbackKeyTesting || !form.llm.fallback.baseUrl.trim()}
+                        disabled={compatFallbackKeyTesting || !fallbackCustomUrlAvailable}
                       >
                         {compatFallbackKeyTesting ? 'Testing…' : 'Test connection'}
                       </Btn>
                     </div>
                     <div className="field-hint">
-                      Optional — only needed when the backup server requires bearer
+                      Optional — only needed when the backup {form.llm.fallback.provider === 'litellm' ? 'gateway' : 'server'} requires bearer
                       authentication. Saved to <code>settings.json</code>, takes effect on
                       next save.
                     </div>
@@ -802,12 +852,12 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                       disabled={!fallbackDiscoveryEnabled && form.llm.fallback.provider !== 'ollama'}
                       placeholder={
                         !fallbackDiscoveryEnabled
-                          ? (form.llm.fallback.provider === 'openai-compatible' ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
+                          ? (fallbackCustomProvider ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
                           : form.llm.fallback.provider === 'ollama'
                             ? 'llama3.2:3b'
                             : form.llm.fallback.provider === 'deepseek'
                               ? 'deepseek-chat'
-                              : form.llm.fallback.provider === 'openai-compatible' || form.llm.fallback.provider === 'locca'
+                              : fallbackCustomProvider || form.llm.fallback.provider === 'locca'
                                 ? 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf'
                                 : 'model id'
                       }
@@ -825,7 +875,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   {fallbackDiscovery.models.length > 0
                     ? `${fallbackDiscovery.models.length} model${fallbackDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
                     : !fallbackDiscoveryEnabled
-                      ? (form.llm.fallback.provider === 'openai-compatible'
+                      ? (fallbackCustomProvider
                           ? 'Set a base URL above to discover available models.'
                           : 'Set an API key above to discover and select a model.')
                       : fallbackDiscovery.error
@@ -1018,7 +1068,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             step={10}
             value={form.llm.noRepeatWindow}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
-              setForm(f => ({ ...f, llm: { ...f.llm, noRepeatWindow: Math.max(0, Number(e.target.value)) } }))
+              setForm(f => ({ ...f, llm: { ...f.llm, noRepeatWindow: e.target.value } }))
             }
             placeholder="100"
             className="max-w-[200px]"

@@ -7,6 +7,7 @@
 // host-unreachable error retries against the fallback leg. See discussion #320.
 
 import * as settings from '../../../settings.js';
+import { effectiveLiteLlmBaseUrl } from '../../../litellm-config.js';
 import { languageModel, resolveModelId, ollamaBaseUrl, llmCfg } from './registry.js';
 
 export interface Leg {
@@ -71,6 +72,10 @@ export async function probeLegReachable(leg: Leg, timeoutMs = 3000): Promise<boo
   } else if (cfg.provider === 'openai-compatible') {
     if (!cfg.baseUrl) return false;
     url = `${cfg.baseUrl.replace(/\/$/, '')}/models`;
+  } else if (cfg.provider === 'litellm') {
+    const baseUrl = effectiveLiteLlmBaseUrl(cfg);
+    if (!baseUrl) return false;
+    url = `${baseUrl}/models`;
   } else {
     // Hosted provider — no cheap local probe; assume up.
     return true;

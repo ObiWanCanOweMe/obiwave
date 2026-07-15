@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useAdminAuth } from '@/lib/adminAuth';
+import { AsyncResultGeneration } from '@/lib/asyncResultGeneration';
 
 // Shape of every wizard step in one place — easier to pass around than
 // individual setState callbacks. Each step component reads/writes via the
@@ -110,6 +111,7 @@ export function useWizard() {
   const auth = useAdminAuth();
   const [data, setData] = useState<WizardData>(DEFAULT_DATA);
   const [stepIdx, setStepIdx] = useState(0);
+  const llmTestGeneration = useRef(new AsyncResultGeneration());
 
   const step = STEP_ORDER[stepIdx];
   const next = useCallback(() => setStepIdx(i => Math.min(i + 1, STEP_ORDER.length - 1)), []);
@@ -122,7 +124,17 @@ export function useWizard() {
   const patch = useCallback((p: Partial<WizardData> | ((d: WizardData) => Partial<WizardData>)) => {
     setData(d => {
       const incoming = typeof p === 'function' ? p(d) : p;
-      return { ...d, ...incoming };
+      const next = { ...d, ...incoming };
+      if (
+        next.llm.provider !== d.llm.provider
+        || next.llm.model !== d.llm.model
+        || next.llm.apiKey !== d.llm.apiKey
+        || next.llm.baseUrl !== d.llm.baseUrl
+        || next.llm.ollamaUrl !== d.llm.ollamaUrl
+      ) {
+        llmTestGeneration.current.invalidate();
+      }
+      return next;
     });
   }, []);
 
@@ -157,6 +169,7 @@ export function useWizard() {
     // 60s client cap sits just above the controller's 45s generateText abort,
     // so a slow/unreachable model surfaces the server's error rather than a
     // bare client timeout — and the button can never hang forever.
+    const generation = llmTestGeneration.current.begin();
     try {
       const r = await auth.adminFetch('/onboarding/test-llm', {
         method: 'POST',
@@ -166,28 +179,36 @@ export function useWizard() {
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; sample?: string; error?: string };
       const result = { ok: !!j.ok, msg: j.ok ? `responded: "${j.sample}"` : (j.error || `controller returned HTTP ${r.status}`) };
-      patch({ llmTest: result });
+      if (llmTestGeneration.current.isCurrent(generation)) patch({ llmTest: result });
       return result;
     } catch (err: unknown) {
       const result = { ok: false, msg: fetchErrorMsg(err) };
-      patch({ llmTest: result });
+      if (llmTestGeneration.current.isCurrent(generation)) patch({ llmTest: result });
       return result;
     }
   }, [auth, data.llm, patch]);
 
-  // Probe a locca / openai-compatible server for its loaded model list so the
-  // operator can pick the model instead of typing it. Uses data.llm.baseUrl
-  // when set; otherwise the controller defaults to the locca host URL.
-  const discoverLocca = useCallback(async () => {
-    const qs = data.llm.baseUrl ? `?baseUrl=${encodeURIComponent(data.llm.baseUrl)}` : '';
-    const r = await auth.adminFetch(`/settings/llm/discover${qs}`);
+  // Probe a custom endpoint for its loaded model list so the operator can pick
+  // the model instead of typing it. LiteLLM resolves a blank URL from the
+  // controller environment; openai-compatible still requires an explicit URL.
+  const discoverCustomModels = useCallback(async () => {
+    const r = await auth.adminFetch('/settings/llm/models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: data.llm.provider,
+        leg: 'onboarding',
+        baseUrl: data.llm.baseUrl,
+        apiKey: data.llm.apiKey,
+      }),
+    });
     const j = (await r.json().catch(() => ({}))) as {
-      reachable?: boolean;
+      ok?: boolean;
       models?: string[];
       error?: string;
     };
-    return { reachable: !!j.reachable, models: j.models || [], error: j.error };
-  }, [auth, data.llm.baseUrl]);
+    return { reachable: !!j.ok, models: j.models || [], error: j.error };
+  }, [auth, data.llm.provider, data.llm.baseUrl, data.llm.apiKey]);
 
   const save = useCallback(async () => {
     // Stitch the apiKeys into the right env-var keys before sending.
@@ -215,9 +236,9 @@ export function useWizard() {
       llm: {
         provider: data.llm.provider,
         model: data.llm.model,
-        // Cloud keys go to apiKeys (state/secrets.env). settings.json keeps
-        // only the provider/model/url; never the key.
-        apiKey: '',
+        // Native cloud keys go to apiKeys (state/secrets.env). Custom gateway
+        // tokens are provider-scoped inline overrides in settings.json.
+        apiKey: data.llm.provider === 'litellm' ? data.llm.apiKey : '',
         baseUrl: data.llm.baseUrl,
         ollamaUrl: data.llm.ollamaUrl,
       },
@@ -254,7 +275,7 @@ export function useWizard() {
     goto,
     testNavidrome,
     testLlm,
-    discoverLocca,
+    discoverCustomModels,
     save,
   };
 }

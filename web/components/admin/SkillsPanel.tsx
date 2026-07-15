@@ -12,15 +12,24 @@
 // Creating and editing a skill (custom or built-in) opens the SkillEditModal
 // "segment sheet" — the list here is just the roster + quick actions.
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
 import { notify, errorMessage } from '../../lib/notify';
 import { useAdminAuth } from '../../lib/adminAuth';
-import { RefreshCw, Plus, Users, Upload } from 'lucide-react';
-import { Card, Btn, Pill, Eyebrow, Toggle } from './ui';
+import {
+  RefreshCw, Plus, Users, Upload, Search, X,
+  CloudSun, Newspaper, TrafficCone, Lightbulb, Cake, Disc3, Globe, Sparkles,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Card, Btn, Pill, Eyebrow, MetaChip, Toggle } from './ui';
 import { V3Alert } from '../ui/alert';
 import { Modal } from '../ui/modal';
+import { Input } from '../ui/input';
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
+} from '../ui/select';
 import SkillEditModal from './skills/SkillEditModal';
+import type { PersonaLite } from './skills/SkillEditModal';
 
 interface Skill {
   name: string;
@@ -35,7 +44,25 @@ interface Skill {
   custom?: boolean;
   feed?: string | null;
   feedMaxItems?: number | null;
+  tags?: string[];
 }
+
+// Slim show shape from GET /settings — enough for the "filter by show" option
+// (a show's skills are its HOST persona's, plus its pinned feature segment).
+interface ShowLite {
+  id: string;
+  name: string;
+  personaId: string;
+  segmentSkill: string;
+}
+
+// Does this persona run the skill? `skills: null` is the "all skills" sentinel.
+function personaHasSkill(p: PersonaLite, name: string): boolean {
+  return p.skills === null || p.skills.includes(name);
+}
+
+type StatusFilter = 'all' | 'enabled' | 'disabled' | 'needs-key' | 'custom' | 'builtin';
+type SortMode = 'az' | 'enabled' | 'cooldown';
 
 // One entry in the shipped community catalog (GET /dj/skills/community).
 interface CommunitySkill {
@@ -81,6 +108,19 @@ function cooldownLabel(ms?: number): string {
   return `${h} h cooldown`;
 }
 
+// A glyph for each of the seven built-in segment kinds — fills the slate card's
+// "face" slot where personas/shows have an avatar. Custom skills (and any
+// unmapped kind) fall back to Sparkles, so this is not a maintenance trap.
+const KIND_ICONS: Record<string, LucideIcon> = {
+  weather: CloudSun,
+  news: Newspaper,
+  traffic: TrafficCone,
+  curiosity: Lightbulb,
+  'album-anniversary': Cake,
+  'library-deep-cut': Disc3,
+  'web-search': Globe,
+};
+
 interface SkillDescriptionProps {
   text?: string;
   keyUrl?: string;
@@ -121,6 +161,50 @@ export default function SkillsPanel() {
   const [importing, setImporting] = useState(false);                 // zip import in flight?
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Roster context for the organisation tools — best-effort from GET /settings;
+  // when it fails the DJ/show filter and assignment pills simply don't render.
+  const [personas, setPersonas] = useState<PersonaLite[]>([]);
+  const [shows, setShows] = useState<ShowLite[]>([]);
+
+  // Organisation controls — component-local, reset on navigation.
+  const [query, setQuery] = useState('');
+  const [who, setWho] = useState('all');            // 'all' | 'p:<personaId>' | 's:<showId>'
+  const [tagSel, setTagSel] = useState<string[]>([]);
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [sort, setSort] = useState<SortMode>('az');
+
+  // Pull the slim persona/show roster out of GET /settings. Reused after the
+  // modal saves DJ assignments, so the filter + pills stay accurate.
+  const refreshRoster = useCallback(async () => {
+    try {
+      const r = await adminFetch('/settings');
+      if (!r.ok) return;
+      const j = (await r.json().catch(() => ({}))) as {
+        values?: {
+          personas?: Array<{ id?: string; name?: string; skills?: string[] | null }>;
+          shows?: Array<{ id?: string; name?: string; personaId?: string; segmentSkill?: string }>;
+        };
+      };
+      const ps = Array.isArray(j.values?.personas) ? j.values.personas : [];
+      setPersonas(ps
+        .map(p => ({
+          id: String(p.id || ''),
+          name: String(p.name || ''),
+          skills: Array.isArray(p.skills) ? p.skills.map(String) : null,
+        }))
+        .filter(p => p.id));
+      const sh = Array.isArray(j.values?.shows) ? j.values.shows : [];
+      setShows(sh
+        .map(s => ({
+          id: String(s.id || ''),
+          name: String(s.name || ''),
+          personaId: String(s.personaId || ''),
+          segmentSkill: typeof s.segmentSkill === 'string' ? s.segmentSkill : '',
+        }))
+        .filter(s => s.id));
+    } catch { /* organisation tools degrade gracefully */ }
+  }, [adminFetch]);
+
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -150,8 +234,10 @@ export default function SkillsPanel() {
         if (!cancelled) setCommunity([]);
       }
     })();
+    // Roster for the DJ/show filter — best-effort like the community catalog.
+    refreshRoster();
     return () => { cancelled = true; };
-  }, [hydrated, needsAuth, adminFetch]);
+  }, [hydrated, needsAuth, adminFetch, refreshRoster]);
 
   const toggle = async (name: string, on: boolean) => {
     setBusy(name);
@@ -271,6 +357,62 @@ export default function SkillsPanel() {
 
   const enabledCount = skills.filter(s => s.enabled).length;
 
+  // Union of every tag in the catalog — the tag filter's vocabulary. Hidden
+  // until at least one skill carries a tag.
+  const allTags = [...new Set(skills.flatMap(s => s.tags || []))].sort();
+
+  // Who runs this skill — drives the DJ/show filter and the assignment pill.
+  const matchesWho = (s: Skill): boolean => {
+    if (who === 'all') return true;
+    if (who.startsWith('p:')) {
+      const p = personas.find(x => x.id === who.slice(2));
+      return !!p && personaHasSkill(p, s.name);
+    }
+    const show = shows.find(x => x.id === who.slice(2));
+    if (!show) return true;
+    if (show.segmentSkill === s.name) return true; // the show's pinned feature
+    const host = personas.find(x => x.id === show.personaId);
+    return !!host && personaHasSkill(host, s.name);
+  };
+
+  const matchesStatus = (s: Skill): boolean => {
+    switch (status) {
+      case 'enabled': return !!s.enabled;
+      case 'disabled': return !s.enabled;
+      case 'needs-key': return s.ready === false;
+      case 'custom': return !!s.custom;
+      case 'builtin': return !s.custom;
+      default: return true;
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const visible = skills
+    .filter(s =>
+      (!q
+        || (s.label || '').toLowerCase().includes(q)
+        || s.name.toLowerCase().includes(q)
+        || (s.description || '').toLowerCase().includes(q))
+      && (!tagSel.length || (s.tags || []).some(t => tagSel.includes(t)))
+      && matchesWho(s)
+      && matchesStatus(s))
+    .sort((a, b) => {
+      const az = (a.label || a.name).localeCompare(b.label || b.name);
+      if (sort === 'enabled') return Number(!!b.enabled) - Number(!!a.enabled) || az;
+      if (sort === 'cooldown') return (a.cooldownMs || 0) - (b.cooldownMs || 0) || az;
+      return az;
+    });
+
+  const filtered = query.trim() !== '' || who !== 'all' || tagSel.length > 0 || status !== 'all';
+  const clearFilters = () => { setQuery(''); setWho('all'); setTagSel([]); setStatus('all'); };
+
+  // "All DJs" / "3 of 8 DJs" pill copy — needs the roster; empty string hides it.
+  const assignmentLabel = (s: Skill): string => {
+    if (!personas.length) return '';
+    const n = personas.filter(p => personaHasSkill(p, s.name)).length;
+    return n === personas.length ? 'All DJs' : `${n} of ${personas.length} DJs`;
+  };
+
   return (
     <div className="grid gap-4">
       {/* ── HERO ─────────────────────────────────────────────────────────── */}
@@ -282,8 +424,9 @@ export default function SkillsPanel() {
           </div>
           <div className="mt-1 text-[11px] leading-[1.6] text-muted">
             Each skill is an autonomous segment. A skill fires only when it is enabled here
-            <strong> and</strong> assigned to the persona on air. Set per-persona assignments
-            on the Personas page. “Run now” is an operator override and ignores both.
+            <strong> and</strong> assigned to the persona on air. Assign DJs from each skill&apos;s
+            Edit sheet, or per-persona on the Personas page. “Run now” is an operator override
+            and ignores both.
           </div>
           <div className="mt-1 text-[11px] leading-[1.6] text-muted">
             Hit <strong>Edit</strong> on any skill to open its segment sheet — change the brief,
@@ -306,7 +449,9 @@ export default function SkillsPanel() {
           </a>
         </div>
         <div className="flex items-center gap-4 bg-[var(--ink-softer)] p-3.5">
-          <span className="caption">{skills.length} skill{skills.length === 1 ? '' : 's'}</span>
+          <span className="caption">
+            {filtered ? `${visible.length} of ${skills.length}` : skills.length} skill{skills.length === 1 ? '' : 's'}
+          </span>
           <span className="caption text-vermilion">{enabledCount} enabled</span>
           <div className="ml-auto flex items-center gap-2">
             <Btn
@@ -333,75 +478,236 @@ export default function SkillsPanel() {
         </div>
       </section>
 
-      {/* ── SKILL LIST ───────────────────────────────────────────────────── */}
-      {skills.map(s => (
-        <Card
-          key={s.name}
-          title={s.label || s.name}
-          right={
-            <>
-              {s.custom && <Pill>custom</Pill>}
-              <Pill tone={s.enabled ? 'accent' : 'default'} dot={s.enabled}>
-                {s.enabled ? 'enabled' : 'disabled'}
-              </Pill>
-              <Toggle
-                on={s.enabled}
-                disabled={busy === s.name}
-                onClick={() => toggle(s.name, !s.enabled)}
-              />
-            </>
-          }
-        >
-          {s.ready === false && (
-            <div className="mb-3">
-              <V3Alert tone="error" title="API key not set">
-                This skill needs the <code>{s.requiresKey || 'required API key'}</code> environment
-                variable set in <code>.env</code>. Until then it stays inert and never
-                fires autonomously, even when enabled.
-                {s.keyUrl && (
-                  <>
-                    {' '}
-                    <a
-                      href={s.keyUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-bold text-vermilion underline decoration-[1.5px] underline-offset-2"
-                    >
-                      Get a key here
-                    </a>.
-                  </>
+      {/* ── ORGANISE — search / filter / sort ─────────────────────────────── */}
+      <section className="card p-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] flex-1">
+            <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
+            <Input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search skills…"
+              aria-label="Search skills"
+              className="pl-8"
+            />
+          </div>
+          {personas.length > 0 && (
+            <Select value={who} onValueChange={setWho}>
+              <SelectTrigger className="w-[190px]" aria-label="Filter by DJ or show">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All DJs &amp; shows</SelectItem>
+                <SelectGroup>
+                  <SelectLabel>DJs</SelectLabel>
+                  {personas.map(p => (
+                    <SelectItem key={p.id} value={`p:${p.id}`}>DJ: {p.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+                {shows.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>Shows</SelectLabel>
+                    {shows.map(s => (
+                      <SelectItem key={s.id} value={`s:${s.id}`}>Show: {s.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
                 )}
-              </V3Alert>
-            </div>
+              </SelectContent>
+            </Select>
           )}
-          <div className="grid grid-cols-[1fr_auto] items-center gap-4">
-            <div>
-              <div className="line-clamp-2 text-[12px] leading-[1.6] text-muted">
-                <SkillDescription text={s.description} keyUrl={s.keyUrl} />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Pill className="text-[8px]">{cooldownLabel(s.cooldownMs)}</Pill>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              {/* Same cart-pad language as the dash DJ segment pads, slimmed
-                  to one line — LED arms on hover, blinks while running. */}
-              <button
-                type="button"
-                onClick={() => runNow(s.name)}
-                disabled={busy === s.name}
-                className={cn('seg-pad seg-pad--slim', busy === s.name && 'is-firing')}
-              >
-                <span className="seg-led" aria-hidden />
-                <span className="seg-label">{busy === s.name ? 'Working…' : 'Run now'}</span>
-              </button>
-              {/* Edit opens the segment-sheet modal for both built-in and custom
-                  skills; Run now / Delete live inside the sheet. */}
-              <Btn onClick={() => setModal({ mode: 'edit', skill: s })}>Edit</Btn>
-            </div>
+          <Select value={status} onValueChange={v => setStatus(v as StatusFilter)}>
+            <SelectTrigger className="w-[130px]" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any status</SelectItem>
+              <SelectItem value="enabled">Enabled</SelectItem>
+              <SelectItem value="disabled">Disabled</SelectItem>
+              <SelectItem value="needs-key">Needs key</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+              <SelectItem value="builtin">Built-in</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sort} onValueChange={v => setSort(v as SortMode)}>
+            <SelectTrigger className="w-[140px]" aria-label="Sort skills">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="az">A–Z</SelectItem>
+              <SelectItem value="enabled">Enabled first</SelectItem>
+              <SelectItem value="cooldown">Cooldown</SelectItem>
+            </SelectContent>
+          </Select>
+          {filtered && (
+            <Btn onClick={clearFilters} title="Clear all filters">
+              <X size={14} /> Clear
+            </Btn>
+          )}
+        </div>
+        {allTags.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1">
+            <span className="caption mr-1">tags</span>
+            {allTags.map(t => {
+              const on = tagSel.includes(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setTagSel(cur => (on ? cur.filter(x => x !== t) : [...cur, t]))}
+                  className={cn(
+                    'border border-ink px-2 py-0.5 text-[12px]',
+                    on ? 'bg-ink text-bg' : 'text-ink hover:bg-[var(--ink-soft)]',
+                  )}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* ── SKILL LIST ───────────────────────────────────────────────────── */}
+      {visible.length === 0 && (
+        <Card title="No matches">
+          <div className="text-[13px] text-muted italic">
+            No skill matches the current filters.{' '}
+            <button type="button" onClick={clearFilters} className="font-bold text-vermilion underline decoration-[1.5px] underline-offset-2">
+              Clear filters
+            </button>
           </div>
         </Card>
-      ))}
+      )}
+      {visible.map(s => {
+        const Icon = KIND_ICONS[s.kind || s.name] ?? Sparkles;
+        // Spine keyed to enabled state — the same signal the toggle carries.
+        const spine = s.enabled ? 'bg-[var(--accent)]' : 'bg-separator-strong';
+        const assign = assignmentLabel(s);
+        const pinned = who.startsWith('s:')
+          && shows.find(x => x.id === who.slice(2))?.segmentSkill === s.name;
+        return (
+          // The whole card opens the edit sheet; the Toggle, Run now, and the
+          // API-key link stopPropagation so they act in place. The onKeyDown
+          // guard (target === currentTarget) keeps a keyboard press on those
+          // inner controls from bubbling up and also opening the editor.
+          <article
+            key={s.name}
+            role="button"
+            tabIndex={0}
+            aria-label={`Edit ${s.label || s.name}`}
+            onClick={() => setModal({ mode: 'edit', skill: s })}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setModal({ mode: 'edit', skill: s }); }
+            }}
+            className={cn(
+              'group card relative cursor-pointer transition-colors hover:bg-[var(--ink-softer)]',
+              'focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]',
+            )}
+          >
+            {/* enabled/disabled spine */}
+            <span
+              aria-hidden="true"
+              className={cn('absolute inset-y-0 left-0 w-1 transition-[width] group-hover:w-1.5', spine)}
+            />
+
+            <div className="card-body flex gap-3.5">
+              {/* kind glyph — the face slot */}
+              <span
+                className={cn(
+                  'grid size-12 flex-none place-items-center border border-ink bg-[var(--ink-softer)]',
+                  s.enabled ? 'text-ink' : 'text-muted',
+                )}
+              >
+                <Icon size={20} strokeWidth={1.75} aria-hidden />
+              </span>
+
+              {/* body — text stack + toggle rail as siblings, so the taller rail
+                  never inflates the name row and pushes the description down */}
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                {/* text stack — name, description, facets, actions stack tightly */}
+                <div className="grid min-w-0 flex-1 gap-2.5">
+                  {/* name + custom flag */}
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[17px] font-extrabold tracking-[-0.01em] text-ink">
+                      {s.label || s.name}
+                    </span>
+                    {s.custom && <Pill className="text-[8px]">custom</Pill>}
+                  </div>
+
+                  {s.ready === false && (
+                    <V3Alert tone="error" title="API key not set">
+                      This skill needs the <code>{s.requiresKey || 'required API key'}</code> environment
+                      variable set in <code>.env</code>. Until then it stays inert and never
+                      fires autonomously, even when enabled.
+                      {s.keyUrl && (
+                        <>
+                          {' '}
+                          <a
+                            href={s.keyUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="font-bold text-vermilion underline decoration-[1.5px] underline-offset-2"
+                          >
+                            Get a key here
+                          </a>.
+                        </>
+                      )}
+                    </V3Alert>
+                  )}
+
+                  {/* brief */}
+                  <p className="line-clamp-2 text-[12px] leading-[1.55] text-muted italic">
+                    <SkillDescription text={s.description} keyUrl={s.keyUrl} />
+                  </p>
+
+                  {/* facets — cadence, reach, tags */}
+                  <div className="flex flex-wrap gap-1">
+                    <MetaChip>{cooldownLabel(s.cooldownMs)}</MetaChip>
+                    {assign && <MetaChip>{assign}</MetaChip>}
+                    {pinned && <MetaChip accent>pinned feature</MetaChip>}
+                    {(s.tags || []).map(t => (
+                      <MetaChip key={t}>#{t}</MetaChip>
+                    ))}
+                  </div>
+
+                  {/* actions — Run now on the left, Edit affordance on the right.
+                      Same cart-pad language as the dash DJ segment pads, slimmed
+                      to one line — LED arms on hover, blinks while running. */}
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); runNow(s.name); }}
+                      disabled={busy === s.name}
+                      className={cn('seg-pad seg-pad--slim', busy === s.name && 'is-firing')}
+                    >
+                      <span className="seg-led" aria-hidden />
+                      <span className="seg-label">{busy === s.name ? 'Working…' : 'Run now'}</span>
+                    </button>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.16em] text-muted uppercase transition-colors group-hover:text-vermilion">
+                      Edit <span aria-hidden="true">→</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* right rail — the toggle + its state */}
+                <div className="flex flex-none flex-col items-end gap-1 text-right">
+                  <span onClick={e => e.stopPropagation()}>
+                    <Toggle
+                      on={s.enabled}
+                      disabled={busy === s.name}
+                      onClick={() => toggle(s.name, !s.enabled)}
+                    />
+                  </span>
+                  <span className="caption">{s.enabled ? 'enabled' : 'disabled'}</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        );
+      })}
 
       {/* ── COMMUNITY CATALOG MODAL ──────────────────────────────────────── */}
       <Modal
@@ -507,8 +813,11 @@ export default function SkillsPanel() {
         <SkillEditModal
           mode={modal.mode}
           skill={modal.mode === 'edit' ? modal.skill : undefined}
+          personas={personas}
+          tagSuggestions={allTags}
           onClose={() => setModal(null)}
           onSkillsChange={next => { if (Array.isArray(next)) setSkills(next as Skill[]); }}
+          onRosterChange={refreshRoster}
         />
       )}
     </div>

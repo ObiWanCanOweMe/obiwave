@@ -10,6 +10,7 @@ import { STATE_DIR, config } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
 import { DEFAULT_THEME_ID, isValidThemeId, listThemes } from './themes.js';
 import { isValidTimezone, setStationTimezone, zonedParts } from './time.js';
+import { effectiveLiteLlmBaseUrl } from './litellm-config.js';
 
 // Where uploaded persona avatars live. One file per persona, basename =
 // `<personaId>.<ext>`. The dedicated upload route is the only writer; the
@@ -280,6 +281,7 @@ function validateTtsCorrectionsStrict(raw: any): Array<{ from: string; to: strin
 export const LLM_PROVIDERS = [
   'ollama',
   'openai-compatible',
+  'litellm',
   'locca',
   'openrouter',
   'requesty',
@@ -310,6 +312,21 @@ export const EMBEDDING_PROVIDERS = [
   'google',
   'requesty',
 ];
+
+function defaultEmbeddingModelForProvider(provider: string): string {
+  switch (provider) {
+    case 'openai':
+    case 'openai-compatible':
+      return 'text-embedding-3-small';
+    case 'google':
+      return 'text-embedding-004';
+    case 'openrouter':
+    case 'requesty':
+      return 'openai/text-embedding-3-small';
+    default:
+      return 'nomic-embed-text';
+  }
+}
 
 // Coerce a stored Ollama context-window value. 0 disables (use Ollama's own
 // default); any other number is clamped to a sane [2048, 131072] band and
@@ -645,7 +662,7 @@ const SKILL_SLUG_RE = /^[a-z0-9-]{1,40}$/;
 // Exported for the community-persona install route (routes/personas.ts), which
 // gives a friendly 409 before settings.update() would throw on an oversize roster.
 export const PERSONA_LIMIT = 48;
-const SHOWS_LIMIT = 64;
+export const SHOWS_LIMIT = 64;
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
@@ -656,7 +673,10 @@ const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
 // attribute the values OR together at pick time; across attributes they AND —
 // so past a handful the filter stops meaning anything.
 const SHOW_FILTER_VALUES_MAX = 6;
-const SKILLS_PER_PERSONA_LIMIT = 20;
+// Must comfortably exceed a realistic skill library: unticking one skill on an
+// "all skills" (null) persona materialises the FULL catalog minus one, so a cap
+// near the library size would make that first untick fail (#skill-organization).
+const SKILLS_PER_PERSONA_LIMIT = 64;
 const WEBHOOKS_LIMIT = 16;
 // Prompt-template library (djPrompts). Text bounds match the historical
 // single-djPrompt rule — keep them in lockstep with PROMPT_MIN/PROMPT_MAX in
@@ -1006,6 +1026,12 @@ export const MP3_BITRATES = [64, 96, 128, 160, 192, 320] as const;
 export const OPUS_BITRATES = [96, 128, 192, 256, 320] as const;
 export const AAC_BITRATES = [128, 192, 256] as const;
 
+// Where per-track loudness comes from (queue.applyLoudnessGain, issue #998):
+// an embedded ReplayGain tag (Navidrome's OpenSubsonic replayGain field),
+// the analyzer's measured LUFS, or tag-with-measured-fallback (the default).
+export const LOUDNESS_SOURCES = ['replaygain-then-measured', 'replaygain', 'measured'] as const;
+export type LoudnessSource = (typeof LOUDNESS_SOURCES)[number];
+
 const DEFAULTS = {
   jingleRatio: 30, // 1 jingle per N music tracks
   crossfadeDuration: 10.0, // seconds
@@ -1043,10 +1069,15 @@ const DEFAULTS = {
   // direction only — cuts have a fixed wide clamp, and the boost is further
   // limited by the track's own measured peak headroom, so widening this on a
   // dynamic library won't slam the broadcast limiter. Read live per track at
-  // annotate time; no mixer restart.
+  // annotate time; no mixer restart. `source` picks where the loudness figure
+  // comes from (issue #998): embedded ReplayGain tags (whole-file stereo R128,
+  // via Navidrome's OpenSubsonic replayGain field) vs the analyzer's measured
+  // LUFS (leading window only). The default prefers the tag and falls back to
+  // the measurement, so untagged libraries behave exactly as before.
   loudness: {
     targetLufs: -14,
     maxBoostDb: 6,
+    source: 'replaygain-then-measured' as LoudnessSource,
   },
   weather: { lat: 30.7333, lng: 76.7794, locationName: 'Punjab', units: 'metric' as 'metric' | 'imperial' },
   // Operator-facing station name. Substituted into the DJ prompt's {station}
@@ -1077,7 +1108,13 @@ const DEFAULTS = {
   // player reads these via GET /state (alongside the theme) and applies them
   // live; no restart. `boothBuddy` gates the DJ-line mascot — OFF by default,
   // so the line shows the classic ♪/◇ marker until an operator opts in.
-  ui: { boothBuddy: false },
+  // `skin` is the station-wide player-skin id — the web app owns the skin
+  // registry and falls back to its default on an unknown id, so the
+  // controller only stores a slug, never validates against a list.
+  // `tuneInOverlay` gates the full-bleed "Tap to tune in" gate — ON by default;
+  // OFF drops the takeover and listeners start via the skin's own play button
+  // (browsers still can't autoplay, so a tap is always required somewhere).
+  ui: { boothBuddy: false, skin: 'classic', tuneInOverlay: true },
   // Global DJ prompt template. '' means "use DEFAULT_DJ_PROMPT_TEMPLATE".
   // Always the RESOLVED text of the active djPrompts entry — kept so
   // renderDjPrompt() (and an older controller sharing the same settings.json)
@@ -1443,7 +1480,9 @@ const DEFAULTS = {
 };
 
 const BOUNDS = {
-  jingleRatio: { min: 1, max: 1000, type: 'int' },
+  // 0 = jingles off entirely — radio.liq skips the jingle rotate when the
+  // ratio file reads 0 (issue #997: no way to disable the station stinger).
+  jingleRatio: { min: 0, max: 1000, type: 'int' },
   crossfadeDuration: { min: 0, max: 30, type: 'float' },
   // 0 = off; 36000 s (10h) is a generous ceiling that still leaves room for
   // long-form mix shows without letting a typo set an absurd value.
@@ -1843,6 +1882,9 @@ export async function load() {
         stored.loudness.maxBoostDb <= BOUNDS.loudnessMaxBoostDb.max
           ? stored.loudness.maxBoostDb
           : DEFAULTS.loudness.maxBoostDb,
+      source: LOUDNESS_SOURCES.includes(stored.loudness?.source)
+        ? (stored.loudness.source as LoudnessSource)
+        : DEFAULTS.loudness.source,
     },
     weather: {
       lat: stored.weather?.lat ?? DEFAULTS.weather.lat,
@@ -1889,6 +1931,14 @@ export async function load() {
         typeof stored.ui?.boothBuddy === 'boolean'
           ? stored.ui.boothBuddy
           : DEFAULTS.ui.boothBuddy,
+      skin:
+        typeof stored.ui?.skin === 'string' && stored.ui.skin.trim()
+          ? stored.ui.skin.trim()
+          : DEFAULTS.ui.skin,
+      tuneInOverlay:
+        typeof stored.ui?.tuneInOverlay === 'boolean'
+          ? stored.ui.tuneInOverlay
+          : DEFAULTS.ui.tuneInOverlay,
     },
     personas,
     activePersonaId,
@@ -2255,6 +2305,13 @@ export function get() {
 
 export function getDefaults() {
   return DEFAULTS;
+}
+
+// Public shape for POST /settings. The internal update result includes the
+// complete saved settings so in-process callers can apply live changes, but it
+// must never cross the HTTP boundary because it contains provider key values.
+export function publicUpdateResult(result: { requiresRestart?: unknown }) {
+  return { requiresRestart: !!result?.requiresRestart };
 }
 
 // Resolve the operator-entered inline API key for a provider from the
@@ -2823,6 +2880,10 @@ function validateFestivalsStrict(raw) {
 export async function update(patch) {
   const cur = await load();
   const next = JSON.parse(JSON.stringify(cur));
+  const inheritedEmbeddingProvider = next.embedding.provider
+    || (EMBEDDING_PROVIDERS.includes(next.llm.provider) ? next.llm.provider : 'ollama');
+  const inheritedEmbeddingModel = next.embedding.model
+    || defaultEmbeddingModelForProvider(inheritedEmbeddingProvider);
   let restart = false;
 
   if ('jingleRatio' in patch) {
@@ -2984,6 +3045,12 @@ export async function update(patch) {
         throw new Error(`loudness.maxBoostDb must be number in [${b.min}, ${b.max}]`);
       }
       next.loudness.maxBoostDb = v;
+    }
+    if (lo.source !== undefined) {
+      if (!LOUDNESS_SOURCES.includes(lo.source)) {
+        throw new Error(`loudness.source must be one of: ${LOUDNESS_SOURCES.join(', ')}`);
+      }
+      next.loudness.source = lo.source;
     }
   }
   if ('weather' in patch) {
@@ -3338,6 +3405,12 @@ export async function update(patch) {
     if (next.llm.provider === 'openai-compatible' && !next.llm.baseUrl) {
       throw new Error('llm.baseUrl is required when provider is "openai-compatible"');
     }
+    if (next.llm.provider === 'litellm' && !effectiveLiteLlmBaseUrl(next.llm)) {
+      throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+    }
+    if (next.llm.provider === 'litellm' && !next.llm.model) {
+      throw new Error('LiteLLM model is required');
+    }
     // Backup leg — same connection fields, validated identically. The
     // openai-compatible-needs-baseUrl rule is enforced only when the fallback
     // is enabled, so a half-filled, disabled backup never blocks a save.
@@ -3359,6 +3432,20 @@ export async function update(patch) {
         throw new Error(
           'llm.fallback.baseUrl is required when its provider is "openai-compatible"',
         );
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !effectiveLiteLlmBaseUrl(next.llm.fallback)
+      ) {
+        throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !next.llm.fallback.model
+      ) {
+        throw new Error('LiteLLM model is required');
       }
     }
   }
@@ -3523,6 +3610,17 @@ export async function update(patch) {
     if (ui.boothBuddy !== undefined) {
       next.ui.boothBuddy = !!ui.boothBuddy;
     }
+    if (ui.skin !== undefined) {
+      // Slug only — the web registry resolves it and falls back on unknowns,
+      // so an invalid value is dropped rather than erroring the whole patch.
+      const slug = String(ui.skin).trim().toLowerCase();
+      if (/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)) {
+        next.ui.skin = slug;
+      }
+    }
+    if (ui.tuneInOverlay !== undefined) {
+      next.ui.tuneInOverlay = !!ui.tuneInOverlay;
+    }
   }
   if ('webhooks' in patch) {
     next.webhooks = validateWebhooksStrict(patch.webhooks, next.webhooks || []);
@@ -3575,6 +3673,14 @@ export async function update(patch) {
         next.scrobble.listenbrainz.baseUrl = trimmed;
       }
     }
+  }
+
+  // LiteLLM is chat-only. Enforce this after BOTH llm and embedding patches so
+  // neither an embedding-only clear nor a combined patch can re-enable chat
+  // provider inheritance. Preserve the prior effective embedding choice.
+  if (next.llm.provider === 'litellm' && !next.embedding.provider) {
+    next.embedding.provider = inheritedEmbeddingProvider;
+    if (!next.embedding.model) next.embedding.model = inheritedEmbeddingModel;
   }
 
   // Post-patch integrity sweep — a personas/shows change in this patch may
@@ -3686,6 +3792,11 @@ export function resolveActiveShow(date = new Date(), s = get()) {
     // entire universe; soft just lets it dominate. Empty array = no anchor.
     playlistIds: Array.isArray(show.playlistIds) ? show.playlistIds.filter((v: unknown) => typeof v === 'string') : [],
     playlistStrict: show.playlistStrict === true,
+    // Navidrome playlist blocklist: tracks in these playlists are hard-dropped
+    // from the show's candidate pool (resolveExcludedPlaylistIds reads this off
+    // the RESOLVED show, so omitting it here silently disabled the whole
+    // feature on every pick path — the #779 blocklist no-op).
+    excludedPlaylistIds: Array.isArray(show.excludedPlaylistIds) ? show.excludedPlaylistIds.filter((v: unknown) => typeof v === 'string') : [],
     // Empty string means "fall back to the station-wide default". The route
     // layer is responsible for resolving an empty/stale id against the live
     // theme registry; we just surface what the show declares.
