@@ -3,9 +3,8 @@ name: Publish CLI binaries
 # Builds the standalone `subwave` CLI for linux + macOS (x64 + arm64) and
 # attaches the binaries to the GitHub Release matching the tag.
 #
-# Triggers:
-#   - push of a tag like v1.2.3 → builds + uploads
-#   - manual workflow_dispatch → builds without uploading (smoke test)
+# Triggered only by fork-qualified release tags. The validate job is the
+# authoritative boundary; the tag glob is intentionally only a coarse filter.
 #
 # The install script at install.sh (served from cli.getsubwave.com → raw
 # GitHub URL → this repo) downloads the matching CLI binary from the latest
@@ -17,14 +16,26 @@ name: Publish CLI binaries
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - 'v*-obiwave.*'
 
 permissions:
   contents: write   # for uploading release assets
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate immutable fork release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
+
   build:
+    needs: validate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,8 +95,8 @@ jobs:
           "cli/dist/$ASSET" --version
 
       - name: Upload binary artifact
-        # Share every built binary (not just on tags) so the smoke jobs can
-        # download and exec them on both tag pushes and workflow_dispatch runs.
+        # Share every built binary so the native smoke jobs can download and
+        # execute the matrix outputs before the workflow completes.
         # Short retention — these are throwaway CI artifacts, not releases.
         uses: actions/upload-artifact@v4
         with:
@@ -186,7 +197,7 @@ jobs:
   # SHA256SUMS file (the standard `sha256sum -c` format) and attach it to the
   # release. install.sh downloads this to verify the binary before install.
   checksums:
-    needs: build
+    needs: [validate, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

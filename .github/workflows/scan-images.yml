@@ -13,16 +13,52 @@ name: Scan images
 # base layers as their lean counterparts.
 
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Exact fork-qualified release tag to scan
+        required: true
+        type: string
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact fork-qualified release tag to scan
+        required: true
+        type: string
 
 permissions:
   contents: read
   security-events: write   # for github/codeql-action/upload-sarif
 
 jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve and validate release tag
+        id: resolve
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            RELEASE_TAG="$(git tag --list 'v*-obiwave.*' --sort=-version:refname | head -1)"
+          else
+            RELEASE_TAG="$REQUESTED_TAG"
+          fi
+          RELEASE_TAG="$RELEASE_TAG" node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
   scan:
+    needs: resolve-tag
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,7 +68,7 @@ jobs:
       - name: Scan ${{ matrix.image }}
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ghcr.io/perminder-klair/subwave-${{ matrix.image }}:latest
+          image-ref: ghcr.io/obiwancanoweme/subwave-${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
           format: sarif
           output: trivy-${{ matrix.image }}.sarif
           severity: CRITICAL,HIGH
