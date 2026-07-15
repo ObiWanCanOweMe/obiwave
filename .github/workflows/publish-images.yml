@@ -119,16 +119,7 @@ jobs:
               WITH_CLAP=1
               WITH_DEMUCS=1
     steps:
-      # fetch-depth: 0 pulls full history + tags so `git describe` resolves the
-      # exact fork-qualified release tag at HEAD.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The version stamped into the images (admin footer + controller). On the
-      # validated tag push, `git describe` returns the fork release tag.
-      - id: version
-        run: echo "version=$(git describe --tags --always 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
 
       # QEMU provides the cross-arch emulation buildx needs to build the
       # linux/arm64 variant on the amd64 GitHub runner.
@@ -150,7 +141,7 @@ jobs:
           platforms: ${{ matrix.platforms }}
           build-args: |
             ${{ matrix.build_args }}
-            SUBWAVE_BUILD_VERSION=${{ steps.version.outputs.version }}
+            SUBWAVE_BUILD_VERSION=${{ github.ref_name }}
           push: true
           tags: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
           labels: |
