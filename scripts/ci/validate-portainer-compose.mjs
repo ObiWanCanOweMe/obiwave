@@ -136,8 +136,8 @@ export function validatePortainerCompose(source) {
 
 const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
 const approvedResolvedPorts = [
-  '10.20.0.9|7700|80',
-  '2600:1700:3210:5314:10:20:0:9|7700|80',
+  '10.20.0.9|7700|80|tcp',
+  '2600:1700:3210:5314:10:20:0:9|7700|80|tcp',
 ].sort();
 
 function resolvedPorts(service) {
@@ -149,7 +149,7 @@ function normalizedPort(port) {
   const value = (field) => ['string', 'number'].includes(typeof port?.[field])
     ? String(port[field])
     : '';
-  return `${value('host_ip')}|${value('published')}|${value('target')}`;
+  return `${value('host_ip')}|${value('published')}|${value('target')}|${value('protocol')}`;
 }
 
 export function validateResolvedPortainerCompose(model) {

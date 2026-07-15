@@ -14,8 +14,8 @@ const validResolved = {
     caddy: {
       environment: { TRUSTED_PROXY_RANGES: trustedProxyRanges },
       ports: [
-        { host_ip: '10.20.0.9', published: '7700', target: 80 },
-        { host_ip: '2600:1700:3210:5314:10:20:0:9', published: 7700, target: '80' },
+        { host_ip: '10.20.0.9', published: '7700', target: 80, protocol: 'tcp' },
+        { host_ip: '2600:1700:3210:5314:10:20:0:9', published: 7700, target: '80', protocol: 'tcp' },
       ],
     },
     web: {},
@@ -243,6 +243,20 @@ test('resolved model requires exact Caddy port ownership and cardinality', () =>
   wrongOwner.services.web.ports = [wrongOwner.services.caddy.ports.pop()];
   assert.ok(resolvedErrors(wrongOwner).includes('resolved service web must not publish host ports'));
   assert.ok(resolvedErrors(wrongOwner).includes('resolved service caddy must publish exactly the approved ports'));
+});
+
+test('resolved model requires TCP for both Caddy publications', () => {
+  const udpOnly = structuredClone(validResolved);
+  for (const port of udpOnly.services.caddy.ports) port.protocol = 'udp';
+  assert.ok(
+    resolvedErrors(udpOnly).includes('resolved service caddy must publish exactly the approved ports'),
+  );
+
+  const mixed = structuredClone(validResolved);
+  mixed.services.caddy.ports[1].protocol = 'udp';
+  assert.ok(
+    resolvedErrors(mixed).includes('resolved service caddy must publish exactly the approved ports'),
+  );
 });
 
 test('resolved model requires exact Caddy trusted proxy ranges', () => {
