@@ -5,13 +5,11 @@
 # images, operator variables are supplied through Portainer's generated
 # stack.env, and persistent state uses ark's absolute host path.
 #
-# bender owns TLS and reverse-proxies one public origin to these bound services:
-#   /stream.mp3  → 10.20.0.9:${ICECAST_PORT:-7702} (disable buffering)
-#   /api/*       → 10.20.0.9:${CONTROLLER_PORT:-7701} (strip /api)
-#   everything   → 10.20.0.9:${WEB_PORT:-7700}
+# Bender owns public TLS and forwards the complete origin to ark port 7700.
+# The bundled Caddy service performs path routing internally to broadcast,
+# controller, and web over the Compose network.
 #
-# Ark owns the persistent data and the fixed IPv4/IPv6 service binds. Bender
-# owns only public TLS and routing to those ark addresses.
+# Ark owns the persistent data and the fixed IPv4/IPv6 Caddy binds.
 # Set SUBWAVE_VERSION in the Portainer stack environment to an existing image
 # tag; interpolation fails before deployment when it is missing.
 
@@ -28,11 +26,29 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  caddy:
+    image: ghcr.io/obiwancanoweme/subwave-caddy:${SUBWAVE_VERSION:?required}
+    container_name: sub-wave-caddy
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      web:
+        condition: service_started
+      controller:
+        condition: service_healthy
+      broadcast:
+        condition: service_healthy
+    ports:
+      - "10.20.0.9:${WEB_PORT:-7700}:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
   # -------------------------------------------------------------------------
   # BROADCAST — icecast2 + liquidsoap in one container
   # -------------------------------------------------------------------------
-  # The icecast HTTP port is bound to the host so the operator's reverse
-  # proxy can front /stream.mp3. Liquidsoap is internal to this container.
+  # Icecast and Liquidsoap are internal to this container and Compose network.
   broadcast:
     image: ghcr.io/obiwancanoweme/subwave-broadcast:${SUBWAVE_VERSION:?required}
     container_name: sub-wave-broadcast
@@ -46,9 +62,6 @@ services:
       # Empty/unset → 100 (the historical default).
       - ICECAST_MAX_CLIENTS=${ICECAST_MAX_CLIENTS:-}
       - TZ=${TZ:-Europe/London}
-    ports:
-      - "10.20.0.9:${ICECAST_PORT:-7702}:7702"
-      - "[2600:1700:3210:5314:10:20:0:9]:${ICECAST_PORT:-7702}:7702"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -62,7 +75,7 @@ services:
       start_period: 15s
 
   # -------------------------------------------------------------------------
-  # CONTROLLER — AI DJ brain, bound to host for your reverse proxy
+  # CONTROLLER — AI DJ brain, internal behind Caddy
   # -------------------------------------------------------------------------
   controller:
     image: ghcr.io/obiwancanoweme/subwave-controller:${SUBWAVE_VERSION:?required}
@@ -100,9 +113,6 @@ services:
       - stack.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    ports:
-      - "10.20.0.9:${CONTROLLER_PORT:-7701}:7701"
-      - "[2600:1700:3210:5314:10:20:0:9]:${CONTROLLER_PORT:-7701}:7701"
     volumes:
       - *state-mount
     # curl is present in the controller image (see docker/Dockerfile.controller).
@@ -137,7 +147,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   # -------------------------------------------------------------------------
-  # WEB — Next.js listener UI, bound to host for your reverse proxy
+  # WEB — Next.js listener UI, internal behind Caddy
   # -------------------------------------------------------------------------
   web:
     image: ghcr.io/obiwancanoweme/subwave-web:${SUBWAVE_VERSION:?required}
@@ -163,12 +173,8 @@ services:
       # to read the live station name from the controller. Internal compose
       # network name — not exposed to the browser (which uses /api via Caddy).
       - CONTROLLER_INTERNAL_URL=http://controller:7701
-    ports:
-      - "10.20.0.9:${WEB_PORT:-7700}:7700"
-      - "[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:7700"
     # Same-origin (/api, /stream.mp3) is the default baked into the image.
-    # Your external proxy is responsible for routing those paths to controller
-    # and broadcast — see the header comment for the route table.
+    # The bundled Caddy service routes those paths to controller and broadcast.
 
   # -------------------------------------------------------------------------
   # TTS-HEAVY (optional) — sidecar for Chatterbox + PocketTTS
@@ -258,6 +264,8 @@ services:
       - analyzer-cache:/opt/analyzer/hf-cache
 
 volumes:
+  caddy-data:
+  caddy-config:
   tts-heavy-chatterbox-cache:
   tts-heavy-pocket-cache:
   analyzer-cache:
