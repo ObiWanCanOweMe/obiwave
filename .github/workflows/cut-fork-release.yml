@@ -14,7 +14,7 @@ on:
       target:
         description: Branch, tag, or commit to release
         required: false
-        default: main
+        default: develop
         type: string
 
 permissions:

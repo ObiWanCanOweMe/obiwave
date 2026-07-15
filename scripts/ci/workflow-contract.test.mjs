@@ -5,6 +5,10 @@ import { readFile } from 'node:fs/promises';
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
 const scan = await readFile(new URL('../../.github/workflows/scan-images.yml', import.meta.url), 'utf8');
+const cutRelease = await readFile(
+  new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
+  'utf8',
+);
 
 test('CI remains unfiltered and reusable while sparing tag runs from cancellation', () => {
   assert.match(ci, /on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+workflow_call:/);
@@ -55,4 +59,11 @@ test('private image scans authenticate with package read permission', () => {
 
 test('production timeout covers bounded target and rollback operations', () => {
   assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 30/);
+});
+
+test('fork release defaults to the fork release branch', () => {
+  assert.match(
+    cutRelease,
+    /target:\s*[\s\S]*?description: Branch, tag, or commit to release[\s\S]*?default: develop/,
+  );
 });
