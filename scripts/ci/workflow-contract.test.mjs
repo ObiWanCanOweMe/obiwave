@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
@@ -9,6 +9,20 @@ const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
 );
+const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
+
+test('official JavaScript actions use the Node 24 runtime', async () => {
+  const workflowFiles = (await readdir(workflowDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.yml'))
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const workflowFile of workflowFiles) {
+    const workflow = await readFile(new URL(workflowFile, workflowDirectory), 'utf8');
+    assert.doesNotMatch(workflow, /actions\/checkout@v4/, workflowFile);
+    assert.doesNotMatch(workflow, /actions\/setup-node@v4/, workflowFile);
+  }
+});
 
 test('CI remains unfiltered and reusable while sparing tag runs from cancellation', () => {
   assert.match(ci, /on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+workflow_call:/);
