@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   DeploymentRolledBackError,
   PortainerClient,
+  PortainerRequestTimeoutError,
   RollbackIncidentError,
   deployWithRollback,
   probeHealth,
@@ -69,6 +70,27 @@ test('upsertEnv changes only the requested entry without mutating input', () => 
     { name: 'SUBWAVE_VERSION', value: 'v0.42.0-obiwave.1' },
   ]);
   assert.equal(env[1].value, 'v0.41.0-obiwave.3');
+});
+
+test('upsertEnv collapses duplicate target entries while preserving unrelated order and fields', () => {
+  const env = [
+    { name: 'ADMIN_USER', value: 'operator', preserved: 'first' },
+    { name: 'SUBWAVE_VERSION', value: 'v0.40.0-obiwave.1', preserved: 'kept-target' },
+    { name: 'SITE_URL', value: 'https://radio.example', preserved: 'middle' },
+    { name: 'SUBWAVE_VERSION', value: 'v0.41.0-obiwave.3', discarded: true },
+    { name: 'ADMIN_PASS', value: 'password', preserved: 'last' },
+  ];
+
+  const result = upsertEnv(env, 'SUBWAVE_VERSION', 'v0.42.0-obiwave.1');
+
+  assert.deepEqual(result, [
+    { name: 'ADMIN_USER', value: 'operator', preserved: 'first' },
+    { name: 'SUBWAVE_VERSION', value: 'v0.42.0-obiwave.1', preserved: 'kept-target' },
+    { name: 'SITE_URL', value: 'https://radio.example', preserved: 'middle' },
+    { name: 'ADMIN_PASS', value: 'password', preserved: 'last' },
+  ]);
+  assert.equal(result.filter((entry) => entry.name === 'SUBWAVE_VERSION').length, 1);
+  assert.equal(env[1].value, 'v0.40.0-obiwave.1');
 });
 
 test('Portainer update requests pruning and image pulls for the selected endpoint', async () => {
@@ -324,6 +346,51 @@ test('a timed-out target update waits for a bounded grace period before rollback
   assert.deepEqual(updates[1].Env, oldEnv);
   assert.equal(updates[1].StackFileContent, oldFile);
   assert.deepEqual(sleeps, [12_000]);
+});
+
+test('an update timeout while reading the response body waits before rollback', async () => {
+  const updates = [];
+  const sleeps = [];
+  const client = clientFor(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/stacks/7' && options.method === 'PUT') {
+      updates.push(JSON.parse(options.body));
+      if (updates.length === 1) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => { throw new DOMException('body timed out', 'TimeoutError'); },
+        };
+      }
+      return jsonResponse({});
+    }
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
+    if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const probeFetch = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: newFile,
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl: probeFetch,
+    attempts: 1,
+    rollbackGraceMs: 9_000,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+  }), (error) => {
+    assert.ok(error instanceof DeploymentRolledBackError);
+    assert.ok(error.cause instanceof PortainerRequestTimeoutError);
+    assert.equal(error.cause.operation, 'stack update');
+    return true;
+  });
+
+  assert.equal(updates.length, 2);
+  assert.deepEqual(sleeps, [9_000]);
 });
 
 test('a failed rollback is a typed incident with sanitized version metadata', async () => {

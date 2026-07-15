@@ -12,18 +12,39 @@ test('CI remains unfiltered and reusable while sparing tag runs from cancellatio
 });
 
 test('release publication waits for the reusable CI gate', () => {
-  assert.match(publish, /quality-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
-  assert.match(publish, /build:\s*\n\s+needs: \[validate, quality-gate\]/);
-  assert.match(publish, /scan-images:\s*\n\s+needs: \[validate, quality-gate, build\]/);
-  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, quality-gate, build, scan-images\]/);
+  assert.match(publish, /release-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
+  assert.match(publish, /build:\s*\n\s+needs: \[validate, release-gate, tag-preflight\]/);
+  assert.match(publish, /scan-images:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build\]/);
+  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, scan-images\]/);
 });
 
-test('each matrix build refuses an existing exact image tag after login', () => {
-  const login = publish.indexOf('uses: docker/login-action@v3');
-  const immutableCheck = publish.indexOf('node scripts/ci/assert-image-tag-absent.mjs');
-  const build = publish.indexOf('uses: docker/build-push-action@v6');
-  assert.ok(login >= 0 && immutableCheck > login && build > immutableCheck);
-  assert.match(publish, /IMAGE_REF: ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:\$\{\{ github\.ref_name \}\}/);
+test('release tag concurrency never cancels an in-flight publication', () => {
+  assert.match(publish, /concurrency:\s*\n\s+group: publish-images-\$\{\{ github\.ref_name \}\}\s*\n\s+cancel-in-progress: false/);
+});
+
+test('all nine exact tags pass a complete preflight before any build starts', () => {
+  const preflightStart = publish.indexOf('  tag-preflight:');
+  const buildStart = publish.indexOf('  build:');
+  const scanStart = publish.indexOf('  scan-images:');
+  assert.ok(preflightStart >= 0 && buildStart > preflightStart && scanStart > buildStart);
+
+  const preflight = publish.slice(preflightStart, buildStart);
+  const build = publish.slice(buildStart, scanStart);
+  for (const image of [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+  ]) {
+    assert.match(preflight, new RegExp(`- ${image.replaceAll('-', '\\-')}(?:\\n|$)`));
+  }
+  assert.match(preflight, /uses: docker\/login-action@v3[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
+  assert.doesNotMatch(build, /assert-image-tag-absent/);
 });
 
 test('private image scans authenticate with package read permission', () => {

@@ -35,10 +35,17 @@ export class RollbackIncidentError extends Error {
 }
 
 export function upsertEnv(env, name, value) {
-  const next = env.map((entry) => ({ ...entry }));
-  const found = next.find((entry) => entry.name === name);
-  if (found) found.value = value;
-  else next.push({ name, value });
+  const next = [];
+  let found = false;
+  for (const entry of env) {
+    if (entry.name !== name) {
+      next.push({ ...entry });
+    } else if (!found) {
+      next.push({ ...entry, value });
+      found = true;
+    }
+  }
+  if (!found) next.push({ name, value });
   return next;
 }
 
@@ -59,9 +66,8 @@ export class PortainerClient {
   }
 
   async request(path, { timeoutMs = this.readTimeoutMs, operation = 'request', ...options } = {}) {
-    let response;
     try {
-      response = await this.fetch(`${this.baseUrl}/api${path}`, {
+      const response = await this.fetch(`${this.baseUrl}/api${path}`, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
@@ -70,22 +76,22 @@ export class PortainerClient {
         },
         signal: this.signalFactory(timeoutMs),
       });
+      if (!response.ok) {
+        try {
+          await response.body?.cancel();
+        } catch {
+          // The status is sufficient; never replace it with body cleanup details.
+        }
+        throw new Error(`Portainer ${operation} failed with HTTP ${response.status}`);
+      }
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
         throw new PortainerRequestTimeoutError(operation, timeoutMs, { cause: error });
       }
       throw error;
     }
-    if (!response.ok) {
-      try {
-        await response.body?.cancel();
-      } catch {
-        // The status is sufficient; never replace it with body cleanup details.
-      }
-      throw new Error(`Portainer ${operation} failed with HTTP ${response.status}`);
-    }
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
   }
 
   async snapshotStack() {

@@ -74,13 +74,23 @@ Expected: inventory and digests are non-empty; no file contents are captured.
 
 - [ ] **Step 1: Validate the existing root environment without printing values**
 
-Run this from the live source checkout. It reports only a missing variable
-name, never a value:
+Run this from the live source checkout with Node 22. It parses `.env` using
+Node's environment-file parser and reports only missing variable names, never
+values:
 
 ```bash
-for name in ADMIN_USER ADMIN_PASS SITE_URL; do
-  grep -Eq "^${name}=.+" .env || { printf 'Missing required variable name: %s\n' "$name" >&2; exit 1; }
-done
+node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
+
+const env = parseEnv(readFileSync('.env', 'utf8'));
+const missing = ['ADMIN_USER', 'ADMIN_PASS', 'SITE_URL']
+  .filter((name) => !env[name]?.trim());
+if (missing.length > 0) {
+  console.error(`Missing required variable names: ${missing.join(', ')}`);
+  process.exit(1);
+}
+NODE
 ```
 
 Expected: exit 0 confirms that `ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL` are
@@ -120,7 +130,9 @@ services:
 Before clicking **Deploy the stack**, expand **Environment variables** and use
 Portainer's **Load variables from .env file** control to load the existing root
 `.env` directly from the trusted workstation. Do not paste its contents into
-the Web Editor. Add `SUBWAVE_VERSION=v0.42.0-obiwave.1` as a separate entry.
+the Web Editor. If `SUBWAVE_VERSION` already exists, update that entry to
+`v0.42.0-obiwave.1`; otherwise add it once. Never add a second entry with the
+same name.
 Review the variable names in the authenticated Portainer UI and update
 host-specific values for ark, especially URLs/addresses that referred to the
 old Docker host; confirm `SITE_URL` remains the public
@@ -169,6 +181,19 @@ read -rs 'PORTAINER_API_KEY?Portainer access token: '; printf '\n'; curl -fsS -H
 Expected: exactly one `subwave` stack appears on the recorded ark endpoint.
 In Portainer, also reconfirm ark is associated with the dedicated GHCR
 credential before approving any release deployment.
+
+Verify the stack Environment contains exactly one `SUBWAVE_VERSION` entry
+without displaying its value:
+
+```zsh
+read 'PORTAINER_STACK_ID?Recorded subwave stack ID: '
+read -rs 'PORTAINER_API_KEY?Portainer access token: '; printf '\n'
+curl -fsS -H "X-API-Key: ${PORTAINER_API_KEY}" "https://portainer.kener.org/api/stacks/${PORTAINER_STACK_ID}" | jq -e '([.Env[]? | select(.name == "SUBWAVE_VERSION")] | length) == 1'
+unset PORTAINER_API_KEY PORTAINER_STACK_ID
+```
+
+Expected: `jq` prints only `true`. It never prints the version or any other
+Environment value.
 
 ### Task 3: Seed the State Dataset and Start the First Release
 

@@ -31,6 +31,10 @@ permissions:
   packages: write
   security-events: write
 
+concurrency:
+  group: publish-images-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -44,13 +48,49 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
 
-  quality-gate:
+  release-gate:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
+  tag-preflight:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - subwave-caddy
+          - subwave-broadcast
+          - subwave-controller
+          - subwave-web
+          - subwave-aio
+          - subwave-aio-heavy
+          - subwave-tts-heavy
+          - subwave-analyzer
+          - subwave-analyzer-heavy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prove the exact release tag is absent
+        env:
+          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
+        run: node scripts/ci/assert-image-tag-absent.mjs "$IMAGE_REF"
+
   build:
-    needs: [validate, quality-gate]
+    needs: [validate, release-gate, tag-preflight]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -138,11 +178,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Refuse to overwrite an existing immutable image tag
-        env:
-          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ github.ref_name }}
-        run: node scripts/ci/assert-image-tag-absent.mjs "$IMAGE_REF"
-
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -168,7 +203,7 @@ jobs:
           echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
 
   scan-images:
-    needs: [validate, quality-gate, build]
+    needs: [validate, release-gate, tag-preflight, build]
     uses: ./.github/workflows/scan-images.yml
     with:
       release_tag: ${{ github.ref_name }}
@@ -178,7 +213,7 @@ jobs:
       security-events: write
 
   deploy-production:
-    needs: [validate, quality-gate, build, scan-images]
+    needs: [validate, release-gate, tag-preflight, build, scan-images]
     runs-on: ubuntu-latest
     environment: production
     concurrency:

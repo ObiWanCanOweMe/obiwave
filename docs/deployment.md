@@ -280,10 +280,11 @@ command until the ark migration reaches its release checkpoint.
 That fork-qualified tag is the only automatic publication boundary. It builds
 and publishes the full fork image matrix under the exact tag only after the
 reusable CI gate repeats all package quality checks, deployment-contract tests,
-and image smoke builds for the tagged commit. Each matrix job checks its exact
-GHCR tag after login and refuses to overwrite an existing digest. It then scans
-the authenticated private images and serially deploys production through the
-GitHub Environment. The
+and image smoke builds for the tagged commit. A nine-image preflight matrix
+checks every exact GHCR tag after login; the complete preflight must pass before
+any image build can start. Workflow concurrency serializes runs for the same
+qualified tag without cancellation. It then scans the authenticated private
+images and serially deploys production through the GitHub Environment. The
 deployment snapshots the current Portainer stack file and Environment,
 replaces `StackFileContent` with the checked-in release manifest, preserves the
 existing Environment except for updating `SUBWAVE_VERSION`, pulls and
