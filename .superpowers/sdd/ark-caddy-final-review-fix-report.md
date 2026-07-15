@@ -139,3 +139,42 @@ Result: both exit 0.
 ## Concerns
 
 None.
+
+## TCP Publication Follow-up
+
+Commit:
+
+- `3df9ebdf7a3177080220f7a12fa284870cc46180` — `fix: require TCP Caddy publications`
+
+The normalized resolved-port tuple now includes `protocol`, and both approved
+Caddy publications require the exact resolved value `tcp`. A missing protocol
+is not defaulted in policy because Docker Compose's resolved JSON emits the
+default `tcp`; an absent field is therefore off-contract and rejected.
+
+RED command:
+
+```bash
+node --test scripts/ci/validate-portainer-compose.test.mjs
+```
+
+Result before implementation: exit 1, 12 tests, 11 passed and the new
+`resolved model requires TCP for both Caddy publications` regression failed.
+Both UDP-only and mixed TCP/UDP models were incorrectly accepted because
+`protocol` was not part of the normalized tuple.
+
+GREEN command:
+
+```bash
+node --test scripts/ci/validate-portainer-compose.test.mjs
+```
+
+Result after the minimal tuple change: exit 0, 12/12 passed.
+
+Full deployment contract command:
+
+```bash
+node --test scripts/release/fork-tag.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs
+```
+
+Result: exit 0, 52/52 passed, 0 failed. `git diff --check` also exited 0 with
+no output.
