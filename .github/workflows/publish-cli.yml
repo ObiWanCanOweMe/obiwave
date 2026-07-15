@@ -38,7 +38,7 @@ jobs:
           - target: bun-darwin-arm64
             asset:  subwave-darwin-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -166,7 +166,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Set up QEMU binfmt
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Download binary
         uses: actions/download-artifact@v4

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
@@ -9,6 +9,24 @@ const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
 );
+const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
+
+test('official JavaScript actions use the Node 24 runtime', async () => {
+  const workflowFiles = (await readdir(workflowDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.yml'))
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const workflowFile of workflowFiles) {
+    const workflow = await readFile(new URL(workflowFile, workflowDirectory), 'utf8');
+    assert.doesNotMatch(workflow, /actions\/checkout@v4/, workflowFile);
+    assert.doesNotMatch(workflow, /actions\/setup-node@v4/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/setup-buildx-action@v3/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/build-push-action@v6/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/login-action@v3/, workflowFile);
+    assert.doesNotMatch(workflow, /docker\/setup-qemu-action@v3/, workflowFile);
+  }
+});
 
 test('CI remains unfiltered and reusable while sparing tag runs from cancellation', () => {
   assert.match(ci, /on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+workflow_call:/);
@@ -47,14 +65,14 @@ test('all nine exact tags pass a complete preflight before any build starts', ()
   ]) {
     assert.match(preflight, new RegExp(`- ${image.replaceAll('-', '\\-')}(?:\\n|$)`));
   }
-  assert.match(preflight, /uses: docker\/login-action@v3[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
+  assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
 });
 
 test('private image scans authenticate with package read permission', () => {
   assert.match(publish, /scan-images:[\s\S]*?permissions:[\s\S]*?packages: read/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
-  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v3[\s\S]*?uses: aquasecurity\/trivy-action/);
+  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
 });
 
 test('production timeout covers bounded target and rollback operations', () => {
