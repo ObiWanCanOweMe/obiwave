@@ -10,12 +10,25 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 services:
+  caddy:
+    image: ghcr.io/obiwancanoweme/subwave-caddy:\${SUBWAVE_VERSION:?required}
+    logging: *default-logging
+    depends_on:
+      web:
+        condition: service_started
+      controller:
+        condition: service_healthy
+      broadcast:
+        condition: service_healthy
+    ports:
+      - "10.20.0.9:\${WEB_PORT:-7700}:80"
+      - "[2600:1700:3210:5314:10:20:0:9]:\${WEB_PORT:-7700}:80"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
   broadcast:
     image: ghcr.io/obiwancanoweme/subwave-broadcast:\${SUBWAVE_VERSION:?required}
     logging: *default-logging
-    ports:
-      - "10.20.0.9:\${ICECAST_PORT:-7702}:7702"
-      - "[2600:1700:3210:5314:10:20:0:9]:\${ICECAST_PORT:-7702}:7702"
     volumes:
       - *state-mount
       - /mnt/NVMe/container-data/subwave/state/logs:/var/log/liquidsoap
@@ -31,9 +44,6 @@ services:
         condition: service_started
     env_file:
       - stack.env
-    ports:
-      - "10.20.0.9:\${CONTROLLER_PORT:-7701}:7701"
-      - "[2600:1700:3210:5314:10:20:0:9]:\${CONTROLLER_PORT:-7701}:7701"
     volumes:
       - *state-mount
     healthcheck:
@@ -49,9 +59,6 @@ services:
     depends_on:
       controller:
         condition: service_healthy
-    ports:
-      - "10.20.0.9:\${WEB_PORT:-7700}:7700"
-      - "[2600:1700:3210:5314:10:20:0:9]:\${WEB_PORT:-7700}:7700"
   tts-heavy:
     image: ghcr.io/obiwancanoweme/subwave-tts-heavy:\${SUBWAVE_VERSION:?required}
     logging: *default-logging
@@ -69,6 +76,8 @@ services:
       - *state-mount
       - analyzer-cache:/opt/analyzer/hf-cache
 volumes:
+  caddy-data:
+  caddy-config:
   tts-heavy-chatterbox-cache:
   tts-heavy-pocket-cache:
   analyzer-cache:
@@ -82,7 +91,7 @@ function assertRejects(source, expected) {
   assert.ok(errorsFor(source).includes(expected), `expected ${expected}`);
 }
 
-test('accepts the full six-service production contract', () => {
+test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
 });
 
@@ -102,7 +111,7 @@ test('rejects mutable or checkout-coupled deployment', () => {
 
 test('rejects missing services and exact first-party images', () => {
   assertRejects(valid.replace(/  analyzer:\n[\s\S]*?(?=volumes:)/, ''), 'manifest is missing service analyzer');
-  for (const service of ['broadcast', 'controller', 'web', 'tts-heavy']) {
+  for (const service of ['caddy', 'broadcast', 'controller', 'web', 'tts-heavy']) {
     assertRejects(
       valid.replace(`ghcr.io/obiwancanoweme/subwave-${service}:`, `example.invalid/subwave-${service}:`),
       `service ${service} has an invalid image`,
@@ -126,38 +135,40 @@ test('rejects material topology removals', () => {
     ['      docker-socket-proxy:\n        condition: service_started\n', 'service controller is missing docker-socket-proxy service_started dependency'],
     ['      - analyzer-cache:/opt/analyzer/hf-cache\n', 'service analyzer is missing its named cache mount'],
     ['  analyzer-cache:\n', 'manifest is missing named volume analyzer-cache'],
-    ['    logging: *default-logging\n', 'service broadcast is missing default log rotation'],
+    [
+      '    image: ghcr.io/obiwancanoweme/subwave-broadcast:\${SUBWAVE_VERSION:?required}\n    logging: *default-logging\n',
+      'service broadcast is missing default log rotation',
+      '    image: ghcr.io/obiwancanoweme/subwave-broadcast:\${SUBWAVE_VERSION:?required}\n',
+    ],
+    ['      web:\n        condition: service_started\n', 'service caddy is missing web service_started dependency'],
+    ['      controller:\n        condition: service_healthy\n', 'service caddy is missing controller service_healthy dependency'],
+    ['      broadcast:\n        condition: service_healthy\n', 'service caddy is missing broadcast service_healthy dependency'],
+    ['      - caddy-data:/data\n', 'service caddy is missing its data volume'],
+    ['      - caddy-config:/config\n', 'service caddy is missing its config volume'],
+    ['  caddy-data:\n', 'manifest is missing named volume caddy-data'],
+    ['  caddy-config:\n', 'manifest is missing named volume caddy-config'],
   ];
-  for (const [material, expected] of cases) assertRejects(valid.replace(material, ''), expected);
-});
-
-test('rejects off-contract and extra published ports', () => {
-  for (const binding of [
-    '127.0.0.1:\${WEB_PORT:-7700}:7700',
-    '10.20.0.10:\${WEB_PORT:-7700}:7700',
-    '0.0.0.0:\${WEB_PORT:-7700}:7700',
-    '[::]:\${WEB_PORT:-7700}:7700',
-  ]) {
-    const invalid = valid.replace('10.20.0.9:\${WEB_PORT:-7700}:7700', binding);
-    assertRejects(invalid, `manifest contains an unapproved published port ${binding}`);
+  for (const [material, expected, replacement = ''] of cases) {
+    assertRejects(valid.replace(material, replacement), expected);
   }
-  const extra = valid.replace(
-    '      - "10.20.0.9:\${WEB_PORT:-7700}:7700"',
-    '      - "10.20.0.9:\${WEB_PORT:-7700}:7700"\n      - "10.20.0.9:9999:9999"',
-  );
-  assertRejects(extra, 'manifest contains an unapproved published port 10.20.0.9:9999:9999');
 });
 
-test('does not accept required port bindings that appear only in comments', () => {
-  const binding = '10.20.0.9:\${WEB_PORT:-7700}:7700';
-  const invalid = valid.replace(`      - "${binding}"`, `      # - "${binding}"`);
-  assertRejects(invalid, `manifest is missing published port ${binding}`);
+test('rejects internal services that publish host ports', () => {
+  for (const service of ['web', 'controller', 'broadcast']) {
+    const marker = `\n  ${service}:\n`;
+    const invalid = valid.replace(
+      marker,
+      `${marker}    ports:\n      - "10.20.0.9:9999:9999"\n`,
+    );
+    assertRejects(invalid, `service ${service} must not publish host ports`);
+  }
 });
 
-test('rejects approved bindings assigned to the wrong service', () => {
-  const web = '10.20.0.9:\${WEB_PORT:-7700}:7700';
-  const controller = '10.20.0.9:\${CONTROLLER_PORT:-7701}:7701';
-  const swapped = valid.replace(web, '__WEB__').replace(controller, web).replace('__WEB__', controller);
-  assertRejects(swapped, `service web is missing published port ${web}`);
-  assertRejects(swapped, `service controller is missing published port ${controller}`);
+test('rejects missing, off-contract, commented, or duplicated Caddy bindings', () => {
+  const ipv4 = '10.20.0.9:${WEB_PORT:-7700}:80';
+  const ipv6 = '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80';
+  assertRejects(valid.replace(`      - "${ipv4}"\n`, ''), `service caddy is missing published port ${ipv4}`);
+  assertRejects(valid.replace(ipv4, '0.0.0.0:${WEB_PORT:-7700}:80'), 'manifest binds a published port to a wildcard address');
+  assertRejects(valid.replace(`      - "${ipv6}"`, `      # - "${ipv6}"`), `service caddy is missing published port ${ipv6}`);
+  assertRejects(valid.replace(`      - "${ipv4}"`, `      - "${ipv4}"\n      - "${ipv4}"`), `manifest must publish port ${ipv4} exactly once`);
 });

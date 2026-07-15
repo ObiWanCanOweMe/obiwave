@@ -11,6 +11,7 @@ const rules = [
 ];
 
 const serviceImages = new Map([
+  ['caddy', 'ghcr.io/obiwancanoweme/subwave-caddy:${SUBWAVE_VERSION:?required}'],
   ['broadcast', 'ghcr.io/obiwancanoweme/subwave-broadcast:${SUBWAVE_VERSION:?required}'],
   ['controller', 'ghcr.io/obiwancanoweme/subwave-controller:${SUBWAVE_VERSION:?required}'],
   ['docker-socket-proxy', 'ghcr.io/tecnativa/docker-socket-proxy:0.3.0'],
@@ -20,21 +21,19 @@ const serviceImages = new Map([
 ]);
 
 const approvedPorts = [
-  '10.20.0.9:${WEB_PORT:-7700}:7700',
-  '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:7700',
-  '10.20.0.9:${CONTROLLER_PORT:-7701}:7701',
-  '[2600:1700:3210:5314:10:20:0:9]:${CONTROLLER_PORT:-7701}:7701',
-  '10.20.0.9:${ICECAST_PORT:-7702}:7702',
-  '[2600:1700:3210:5314:10:20:0:9]:${ICECAST_PORT:-7702}:7702',
+  '10.20.0.9:${WEB_PORT:-7700}:80',
+  '[2600:1700:3210:5314:10:20:0:9]:${WEB_PORT:-7700}:80',
 ];
-
-const servicePorts = new Map([
-  ['web', approvedPorts.slice(0, 2)],
-  ['controller', approvedPorts.slice(2, 4)],
-  ['broadcast', approvedPorts.slice(4, 6)],
-]);
+const servicePorts = new Map([['caddy', approvedPorts]]);
+const internalServices = ['web', 'controller', 'broadcast'];
 
 const serviceRequirements = [
+  ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
+  ['caddy', 'web:\n        condition: service_started', 'service caddy is missing web service_started dependency'],
+  ['caddy', 'controller:\n        condition: service_healthy', 'service caddy is missing controller service_healthy dependency'],
+  ['caddy', 'broadcast:\n        condition: service_healthy', 'service caddy is missing broadcast service_healthy dependency'],
+  ['caddy', 'caddy-data:/data', 'service caddy is missing its data volume'],
+  ['caddy', 'caddy-config:/config', 'service caddy is missing its config volume'],
   ['broadcast', 'logging: *default-logging', 'service broadcast is missing default log rotation'],
   ['broadcast', 'healthcheck:', 'service broadcast is missing a healthcheck'],
   ['broadcast', '*state-mount', 'service broadcast is missing the state mount'],
@@ -143,7 +142,7 @@ export function validatePortainerCompose(source) {
   }
 
   const volumes = namedVolumes(active);
-  for (const volume of ['tts-heavy-chatterbox-cache', 'tts-heavy-pocket-cache', 'analyzer-cache']) {
+  for (const volume of ['caddy-data', 'caddy-config', 'tts-heavy-chatterbox-cache', 'tts-heavy-pocket-cache', 'analyzer-cache']) {
     if (!volumes.has(volume)) errors.push(`manifest is missing named volume ${volume}`);
   }
 
@@ -158,6 +157,11 @@ export function validatePortainerCompose(source) {
   }
 
   const portsByService = publishedPorts(blocks);
+  for (const service of internalServices) {
+    if ((portsByService.get(service) ?? []).length > 0) {
+      errors.push(`service ${service} must not publish host ports`);
+    }
+  }
   const ports = [...portsByService.values()].flat();
   for (const port of ports) {
     if (!approvedPorts.includes(port)) errors.push(`manifest contains an unapproved published port ${port}`);
@@ -169,7 +173,9 @@ export function validatePortainerCompose(source) {
     }
   }
   for (const port of approvedPorts) {
-    if (ports.filter((candidate) => candidate === port).length !== 1) errors.push(`manifest is missing published port ${port}`);
+    if (ports.filter((candidate) => candidate === port).length !== 1) {
+      errors.push(`manifest must publish port ${port} exactly once`);
+    }
   }
   return errors;
 }
