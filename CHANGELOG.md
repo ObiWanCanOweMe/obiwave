@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.42.1](https://github.com/perminder-klair/subwave/compare/v0.42.0...v0.42.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **cli:** sync stale compose files + clear wizard/uninstall drift ([#1043](https://github.com/perminder-klair/subwave/issues/1043)) ([#1047](https://github.com/perminder-klair/subwave/issues/1047)) ([7663008](https://github.com/perminder-klair/subwave/commit/76630089b0c6d25acbca8f26fe38bfc2edaad3e4))
+* **llm:** don't send a thinking budget to Gemma models ([#1044](https://github.com/perminder-klair/subwave/issues/1044)) ([#1045](https://github.com/perminder-klair/subwave/issues/1045)) ([8346a7a](https://github.com/perminder-klair/subwave/commit/8346a7a7320024a12f4f3980849b4537a34182a7))
+* **web:** add missing On: label to Playlist-only (strict) hint ([#1050](https://github.com/perminder-klair/subwave/issues/1050)) ([421deab](https://github.com/perminder-klair/subwave/commit/421deab0f5ef7edd567a2d68e945cc648c295d95))
+* **web:** Platter — tonearm on right grooves + START button hover ([#1046](https://github.com/perminder-klair/subwave/issues/1046)) ([9dd55f1](https://github.com/perminder-klair/subwave/commit/9dd55f140fafffc0508cdc5dc75360ce5af79848))
+* **web:** spool cassette scales to fit on short viewports (#iPad Mini) ([#1053](https://github.com/perminder-klair/subwave/issues/1053)) ([e5d1aeb](https://github.com/perminder-klair/subwave/commit/e5d1aebc2524dd13977b6faad4afcf37a3ca143f))
+
+
+### Documentation
+
+* **web:** manual/themes → Skins & Themes (6 skins + reference player) ([#1051](https://github.com/perminder-klair/subwave/issues/1051)) ([69eae2a](https://github.com/perminder-klair/subwave/commit/69eae2a4769361111909e77c748ca8f20cb092d1))
+
 ## [0.42.0](https://github.com/perminder-klair/subwave/compare/v0.41.0...v0.42.0) (2026-07-14)
 
 
