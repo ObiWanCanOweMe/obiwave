@@ -32,7 +32,7 @@ import { useStationFeed, type StationFeed } from '@/hooks/useStationFeed';
 import { usePlayer, type PlayerStatus } from '@/hooks/usePlayer';
 import { useSignal, type Signal } from '@/hooks/useSignal';
 import { useMediaSession } from '@/hooks/useMediaSession';
-import { useStationClient } from '@/lib/stationClient';
+import { useStationClient, type LikeResult, type LikeStatus } from '@/lib/stationClient';
 import { streamEnablementFor, type AudioFormat, type FormatAvailability } from '@/lib/audioFormat';
 import type { RequestResult } from '@/lib/types';
 
@@ -66,6 +66,11 @@ export interface PlayerActions {
   /** Poll a submitted request's outcome (null on network error, so drawers
    *  keep trying). */
   pollRequest: (requestId: string) => Promise<RequestResult | null>;
+  /** Like the currently playing track (#991). null on network error; error
+   *  statuses come back as a LikeResult with `error`. */
+  likeCurrent: (songId: string) => Promise<LikeResult | null>;
+  /** Liked-state + count for the current airing. null on network error. */
+  likeStatus: () => Promise<LikeStatus | null>;
 }
 
 const FeedContext = createContext<StationFeed | null>(null);
@@ -136,6 +141,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
       setVolume,
       submitRequest: (text, name) => client.submitRequest(text, name),
       pollRequest: requestId => client.requestStatus(requestId),
+      likeCurrent: songId => client.likeCurrent(songId),
+      likeStatus: () => client.likeStatus(),
     }),
     [setVolume, client],
   );

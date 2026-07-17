@@ -18,7 +18,7 @@ import BackupPanel from './BackupPanel';
 import FestivalsSection from './FestivalsSection';
 import {
   Radio, Palette, Cpu, Mic, Library, Search, Music, AudioLines,
-  Activity, Archive, Save, AlertTriangle, CalendarDays,
+  Activity, Archive, Save, AlertTriangle, CalendarDays, Heart,
 } from 'lucide-react';
 import {
   SectionHeader, ELEVENLABS_VS_DEFAULTS,
@@ -35,6 +35,7 @@ import { ThemeSection } from './settings/ThemeSection';
 import { JinglesSection } from './settings/JinglesSection';
 import { SfxSection } from './settings/SfxSection';
 import { ScrobbleSection } from './settings/ScrobbleSection';
+import { LikesSection } from './settings/LikesSection';
 
 const SECTIONS = [
   { id: 'station',  label: 'Station', hint: 'name · location · locale', icon: Radio },
@@ -47,6 +48,7 @@ const SECTIONS = [
   { id: 'jingles',  label: 'Jingles', hint: 'stingers', icon: Music },
   { id: 'sfx',      label: 'Sound FX', hint: 'agent stingers', icon: AudioLines },
   { id: 'scrobble', label: 'Scrobbling', hint: 'last.fm · listenbrainz', icon: Activity },
+  { id: 'likes',    label: 'Likes', hint: 'heart button · navidrome stars', icon: Heart },
   { id: 'archives', label: 'Archives', hint: 'hourly recordings', icon: Archive },
   { id: 'backup',   label: 'Backup', hint: 'export · restore', icon: Save },
   { id: 'danger',   label: 'Danger zone', hint: 'broadcast control', icon: AlertTriangle },
@@ -122,6 +124,8 @@ export default function SettingsPanel() {
         aacEnabled: v.stream?.aacEnabled ?? false,
         aacBitrate: String(v.stream?.aacBitrate ?? 192),
         bitrate: String(v.stream?.bitrate ?? 192),
+        idleWhenEmpty: v.stream?.idleWhenEmpty ?? false,
+        idleAfterMinutes: String(v.stream?.idleAfterMinutes ?? 10),
       },
       loudness: {
         targetLufs: String(v.loudness?.targetLufs ?? -14),
@@ -250,6 +254,13 @@ export default function SettingsPanel() {
           username: v.scrobble?.listenbrainz?.username ?? '',
           baseUrl: v.scrobble?.listenbrainz?.baseUrl ?? '',
         },
+      },
+      likes: {
+        enabled: v.likes?.enabled ?? true,
+        starInNavidrome: v.likes?.starInNavidrome ?? true,
+        influenceDj: !!v.likes?.influenceDj,
+        maxTracks: String(v.likes?.maxTracks ?? 10),
+        windowDays: String(v.likes?.windowDays ?? 30),
       },
     });
   }, [data, form]);
@@ -580,6 +591,12 @@ export default function SettingsPanel() {
                 saveSettings={saveSettings} adminFetch={adminFetch} refresh={refresh}
               />
             )}
+            {activeSection === 'likes' && (
+              <LikesSection
+                data={data} form={form} setForm={updateForm} busy={busy}
+                saveSettings={saveSettings}
+              />
+            )}
           </>
           );
         })()}
@@ -753,6 +770,66 @@ export default function SettingsPanel() {
                 </div>
               </div>
             </Card>
+
+            {form && (
+              <Card title="Idle pause" sub="silence the programme when nobody is listening">
+                <div className="field">
+                  <Label>Pause when the room is empty</Label>
+                  <div className="flex items-center gap-2">
+                    <Seg
+                      options={[
+                        { id: 'on', label: 'On' },
+                        { id: 'off', label: 'Off' },
+                      ]}
+                      value={form.stream.idleWhenEmpty ? 'on' : 'off'}
+                      onChange={id =>
+                        setForm(f =>
+                          f ? { ...f, stream: { ...f.stream, idleWhenEmpty: id === 'on' } } : f,
+                        )
+                      }
+                    />
+                    <span className="text-[12px] text-muted">after</span>
+                    <Input
+                      className="mono-num w-24"
+                      type="number"
+                      step={1}
+                      min={1}
+                      max={1440}
+                      value={form.stream.idleAfterMinutes}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setForm(f =>
+                          f
+                            ? { ...f, stream: { ...f.stream, idleAfterMinutes: e.target.value } }
+                            : f,
+                        )
+                      }
+                    />
+                    <span className="text-[12px] text-muted">min</span>
+                    <Btn
+                      sm
+                      onClick={() =>
+                        saveSettings({
+                          stream: {
+                            idleWhenEmpty: form.stream.idleWhenEmpty,
+                            idleAfterMinutes: parseInt(form.stream.idleAfterMinutes, 10),
+                          },
+                        })
+                      }
+                      disabled={busy}
+                    >
+                      Save
+                    </Btn>
+                  </div>
+                  <div className="field-hint">
+                    After this long with zero listeners the programme pauses mid-track and the DJ
+                    goes quiet — no track pulls from Navidrome, no LLM or TTS work. The stream
+                    mounts stay up, so any player (VLC, Sonos, the web player) connects normally;
+                    playback resumes where it left off within a few seconds of the first listener
+                    tuning in. Applies live — no mixer restart.
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {form && (
               <Card title="Crossfade" sub="track transition overlap">
