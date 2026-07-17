@@ -1280,6 +1280,29 @@ radio = smooth_add(
 emergency = single("/sounds/emergency.mp3")
 radio = fallback(track_sensitive=false, [radio, emergency])
 
+# ---------------------------------------------------------------------------
+# IDLE GATE — silence the programme while nobody is listening
+# ---------------------------------------------------------------------------
+# When the controller has seen zero Icecast listeners for a while it flips
+# idle_mode on (telnet idle_on / idle_off, registered below): the switch
+# selects blank() and the whole chain above — dj_queue, the auto playlist,
+# the cross buffer, the subhttp downloads from Navidrome — stops being
+# pulled, frozen mid-track. The Icecast mounts STAY UP serving silence, so
+# any client (VLC, Sonos, a browser) connects normally; the controller sees
+# the new listener on its next poll, flips idle_mode off, and playback
+# resumes exactly where it froze. Contrast stream_off (further down), which
+# tears the mounts down and 404s new listeners.
+# A plain blank() branch is safe here — the #660 CPU spin was specific to
+# the blank.skip operator, not a blank source.
+# Not persisted: a mixer restart always comes back live (mirrors stream_on);
+# the controller re-asserts idle over telnet if the room is still empty.
+idle_mode = ref(false)
+radio = switch(
+  id="idle_gate",
+  track_sensitive=false,
+  [({idle_mode()}, blank(id="idle_silence")), ({true}, radio)]
+)
+
 # NOTE: a `blank.skip(max_blank=5.0, radio)` used to sit here to skip >5s of
 # digital silence. It was REMOVED (#660). With no music in the chain — a fresh
 # install pre-onboarding, Navidrome down, or the auto playlist exhausted —
@@ -1490,6 +1513,15 @@ def make_stream_outputs() =
         opus_enc,
         id="stream_opus",
         fallible=true,
+        # Force ICY metadata ON. output.icecast leaves send_icy_metadata null by
+        # default, which GUESSES it off for any Ogg-container format and relies on
+        # in-band Ogg header re-emission (a new chained logical stream per track)
+        # instead. Many radio clients — Ferrosonic, Google Cast receivers, Symfonium
+        # — read the Ogg Vorbis comment only once at connect and never re-parse on a
+        # chained boundary, so they freeze on the first track's title (issue #1052).
+        # Icecast relays ICY StreamTitle out-of-band for Ogg mounts too, so enabling
+        # it gives those clients the same reliable per-track updates MP3/AAC get.
+        send_icy_metadata=true,
         host=environment.get(default="icecast", "ICECAST_HOST"),
         port=7702,
         password=environment.get("ICECAST_SOURCE_PASSWORD"),
@@ -1522,6 +1554,10 @@ def make_stream_outputs() =
         ),
         id="stream_flac",
         fallible=true,
+        # Force ICY metadata ON — see the /stream.opus note above. Ogg-FLAC clients
+        # (Ferrosonic and other internet-radio players) otherwise stay stuck on the
+        # connect-time track because they ignore in-band chained-Ogg metadata (#1052).
+        send_icy_metadata=true,
         host=environment.get(default="icecast", "ICECAST_HOST"),
         port=7702,
         password=environment.get("ICECAST_SOURCE_PASSWORD"),
@@ -1689,6 +1725,45 @@ server.register(
   description="Report whether the station is on air (on/off)",
   usage="stream_status",
   fun(_) -> if stream_on() then "on" else "off" end
+)
+
+# Pause / resume the programme while keeping the mounts up (the idle gate
+# above). idle_on swaps the broadcast to silence without disconnecting
+# anyone; idle_off resumes mid-track. Driven by the controller's stream-idle
+# monitor when "pause the programme when nobody is listening" is enabled.
+# Both are idempotent and only log on an actual state change, so the
+# controller can re-assert the desired state cheaply after a mixer restart.
+server.register(
+  "idle_on",
+  description="Silence the programme while nobody listens (mounts stay up)",
+  usage="idle_on",
+  fun(_) -> begin
+    if not idle_mode() then
+      log("Idle gate ON via server command — programme paused, mounts stay up")
+    end
+    idle_mode := true
+    "OK"
+  end
+)
+
+server.register(
+  "idle_off",
+  description="Resume the programme after an idle pause",
+  usage="idle_off",
+  fun(_) -> begin
+    if idle_mode() then
+      log("Idle gate OFF via server command — programme resumed")
+    end
+    idle_mode := false
+    "OK"
+  end
+)
+
+server.register(
+  "idle_status",
+  description="Report whether the idle gate is active (on/off)",
+  usage="idle_status",
+  fun(_) -> if idle_mode() then "on" else "off" end
 )
 
 # Skip the currently playing track. `radio` is the final broadcast source;

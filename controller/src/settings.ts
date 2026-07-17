@@ -973,6 +973,19 @@ function emptyWeek() {
   return week;
 }
 
+// Timed schedule takeover (#930): pin one show for a bounded window, then the
+// weekly grid resumes. Epoch-ms so no station-zone interpretation is needed.
+export interface ScheduleOverride {
+  showId: string;
+  startedAt: number;
+  expiresAt: number;
+}
+
+// Bounds for POST /schedule/override's `minutes` — long enough for an all-day
+// takeover, short enough that a forgotten pin can't shadow the grid for days.
+export const OVERRIDE_MIN_MINUTES = 15;
+export const OVERRIDE_MAX_MINUTES = 720;
+
 // Seed roster — three distinct DJs shipped on a fresh install (and used as the
 // migration fallback when a legacy `dj` block carries no real souls). Distinct
 // names, taglines, souls and talk frequency — a real roster, not clones of one
@@ -1063,6 +1076,15 @@ const DEFAULTS = {
     aacEnabled: false,
     aacBitrate: 192,
     bitrate: 192,
+    // Idle pause (broadcast/stream-idle.ts). When on, the controller flips
+    // radio.liq's idle gate after idleAfterMinutes with zero Icecast
+    // listeners: the mounts keep serving (silence), but the music chain
+    // stops being pulled — no track decode, no Navidrome downloads — and
+    // resumes mid-track within seconds of anyone connecting. Off by default:
+    // a radio that plays to an empty room is the product's default fiction,
+    // so going dark while unobserved is an explicit operator choice.
+    idleWhenEmpty: false,
+    idleAfterMinutes: 10,
   },
   // Per-track loudness normalisation (music/mix.ts gainForLoudness). targetLufs
   // is what every measured track is pulled toward; maxBoostDb caps the upward
@@ -1132,6 +1154,10 @@ const DEFAULTS = {
   shows: [],
   // 7-day x 24-hour grid of showId|null. An empty hour = run autonomously.
   schedule: emptyWeek(),
+  // Timed takeover (#930): { showId, startedAt, expiresAt } epoch-ms window
+  // that outranks the weekly grid in resolveActiveShow while it's live.
+  // null = no takeover. Persisted in schedule.json alongside shows/schedule.
+  scheduleOverride: null,
   tts: {
     defaultEngine: 'piper',
     // Advisory flag — does the operator intend to run the optional tts-heavy
@@ -1407,6 +1433,12 @@ const DEFAULTS = {
       // vanilla-Navidrome installs.
       lastfmTags: null as boolean | null,
       lyrics: true,       // fetch + include lyric excerpt in embed text
+      // Resolve original release years for compilation-album tracks via
+      // MusicBrainz (issue #842) — a compilation's `year` tag is the
+      // compilation's own release date, so era-bounded shows both mis-include
+      // and miss its tracks until each song's true year is known. Keyless API
+      // (1 req/s, throttled in music/musicbrainz.ts), so default-on.
+      originalYear: true,
     },
   },
   // Web-search backend for the segment director's web-search capability.
@@ -1476,6 +1508,19 @@ const DEFAULTS = {
       // Full submit URL is `${baseUrl}/submit-listens`. Env LISTENBRAINZ_API_URL wins.
       baseUrl: '',
     },
+  },
+
+  // Listener likes (#991) — the player heart button. `starInNavidrome` mirrors
+  // each first like of a song into Navidrome via Subsonic star (any Subsonic
+  // client sees it under Starred). `influenceDj` feeds the most-liked tracks
+  // back to BOTH pick paths (agent prompt lean + pool picker source) as a
+  // weighted preference signal — never a lock. Window/limit bound that signal.
+  likes: {
+    enabled: true,
+    starInNavidrome: true,
+    influenceDj: false,
+    maxTracks: 10,
+    windowDays: 30, // 0 = all time
   },
 };
 
@@ -1751,6 +1796,21 @@ function normalizeSchedule(raw: unknown, showIds: string[]) {
   return week;
 }
 
+// Lenient load-path coercion for the timed takeover (#930). Anything malformed,
+// dangling, or already expired loads as null — an override is transient state,
+// never worth failing a boot over.
+function normalizeScheduleOverride(raw: unknown, showIds: string[]): ScheduleOverride | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const showId = typeof o.showId === 'string' ? o.showId : '';
+  const startedAt = typeof o.startedAt === 'number' ? o.startedAt : NaN;
+  const expiresAt = typeof o.expiresAt === 'number' ? o.expiresAt : NaN;
+  if (!showIds.includes(showId)) return null;
+  if (!Number.isFinite(startedAt) || !Number.isFinite(expiresAt)) return null;
+  if (startedAt >= expiresAt || expiresAt <= Date.now()) return null;
+  return { showId, startedAt, expiresAt };
+}
+
 export async function load() {
   if (cache) return cache;
   let stored: any = {};
@@ -1773,6 +1833,7 @@ export async function load() {
       if (sched && typeof sched === 'object') {
         stored.shows = sched.shows;
         stored.schedule = sched.schedule;
+        stored.scheduleOverride = sched.override;
       }
     } catch {}
   }
@@ -1818,6 +1879,10 @@ export async function load() {
   const shows = normalizeShows(stored.shows, personaIds);
   const schedule = normalizeSchedule(
     stored.schedule,
+    shows.map(s => s.id),
+  );
+  const scheduleOverride = normalizeScheduleOverride(
+    stored.scheduleOverride,
     shows.map(s => s.id),
   );
 
@@ -1868,6 +1933,16 @@ export async function load() {
         typeof stored.stream?.bitrate === 'number' && MP3_BITRATE_SET.has(stored.stream.bitrate)
           ? stored.stream.bitrate
           : DEFAULTS.stream.bitrate,
+      idleWhenEmpty:
+        typeof stored.stream?.idleWhenEmpty === 'boolean'
+          ? stored.stream.idleWhenEmpty
+          : DEFAULTS.stream.idleWhenEmpty,
+      idleAfterMinutes:
+        Number.isInteger(stored.stream?.idleAfterMinutes) &&
+        stored.stream.idleAfterMinutes >= 1 &&
+        stored.stream.idleAfterMinutes <= 1440
+          ? stored.stream.idleAfterMinutes
+          : DEFAULTS.stream.idleAfterMinutes,
     },
     loudness: {
       targetLufs:
@@ -1944,6 +2019,7 @@ export async function load() {
     activePersonaId,
     shows,
     schedule,
+    scheduleOverride,
     tts: {
       defaultEngine: TTS_ENGINES.includes(stored.tts?.defaultEngine)
         ? stored.tts.defaultEngine
@@ -2194,6 +2270,10 @@ export async function load() {
           typeof stored.embedding?.enrichment?.lyrics === 'boolean'
             ? stored.embedding.enrichment.lyrics
             : DEFAULTS.embedding.enrichment.lyrics,
+        originalYear:
+          typeof stored.embedding?.enrichment?.originalYear === 'boolean'
+            ? stored.embedding.enrichment.originalYear
+            : DEFAULTS.embedding.enrichment.originalYear,
       },
     },
     skills: {
@@ -2260,6 +2340,26 @@ export async function load() {
             ? stored.scrobble.listenbrainz.baseUrl.trim().slice(0, 500)
             : '',
       },
+    },
+    likes: {
+      enabled:
+        typeof stored.likes?.enabled === 'boolean'
+          ? stored.likes.enabled
+          : DEFAULTS.likes.enabled,
+      starInNavidrome:
+        typeof stored.likes?.starInNavidrome === 'boolean'
+          ? stored.likes.starInNavidrome
+          : DEFAULTS.likes.starInNavidrome,
+      influenceDj:
+        typeof stored.likes?.influenceDj === 'boolean'
+          ? stored.likes.influenceDj
+          : DEFAULTS.likes.influenceDj,
+      maxTracks: Number.isFinite(Number(stored.likes?.maxTracks))
+        ? Math.min(25, Math.max(1, Math.round(Number(stored.likes.maxTracks))))
+        : DEFAULTS.likes.maxTracks,
+      windowDays: Number.isFinite(Number(stored.likes?.windowDays))
+        ? Math.min(365, Math.max(0, Math.round(Number(stored.likes.windowDays))))
+        : DEFAULTS.likes.windowDays,
     },
   };
   if (typeof stored.timezone === 'string' && stored.timezone.trim() && !cache.timezone) {
@@ -2790,6 +2890,30 @@ function validateScheduleStrict(raw, shows) {
   return week;
 }
 
+// Strict takeover validator — used by update(). null clears; anything else
+// must be a well-formed window over an existing show. The 12h cap is enforced
+// here (not just the route) so no caller can persist an unbounded pin.
+function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'object') throw new Error('scheduleOverride must be an object or null');
+  const showId = typeof raw.showId === 'string' ? raw.showId : '';
+  if (!shows.some(s => s.id === showId)) {
+    throw new Error('scheduleOverride.showId references an unknown show');
+  }
+  const startedAt = raw.startedAt;
+  const expiresAt = raw.expiresAt;
+  if (!Number.isFinite(startedAt) || !Number.isFinite(expiresAt)) {
+    throw new Error('scheduleOverride.startedAt/expiresAt must be epoch-ms numbers');
+  }
+  if (startedAt >= expiresAt) {
+    throw new Error('scheduleOverride.expiresAt must be after startedAt');
+  }
+  if (expiresAt - startedAt > OVERRIDE_MAX_MINUTES * 60_000) {
+    throw new Error(`scheduleOverride window must be at most ${OVERRIDE_MAX_MINUTES} minutes`);
+  }
+  return { showId, startedAt, expiresAt };
+}
+
 // Strict validator — used by update(). `existing` is the current list, so
 // the operator can keep a previously-set authHeader by sending the redacted
 // sentinel back unchanged.
@@ -3025,6 +3149,20 @@ export async function update(patch) {
         restart = true;
       }
     }
+    // Idle pause is enforced controller-side over telnet (broadcast/
+    // stream-idle.ts) — no Liquidsoap boot file, no mixer restart. Turning it
+    // off mid-idle is handled by the monitor's next tick, which resumes the
+    // programme.
+    if (st.idleWhenEmpty !== undefined) {
+      next.stream.idleWhenEmpty = !!st.idleWhenEmpty;
+    }
+    if (st.idleAfterMinutes !== undefined) {
+      const v = parseInt(st.idleAfterMinutes, 10);
+      if (!Number.isInteger(v) || v < 1 || v > 1440) {
+        throw new Error('stream.idleAfterMinutes must be an integer between 1 and 1440');
+      }
+      next.stream.idleAfterMinutes = v;
+    }
   }
   if ('loudness' in patch) {
     // Read live by queue.applyLoudnessGain when each track is annotated — no
@@ -3177,6 +3315,9 @@ export async function update(patch) {
   }
   if ('schedule' in patch) {
     next.schedule = validateScheduleStrict(patch.schedule, next.shows);
+  }
+  if ('scheduleOverride' in patch) {
+    next.scheduleOverride = validateScheduleOverrideStrict(patch.scheduleOverride, next.shows);
   }
   if ('activePersonaId' in patch) {
     if (!next.personas.some(p => p.id === patch.activePersonaId)) {
@@ -3574,6 +3715,9 @@ export async function update(patch) {
       if (en.lyrics !== undefined) {
         next.embedding.enrichment.lyrics = !!en.lyrics;
       }
+      if (en.originalYear !== undefined) {
+        next.embedding.enrichment.originalYear = !!en.originalYear;
+      }
     }
   }
   if ('skills' in patch) {
@@ -3674,6 +3818,24 @@ export async function update(patch) {
       }
     }
   }
+  if ('likes' in patch) {
+    const lk = patch.likes || {};
+    if (lk.enabled !== undefined) next.likes.enabled = !!lk.enabled;
+    if (lk.starInNavidrome !== undefined) next.likes.starInNavidrome = !!lk.starInNavidrome;
+    if (lk.influenceDj !== undefined) next.likes.influenceDj = !!lk.influenceDj;
+    if (lk.maxTracks !== undefined) {
+      const n = Math.round(Number(lk.maxTracks));
+      if (!Number.isFinite(n) || n < 1 || n > 25) throw new Error('likes.maxTracks must be 1-25');
+      next.likes.maxTracks = n;
+    }
+    if (lk.windowDays !== undefined) {
+      const n = Math.round(Number(lk.windowDays));
+      if (!Number.isFinite(n) || n < 0 || n > 365) {
+        throw new Error('likes.windowDays must be 0-365 (0 = all time)');
+      }
+      next.likes.windowDays = n;
+    }
+  }
 
   // LiteLLM is chat-only. Enforce this after BOTH llm and embedding patches so
   // neither an embedding-only clear nor a combined patch can re-enable chat
@@ -3700,6 +3862,10 @@ export async function update(patch) {
           next.schedule[d][h] = null;
         }
       }
+    }
+    // A takeover pinning a show that no longer exists dies with the show.
+    if (next.scheduleOverride && !showIds.includes(next.scheduleOverride.showId)) {
+      next.scheduleOverride = null;
     }
     if (!personaIds.includes(next.activePersonaId)) next.activePersonaId = personaIds[0];
 
@@ -3732,13 +3898,17 @@ export async function update(patch) {
   // on the first write. The in-memory `cache` keeps the full shape so
   // resolveActiveShow / getEffectivePersona / the integrity sweep all
   // continue to work against one merged view.
-  const { shows: _shows, schedule: _schedule, ...settingsPersist } = next;
+  const { shows: _shows, schedule: _schedule, scheduleOverride: _override, ...settingsPersist } = next;
   // Atomic replace — a crash mid-write must not take the operator's whole
   // config (or show schedule) with it.
   await writeFileAtomic(SETTINGS_PATH, JSON.stringify(settingsPersist, null, 2));
   await writeFileAtomic(
     SCHEDULE_PATH,
-    JSON.stringify({ shows: next.shows, schedule: next.schedule }, null, 2),
+    JSON.stringify(
+      { shows: next.shows, schedule: next.schedule, override: next.scheduleOverride ?? null },
+      null,
+      2,
+    ),
   );
   await writeLiquidsoapSettings(next);
   return { saved: next, requiresRestart: restart };
@@ -3756,9 +3926,20 @@ export function resolvePersonaById(id) {
   return get().personas?.find(p => p.id === id) || null;
 }
 
-// The show scheduled for `date`'s day-of-week + hour, or null. Self-contained
-// (touches only settings data) so context.js can import it without a cycle.
+// The show on air at `date`, or null. A live timed takeover (#930) outranks
+// the weekly grid; both paths resolve through the same shape below.
+// Self-contained (touches only settings data) so context.js can import it
+// without a cycle.
 export function resolveActiveShow(date = new Date(), s = get()) {
+  // Date-aware, lazily-expired takeover check. Comparing `date` (not "now")
+  // means look-ahead callers — the queue picks the next track at its expected
+  // airtime — naturally straddle the pin's start/end boundary.
+  const ov = s?.scheduleOverride;
+  if (ov && date.getTime() >= ov.startedAt && date.getTime() < ov.expiresAt) {
+    const pinned = s.shows?.find(x => x.id === ov.showId);
+    // A dangling showId (show deleted mid-takeover) voids the override.
+    if (pinned) return resolveShowShape(pinned, s);
+  }
   // Station-zone wall clock, not process-local — schedule slots fire at the
   // hours the operator painted them in (issue #353).
   const { dow: day, hour } = zonedParts(date);
@@ -3766,6 +3947,23 @@ export function resolveActiveShow(date = new Date(), s = get()) {
   if (!showId) return null;
   const show = s.shows?.find(x => x.id === showId);
   if (!show) return null;
+  return resolveShowShape(show, s);
+}
+
+// The takeover currently in force, or null (absent, expired, or dangling —
+// the same voiding rules resolveActiveShow applies). Route/janitor helper.
+export function getScheduleOverride(now = Date.now()) {
+  const s = get();
+  const ov = s?.scheduleOverride;
+  if (!ov) return null;
+  if (now >= ov.expiresAt) return null;
+  if (!s.shows?.some(x => x.id === ov.showId)) return null;
+  return ov;
+}
+
+// A stored show, resolved to the consumer-facing shape (persona/guests
+// hydrated, filters coerced). Shared by the grid path and the takeover path.
+function resolveShowShape(show, s) {
   const persona = s.personas?.find(p => p.id === show.personaId) || null;
   return {
     id: show.id,
