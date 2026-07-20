@@ -28,19 +28,20 @@ const embedCache = new Map();
 function embeddingCfg() {
   const s: any = settings.get().embedding || {};
   const llm = llmCfg();
+  const provider = s.provider || llm.provider || 'ollama';
   return {
     enabled: s.enabled !== false,
-    provider: s.provider || llm.provider || 'ollama',
+    provider,
     model: s.model || '',
     // Key precedence: the saved settings field wins, then a dedicated
     // `EMBEDDING_API_KEY` env var (the env path most installs use -- keys live in
-    // state/secrets.env, not settings.json), then the chat key. This is a
-    // runtime env read like config.ts does for SEARCH_API_KEY, so the env value
-    // never gets baked into the persisted settings.json. It covers every
-    // provider uniformly -- including openai-compatible/locca, which can't safely
-    // grab a provider-conventional env var (createOpenAI would otherwise reach
-    // for OPENAI_API_KEY against an arbitrary self-hosted server).
-    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || llm.apiKey || '',
+    // state/secrets.env, not settings.json), then the effective embedding
+    // provider's inline key. This runtime env read never gets baked into the
+    // persisted settings.json. It covers every provider uniformly -- including
+    // openai-compatible/locca, which can't safely grab a provider-conventional
+    // env var (createOpenAI would otherwise reach for OPENAI_API_KEY against an
+    // arbitrary self-hosted server).
+    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
     baseUrl: s.baseUrl || llm.baseUrl || '',
   };

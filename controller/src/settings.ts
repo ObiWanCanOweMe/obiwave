@@ -1504,7 +1504,7 @@ const DEFAULTS = {
     providerBaseUrls: {} as Record<string, string>, // per-provider embedding server URLs (issue #1082)
     baseUrl: '',          // deprecated single slot — migration source only, never written after first save
     ollamaUrl: '',        // Ollama embedding server URL (ollama provider)
-    apiKey: '',           // empty -> inherit settings.llm.apiKey
+    apiKey: '',           // empty → EMBEDDING_API_KEY, then provider-matched llm.keys/env
     seedCount: 0,         // 0 → auto (see autoSeedCount in tag-library.ts: ~4% of
                           //   the library, floored 200 / capped 2500)
     // Propagation defaults. These were 5 / 0.6 / 0.6 and propagated almost
@@ -2371,8 +2371,11 @@ export async function load() {
       providerBaseUrls: embedBaseUrls,
       // Derived with the effective provider (own, else the chat provider) so a
       // dedicated embedding URL keeps working when the provider is inherited.
+      // A same-provider chat URL is the fallback; a different chat provider's
+      // active flat URL must never leak into the embedding leg.
       baseUrl: embedBaseUrls[embedProvider]
-        ?? (typeof stored.embedding?.baseUrl === 'string' ? stored.embedding.baseUrl.trim() : DEFAULTS.embedding.baseUrl),
+        || llmBaseUrls[embedProvider]
+        || '',
       ollamaUrl:
         typeof stored.embedding?.ollamaUrl === 'string'
           ? stored.embedding.ollamaUrl.trim()
@@ -3920,15 +3923,6 @@ export async function update(patch) {
       }
     }
   }
-  // Re-derive the embedding leg's flat baseUrl on EVERY update, not just when
-  // the embedding block was patched: the leg inherits the chat provider when
-  // its own is empty, so an llm.provider-only change also moves which map slot
-  // is live. Runtime (embeddingCfg) reads the flat field — issues #405/#1082.
-  {
-    const embedProv = (next.embedding.provider || next.llm.provider || '') as string;
-    const embedUrls = (next.embedding.providerBaseUrls as Record<string, string> | undefined) ?? {};
-    next.embedding.baseUrl = (embedProv && embedUrls[embedProv]) ? embedUrls[embedProv] : '';
-  }
   if ('skills' in patch) {
     const sk = patch.skills || {};
     if (sk.enabled !== undefined) {
@@ -4052,6 +4046,17 @@ export async function update(patch) {
   if (next.llm.provider === 'litellm' && !next.embedding.provider) {
     next.embedding.provider = inheritedEmbeddingProvider;
     if (!next.embedding.model) next.embedding.model = inheritedEmbeddingModel;
+  }
+
+  // Re-derive the embedding leg's flat baseUrl on EVERY update, after the
+  // LiteLLM chat-only pin establishes the effective embedding identity. A
+  // dedicated embedding URL wins; otherwise inherit only the URL retained for
+  // that same provider on the primary LLM leg — issues #405/#1082.
+  {
+    const embedProv = (next.embedding.provider || next.llm.provider || '') as string;
+    const embedUrls = (next.embedding.providerBaseUrls as Record<string, string> | undefined) ?? {};
+    const llmUrls = (next.llm.providerBaseUrls as Record<string, string> | undefined) ?? {};
+    next.embedding.baseUrl = embedUrls[embedProv] || llmUrls[embedProv] || '';
   }
 
   // Post-patch integrity sweep — a personas/shows change in this patch may
