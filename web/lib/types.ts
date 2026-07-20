@@ -115,7 +115,10 @@ export interface ListenerCount {
   [key: string]: unknown;
 }
 
-export interface PublicStreamInfo {
+/** Structured description of the live broadcast mounts (`stream` on
+ * `/now-playing`). MP3 is the required floor; the enabled flags advertise
+ * optional sibling mounts. */
+export interface StreamInfo {
   mount: string;
   format: 'mp3';
   bitrate?: number | null;
@@ -126,6 +129,9 @@ export interface PublicStreamInfo {
   aacEnabled: boolean;
 }
 
+// Compatibility name retained for the fork web selector.
+export type PublicStreamInfo = StreamInfo;
+
 /** `/now-playing` response. */
 export interface NowPlayingResponse {
   nowPlaying: NowPlayingTrack | null;
@@ -134,9 +140,10 @@ export interface NowPlayingResponse {
   activeShow?: ActiveShow | null;
   listeners?: ListenerCount | number;
   streamOnline?: boolean;
-  stream?: PublicStreamInfo;
   /** kbps of the first attached broadcast mount; null when offline. */
   streamBitrate?: number | null;
+  /** Broadcast mount descriptor — drives the listener stream-format picker. */
+  stream?: StreamInfo;
   /** Cumulative since-boot LLM token total — the player's token ticker. */
   llmTokens?: number | null;
   /** Station IANA timezone — render on-air timestamps in it (issue #418). */
