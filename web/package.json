@@ -1,6 +1,6 @@
 {
   "name": "sub-wave-web",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -13,7 +13,8 @@
     "test:audio-format": "node --experimental-strip-types scripts/audio-format.test.ts",
     "test:llm-provider": "node --experimental-strip-types scripts/llm-provider-meta.test.ts",
     "test:onboarding-provider-state": "node --experimental-strip-types scripts/onboarding-provider-state.test.ts",
-    "test:async-generation": "node --experimental-strip-types scripts/async-result-generation.test.ts"
+    "test:async-generation": "node --experimental-strip-types scripts/async-result-generation.test.ts",
+    "test:llm-section-provider-url-contract": "node --experimental-strip-types scripts/llm-section-provider-url-contract.test.ts"
   },
   "dependencies": {
     "@next/third-parties": "^16.2.6",
