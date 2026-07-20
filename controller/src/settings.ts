@@ -2372,9 +2372,10 @@ export async function load() {
       // Derived with the effective provider (own, else the chat provider) so a
       // dedicated embedding URL keeps working when the provider is inherited.
       // A same-provider chat URL is the fallback; a different chat provider's
-      // active flat URL must never leak into the embedding leg.
+      // active flat URL must never leak into the embedding leg. Locca is the
+      // exception: its chat and embedding servers are deliberately distinct.
       baseUrl: embedBaseUrls[embedProvider]
-        || llmBaseUrls[embedProvider]
+        || (embedProvider === 'locca' ? '' : llmBaseUrls[embedProvider])
         || '',
       ollamaUrl:
         typeof stored.embedding?.ollamaUrl === 'string'
@@ -4050,13 +4051,16 @@ export async function update(patch) {
 
   // Re-derive the embedding leg's flat baseUrl on EVERY update, after the
   // LiteLLM chat-only pin establishes the effective embedding identity. A
-  // dedicated embedding URL wins; otherwise inherit only the URL retained for
-  // that same provider on the primary LLM leg — issues #405/#1082.
+  // dedicated embedding URL wins; otherwise non-Locca providers inherit only
+  // the URL retained for that same provider on the primary LLM leg. Locca's
+  // blank means its dedicated embedding default — issues #405/#1082.
   {
     const embedProv = (next.embedding.provider || next.llm.provider || '') as string;
     const embedUrls = (next.embedding.providerBaseUrls as Record<string, string> | undefined) ?? {};
     const llmUrls = (next.llm.providerBaseUrls as Record<string, string> | undefined) ?? {};
-    next.embedding.baseUrl = embedUrls[embedProv] || llmUrls[embedProv] || '';
+    next.embedding.baseUrl = embedUrls[embedProv]
+      || (embedProv === 'locca' ? '' : llmUrls[embedProv])
+      || '';
   }
 
   // Post-patch integrity sweep — a personas/shows change in this patch may

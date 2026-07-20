@@ -43,7 +43,9 @@ function embeddingCfg() {
     // arbitrary self-hosted server).
     apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
-    baseUrl: s.baseUrl || (provider === llm.provider ? llm.baseUrl : '') || '',
+    // Locca chat and embeddings are separate servers; a blank embedding URL
+    // must reach loccaEmbedBaseUrl() so it selects the dedicated port-8090 default.
+    baseUrl: s.baseUrl || (provider !== 'locca' && provider === llm.provider ? llm.baseUrl : '') || '',
   };
 }
 

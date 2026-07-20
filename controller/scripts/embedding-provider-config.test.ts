@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -125,6 +125,41 @@ await test('blank Locca embeddings use the Locca default, never the LiteLLM chat
   assert.equal(cfg.provider, 'locca');
   assert.equal(cfg.baseUrl, '', 'a different chat provider URL must not enter the embedding config');
   assert.equal(embeddingBaseUrl(cfg), DEFAULT_LOCCA_EMBED_BASE_URL);
+});
+
+await test('blank Locca embeddings never inherit a custom Locca chat URL', async () => {
+  const result = await settings.update({
+    llm: {
+      provider: 'locca',
+      model: 'locca-chat-model',
+      providerBaseUrls: { locca: 'https://custom-locca-chat.example/v1' },
+      apiKey: 'locca-key',
+    },
+    embedding: {
+      provider: 'locca',
+      model: 'nomic-embed-text',
+      providerBaseUrls: { locca: '' },
+      baseUrl: '',
+    },
+  });
+  const persisted = JSON.parse(
+    readFileSync(join(process.env.STATE_DIR!, 'settings.json'), 'utf8'),
+  );
+  const cfg = resolveEmbeddingCfg();
+  assert.deepEqual(
+    {
+      savedBaseUrl: result.saved.embedding.baseUrl,
+      storedBaseUrl: persisted.embedding.baseUrl,
+      resolvedBaseUrl: cfg.baseUrl,
+      effectiveBaseUrl: embeddingBaseUrl(cfg),
+    },
+    {
+      savedBaseUrl: '',
+      storedBaseUrl: '',
+      resolvedBaseUrl: '',
+      effectiveBaseUrl: DEFAULT_LOCCA_EMBED_BASE_URL,
+    },
+  );
 });
 
 if (failures) process.exit(1);
