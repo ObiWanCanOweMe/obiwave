@@ -43,7 +43,7 @@ function embeddingCfg() {
     // arbitrary self-hosted server).
     apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
-    baseUrl: s.baseUrl || llm.baseUrl || '',
+    baseUrl: s.baseUrl || (provider === llm.provider ? llm.baseUrl : '') || '',
   };
 }
 

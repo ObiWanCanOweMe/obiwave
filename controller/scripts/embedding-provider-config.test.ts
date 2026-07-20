@@ -8,6 +8,8 @@ delete process.env.EMBEDDING_API_KEY;
 
 const settings = await import('../src/settings.js');
 const { resolveEmbeddingCfg } = await import('../src/llm/provider.js');
+const { embeddingBaseUrl } = await import('../src/llm/internal/provider/embedding.js');
+const { DEFAULT_LOCCA_EMBED_BASE_URL } = await import('../src/llm/internal/provider/registry.js');
 
 function connection() {
   const { provider, model, baseUrl, apiKey } = resolveEmbeddingCfg();
@@ -99,6 +101,30 @@ await test('an explicit embedding provider inherits its same-provider LLM connec
     baseUrl: 'https://compat-chat.example/v1',
     apiKey: 'compat-key',
   });
+});
+
+await test('blank Locca embeddings use the Locca default, never the LiteLLM chat URL', async () => {
+  await settings.update({
+    llm: {
+      provider: 'litellm',
+      model: 'vendor/chat-model',
+      providerBaseUrls: {
+        litellm: 'https://litellm-chat.example/v1',
+        locca: '',
+      },
+      apiKey: 'litellm-key',
+    },
+    embedding: {
+      provider: 'locca',
+      model: 'nomic-embed-text',
+      providerBaseUrls: { locca: '' },
+      baseUrl: '',
+    },
+  });
+  const cfg = resolveEmbeddingCfg();
+  assert.equal(cfg.provider, 'locca');
+  assert.equal(cfg.baseUrl, '', 'a different chat provider URL must not enter the embedding config');
+  assert.equal(embeddingBaseUrl(cfg), DEFAULT_LOCCA_EMBED_BASE_URL);
 });
 
 if (failures) process.exit(1);
