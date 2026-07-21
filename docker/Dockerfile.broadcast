@@ -48,7 +48,8 @@ COPY sounds /sounds
 
 # Bake the supervisor entrypoint.
 COPY docker/broadcast-entrypoint.sh /usr/local/bin/broadcast-entrypoint
-RUN chmod +x /usr/local/bin/broadcast-entrypoint
+COPY docker/icecast-render.sh /usr/local/bin/icecast-render
+RUN chmod +x /usr/local/bin/broadcast-entrypoint /usr/local/bin/icecast-render
 
 # Healthcheck: icecast HTTP is reachable. Start period covers cold-boot
 # (apt'd icecast2 takes a couple of seconds to bind the socket).

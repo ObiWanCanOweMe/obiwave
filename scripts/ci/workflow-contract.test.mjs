@@ -9,6 +9,10 @@ const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
 );
+const verifyCliAssets = await readFile(
+  new URL('../../.github/workflows/verify-cli-assets.yml', import.meta.url),
+  'utf8',
+);
 const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
 
 test('official JavaScript actions use the Node 24 runtime', async () => {
@@ -31,6 +35,25 @@ test('official JavaScript actions use the Node 24 runtime', async () => {
 test('CI remains unfiltered and reusable while sparing tag runs from cancellation', () => {
   assert.match(ci, /on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+workflow_call:/);
   assert.match(ci, /cancel-in-progress:.*pull_request.*refs\/tags/);
+});
+
+test('consolidated CI verifies the generated theme-token mirror', () => {
+  assert.match(ci, /if: matrix\.package == 'controller'[\s\S]*npm run gen:themes/);
+  assert.match(ci, /git diff --exit-code \.\.\/web\/lib\/theme-tokens\.generated\.ts/);
+});
+
+test('app quality matrix runs the native stream-buffer contract', () => {
+  const appCommand = ci.match(/- package: app\s*\n\s+command: ([^\n]+)/)?.[1];
+  assert.ok(appCommand, 'missing app quality-matrix command');
+  assert.match(appCommand, /(?:^|&& )npm run test:stream-buffer-format(?: &&|$)/);
+});
+
+test('fork releases deliberately exclude the upstream CUDA analyzer image', () => {
+  assert.doesNotMatch(publish, /subwave-analyzer-cuda/);
+});
+
+test('CLI asset drift watches the analyzer GPU overlay', () => {
+  assert.match(verifyCliAssets, /docker-compose\.analyzer-gpu\.yml/);
 });
 
 test('release publication waits for the reusable CI gate', () => {

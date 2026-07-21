@@ -23,13 +23,13 @@ jobs:
           - package: controller
             command: npm run lint && npm test
           - package: web
-            command: npm run lint && npm run test:audio-format && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation && npm run test:llm-section-provider-url-contract && npm run build
+            command: npm run lint && npm run test:audio-format && npm run test:stream-auth-format && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation && npm run test:llm-section-provider-url-contract && npm run build
           - package: mcp-subwave
             command: npm run lint
           - package: cli
             command: npm run typecheck
           - package: app
-            command: npm run lint && npm run typecheck
+            command: npm run lint && npm run typecheck && npm run test:stream-buffer-format
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -43,6 +43,12 @@ jobs:
           cache-dependency-path: ${{ matrix.package }}/package-lock.json
 
       - run: npm ci --no-audit --no-fund
+
+      - name: Verify theme-token mirror is up to date
+        if: matrix.package == 'controller'
+        run: |
+          npm run gen:themes
+          git diff --exit-code ../web/lib/theme-tokens.generated.ts
 
       # mcp-subwave imports shared MCP sources from controller/src/mcp/**.
       # Install their dependencies so TypeScript can resolve those imports.

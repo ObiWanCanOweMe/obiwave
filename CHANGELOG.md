@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.45.0](https://github.com/perminder-klair/subwave/compare/v0.44.0...v0.45.0) (2026-07-21)
+
+
+### Features
+
+* **admin:** API key field for the openai-compatible cloud TTS provider ([#1107](https://github.com/perminder-klair/subwave/issues/1107)) ([4472f00](https://github.com/perminder-klair/subwave/commit/4472f00e85044328012f45fd8ee39553c603006c))
+* **admin:** humanize help copy + card-style section headers ([25add59](https://github.com/perminder-klair/subwave/commit/25add59d45ebd600ccdb5c04f3c4fdf8f6632872))
+* **admin:** playlist recipe panel bg + shadcn scrollbars ([070cbc9](https://github.com/perminder-klair/subwave/commit/070cbc9fed88bf6ed4debd3e02a37c7aaf20cc36))
+* CUDA analyzer flavour + quiet-times analysis gate ([#1099](https://github.com/perminder-klair/subwave/issues/1099)) ([#1102](https://github.com/perminder-klair/subwave/issues/1102)) ([ce0b3ac](https://github.com/perminder-klair/subwave/commit/ce0b3acd5a6d106149c4793ca09e91249e6a2863))
+* **personas:** raise DJ soul cap from 1000 to 2000 chars ([#1105](https://github.com/perminder-klair/subwave/issues/1105)) ([#1113](https://github.com/perminder-klair/subwave/issues/1113)) ([802172c](https://github.com/perminder-klair/subwave/commit/802172c6d14e355f6fdadbdd2ddf629028c7f7b5))
+* **privacy:** private station mode — hidden player + stream listener auth ([#478](https://github.com/perminder-klair/subwave/issues/478)) ([#1058](https://github.com/perminder-klair/subwave/issues/1058)) ([aaacca2](https://github.com/perminder-klair/subwave/commit/aaacca25797a83127e0cf4f90ed4c3baa5e5af06))
+* **skins:** more contrast on the classic, subamp and tty players ([a1b91a3](https://github.com/perminder-klair/subwave/commit/a1b91a3fb8f70d29c679df31261c817968ce8dff))
+* **themes:** distinct fonts per built-in theme + clear stale tokens on switch ([#1112](https://github.com/perminder-klair/subwave/issues/1112)) ([2ed2b8a](https://github.com/perminder-klair/subwave/commit/2ed2b8a9b7d9777a4f04480c1fd61b50b997e6bd))
+* **themes:** expand token system for depth, hierarchy, colour & type ([a82acd2](https://github.com/perminder-klair/subwave/commit/a82acd28304fba84cc7cb79148b9d1d6d7fec377))
+* **themes:** live preview in the theme builder ([73a4fdd](https://github.com/perminder-klair/subwave/commit/73a4fdd833eb3fb0048a18b2d5aa9ef3a075915b))
+* **themes:** modal theme editor with edit, + image-sourced built-ins ([58c3782](https://github.com/perminder-klair/subwave/commit/58c3782b78b983b75fe93b6f3c162a1fe75cc085))
+* **themes:** rework built-ins for depth + add Press & Neon ([03e1ab2](https://github.com/perminder-klair/subwave/commit/03e1ab231b5b477b56da2f86ec5e0ec4c53f564f))
+* **themes:** surgical spec-4 touchups — accent-2 + ink-faint ([f59b412](https://github.com/perminder-klair/subwave/commit/f59b412cbdfd963269473e23448694c0e3dc661a))
+* **themes:** theme editor + image-sourced built-ins, admin humanize, skin contrast ([90ff4c8](https://github.com/perminder-klair/subwave/commit/90ff4c8ac1d2e0b4d8a6a92a98feb6b20ef88f91))
+* **themes:** themeable mono font (--mono-font) ([234d5b6](https://github.com/perminder-klair/subwave/commit/234d5b67e6dcd5d0c17fe3df096d9f568aac4081))
+
+
+### Bug Fixes
+
+* **admin:** higher-contrast muted + larger read-copy for legibility ([c1f04ab](https://github.com/perminder-klair/subwave/commit/c1f04ab212899658aeb14d589a9831e278e771d2))
+* **admin:** lift the shell nav + header for contrast ([717aae2](https://github.com/perminder-klair/subwave/commit/717aae2ce70c4f12293214247bd569f186f87ec7))
+* **admin:** make persona Discard actually revert unsaved edits ([#1106](https://github.com/perminder-klair/subwave/issues/1106)) ([#1115](https://github.com/perminder-klair/subwave/issues/1115)) ([78590be](https://github.com/perminder-klair/subwave/commit/78590bee0e986db8ff2dc3ca0d7a96285ab4e13f))
+* **admin:** nav + header use card-bg, matching the other panels ([9c549ee](https://github.com/perminder-klair/subwave/commit/9c549ee0a149777f7f243875779c7766ef5998df))
+* **app:** align now-playing with listener audio ([#1117](https://github.com/perminder-klair/subwave/issues/1117)) ([d2f9f51](https://github.com/perminder-klair/subwave/commit/d2f9f5180b2859dc3348ce0347a04886d068a05b))
+* **shows:** one-directional, boundary-aware genre matching for strict shows ([#1116](https://github.com/perminder-klair/subwave/issues/1116)) ([40ad544](https://github.com/perminder-klair/subwave/commit/40ad544306db8fde129c0d5979a8b46e9904ac34))
+* **stream:** align now-playing with listener audio, size burst in seconds ([#1114](https://github.com/perminder-klair/subwave/issues/1114)) ([2f36225](https://github.com/perminder-klair/subwave/commit/2f3622554d347904836b48105870beb7e4014d76))
+
+
+### Documentation
+
+* **themes:** theme foundation design spec ([781bc61](https://github.com/perminder-klair/subwave/commit/781bc61b5c7f76de7c9934e3c2cdf8b45b7a2e2b))
+
 ## [0.44.0](https://github.com/perminder-klair/subwave/compare/v0.43.0...v0.44.0) (2026-07-19)
 
 

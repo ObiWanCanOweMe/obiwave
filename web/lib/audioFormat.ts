@@ -28,6 +28,21 @@ export const AUDIO_MIME_TYPES: Record<AudioFormat, string> = {
   flac: 'audio/ogg; codecs=flac',
 };
 
+/** Resolve the live-edge delay for the mount actually selected by the player. */
+export function bufferSecondsForFormat(
+  stream: {
+    bufferSeconds?: number | null;
+    bufferSecondsByFormat?: Partial<Record<AudioFormat, number | null>>;
+  } | null | undefined,
+  format: AudioFormat,
+): number | null {
+  const specific = stream?.bufferSecondsByFormat?.[format];
+  const value = typeof specific === 'number' ? specific : stream?.bufferSeconds;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 60
+    ? value
+    : null;
+}
+
 /** Translate the public station metadata into the playback engine's format
  * switches. MP3 is the universal floor even before the first feed poll. */
 export function streamEnablementFor(stream: {

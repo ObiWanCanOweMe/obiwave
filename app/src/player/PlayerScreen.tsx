@@ -44,6 +44,7 @@ import { useTrackLike } from '@/hooks/useTrackLike';
 import type { StationApi } from '@/lib/api';
 import type { StationLocale } from '@/lib/format';
 import { formatLabel } from '@/lib/streamFormat';
+import type { StreamFormat } from '@/lib/streamFormat';
 import type {
   ActiveShow,
   NowPlayingTrack,
@@ -178,6 +179,7 @@ const RequestPage = memo(function RequestPage({
 
 export default function PlayerScreen() {
   const { api } = useStation();
+  const activeStreamFormatRef = useRef<StreamFormat>('mp3');
   const { colors, mode, themes, activeId } = useTheme();
 
   const { isConnected } = useConnectivity();
@@ -207,12 +209,13 @@ export default function PlayerScreen() {
     // screen (useNowPlayingInfo) tracks the broadcast; idle + backgrounded
     // polls nothing at all. While casting there's no local audio session, so
     // the OS suspends us in the background anyway — no point polling.
-  } = useStationFeed(api, { backgroundPoll: bgPoll });
+  } = useStationFeed(api, { backgroundPoll: bgPoll, activeFormat: activeStreamFormatRef });
   const boothFeed = session.messages;
 
   // Listener-picked stream format (MP3 floor / Opus / FLAC / AAC), per
   // station, gated on platform decodability + the mounts the station serves.
   const streamFormat = useStreamFormat(api?.base ?? null, streamInfo);
+  activeStreamFormatRef.current = streamFormat.format;
   const localPlayer = usePlayer(api, 1, isConnected, streamFormat.format);
   useEffect(() => {
     setBgPoll(localPlayer.tunedIn);

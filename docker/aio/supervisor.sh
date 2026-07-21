@@ -125,24 +125,20 @@ init_secrets() {
 	# Liquidsoap connects to icecast over loopback inside this container;
 	# radio.liq reads ICECAST_HOST (default "icecast").
 	export ICECAST_HOST=localhost
+}
 
-	# Concurrent-listener ceiling (<limits><clients>). Empty/unset → the stock 100.
-	# A non-numeric value would render invalid XML and fail icecast at boot,
-	# so fall back to the default with a warning instead.
-	ICECAST_MAX_CLIENTS="${ICECAST_MAX_CLIENTS:-100}"
-	case "$ICECAST_MAX_CLIENTS" in
-		*[!0-9]*|'')
-			log "ICECAST_MAX_CLIENTS='$ICECAST_MAX_CLIENTS' is not a number — using 100"
-			ICECAST_MAX_CLIENTS=100
-			;;
-	esac
-
-	sed \
-		-e "s|\${ICECAST_SOURCE_PASSWORD}|$ICECAST_SOURCE_PASSWORD|g" \
-		-e "s|\${ICECAST_ADMIN_PASSWORD}|$ICECAST_ADMIN_PASSWORD|g" \
-		-e "s|\${ICECAST_RELAY_PASSWORD}|$ICECAST_RELAY_PASSWORD|g" \
-		-e "s|\${ICECAST_MAX_CLIENTS}|$ICECAST_MAX_CLIENTS|g" \
-		"$TEMPLATE" > "$RENDERED"
+# ---------------------------------------------------------------------------
+# Render icecast.xml from the template + resolved secrets. Called on EVERY
+# broadcast pair (re)launch — not just boot — so a restart-mixer picks up a
+# flipped listener-auth flag the same way the split stack's container restart
+# re-runs its entrypoint.
+# ---------------------------------------------------------------------------
+render_icecast() {
+	ICECAST_STATE_DIR=/var/sub-wave \
+	ICECAST_TEMPLATE="$TEMPLATE" \
+	ICECAST_RENDERED="$RENDERED" \
+	LISTENER_AUTH_URL="${LISTENER_AUTH_URL:-http://localhost:7701/listener-auth}" \
+		/usr/local/bin/icecast-render
 	chown icecast2 "$RENDERED" 2>/dev/null || true
 }
 
@@ -155,6 +151,9 @@ init_secrets() {
 # the pair). icecast runs as the icecast2 user; liquidsoap as the liquidsoap
 # user (uid 10000). `sudo -E` preserves the resolved ICECAST_* env.
 run_broadcast() {
+	# Re-render on every pair launch so a flipped listener-auth flag lands
+	# after a restart-mixer (which bounces this pair, not the container).
+	render_icecast
 	log "starting icecast2"
 	sudo -E -u icecast2 icecast2 -n -c "$RENDERED" &
 	local ic=$!
