@@ -29,6 +29,7 @@ function embeddingCfg() {
   const s: any = settings.get().embedding || {};
   const llm = llmCfg();
   const provider = s.provider || llm.provider || 'ollama';
+  const inlineApiKey = provider === 'openai-compatible' ? s.apiKey : '';
   return {
     enabled: s.enabled !== false,
     provider,
@@ -41,7 +42,7 @@ function embeddingCfg() {
     // openai-compatible/locca, which can't safely grab a provider-conventional
     // env var (createOpenAI would otherwise reach for OPENAI_API_KEY against an
     // arbitrary self-hosted server).
-    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
+    apiKey: inlineApiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
     // Locca chat and embeddings are separate servers; a blank embedding URL
     // must reach loccaEmbedBaseUrl() so it selects the dedicated port-8090 default.

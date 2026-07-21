@@ -127,6 +127,13 @@ export interface StreamInfo {
   opusEnabled: boolean;
   flacEnabled: boolean;
   aacEnabled: boolean;
+  /** Seconds of audio Icecast bursts on connect — i.e. how far behind the live
+   *  edge this listener is for the whole connection. Every timestamp on the
+   *  payload is live-edge; subtract this to render listener-time (issue #1114). */
+  bufferSeconds?: number | null;
+  /** Exact listener delay for the selected mount. Added alongside the legacy
+   * MP3 `bufferSeconds` field so older controllers remain compatible. */
+  bufferSecondsByFormat?: Partial<Record<'mp3' | 'opus' | 'aac' | 'flac', number | null>>;
 }
 
 // Compatibility name retained for the fork web selector.
@@ -197,12 +204,20 @@ export interface StationState {
   upcoming: QueueEntry[];
   history: QueueEntry[];
   djLog: DjLogEntry[];
+  /** The track the controller has on air right now, stamped at the live edge. */
+  current?: { title?: string; artist?: string; startedAt?: string } | null;
   timezone?: string;
   locale?: StationLocale;
   /** Station-wide listener-player UI settings (from GET /state). `skin` is
    *  the operator's player-skin pick (see components/skins); `tuneInOverlay`
    *  gates the full-bleed tap-to-tune gate (default on). */
   ui?: { boothBuddy?: boolean; skin?: string; tuneInOverlay?: boolean };
+  /** Private-station flags (#478) — booleans only, never credentials.
+   *  `privatePlayer` swaps the player pages for a "private station" screen;
+   *  `listenerAuth` means the stream mounts demand a password, so the shell
+   *  prompts for the shared listener password before tune-in. Absent on
+   *  older controllers (treated as fully public). */
+  privacy?: { privatePlayer?: boolean; listenerAuth?: boolean };
 }
 
 /** A single turn in the live DJ session — `voice` (spoken on-air), `dj` (the

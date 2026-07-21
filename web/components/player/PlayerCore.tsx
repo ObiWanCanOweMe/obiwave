@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   type Dispatch,
+  type RefCallback,
   type ReactNode,
   type RefObject,
   type SetStateAction,
@@ -38,6 +39,7 @@ import type { RequestResult } from '@/lib/types';
 
 export interface PlayerAudio {
   audioRef: RefObject<HTMLAudioElement | null>;
+  audioElementRef: RefCallback<HTMLAudioElement>;
   tunedIn: boolean;
   status: PlayerStatus;
   volume: number;
@@ -97,9 +99,13 @@ export function usePlayerActions(): PlayerActions {
 
 export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
-  const feed = useStationFeed();
+  // Break the feed/player dependency cycle without duplicating format state:
+  // the poll reads the latest player-owned selection when it resolves timing.
+  const activeFormatRef = useRef<AudioFormat>('mp3');
+  const feed = useStationFeed(activeFormatRef);
   const {
     audioRef,
+    audioElementRef,
     tunedIn,
     status,
     volume,
@@ -114,6 +120,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     selectFormat,
     formatFailure,
   } = usePlayer({ streamEnablement: streamEnablementFor(feed.stream) });
+  activeFormatRef.current = format;
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;
@@ -195,11 +202,11 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const { latencyMs, quality } = signal;
   const audioValue = useMemo<PlayerAudio>(
     () => ({
-      audioRef, tunedIn, status, volume, muted, idleStopped, format,
+      audioRef, audioElementRef, tunedIn, status, volume, muted, idleStopped, format,
       availability, formatFailure, offline,
       signal: { latencyMs, quality },
     }),
-    [audioRef, tunedIn, status, volume, muted, idleStopped, format,
+    [audioRef, audioElementRef, tunedIn, status, volume, muted, idleStopped, format,
      availability, formatFailure, offline, latencyMs, quality],
   );
 

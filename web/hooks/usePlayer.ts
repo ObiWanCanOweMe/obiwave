@@ -1,6 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefCallback,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import {
   AUDIO_MIME_TYPES,
   availabilityFor,
@@ -15,7 +25,9 @@ import {
   type StreamEnablement,
 } from '@/lib/audioFormat';
 import { isIOSDevice } from '@/lib/platform';
+import { replacePlayerAudioElement, teardownDetachedPlayerAudio } from '@/lib/playerAudioBinding';
 import { useStationOrigin } from '@/lib/stationOrigin';
+import { withStreamAuth } from '@/lib/stationAuth';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 
 // The listener explicitly chooses among MP3, Opus, AAC, and FLAC. Browser
@@ -48,6 +60,7 @@ export type PlayerStatus = 'idle' | 'connecting' | 'playing';
 
 export interface Player {
   audioRef: RefObject<HTMLAudioElement | null>;
+  audioElementRef: RefCallback<HTMLAudioElement>;
   tunedIn: boolean;
   status: PlayerStatus;
   volume: number;
@@ -92,6 +105,7 @@ function detectBrowserSupport(): BrowserSupport {
 export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: UsePlayerOptions = {}): Player {
   const { apiUrl, streams } = useStationOrigin();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioListenerCleanupRef = useRef<(() => void) | null>(null);
   // SSR + first render use the MP3 URL so server and client markup agree; the
   // effect below applies a valid explicit preference after capability checks.
   const [streamUrl, setStreamUrl] = useState<string>(streams.mp3);
@@ -152,7 +166,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     if (!tunedInRef.current || !audioRef.current) return;
     const audio = audioRef.current;
     const myGen = ++gen.current;
-    audio.src = `${nextUrl}?t=${Date.now()}`;
+    audio.src = withStreamAuth(apiUrl, `${nextUrl}?t=${Date.now()}`);
     audio.volume = volumeRef.current;
     setStatus('connecting');
     const p = audio.play();
@@ -161,7 +175,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
       const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
       if (gen.current === myGen && name !== 'AbortError') console.error(`${errorLabel}:`, err);
     });
-  }, [clearWatchdog]);
+  }, [apiUrl, clearWatchdog]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -249,71 +263,79 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   // arm a 5s timer that re-sets src if 'playing' hasn't fired by then;
   // 'error' reconnects with exponential backoff (500 ms doubling to a 60 s
   // ceiling, reset on the next successful 'playing').
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
+  const audioElementRef = useCallback<RefCallback<HTMLAudioElement>>((el) => {
+    replacePlayerAudioElement(audioRef, audioListenerCleanupRef, el, boundEl => {
+      const reconnect = () => {
+        clearWatchdog();
+        if (!tunedInRef.current || !audioRef.current) return;
+        const audio = audioRef.current;
+        const myGen = ++gen.current;
+        audio.src = withStreamAuth(apiUrl, `${streamUrlRef.current}?t=${Date.now()}`);
+        audio.volume = volumeRef.current;
+        setStatus('connecting');
+        const p = audio.play();
+        playPromise.current = p;
+        Promise.resolve(p).catch((err: unknown) => {
+          const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
+          if (gen.current === myGen && name !== 'AbortError') {
+            console.error('Reconnect failed:', err);
+          }
+        });
+      };
 
-    const reconnect = () => {
-      clearWatchdog();
-      if (!tunedInRef.current || !audioRef.current) return;
-      const audio = audioRef.current;
-      const myGen = ++gen.current;
-      audio.src = `${streamUrlRef.current}?t=${Date.now()}`;
-      audio.volume = volumeRef.current;
-      setStatus('connecting');
-      const p = audio.play();
-      playPromise.current = p;
-      Promise.resolve(p).catch((err: unknown) => {
-        const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
-        if (gen.current === myGen && name !== 'AbortError') {
-          console.error('Reconnect failed:', err);
+      const armWatchdog = (delay: number) => {
+        if (!tunedInRef.current) return;
+        clearWatchdog();
+        watchdogTimer.current = setTimeout(reconnect, delay);
+      };
+
+      const onPlaying = () => {
+        clearWatchdog();
+        retryCount.current = 0;
+        setStatus('playing');
+      };
+      const onWaiting = () => {
+        setStatus(s => (s === 'playing' ? 'connecting' : s));
+        armWatchdog(5000);
+      };
+      const onError = () => {
+        setStatus('idle');
+        const { mp3 } = streamsRef.current;
+        const failedFormat = activeFormatRef.current;
+        if (failedFormat !== 'mp3') {
+          failedFormatsRef.current.add(failedFormat);
+          setFormatFailure(failedFormat);
+          activeFormatRef.current = 'mp3';
+          streamUrlRef.current = mp3;
+          setFormat('mp3');
+          setStreamUrl(mp3);
         }
-      });
-    };
-
-    const armWatchdog = (delay: number) => {
-      if (!tunedInRef.current) return;
-      clearWatchdog();
-      watchdogTimer.current = setTimeout(reconnect, delay);
-    };
-
-    const onPlaying = () => {
-      clearWatchdog();
-      retryCount.current = 0;
-      setStatus('playing');
-    };
-    const onWaiting = () => {
-      setStatus(s => (s === 'playing' ? 'connecting' : s));
-      armWatchdog(5000);
-    };
-    const onError = () => {
-      setStatus('idle');
-      const { mp3 } = streamsRef.current;
-      const failedFormat = activeFormatRef.current;
-      if (failedFormat !== 'mp3') {
-        failedFormatsRef.current.add(failedFormat);
-        setFormatFailure(failedFormat);
-        activeFormatRef.current = 'mp3';
-        streamUrlRef.current = mp3;
-        setFormat('mp3');
-        setStreamUrl(mp3);
-      }
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
-      retryCount.current += 1;
-      armWatchdog(delay);
-    };
-    el.addEventListener('playing', onPlaying);
-    el.addEventListener('waiting', onWaiting);
-    el.addEventListener('stalled', onWaiting);
-    el.addEventListener('error', onError);
-    return () => {
-      clearWatchdog();
-      el.removeEventListener('playing', onPlaying);
-      el.removeEventListener('waiting', onWaiting);
-      el.removeEventListener('stalled', onWaiting);
-      el.removeEventListener('error', onError);
-    };
-  }, [clearWatchdog]);
+        const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
+        retryCount.current += 1;
+        armWatchdog(delay);
+      };
+      boundEl.addEventListener('playing', onPlaying);
+      boundEl.addEventListener('waiting', onWaiting);
+      boundEl.addEventListener('stalled', onWaiting);
+      boundEl.addEventListener('error', onError);
+      return () => {
+        clearWatchdog();
+        boundEl.removeEventListener('playing', onPlaying);
+        boundEl.removeEventListener('waiting', onWaiting);
+        boundEl.removeEventListener('stalled', onWaiting);
+        boundEl.removeEventListener('error', onError);
+        teardownDetachedPlayerAudio(boundEl, () => {
+          gen.current += 1;
+          tunedInRef.current = false;
+          playPromise.current = null;
+          retryCount.current = 0;
+          setTunedIn(false);
+          setStatus('idle');
+          setIdleStopped(false);
+        });
+      };
+    });
+  }, [apiUrl, clearWatchdog]);
 
   // Idle cutoff (issue #343): a tab left tuned in with no listener activity
   // for IDLE_TUNE_OUT_MS gets tuned out, so an abandoned browser doesn't sit
@@ -390,7 +412,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
       resolved ? { current: resolved.streamUrl } : streamUrlRef,
       volumeRef,
     );
-    el.src = `${target.streamUrl}?t=${Date.now()}`;
+    el.src = withStreamAuth(apiUrl, `${target.streamUrl}?t=${Date.now()}`);
     el.volume = target.volume;
     setTunedIn(true);
     setStatus('connecting');
@@ -417,7 +439,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   };
 
   return {
-    audioRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute,
+    audioRef, audioElementRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute,
     muted: volume === 0, idleStopped, format, availability, selectFormat, formatFailure,
   };
 }

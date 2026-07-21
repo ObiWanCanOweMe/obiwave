@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-embedding-provider-'));
-delete process.env.EMBEDDING_API_KEY;
+process.env.EMBEDDING_API_KEY = 'dedicated-embedding-env-key';
+
+// Simulate a pre-fix settings.json where a compatible-server bearer survived
+// after the embedding provider switched to managed OpenAI.
+writeFileSync(
+  join(process.env.STATE_DIR, 'settings.json'),
+  JSON.stringify({
+    llm: { provider: 'ollama' },
+    embedding: {
+      provider: 'openai',
+      model: 'text-embedding-3-small',
+      apiKey: 'stale-compat-embedding-key',
+    },
+  }),
+);
 
 const settings = await import('../src/settings.js');
 const { resolveEmbeddingCfg } = await import('../src/llm/provider.js');
@@ -29,6 +43,17 @@ async function test(name: string, run: () => Promise<void>) {
 }
 
 await settings.load();
+
+await test('persisted compatible embedding bearer cannot mask the dedicated env key', async () => {
+  assert.equal(settings.get().embedding.apiKey, '');
+  assert.deepEqual(connection(), {
+    provider: 'openai',
+    model: 'text-embedding-3-small',
+    baseUrl: '',
+    apiKey: 'dedicated-embedding-env-key',
+  });
+  delete process.env.EMBEDDING_API_KEY;
+});
 
 await test('switching to chat-only LiteLLM retains the inherited embedding connection', async () => {
   await settings.update({
@@ -160,6 +185,63 @@ await test('blank Locca embeddings never inherit a custom Locca chat URL', async
       effectiveBaseUrl: DEFAULT_LOCCA_EMBED_BASE_URL,
     },
   );
+});
+
+await test('switching away from openai-compatible never reuses its embedding bearer', async () => {
+  await settings.update({
+    llm: {
+      provider: 'locca',
+      model: 'locca-chat-model',
+      apiKey: 'locca-provider-key',
+    },
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      providerBaseUrls: { 'openai-compatible': 'https://compat-embed.example/v1' },
+      apiKey: 'compat-embedding-key',
+    },
+  });
+  assert.equal(connection().apiKey, 'compat-embedding-key');
+
+  process.env.OPENAI_API_KEY = 'managed-openai-provider-key';
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = 'managed-google-provider-key';
+  process.env.OPENROUTER_API_KEY = 'managed-openrouter-provider-key';
+
+  const resolved: Record<string, string> = {};
+  for (const provider of ['locca', 'openai', 'google', 'openrouter']) {
+    await settings.update({ embedding: { provider, model: '' } });
+    resolved[provider] = connection().apiKey;
+  }
+
+  assert.deepEqual(resolved, {
+    locca: 'locca-provider-key',
+    // Empty here is intentional: each managed AI SDK reads its own normal env
+    // credential when no dedicated EMBEDDING_API_KEY override is supplied.
+    openai: '',
+    google: '',
+    openrouter: '',
+  });
+  assert.equal(settings.get().embedding.apiKey, '');
+
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+});
+
+await test('dedicated embedding env key wins after switching away from compatible', async () => {
+  await settings.update({
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      apiKey: 'compat-embedding-key',
+    },
+  });
+  process.env.EMBEDDING_API_KEY = 'dedicated-embedding-env-key';
+  await settings.update({ embedding: { provider: 'google', model: 'text-embedding-004' } });
+
+  assert.equal(connection().apiKey, 'dedicated-embedding-env-key');
+  assert.equal(settings.get().embedding.apiKey, '');
+  delete process.env.EMBEDDING_API_KEY;
 });
 
 if (failures) process.exit(1);

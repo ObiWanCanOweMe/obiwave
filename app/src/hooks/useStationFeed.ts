@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppActive } from '@/hooks/useAppActive';
 import type { StationApi } from '@/lib/api';
 import { DEFAULT_STATION_LOCALE, type StationLocale } from '@/lib/format';
+import { bufferSecondsForFormat } from '@/lib/streamBuffer';
+import type { StreamFormat } from '@/lib/streamFormat';
 import type {
   ActiveShow,
   DjState,
@@ -61,9 +63,10 @@ const OFFLINE_CONFIRM_POLLS = 4;
 
 export function useStationFeed(
   api: StationApi | null,
-  opts?: { backgroundPoll?: boolean },
+  opts?: { backgroundPoll?: boolean; activeFormat?: { readonly current: StreamFormat } },
 ): StationFeed {
   const backgroundPoll = opts?.backgroundPoll ?? false;
+  const activeFormat = opts?.activeFormat;
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
   const [dj, setDj] = useState<DjState | null>(null);
@@ -80,6 +83,14 @@ export function useStationFeed(
   const trackStartRef = useRef<number | null>(null);
   const offlinePollsRef = useRef(0);
   const appActive = useAppActive();
+  // Identity of the track currently ON DISPLAY. Distinct from "latest track the
+  // controller reported": between them sits the listener's buffer, and this
+  // holds the older of the two until the audio catches up.
+  const lastTrackKeyRef = useRef<string | null>(null);
+  // Listener buffer depth in ms (stream.bufferSeconds). 0 until the first
+  // payload lands, which degrades to the old live-edge behaviour.
+  const leadMsRef = useRef(0);
+  const promoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Per-field payload signatures: skip the setState (keeping the previous
   // object identity) when a poll returns byte-identical data.
@@ -102,6 +113,14 @@ export function useStationFeed(
     sigRef.current = {};
     trackStartRef.current = null;
     offlinePollsRef.current = 0;
+    // Drop any held track switch from the station we just left, or it would
+    // land on the new station and stamp its clock with a foreign start time.
+    lastTrackKeyRef.current = null;
+    leadMsRef.current = 0;
+    if (promoteTimerRef.current) {
+      clearTimeout(promoteTimerRef.current);
+      promoteTimerRef.current = null;
+    }
     setNowPlaying(null);
     setContext(null);
     setDj(null);
@@ -123,18 +142,57 @@ export function useStationFeed(
     if (background && !backgroundPoll) return;
     let cancelled = false;
 
-    const applyNowPlaying = (npRes: NowPlayingResponse) => {
-      setIfChanged('nowPlaying', npRes.nowPlaying, () =>
-        setNowPlaying((prev) => {
-          if (
-            npRes.nowPlaying?.title !== prev?.title ||
-            npRes.nowPlaying?.artist !== prev?.artist
-          ) {
-            trackStartRef.current = Date.now();
-          }
-          return npRes.nowPlaying;
-        }),
-      );
+    // `current` is /state's live-edge view, absent on the background poll (which
+    // fetches /now-playing only) and on a failed /state leg.
+    const applyNowPlaying = (npRes: NowPlayingResponse, current?: StationState['current']) => {
+      const np = npRes.nowPlaying;
+      // Buffer depth first — everything below is measured against it. Clamped:
+      // a bad value would park the clock in the far future or wind it back past
+      // the track start.
+      const bufSec = bufferSecondsForFormat(npRes.stream, activeFormat?.current ?? 'mp3');
+      if (bufSec !== null) leadMsRef.current = bufSec * 1000;
+      const trackKey = np ? `${np.title}\0${np.artist}` : null;
+
+      // Prefer the controller's live-edge stamp over "first seen by this
+      // client". The old behaviour stamped Date.now() on first sight, so a
+      // backgrounded app (30s poll) or a missed transition started the clock
+      // late by however long it took to notice.
+      let serverStart = NaN;
+      if (np?.title && current && current.title === np.title && current.startedAt) {
+        const t = Date.parse(current.startedAt);
+        if (Number.isFinite(t) && t <= Date.now()) serverStart = t;
+      }
+      // Shift into listener-time: the audio reaches this listener leadMs after
+      // the live edge, so that's when the track genuinely starts for them.
+      // Without a server stamp fall back to first-seen (no offset) — the next
+      // foreground tick carries /state and repairs it via the converge branch.
+      const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMsRef.current : Date.now();
+
+      if (trackKey !== lastTrackKeyRef.current) {
+        const commit = () => {
+          promoteTimerRef.current = null;
+          lastTrackKeyRef.current = trackKey;
+          trackStartRef.current = audibleAt;
+          setIfChanged('nowPlaying', np, setNowPlaying);
+        };
+        const wait = audibleAt - Date.now();
+        if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+        // Show immediately when the audio is already out, when the stream drops
+        // (nothing to stay in sync with), or on the first payload — a cold start
+        // has no earlier track to keep showing. The clock stays honest there
+        // because trackStartRef carries the offset and the tick clamps at 0.
+        if (wait <= 0 || trackKey == null || lastTrackKeyRef.current == null) commit();
+        else promoteTimerRef.current = setTimeout(commit, wait);
+      } else {
+        // Same track, better information — converge on the server stamp (and
+        // repair a background-poll estimate) without churn inside ±2.5s.
+        if (Number.isFinite(serverStart)) {
+          const prev = trackStartRef.current;
+          if (prev == null || Math.abs(audibleAt - prev) > 2500) trackStartRef.current = audibleAt;
+        }
+        // Metadata enrichment (genres, bpm, cover) lands on later polls.
+        setIfChanged('nowPlaying', np, setNowPlaying);
+      }
       setIfChanged('context', npRes.context, setContext);
       if (npRes.dj) setIfChanged('dj', npRes.dj, setDj);
       setIfChanged('activeShow', npRes.activeShow ?? npRes.context?.activeShow ?? null, setActiveShow);
@@ -173,7 +231,11 @@ export function useStationFeed(
         api.session(),
       ]);
       if (cancelled) return;
-      if (np.status === 'fulfilled') applyNowPlaying(np.value);
+      // /state before /now-playing: its `current` carries the live-edge stamp
+      // applyNowPlaying needs to place the track in listener-time.
+      if (np.status === 'fulfilled') {
+        applyNowPlaying(np.value, st.status === 'fulfilled' ? st.value?.current : undefined);
+      }
       if (st.status === 'fulfilled') setIfChanged('state', st.value, setState);
       if (se.status === 'fulfilled' && se.value && Array.isArray(se.value.messages)) {
         setIfChanged('session', se.value, setSession);
@@ -184,14 +246,25 @@ export function useStationFeed(
     return () => {
       cancelled = true;
       clearInterval(id);
+      // A held switch must not land after teardown. Deliberately does NOT reset
+      // lastTrackKeyRef: this effect re-runs on every foreground/background
+      // flip, and forgetting the on-display track there would make the next
+      // tick treat a mid-track resume as a cold start and re-stamp the clock.
+      if (promoteTimerRef.current) {
+        clearTimeout(promoteTimerRef.current);
+        promoteTimerRef.current = null;
+      }
     };
-  }, [api, appActive, backgroundPoll, setIfChanged]);
+  }, [activeFormat, api, appActive, backgroundPoll, setIfChanged]);
 
   useEffect(() => {
     if (!appActive) return;
     const update = () => {
       if (trackStartRef.current) {
-        setElapsed(Math.floor((Date.now() - trackStartRef.current) / 1000));
+        // Clamped at 0: trackStartRef is listener-time and sits in the future
+        // while the track is still inside the buffer, so the clock holds 0:00
+        // until the audio actually starts rather than reading negative.
+        setElapsed(Math.max(0, Math.floor((Date.now() - trackStartRef.current) / 1000)));
       }
     };
     update(); // catch up immediately on foreground

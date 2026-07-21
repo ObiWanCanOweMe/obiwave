@@ -14,7 +14,7 @@ import crypto from 'node:crypto';
 import { config } from '../../../config.js';
 import * as settings from '../../../settings.js';
 import { transcodeAudio, hasFfmpeg } from '../../../audio/audio-import.js';
-import { isElevenLabsV3, snapV3Stability } from '../core/pure.js';
+import { isElevenLabsV3, snapV3Stability, soulBrief } from '../core/pure.js';
 
 // Default TTS model per cloud provider. A model id is provider-specific — an
 // OpenAI id like "gpt-4o-mini-tts" is invalid against ElevenLabs and vice
@@ -128,7 +128,11 @@ function deliveryHint(
   model: string,
 ): { instructions?: string; language?: string } {
   const lang = String(language || '').trim();
-  const character = String(soul || '').trim();
+  // Brief, not the full soul: this hint is rebuilt and sent on EVERY spoken
+  // line, and it only steers tone and pacing — the backstory and recurring
+  // bits further down a long soul can't change how a line is read, they just
+  // enlarge every request.
+  const character = soulBrief(soul);
   if (provider === 'openai') {
     // `instructions` only steers gpt-4o*-tts models; tts-1 / tts-1-hd ignore or
     // reject it, so don't send it there (a 400 would drop us to an English
@@ -150,9 +154,24 @@ function cloudCfg() {
   return settings.get().tts?.cloud || {};
 }
 
+// The settings key is an inline bearer owned exclusively by an operator's
+// OpenAI-compatible server. Managed providers always use their conventional
+// environment credential, even if an old settings.json or a persona override
+// leaves a stale compatible bearer in the object being resolved.
+export function resolveCloudApiKey(
+  c: { provider?: string; apiKey?: string },
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (c.provider === 'openai-compatible') return String(c.apiKey || '').trim();
+  if (c.provider === 'elevenlabs') return String(env.ELEVENLABS_API_KEY || '').trim();
+  if (c.provider === 'openai') return String(env.OPENAI_API_KEY || '').trim();
+  return '';
+}
+
 function speechModel(c: any) {
+  const apiKey = resolveCloudApiKey(c);
   if (c.provider === 'elevenlabs') {
-    const provider = createElevenLabs(c.apiKey ? { apiKey: c.apiKey } : {});
+    const provider = createElevenLabs(apiKey ? { apiKey } : {});
     return provider.speech(c.model);
   }
   if (c.provider === 'openai-compatible') {
@@ -161,12 +180,12 @@ function speechModel(c: any) {
     // servers accept any non-empty key, so fall back to a placeholder.
     const provider = createOpenAI({
       baseURL: c.baseUrl,
-      apiKey: c.apiKey || 'unused',
+      apiKey: apiKey || 'unused',
       name: 'openai-compatible',
     });
     return provider.speech(c.model);
   }
-  const provider = createOpenAI(c.apiKey ? { apiKey: c.apiKey } : {});
+  const provider = createOpenAI(apiKey ? { apiKey } : {});
   return provider.speech(c.model);
 }
 
@@ -195,15 +214,7 @@ export function isConfigured(providerOverride: string | null = null) {
     ? CLOUD_DEFAULT_MODELS[providerOverride]
     : c.model;
   if (!model) return false;
-  const envKey = provider === 'elevenlabs'
-    ? process.env.ELEVENLABS_API_KEY
-    : process.env.OPENAI_API_KEY;
-  // A key typed into Settings only counts for the global provider it was
-  // entered against — not for a persona that overrode to a different one.
-  const settingsKey = (!providerOverride || providerOverride === c.provider)
-    ? c.apiKey
-    : null;
-  return !!(settingsKey || envKey);
+  return !!resolveCloudApiKey({ provider, apiKey: c.apiKey });
 }
 
 // Generate speech and write it to a file. Returns the path — same contract as

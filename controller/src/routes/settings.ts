@@ -118,6 +118,8 @@ router.get('/settings', requireAdmin, async (req, res) => {
         sfx: s.sfx,
         ui: s.ui,
         scrobble: s.scrobble,
+        // privacy.password arrives redacted ('set'/'') from getRedacted().
+        privacy: s.privacy,
       },
       defaults: {
         // The built-in prompt template — the UI shows this when djPrompt is "".
@@ -551,14 +553,12 @@ router.get('/settings/tts/voices', requireAdmin, async (req, res) => {
   await settings.load();
   const cloud = settings.get().tts?.cloud || {};
 
-  // Same precedence as cloud-speech.isConfigured(): a key typed into Settings
-  // counts only for the provider it was entered against, otherwise fall back
-  // to that provider's env var from state/secrets.env.
-  const envKey = provider === 'elevenlabs'
-    ? process.env.ELEVENLABS_API_KEY
-    : process.env.OPENAI_API_KEY;
-  const settingsKey = provider === cloud.provider ? cloud.apiKey : '';
-  const apiKey = (settingsKey || envKey || '').trim();
+  // Same provider ownership as synthesis: the inline settings key belongs only
+  // to openai-compatible; managed providers use their normal env credentials.
+  const apiKey = speech.resolveCloudApiKey({
+    provider,
+    apiKey: provider === cloud.provider ? cloud.apiKey : '',
+  });
 
   // Backstop only — listVoices runs its own per-provider budget (10s managed,
   // 8s across the compat probe). Sits above both so the inner deadline is what
