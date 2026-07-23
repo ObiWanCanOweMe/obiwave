@@ -21,24 +21,27 @@ case "$ICECAST_MAX_CLIENTS" in *[!0-9]*|'') ICECAST_MAX_CLIENTS=100 ;; esac
 
 BUFFER_SECONDS="${ICECAST_BUFFER_SECONDS:-$(read_state_num liquidsoap_stream_buffer_seconds.txt 22)}"
 MP3_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"
+OPUS_BITRATE="${ICECAST_OPUS_BITRATE:-$(read_state_num liquidsoap_opus_bitrate.txt 96)}"
 AAC_BITRATE="${ICECAST_AAC_BITRATE:-$(read_state_num liquidsoap_aac_bitrate.txt 192)}"
+FLAC_BITRATE_EST=900
 case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 case "$MP3_BITRATE" in *[!0-9]*|'') MP3_BITRATE=192 ;; esac
+case "$OPUS_BITRATE" in *[!0-9]*|'') OPUS_BITRATE=96 ;; esac
 case "$AAC_BITRATE" in *[!0-9]*|'') AAC_BITRATE=192 ;; esac
 [ "$BUFFER_SECONDS" -gt 60 ] && BUFFER_SECONDS=60
 
-# Icecast burst sizes are bytes. MP3 and AAC have exact configured byte rates.
-# Opus uses constrained VBR and FLAC is variable-rate, so their mounts
-# deliberately override the global burst with zero rather than promising an
-# invented duration from a target/unknown bitrate.
+# Icecast burst sizes are bytes. MP3 and AAC use their exact CBR targets, Opus
+# uses its constrained-VBR target, and FLAC uses a 900 kbps estimate.
 MP3_BURST_SIZE=$(( BUFFER_SECONDS * MP3_BITRATE * 125 ))
-OPUS_BURST_SIZE=0
+OPUS_BURST_SIZE=$(( BUFFER_SECONDS * OPUS_BITRATE * 125 ))
 AAC_BURST_SIZE=$(( BUFFER_SECONDS * AAC_BITRATE * 125 ))
-FLAC_BURST_SIZE=0
+FLAC_BURST_SIZE=$(( BUFFER_SECONDS * FLAC_BITRATE_EST * 125 ))
 ICECAST_BURST_SIZE=$MP3_BURST_SIZE
 
 MAX_BURST_SIZE=$MP3_BURST_SIZE
+[ "$OPUS_BURST_SIZE" -gt "$MAX_BURST_SIZE" ] && MAX_BURST_SIZE=$OPUS_BURST_SIZE
 [ "$AAC_BURST_SIZE" -gt "$MAX_BURST_SIZE" ] && MAX_BURST_SIZE=$AAC_BURST_SIZE
+[ "$FLAC_BURST_SIZE" -gt "$MAX_BURST_SIZE" ] && MAX_BURST_SIZE=$FLAC_BURST_SIZE
 ICECAST_QUEUE_SIZE=$(( MAX_BURST_SIZE * 4 ))
 [ "$ICECAST_QUEUE_SIZE" -lt 2097152 ] && ICECAST_QUEUE_SIZE=2097152
 
@@ -50,11 +53,15 @@ AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}"
 
 : > "$MOUNTS_XML"
 render_mount() {
-    local mount=$1 burst=$2
+    local mount=$1 bitrate=$2 burst queue
+    burst=$(( BUFFER_SECONDS * bitrate * 125 ))
+    queue=$(( burst * 4 ))
+    [ "$queue" -lt 2097152 ] && queue=2097152
     cat >> "$MOUNTS_XML" <<EOF
     <mount type="normal">
         <mount-name>$mount</mount-name>
         <burst-size>$burst</burst-size>
+        <queue-size>$queue</queue-size>
 EOF
     if [ "$AUTH_ENABLED" = true ]; then
         cat >> "$MOUNTS_XML" <<EOF
@@ -69,10 +76,10 @@ EOF
 EOF
 }
 
-render_mount /stream.mp3 "$MP3_BURST_SIZE"
-render_mount /stream.opus "$OPUS_BURST_SIZE"
-render_mount /stream.flac "$FLAC_BURST_SIZE"
-render_mount /stream.aac "$AAC_BURST_SIZE"
+render_mount /stream.mp3 "$MP3_BITRATE"
+render_mount /stream.opus "$OPUS_BITRATE"
+render_mount /stream.flac "$FLAC_BITRATE_EST"
+render_mount /stream.aac "$AAC_BITRATE"
 
 sed \
     -e "s|\${ICECAST_SOURCE_PASSWORD}|$ICECAST_SOURCE_PASSWORD|g" \
@@ -81,8 +88,8 @@ sed \
     -e "s|\${ICECAST_MAX_CLIENTS}|$ICECAST_MAX_CLIENTS|g" \
     -e "s|\${ICECAST_BURST_SIZE}|$ICECAST_BURST_SIZE|g" \
     -e "s|\${ICECAST_QUEUE_SIZE}|$ICECAST_QUEUE_SIZE|g" \
-    -e "/<!--@LISTENER_AUTH_MOUNTS@-->/r $MOUNTS_XML" \
-    -e "/<!--@LISTENER_AUTH_MOUNTS@-->/d" \
+    -e "/<!--@STREAM_MOUNTS@-->/r $MOUNTS_XML" \
+    -e "/<!--@STREAM_MOUNTS@-->/d" \
     "$TEMPLATE" > "$RENDERED"
 
-echo "icecast-render: ${BUFFER_SECONDS}s CBR bursts: mp3=${MP3_BURST_SIZE}B aac=${AAC_BURST_SIZE}B; VBR bursts disabled: opus=0B flac=0B; queue=${ICECAST_QUEUE_SIZE}B; auth=${AUTH_ENABLED}" >&2
+echo "icecast-render: ${BUFFER_SECONDS}s bursts: mp3=${MP3_BURST_SIZE}B opus=${OPUS_BURST_SIZE}B aac=${AAC_BURST_SIZE}B flac~=${FLAC_BURST_SIZE}B; queue=${ICECAST_QUEUE_SIZE}B; auth=${AUTH_ENABLED}" >&2

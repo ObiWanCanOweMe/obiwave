@@ -146,6 +146,8 @@ assert.equal(tunedIn, false);
 assert.equal(status, 'idle');
 
 const source = readFileSync(new URL('../hooks/usePlayer.ts', import.meta.url), 'utf8');
+const coreSource = readFileSync(new URL('../components/player/PlayerCore.tsx', import.meta.url), 'utf8');
+const feedSource = readFileSync(new URL('../hooks/useStationFeed.ts', import.meta.url), 'utf8');
 const shellSource = readFileSync(new URL('../components/player/PlayerShell.tsx', import.meta.url), 'utf8');
 const assignmentPattern = /\b(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*\.src\s*=\s*([^;]+);/g;
 
@@ -193,5 +195,31 @@ for (const expression of assignments) {
     `playback assignment is not scoped to the active station: ${expression}`,
   );
 }
+
+assert.match(
+  source,
+  /getListenerLagMs:\s*\(\)\s*=>\s*number\s*\|\s*null;/,
+  'player must export the measured listener-lag interface',
+);
+assert.match(
+  source,
+  /const getListenerLagMs = useCallback\(\(\): number \| null => \{/,
+  'player must expose a stable measured listener-lag callback',
+);
+assert.match(
+  coreSource,
+  /const getListenerLagMs = useCallback\(\(\) => listenerLagGetterRef\.current\(\), \[\]\);/,
+  'player core must bridge measured lag through a stable callback',
+);
+assert.match(
+  coreSource,
+  /useStationFeed\(\{\s*activeFormat: activeFormatRef,\s*getListenerLagMs\s*\}\)/,
+  'player core must pass active format and measured lag to the feed',
+);
+assert.match(
+  feedSource,
+  /const measuredLagMs = getListenerLagMs\?\.\(\) \?\? null;\s*const leadMs = measuredLagMs \?\? leadMsRef\.current;/,
+  'station feed must prefer measured lag before the per-format fallback',
+);
 
 console.log('stream-auth-format: all assertions passed');

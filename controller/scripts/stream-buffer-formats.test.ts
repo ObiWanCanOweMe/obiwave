@@ -4,9 +4,9 @@ import { streamBufferSecondsByFormat } from '../src/broadcast/stream-buffer.js';
 
 assert.deepEqual(streamBufferSecondsByFormat(22), {
   mp3: 22,
-  opus: 0,
+  opus: 22,
   aac: 22,
-  flac: 0,
+  flac: 22,
 });
 assert.deepEqual(streamBufferSecondsByFormat(0), {
   mp3: 0,

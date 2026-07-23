@@ -77,6 +77,7 @@ export interface Player {
   availability: FormatAvailability;
   selectFormat: (format: AudioFormat) => void;
   formatFailure: AudioFormat | null;
+  getListenerLagMs: () => number | null;
 }
 
 export interface UsePlayerOptions {
@@ -438,8 +439,23 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     }
   };
 
+  const getListenerLagMs = useCallback((): number | null => {
+    const el = audioRef.current;
+    if (!el || !tunedInRef.current || el.paused) return null;
+    try {
+      const n = el.buffered.length;
+      if (n === 0) return null;
+      const lag = el.buffered.end(n - 1) - el.currentTime;
+      if (!Number.isFinite(lag) || lag <= 0) return null;
+      return Math.min(lag, 120) * 1000;
+    } catch {
+      return null;
+    }
+  }, []);
+
   return {
     audioRef, audioElementRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute,
     muted: volume === 0, idleStopped, format, availability, selectFormat, formatFailure,
+    getListenerLagMs,
   };
 }

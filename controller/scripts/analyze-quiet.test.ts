@@ -11,6 +11,7 @@
 // stream-idle.test.ts.
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { quietGateDecision, type QuietState } from '../src/music/analyze-quiet-pure.js';
 
 let failures = 0;
@@ -96,6 +97,21 @@ async function main() {
     const after = quietGateDecision(during.state, { enabled: true, count: 3, now: T0 + WINDOW, quietAfterMs: WINDOW });
     assert.equal(after.proceed, false);
     assert.equal(after.state.quietSince, null);
+  });
+
+  await test('the first prefetch starts only after the quiet gate permits work', async () => {
+    const source = await readFile(new URL('../src/music/analyze.ts', import.meta.url), 'utf8');
+    const pipeline = source.slice(
+      source.indexOf('const prefetchAudio ='),
+      source.indexOf('let localPath:', source.indexOf('const prefetchAudio =')),
+    );
+    const gate = pipeline.indexOf('await waitForQuiet(');
+    const current = pipeline.indexOf('prefetch(id)');
+    const next = pipeline.indexOf('prefetch(ids[i + 1])');
+
+    assert.ok(gate >= 0, 'analysis loop must await the quiet gate');
+    assert.ok(current > gate, 'first/current prefetch must start after the quiet gate permits work');
+    assert.ok(next > current, 'one-ahead prefetch must remain after the gated current prefetch');
   });
 
   process.exit(failures ? 1 : 0);
