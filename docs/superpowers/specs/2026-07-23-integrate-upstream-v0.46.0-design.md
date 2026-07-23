@@ -30,7 +30,7 @@ Adopt clean upstream changes directly, including:
 
 ## Overlap inventory
 
-Twenty-five paths changed on both sides since v0.45.0. Every one is audited even if Git resolves it automatically. The expected textual conflicts are concentrated in:
+Twenty-four paths changed on both sides since v0.45.0. Every one is audited even if Git resolves it automatically. The expected textual conflicts are concentrated in:
 
 - `CLAUDE.md`;
 - `controller/src/settings.ts`;
