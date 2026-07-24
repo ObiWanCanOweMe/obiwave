@@ -102,14 +102,16 @@ async function main() {
   await test('the first prefetch starts only after the quiet gate permits work', async () => {
     const source = await readFile(new URL('../src/music/analyze.ts', import.meta.url), 'utf8');
     const pipeline = source.slice(
-      source.indexOf('const prefetchAudio ='),
-      source.indexOf('let localPath:', source.indexOf('const prefetchAudio =')),
+      source.indexOf('const prefetch ='),
+      source.indexOf('let localPath:', source.indexOf('const prefetch =')),
     );
     const gate = pipeline.indexOf('await waitForQuiet(');
+    const eager = pipeline.indexOf('prefetch(ids[0])');
     const current = pipeline.indexOf('prefetch(id)');
     const next = pipeline.indexOf('prefetch(ids[i + 1])');
 
     assert.ok(gate >= 0, 'analysis loop must await the quiet gate');
+    assert.equal(eager, -1, 'first prefetch must not be eagerly initialized before the quiet gate');
     assert.ok(current > gate, 'first/current prefetch must start after the quiet gate permits work');
     assert.ok(next > current, 'one-ahead prefetch must remain after the gated current prefetch');
   });
