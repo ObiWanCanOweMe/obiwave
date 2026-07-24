@@ -53,8 +53,10 @@ Remove the complete ObiWave remote URL-handoff feature. The integration deletes:
 - `controller/src/music/analyzer-handoff.ts`;
 - URL-mode branches in the analysis pipeline;
 - focused URL-handoff tests;
-- URL-handoff references in operator and architecture documentation;
+- URL-handoff references in active operator and architecture documentation;
 - the historical remote-handoff design and plan documents, which are the only exception to retaining fork planning history.
+
+Older release-integration plans may still describe the behavior they previously preserved; they remain immutable audit history, not active operator guidance.
 
 Analysis returns to upstream's shared-volume flow:
 
@@ -136,7 +138,7 @@ After resolving environment, Compose, runtime, and documentation sources:
 
 Establish a fresh baseline from `origin/develop`, then use focused red-green tests for hand-composed or removed behavior. Required verification includes:
 
-- a removal contract proving no `ANALYZE_HANDOFF`, URL-mode branch, helper module, focused test, generated asset, or documentation reference remains;
+- a removal contract proving no `ANALYZE_HANDOFF`, URL-mode branch, helper module, focused test, generated asset, or active operator-documentation reference remains, and proving the dedicated remote-handoff design and plan are deleted;
 - multi-station pure, manager, resolution, route, activation, rollback, stale-IPC, and state-isolation tests;
 - provider ownership and settings-response secrecy across station profiles;
 - vocal-aware drain policy, lyric-vocal analysis, stem-cache, stem-blend rendering, and ordinary-transition fallback;
