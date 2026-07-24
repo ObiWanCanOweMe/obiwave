@@ -56,3 +56,4 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 web/.ds-styles.css
+__pycache__/
