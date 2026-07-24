@@ -5,10 +5,10 @@ import { bufferSecondsForFormat } from '../src/lib/streamBuffer.ts';
 
 const stream = {
   bufferSeconds: 22,
-  bufferSecondsByFormat: { mp3: 22, opus: 0, aac: 22, flac: 0 },
+  bufferSecondsByFormat: { mp3: 22, opus: 11, aac: 22, flac: 19 },
 };
-assert.equal(bufferSecondsForFormat(stream, 'opus'), 0);
-assert.equal(bufferSecondsForFormat(stream, 'flac'), 0);
+assert.equal(bufferSecondsForFormat(stream, 'opus'), 11);
+assert.equal(bufferSecondsForFormat(stream, 'flac'), 19);
 assert.equal(bufferSecondsForFormat({ bufferSeconds: 17 }, 'aac'), 17, 'legacy API fallback');
 assert.equal(bufferSecondsForFormat(null, 'mp3'), null);
 

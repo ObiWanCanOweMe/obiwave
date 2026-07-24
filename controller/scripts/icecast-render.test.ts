@@ -37,19 +37,19 @@ const mountBlock = (mount: string) => {
   return block;
 };
 
-assert.match(mountBlock('/stream.mp3'), /<burst-size>528000<\/burst-size>/);
-assert.match(mountBlock('/stream.opus'), /<burst-size>0<\/burst-size>/);
-assert.match(mountBlock('/stream.aac'), /<burst-size>352000<\/burst-size>/);
-assert.match(mountBlock('/stream.flac'), /<burst-size>0<\/burst-size>/);
-for (const mount of ['/stream.mp3', '/stream.opus', '/stream.aac', '/stream.flac']) {
-  assert.match(mountBlock(mount), /<authentication type="url">/, `${mount} retains listener auth`);
+const expected = {
+  '/stream.mp3': { burst: 528000, queue: 2112000 },
+  '/stream.opus': { burst: 264000, queue: 2097152 },
+  '/stream.aac': { burst: 352000, queue: 2097152 },
+  '/stream.flac': { burst: 2475000, queue: 9900000 },
+};
+
+for (const [mount, sizes] of Object.entries(expected)) {
+  const block = mountBlock(mount);
+  assert.match(block, new RegExp(`<burst-size>${sizes.burst}</burst-size>`));
+  assert.match(block, new RegExp(`<queue-size>${sizes.queue}</queue-size>`));
+  assert.match(block, /<authentication type="url">/);
 }
-assert.match(xml, /<queue-size>2112000<\/queue-size>/, 'queue is four times the largest mount burst');
-assert.match(
-  run.stderr,
-  /VBR bursts disabled: opus=0B flac=0B/,
-  'renderer log is honest about variable-rate mounts',
-);
 
 writeFileSync(join(state, 'icecast_listener_auth.txt'), 'false');
 const publicRun = spawnSync(resolve(root, 'docker/icecast-render.sh'), [], {

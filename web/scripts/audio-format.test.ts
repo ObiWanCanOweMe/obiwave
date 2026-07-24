@@ -24,6 +24,10 @@ assert.equal(bufferSecondsForFormat(formatBuffers, 'mp3'), 22);
 assert.equal(bufferSecondsForFormat(formatBuffers, 'opus'), 0);
 assert.equal(bufferSecondsForFormat(formatBuffers, 'aac'), 22);
 assert.equal(bufferSecondsForFormat(formatBuffers, 'flac'), 0);
+assert.equal(bufferSecondsForFormat({
+  bufferSeconds: 22,
+  bufferSecondsByFormat: { mp3: 22, opus: 22, aac: 22, flac: 22 },
+}, 'flac'), 22);
 assert.equal(bufferSecondsForFormat({ bufferSeconds: 17 }, 'opus'), 17, 'legacy API fallback');
 assert.equal(bufferSecondsForFormat({ bufferSeconds: Number.NaN }, 'mp3'), null, 'invalid delay');
 

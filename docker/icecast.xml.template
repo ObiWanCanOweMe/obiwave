@@ -25,22 +25,23 @@
              the live edge. Every player-watchdog reconnect carries a ?t=
              cache-buster, so each reconnect primes a fresh burst.
 
-             icecast-render.sh overrides this per mount. MP3 and AAC use
-             settings.stream.bufferSeconds x their configured CBR bitrate:
-             this is a byte
+             Computed by icecast-render.sh from settings.stream.
+             bufferSeconds x the live bitrate, NOT hardcoded: this is a byte
              count, so a fixed value drifts badly across bitrates (the old flat
              512 KB was ~22s at 192k but ~66s at 64k). Deriving it keeps the
-             depth the operator picked the depth every CBR bitrate gets. Opus
-             uses constrained VBR and FLAC is variable-rate, so both mounts
-             explicitly use a zero-byte burst; no fixed byte value can honestly
-             promise a fixed duration.
+             depth the operator picked the depth every bitrate gets.
 
-             This is also precisely how far behind the live edge every listener
-             sits, so /now-playing publishes stream.bufferSecondsByFormat and
-             players select their active mount's value to align now-playing
-             title and elapsed clock with the audio actually in someone's ears
-             (issue #1114). Changing the depth here without updating that
-             pairing reintroduces the drift. -->
+             This is also roughly how far behind the live edge a listener
+             sits, so /now-playing publishes stream.bufferSeconds and players
+             use it to align the now-playing title and elapsed clock with the
+             audio actually in someone's ears (issue #1114) — the web player
+             prefers its own measured lag (buffered.end − currentTime) and
+             falls back to the advertised figure when it isn't the thing
+             playing the audio.
+
+             The <limits> burst is sized for MP3, while its queue is sized for
+             the largest mount burst. They act as safe defaults; every stream
+             mount below carries its own burst/queue sized for its bitrate. -->
         <burst-size>${ICECAST_BURST_SIZE}</burst-size>
     </limits>
 
@@ -59,11 +60,16 @@
 
     <fileserve>1</fileserve>
 
-    <!-- Per-format burst sizing always replaces the marker with one <mount>
-         block per stream. When listener auth (#478) is enabled, each same
-         block also carries <authentication type="url"> pointing at the
+    <!-- Stream mounts: the entrypoint replaces the marker below with one
+         <mount> block per stream mount, always rendered. Each carries its own
+         <burst-size>/<queue-size> sized from settings.stream.bufferSeconds x
+         THAT mount's bitrate — the global <limits> burst above is sized for
+         MP3, while its queue accommodates the largest mount burst. A byte
+         count that means 22s of MP3 is ~43s of Opus or ~6s of FLAC. When
+         state/icecast_listener_auth.txt is 'true' (#478), each block
+         additionally carries <authentication type="url"> pointing at the
          controller's POST /listener-auth. -->
-    <!--@LISTENER_AUTH_MOUNTS@-->
+    <!--@STREAM_MOUNTS@-->
 
 
     <paths>

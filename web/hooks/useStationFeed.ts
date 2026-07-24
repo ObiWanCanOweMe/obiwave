@@ -60,10 +60,18 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
   setter(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 }
 
+export interface StationFeedTiming {
+  activeFormat?: { readonly current: AudioFormat };
+  getListenerLagMs?: () => number | null;
+}
+
 // 5s polling of /now-playing + /state + /session, paused while the tab is
 // hidden (with an immediate refetch on return). Single source of truth for
 // "what's on air right now".
-export function useStationFeed(activeFormat?: { readonly current: AudioFormat }): StationFeed {
+export function useStationFeed({
+  activeFormat,
+  getListenerLagMs,
+}: StationFeedTiming = {}): StationFeed {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
@@ -116,10 +124,10 @@ export function useStationFeed(activeFormat?: { readonly current: AudioFormat })
           const t = Date.parse(cur.startedAt);
           if (Number.isFinite(t) && t <= Date.now()) serverStart = t;
         }
-        // Shift into listener-time. serverStart is the live edge; the audio
-        // reaches this listener leadMs later, so that's when the track is
-        // genuinely "now playing" for them (issue #1114).
-        const leadMs = leadMsRef.current;
+        // Shift into listener-time. Prefer this tab's measured playback lag;
+        // fall back to the advertised depth for its active mount.
+        const measuredLagMs = getListenerLagMs?.() ?? null;
+        const leadMs = measuredLagMs ?? leadMsRef.current;
         const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMs : Date.now();
 
         if (trackKey !== lastTrackKeyRef.current) {
@@ -188,7 +196,7 @@ export function useStationFeed(activeFormat?: { readonly current: AudioFormat })
         promoteTimerRef.current = null;
       }
     };
-  }, [activeFormat, client]);
+  }, [activeFormat, client, getListenerLagMs]);
 
   return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale };
 }
