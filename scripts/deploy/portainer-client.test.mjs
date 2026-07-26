@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import {
   DeploymentRolledBackError,
@@ -65,6 +67,20 @@ function releaseEnv(overrides = {}) {
     SUBWAVE_HEALTH_URL: 'https://radio.example/health',
     SUBWAVE_STREAM_URL: 'https://radio.example/stream.mp3',
     ...overrides,
+  };
+}
+
+async function recordingServer(handler) {
+  const server = createServer(handler);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: async () => {
+      server.close();
+      await once(server, 'close');
+    },
   };
 }
 
@@ -202,6 +218,86 @@ test('probes require on-air JSON and a non-empty MP3 body chunk', async () => {
   await probeHealth('https://radio.example/health', { fetchImpl, attempts: 1 });
   await probeStream('https://radio.example/stream.mp3', { fetchImpl, attempts: 1 });
   assert.equal(cancelled.length, 1);
+});
+
+test('regression: stream probe authenticates a private mount without putting the secret in its URL', async () => {
+  const expected = `Basic ${Buffer.from('listener:mount-secret').toString('base64')}`;
+  const requests = [];
+  const server = await recordingServer((req, res) => {
+    requests.push({ url: req.url, authorization: req.headers.authorization ?? null });
+    if (req.url === '/public' || req.headers.authorization === expected) {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end(Buffer.from([1, 2, 3]));
+      return;
+    }
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('private');
+  });
+
+  try {
+    await probeStream(`${server.baseUrl}/public`, { attempts: 1 });
+    await assert.rejects(
+      probeStream(`${server.baseUrl}/private`, { attempts: 1 }),
+      /HTTP 401/,
+    );
+    await probeStream(`${server.baseUrl}/private`, {
+      attempts: 1,
+      streamPassword: 'mount-secret',
+    });
+  } finally {
+    await server.close();
+  }
+
+  assert.deepEqual(requests, [
+    { url: '/public', authorization: null },
+    { url: '/private', authorization: null },
+    { url: '/private', authorization: expected },
+  ]);
+  assert.ok(requests.every(({ url }) => !url.includes('mount-secret')));
+});
+
+test('regression: target and rollback stream verification both retain private-mount auth', async () => {
+  const expected = `Basic ${Buffer.from('listener:mount-secret').toString('base64')}`;
+  const streamAuthorizations = [];
+  let streamProbeCount = 0;
+  const server = await recordingServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'on-air' }));
+      return;
+    }
+    streamAuthorizations.push(req.headers.authorization ?? null);
+    streamProbeCount += 1;
+    if (req.headers.authorization !== expected || streamProbeCount === 1) {
+      res.writeHead(streamProbeCount === 1 ? 503 : 401, { 'Content-Type': 'text/plain' });
+      res.end('not ready');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+    res.end(Buffer.from([9]));
+  });
+  let updates = 0;
+  const client = {
+    snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
+    updateStack: async () => { updates += 1; },
+  };
+
+  try {
+    await assert.rejects(deployWithRollback({
+      client,
+      manifest: releaseManifest,
+      targetVersion: 'v0.42.0-obiwave.1',
+      healthUrl: `${server.baseUrl}/health`,
+      streamUrl: `${server.baseUrl}/private`,
+      streamPassword: 'mount-secret',
+      attempts: 1,
+    }), DeploymentRolledBackError);
+  } finally {
+    await server.close();
+  }
+
+  assert.equal(updates, 2);
+  assert.deepEqual(streamAuthorizations, [expected, expected]);
 });
 
 test('probes use an independently injected short timeout', async () => {
@@ -494,6 +590,27 @@ test('release validation rejects malformed tags before any deployment work', asy
     },
   }), /fork-qualified release tag/);
   assert.equal(touchedDeployment, false);
+});
+
+test('release forwards the optional production listener secret only as probe configuration', async () => {
+  const calls = [];
+  await runRelease({
+    env: releaseEnv({ SUBWAVE_STREAM_PASSWORD: 'mount-secret' }),
+    readFile: async () => releaseManifest,
+    clientFactory: () => ({}),
+    deploy: async (options) => {
+      calls.push(options);
+      return {
+        previousVersion: 'v0.41.0-obiwave.3',
+        targetVersion: options.targetVersion,
+      };
+    },
+    log: () => {},
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].streamPassword, 'mount-secret');
+  assert.doesNotMatch(calls[0].streamUrl, /mount-secret/);
 });
 
 test('release reports a verified rollback without logging sensitive causes', async () => {

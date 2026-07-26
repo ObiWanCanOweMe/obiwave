@@ -234,12 +234,23 @@ certificates, or TLS ownership away from bender.
 
 ### GitHub production environment
 
-Create a GitHub Actions Environment named `production`. Add one Environment
-secret, entering its value only at the interactive prompt:
+Create a GitHub Actions Environment named `production`. Add the required
+Portainer secret, entering its value only at the interactive prompt:
 
 ```bash
 gh secret set PORTAINER_API_KEY --env production --repo ObiWanCanOweMe/obiwave
 ```
+
+If the production stream mount is private, also add its listener password as
+the optional `SUBWAVE_STREAM_PASSWORD` Environment secret:
+
+```bash
+gh secret set SUBWAVE_STREAM_PASSWORD --env production --repo ObiWanCanOweMe/obiwave
+```
+
+The release probe builds a Basic `listener:<password>` header in memory for
+both target and rollback verification. Keep the public stream URL below free
+of credentials; the secret is never placed in the URL or release output.
 
 Add these Environment variables. Copy the two numeric IDs from Portainer; do
 not put the API key in a variable or commit any real secret or deployment ID:
@@ -299,7 +310,7 @@ previous stack had no version variable. The client still records one
 `SUBWAVE_VERSION` Environment entry as operator metadata. It preserves the
 rest of the existing Environment, pulls and recreates the stack, and verifies
 both the public on-air health response and a non-empty MP3 stream through
-bender.
+bender. A private stream uses the optional Environment secret above.
 
 If deployment or verification fails, the client restores the complete saved
 stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs

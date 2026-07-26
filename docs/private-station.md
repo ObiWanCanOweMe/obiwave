@@ -50,9 +50,12 @@ every listener connect, so:
   (any username works; only the password is checked).
 - **Anything that can't do userinfo URLs** — append the token instead:
   `https://your-station.example/stream.mp3?auth=PASSWORD`.
-- **Native app** — add the credentials to the station address
-  (`https://listener:PASSWORD@your-station.example`); the app converts them
-  into a stream `Authorization` header automatically.
+- **Native app** — add the credentials to the station address once
+  (`https://listener:PASSWORD@your-station.example`). The app immediately
+  reduces the saved/displayed station to its public origin, stores the
+  authorization value in the device Keychain/Keystore, and attaches it as a
+  header only to that station's API, audio, and image requests. Credential URLs
+  are never kept in app preferences or shown again.
 
 While the password is on, `/listen.pls` and `/listen.m3u` return 403 — they
 would otherwise hand out credential-less URLs that no longer play.

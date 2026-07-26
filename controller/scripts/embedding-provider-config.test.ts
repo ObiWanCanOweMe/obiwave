@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +44,53 @@ async function test(name: string, run: () => Promise<void>) {
 }
 
 await settings.load();
+
+await test('restart with blank embeddings and LiteLLM chat pins the embedding leg to Ollama', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'subwave-embedding-restart-'));
+  writeFileSync(
+    join(stateDir, 'settings.json'),
+    JSON.stringify({
+      llm: {
+        provider: 'litellm',
+        model: 'vendor/chat-model',
+        providerBaseUrls: { litellm: 'https://litellm-chat.example/v1' },
+        baseUrl: 'https://litellm-chat.example/v1',
+      },
+      embedding: { provider: '', model: '', providerBaseUrls: {}, baseUrl: '' },
+    }),
+  );
+  const settingsUrl = new URL('../src/settings.ts', import.meta.url).href;
+  const providerUrl = new URL('../src/llm/provider.ts', import.meta.url).href;
+  const source = `
+    const settings = await import(${JSON.stringify(settingsUrl)});
+    const { resolveEmbeddingCfg } = await import(${JSON.stringify(providerUrl)});
+    await settings.load();
+    const cfg = resolveEmbeddingCfg();
+    console.log(JSON.stringify({
+      storedProvider: settings.get().embedding.provider,
+      provider: cfg.provider,
+      baseUrl: cfg.baseUrl,
+    }));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', source],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, STATE_DIR: stateDir },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(
+    JSON.parse(child.stdout.trim()),
+    {
+      storedProvider: 'ollama',
+      provider: 'ollama',
+      baseUrl: '',
+    },
+  );
+});
 
 await test('persisted compatible embedding bearer cannot mask the dedicated env key', async () => {
   assert.equal(settings.get().embedding.apiKey, '');
@@ -242,6 +290,50 @@ await test('dedicated embedding env key wins after switching away from compatibl
   assert.equal(connection().apiKey, 'dedicated-embedding-env-key');
   assert.equal(settings.get().embedding.apiKey, '');
   delete process.env.EMBEDDING_API_KEY;
+});
+
+await test('regression: an unsaved provider override resolves atomically without the saved compatible URL or bearer', async () => {
+  await settings.update({
+    llm: { provider: 'ollama', model: '' },
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      providerBaseUrls: { 'openai-compatible': 'https://saved-compat.example/v1' },
+      apiKey: 'saved-compat-bearer',
+    },
+  });
+  delete process.env.EMBEDDING_API_KEY;
+
+  const cfg = resolveEmbeddingCfg({ provider: 'openai', model: 'text-embedding-3-large' });
+  assert.deepEqual(
+    { provider: cfg.provider, model: cfg.model, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey },
+    { provider: 'openai', model: 'text-embedding-3-large', baseUrl: '', apiKey: '' },
+  );
+});
+
+await test('regression: a same-provider unsaved embedding URL cannot inherit the saved compatible bearer', async () => {
+  await settings.update({
+    llm: { provider: 'ollama', model: '' },
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      providerBaseUrls: { 'openai-compatible': 'https://saved-compat.example/v1' },
+      apiKey: 'saved-compat-bearer',
+    },
+  });
+
+  const changed = resolveEmbeddingCfg({
+    provider: 'openai-compatible',
+    baseUrl: 'https://unsaved-compat.example/v1',
+  });
+  assert.equal(changed.apiKey, '');
+
+  const explicit = resolveEmbeddingCfg({
+    provider: 'openai-compatible',
+    baseUrl: 'https://unsaved-compat.example/v1',
+    apiKey: 'explicit-unsaved-bearer',
+  });
+  assert.equal(explicit.apiKey, 'explicit-unsaved-bearer');
 });
 
 if (failures) process.exit(1);

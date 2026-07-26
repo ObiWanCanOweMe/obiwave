@@ -1,9 +1,58 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-litellm-'));
+const legacyStateDir = mkdtempSync(join(tmpdir(), 'subwave-litellm-legacy-'));
+writeFileSync(
+  join(legacyStateDir, 'settings.json'),
+  JSON.stringify({
+    llm: {
+      provider: 'litellm',
+      model: 'vendor/model',
+      baseUrl: 'https://stored.example/litellm',
+      apiKey: 'legacy-litellm-token',
+    },
+    embedding: { provider: '', model: '' },
+  }),
+);
+const settingsUrl = new URL('../src/settings.ts', import.meta.url).href;
+const providerUrl = new URL('../src/llm/provider.ts', import.meta.url).href;
+const legacySource = `
+  const settings = await import(${JSON.stringify(settingsUrl)});
+  const { resolveEmbeddingCfg } = await import(${JSON.stringify(providerUrl)});
+  await settings.load();
+  const embedding = resolveEmbeddingCfg();
+  console.log(JSON.stringify({
+    litellmKey: settings.llmKeyFor('litellm'),
+    compatibleKey: settings.llmKeyFor('openai-compatible'),
+    embeddingProvider: embedding.provider,
+    embeddingBaseUrl: embedding.baseUrl,
+  }));
+`;
+const legacyChild = spawnSync(
+  process.execPath,
+  ['--import', 'tsx', '--input-type=module', '-e', legacySource],
+  {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: { ...process.env, STATE_DIR: legacyStateDir },
+  },
+);
+assert.equal(legacyChild.status, 0, legacyChild.stderr);
+assert.deepEqual(
+  JSON.parse(legacyChild.stdout.trim()),
+  {
+    litellmKey: 'legacy-litellm-token',
+    compatibleKey: '',
+    embeddingProvider: 'ollama',
+    embeddingBaseUrl: '',
+  },
+  'restart migrates the legacy LiteLLM key to its owner and pins blank embeddings to Ollama',
+);
+
 const settings = await import('../src/settings.js');
 const { resolveEmbeddingCfg } = await import('../src/llm/provider.js');
 

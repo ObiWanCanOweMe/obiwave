@@ -16,6 +16,7 @@ import { createApi, type StationApi } from '@/lib/api';
 import {
   clearActiveStation,
   featuredStation,
+  loadStationAuthorization,
   loadStations,
   removeRecent,
   setActiveStation,
@@ -44,15 +45,23 @@ interface StationContextValue {
 const Ctx = createContext<StationContextValue | null>(null);
 
 export function StationProvider({ children }: { children: React.ReactNode }) {
-  const [store, setStore] = useState<StationStore>({ activeStation: null, recents: [] });
+  const [runtime, setRuntime] = useState<{
+    store: StationStore;
+    authorization: string | null;
+  }>({
+    store: { activeStation: null, recents: [] },
+    authorization: null,
+  });
   const [ready, setReady] = useState(false);
   const featured = useMemo(() => featuredStation(), []);
+  const store = runtime.store;
 
   useEffect(() => {
     let alive = true;
-    loadStations().then((s) => {
+    loadStations().then(async (s) => {
+      const authorization = await loadStationAuthorization(s.activeStation);
       if (alive) {
-        setStore(s);
+        setRuntime({ store: s, authorization });
         setReady(true);
       }
     });
@@ -67,22 +76,26 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
     // onboarding add-station) gets the teardown for free.
     await teardown();
     const next = await setActiveStation(ref);
-    setStore(next);
+    const authorization = await loadStationAuthorization(next.activeStation);
+    setRuntime({ store: next, authorization });
   }, []);
 
   const forgetStation = useCallback(async (url: string) => {
     const next = await removeRecent(url);
-    setStore(next);
+    setRuntime((current) => ({ ...current, store: next }));
   }, []);
 
   const signOut = useCallback(async () => {
     await teardown();
     const next = await clearActiveStation();
-    setStore(next);
+    setRuntime({ store: next, authorization: null });
   }, []);
 
   const base = store.activeStation;
-  const api = useMemo(() => (base ? createApi(base) : null), [base]);
+  const api = useMemo(
+    () => (base ? createApi(base, runtime.authorization) : null),
+    [base, runtime.authorization],
+  );
   const name = useMemo(() => {
     if (!base) return null;
     return store.recents.find((r) => r.url === base)?.name ?? null;

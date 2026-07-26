@@ -108,9 +108,15 @@ router.post('/onboarding/test-llm', requireAdmin, async (req, res) => {
         const cfg = { provider, model, baseUrl, apiKey };
         const resolvedBaseUrl = effectiveLiteLlmBaseUrl(cfg);
         if (!resolvedBaseUrl) throw new Error('LiteLLM base URL is required');
+        const environmentBaseUrl = effectiveLiteLlmBaseUrl({});
+        const resolvedApiKey = apiKey || (
+          resolvedBaseUrl === environmentBaseUrl
+            ? effectiveLiteLlmApiKey({})
+            : ''
+        );
         m = createOpenAI({
           baseURL: resolvedBaseUrl,
-          apiKey: effectiveLiteLlmApiKey(cfg) || 'unused',
+          apiKey: resolvedApiKey || 'unused',
         }).chat(model);
         break;
       }

@@ -9,12 +9,21 @@ const clean = (value: unknown): string =>
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/\s*\([^)]*\)\s*/g, ' ')
-    .replace(/\s*\[[^\]]*\]\s*/g, ' ')
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+
+const artistSegments = (value: unknown): string[] =>
+  String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[&+,;/]/g, ' | ')
+    .replace(/\b(?:feat(?:uring)?|ft|with|vs|x)\.?\b/g, ' | ')
+    .split('|')
+    .map((segment) => segment.replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
 
 function sameText(want: string | null, got: unknown): boolean {
   if (!want) return true;
@@ -23,10 +32,15 @@ function sameText(want: string | null, got: unknown): boolean {
 
 function artistMatches(want: string | null, got: unknown): boolean {
   if (!want) return true;
-  const w = clean(want);
-  const g = clean(got);
-  if (!w || !g) return false;
-  return g === w || g.startsWith(`${w} `) || g.endsWith(` ${w}`) || g.includes(` ${w} `);
+  const wanted = artistSegments(want);
+  const actual = artistSegments(got);
+  if (!wanted.length || !actual.length) return false;
+  if (wanted.length === actual.length && wanted.every((segment, index) => segment === actual[index])) {
+    return true;
+  }
+  // A single requested artist may be one complete credit in a collaboration,
+  // but never an arbitrary substring of a descriptive or tribute-band name.
+  return wanted.length === 1 && actual.includes(wanted[0]);
 }
 
 export function strictRequestTarget(matched: any): StrictRequestTarget {

@@ -25,15 +25,21 @@ import { llmCfg, ollamaBaseUrl, loccaEmbedBaseUrl, OPENROUTER_APP_HEADERS } from
 // mutable Map across modules. Memoisation only; outputs are identical.
 const embedCache = new Map();
 
-function embeddingCfg() {
+function embeddingCfg(providerOverride = '') {
   const s: any = settings.get().embedding || {};
   const llm = llmCfg();
-  const provider = s.provider || llm.provider || 'ollama';
-  const inlineApiKey = provider === 'openai-compatible' ? s.apiKey : '';
+  const savedProvider = s.provider || llm.provider || 'ollama';
+  const provider = providerOverride || savedProvider;
+  // The single inline embedding bearer belongs to the saved compatible
+  // provider only. A transient form override must not carry it to another
+  // adapter (or to a different compatible origin).
+  const inlineApiKey =
+    provider === savedProvider && provider === 'openai-compatible' ? s.apiKey : '';
+  const providerBaseUrl = s.providerBaseUrls?.[provider] || '';
   return {
     enabled: s.enabled !== false,
     provider,
-    model: s.model || '',
+    model: provider === savedProvider ? s.model || '' : '',
     // Key precedence: the saved settings field wins, then a dedicated
     // `EMBEDDING_API_KEY` env var (the env path most installs use -- keys live in
     // state/secrets.env, not settings.json), then the effective embedding
@@ -46,7 +52,11 @@ function embeddingCfg() {
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
     // Locca chat and embeddings are separate servers; a blank embedding URL
     // must reach loccaEmbedBaseUrl() so it selects the dedicated port-8090 default.
-    baseUrl: s.baseUrl || (provider !== 'locca' && provider === llm.provider ? llm.baseUrl : '') || '',
+    baseUrl:
+      providerBaseUrl
+      || (provider === savedProvider ? s.baseUrl : '')
+      || (provider !== 'locca' && provider === llm.provider ? llm.baseUrl : '')
+      || '',
   };
 }
 
@@ -162,16 +172,26 @@ export interface EmbeddingCfg {
 }
 
 export function resolveEmbeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
-  const base = embeddingCfg();
+  const base = embeddingCfg(overrides.provider || '');
+  const provider = overrides.provider || base.provider;
+  const baseUrl = overrides.baseUrl ?? base.baseUrl;
+  const customEndpoint = provider === 'openai-compatible' || provider === 'locca';
+  const changedCustomEndpoint =
+    customEndpoint
+    && overrides.baseUrl !== undefined
+    && embeddingBaseUrl({ provider, baseUrl }).replace(/\/+$/, '')
+      !== embeddingBaseUrl({ provider, baseUrl: base.baseUrl }).replace(/\/+$/, '');
   return {
     enabled: overrides.enabled ?? base.enabled,
     // '' is meaningful for provider (= follow llm), so only override when a
     // non-empty value is supplied.
-    provider: overrides.provider || base.provider,
+    provider,
     model: overrides.model ?? base.model,
-    apiKey: overrides.apiKey || base.apiKey,
-    ollamaUrl: overrides.ollamaUrl || base.ollamaUrl,
-    baseUrl: overrides.baseUrl || base.baseUrl,
+    // A persisted/dedicated bearer is owned by its resolved compatible origin.
+    // An unsaved origin receives a credential only when the POST supplied it.
+    apiKey: overrides.apiKey ?? (changedCustomEndpoint ? '' : base.apiKey),
+    ollamaUrl: overrides.ollamaUrl ?? base.ollamaUrl,
+    baseUrl,
   };
 }
 

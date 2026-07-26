@@ -245,6 +245,10 @@ eas submit --profile production --platform ios     # uploads to App Store Connec
 > build; the fingerprint runtime version guarantees an OTA can't land on a binary
 > with mismatched native code. Full decision table + commands: [`RELEASE.md`](./RELEASE.md).
 
+Private-station credentials use the native `expo-secure-store` module. A build
+that predates that dependency cannot exercise the Keychain/Keystore migration;
+make a new native binary before testing this path (an OTA update is not enough).
+
 ---
 
 ## Known issues / gotchas

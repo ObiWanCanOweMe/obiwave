@@ -151,9 +151,10 @@ function probeOptions(options) {
     fetchImpl = fetch,
     probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
     signalFactory = AbortSignal.timeout,
+    streamPassword,
     ...retryOptions
   } = options;
-  return { fetchImpl, probeTimeoutMs, signalFactory, retryOptions };
+  return { fetchImpl, probeTimeoutMs, signalFactory, streamPassword, retryOptions };
 }
 
 export async function probeHealth(url, options = {}) {
@@ -171,9 +172,15 @@ export async function probeHealth(url, options = {}) {
 }
 
 export async function probeStream(url, options = {}) {
-  const { fetchImpl, probeTimeoutMs, signalFactory, retryOptions } = probeOptions(options);
+  const { fetchImpl, probeTimeoutMs, signalFactory, streamPassword, retryOptions } = probeOptions(options);
   return retry(async () => {
-    const response = await fetchImpl(url, { signal: signalFactory(probeTimeoutMs) });
+    const headers = streamPassword
+      ? { Authorization: `Basic ${Buffer.from(`listener:${streamPassword}`).toString('base64')}` }
+      : undefined;
+    const response = await fetchImpl(url, {
+      ...(headers ? { headers } : {}),
+      signal: signalFactory(probeTimeoutMs),
+    });
     let reader;
     let probeError;
     try {
@@ -210,10 +217,10 @@ function versionFrom(env) {
   return env.find((entry) => entry.name === 'SUBWAVE_VERSION')?.value ?? null;
 }
 
-async function verifyDeployment({ healthUrl, streamUrl, fetchImpl, ...retryOptions }) {
+async function verifyDeployment({ healthUrl, streamUrl, streamPassword, fetchImpl, ...retryOptions }) {
   const options = { fetchImpl, ...retryOptions };
   await probeHealth(healthUrl, options);
-  await probeStream(streamUrl, options);
+  await probeStream(streamUrl, { ...options, streamPassword });
 }
 
 export async function deployWithRollback({
@@ -222,6 +229,7 @@ export async function deployWithRollback({
   targetVersion,
   healthUrl,
   streamUrl,
+  streamPassword,
   fetchImpl = fetch,
   attempts = DEFAULT_ATTEMPTS,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
@@ -238,6 +246,7 @@ export async function deployWithRollback({
   const verification = {
     healthUrl,
     streamUrl,
+    streamPassword,
     fetchImpl,
     attempts,
     retryDelayMs,

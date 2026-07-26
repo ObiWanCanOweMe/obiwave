@@ -183,9 +183,13 @@ export function LlmStep({ w }: { w: WizardController }) {
   const standardDiscoveryEnabled =
     isOllama || isLocca ||
     (w.data.llm.provider === 'openai-compatible' && !!w.data.llm.baseUrl.trim()) ||
-    w.data.llm.provider === 'openrouter';
+    w.data.llm.provider === 'openrouter' ||
+    !!w.data.llm.apiKey.trim();
   const standardDiscovery = useModelDiscovery({
+    owner: 'chat',
     provider: w.data.llm.provider,
+    leg: 'onboarding',
+    apiKey: w.data.llm.apiKey,
     baseUrl: w.data.llm.baseUrl,
     ollamaUrl: w.data.llm.ollamaUrl,
     enabled: standardDiscoveryEnabled,

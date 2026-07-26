@@ -11,6 +11,7 @@ import CoverArt from './CoverArt';
 import DjThinkingLine from './DjThinkingLine';
 import type { TrackLike } from '@/hooks/useTrackLike';
 import { fmtTime } from '@/lib/format';
+import type { StationImageSource } from '@/lib/api';
 import { isDjTurn } from '@/lib/sessionFeed';
 import type { NowPlayingTrack, SessionTurn } from '@/lib/types';
 import { useTheme } from '@/theme/ThemeContext';
@@ -39,7 +40,7 @@ function buildMoodPhrase(t: NowPlayingTrack | null): string {
 
 export interface CenterStageProps {
   nowPlaying: NowPlayingTrack | null;
-  coverSrc: string | null;
+  coverSrc: StationImageSource | null;
   elapsed: number;
   /** Cumulative since-boot LLM token total — the quiet "cost of the DJ" ticker
    *  by the now-playing time (web #449). null hides it. */
@@ -116,7 +117,7 @@ export default function CenterStage({
     <View className="flex-1 justify-center px-5">
       {coverSrc ? (
         <View style={{ alignItems: 'flex-start', marginBottom: 14 }}>
-          <CoverArt uri={coverSrc} live={live} burst={burst} size={120} onPress={onOpenTimeline} />
+          <CoverArt source={coverSrc} live={live} burst={burst} size={120} onPress={onOpenTimeline} />
         </View>
       ) : null}
 

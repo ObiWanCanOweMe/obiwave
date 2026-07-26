@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.48.0](https://github.com/perminder-klair/subwave/compare/v0.47.0...v0.48.0) (2026-07-25)
+
+
+### Features
+
+* **admin:** move the weekly schedule to a dedicated Rundown page ([#1172](https://github.com/perminder-klair/subwave/issues/1172)) ([f741dd8](https://github.com/perminder-klair/subwave/commit/f741dd8fbd40afdf492bef965123105e36751d21))
+* **dj:** add a station-wide voice switch (settings.tts.enabled) ([#1180](https://github.com/perminder-klair/subwave/issues/1180)) ([39eb680](https://github.com/perminder-klair/subwave/commit/39eb680efba598ffd0c75f06a6a4fdd2dc641421))
+* **dj:** station house rules that reach both prompt paths ([#1183](https://github.com/perminder-klair/subwave/issues/1183)) ([18f650e](https://github.com/perminder-klair/subwave/commit/18f650e30582fd96503eed2545c2c088794b60f6)), closes [#1182](https://github.com/perminder-klair/subwave/issues/1182)
+
+
+### Bug Fixes
+
+* **admin:** compact editor footers on mobile ([#1175](https://github.com/perminder-klair/subwave/issues/1175)) ([6fbcfb8](https://github.com/perminder-klair/subwave/commit/6fbcfb8e96192c382ea1ef40c3076b4616bc1313))
+* **admin:** make every admin screen work on a phone ([#1174](https://github.com/perminder-klair/subwave/issues/1174)) ([b9caa0a](https://github.com/perminder-klair/subwave/commit/b9caa0a3ad0a3ae26ab5c99b1fe2c0a6e23ba763))
+* **admin:** run playlist generation as a polled job so Cloudflare can't kill it ([#1173](https://github.com/perminder-klair/subwave/issues/1173)) ([eed415a](https://github.com/perminder-klair/subwave/commit/eed415a5d17acf01ed8f1c776accf3d6c146d518))
+* **admin:** stop the Rundown's save from scrolling out of reach ([#1177](https://github.com/perminder-klair/subwave/issues/1177)) ([89da3ff](https://github.com/perminder-klair/subwave/commit/89da3ffcc98601de7ee1ad630e163be4dbfb8f61))
+* **web:** admin UI polish — imaging width, dash manual-voice design, New station button ([#1170](https://github.com/perminder-klair/subwave/issues/1170)) ([3c8eb83](https://github.com/perminder-klair/subwave/commit/3c8eb83245b99892a842754330a630df14a1a259))
+* **web:** hide station-disabled skills and clamp descriptions in persona skills card ([#1168](https://github.com/perminder-klair/subwave/issues/1168)) ([a7353e1](https://github.com/perminder-klair/subwave/commit/a7353e188bf99b1b54eec0f70f33289a4d90cfbc))
+
+
+### Documentation
+
+* **readme:** refresh features list + compact screenshot thumbs ([#1169](https://github.com/perminder-klair/subwave/issues/1169)) ([63c6fb5](https://github.com/perminder-klair/subwave/commit/63c6fb505f40e17773e3873d80ea94c0983ae9b9))
+* split CLAUDE.md into per-directory memory files ([#1178](https://github.com/perminder-klair/subwave/issues/1178)) ([9bf6852](https://github.com/perminder-klair/subwave/commit/9bf6852d02dfd35e45d5f664bad94d1c5d928921))
+
+
+### Refactors
+
+* split the twelve longest controller and web files ([#1176](https://github.com/perminder-klair/subwave/issues/1176)) ([7610498](https://github.com/perminder-klair/subwave/commit/761049863d4ed9ea3877e17168fc5d73aaf028e3))
+
 ## [0.47.0](https://github.com/perminder-klair/subwave/compare/v0.46.0...v0.47.0) (2026-07-24)
 
 

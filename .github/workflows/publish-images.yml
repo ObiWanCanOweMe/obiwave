@@ -237,3 +237,4 @@ jobs:
           SUBWAVE_RELEASE_TAG: ${{ github.ref_name }}
           SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
           SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
+          SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}

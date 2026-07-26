@@ -26,13 +26,14 @@ import { createApi, normalizeBase, type HealthResult, type StationApi } from '@/
 import { useStation } from '@/config/StationContext';
 import { fetchDirectory, type DirectoryStation } from '@/lib/directory';
 import type { StationRef } from '@/lib/station';
+import { sanitizeDiagnostic } from '@/lib/stationSecurity';
 import { useTheme } from '@/theme/ThemeContext';
 
 const PROBE_TIMEOUT_MS = 4500;
 const STEPS = ['Resolving host', 'Controller · /health', 'Icecast · /stream', 'DJ booth · LLM link'];
 type StepState = 'wait' | 'run' | 'ok' | 'fail';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const stripProto = (u: string) => u.replace(/^https?:\/\//, '');
+const stripProto = (u: string) => normalizeBase(u).replace(/^https?:\/\//, '');
 // Bare host (no scheme, port, or path), lowercased. Best-effort for hostnames
 // and IPv4 — an IPv6 literal isn't a realistic station address here.
 const hostOf = (u: string) => stripProto(u).split('/')[0].split(':')[0].toLowerCase();
@@ -94,7 +95,10 @@ function describeFail(fail: HealthResult | null, candidates: string[]): string |
 }
 
 interface Target {
+  // May contain just-entered credentials while this screen is mounted. It is
+  // never rendered or persisted; selectStation splits it into SecureStore.
   base: string;
+  origin: string;
   url: string;
   name: string;
 }
@@ -152,13 +156,18 @@ export default function Onboarding() {
     // listeners on HTTP-only stations can just type the address. An explicit
     // protocol (http:// or https://) is honored verbatim — no fallback.
     const candidates = (/:\/\//.test(trimmed) ? [trimmed] : [`https://${trimmed}`, `http://${trimmed}`])
-      .map((c) => normalizeBase(c))
-      .filter(Boolean);
+      .map((raw) => ({ raw, origin: normalizeBase(raw) }))
+      .filter((candidate) => !!candidate.origin);
     if (!candidates.length) return;
 
     const id = ++runId.current;
     const first = candidates[0];
-    setTarget({ base: first, url: stripProto(first), name: presetName || stripProto(first) });
+    setTarget({
+      base: first.raw,
+      origin: first.origin,
+      url: stripProto(first.origin),
+      name: presetName || stripProto(first.origin),
+    });
     setSteps(['wait', 'wait', 'wait', 'wait']);
     setDone(false);
     setFailed(false);
@@ -175,8 +184,8 @@ export default function Onboarding() {
     // the live StationApi on success, or a structured failure (timeout / http /
     // network) so the caller can try the next candidate and, if all fail, show
     // a real diagnostic instead of a bare "failed".
-    const probe = async (candidate: string): Promise<{ api: StationApi } | { fail: HealthResult }> => {
-      const api = createApi(candidate);
+    const probe = async (candidate: { raw: string; origin: string }): Promise<{ api: StationApi } | { fail: HealthResult }> => {
+      const api = createApi(candidate.raw);
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
       try {
@@ -200,10 +209,10 @@ export default function Onboarding() {
       // 2 · Controller /health — the real gate. Try each candidate in turn.
       set(1, 'run');
       let api: StationApi | null = null;
-      let base = first;
+      let chosen = first;
       let lastFail: HealthResult | null = null;
       for (const candidate of candidates) {
-        base = candidate;
+        chosen = candidate;
         const r = await probe(candidate);
         if (!alive()) return;
         if ('api' in r) {
@@ -215,22 +224,27 @@ export default function Onboarding() {
       }
       if (!api) {
         set(1, 'fail');
-        setFailDetail(describeFail(lastFail, candidates));
+        setFailDetail(describeFail(lastFail, candidates.map(({ origin }) => origin)));
         const raw = lastFail && !lastFail.ok ? lastFail.message : undefined;
         // The Android generic carries no detail; iOS often surfaces a useful one.
-        setFailRaw(raw && raw !== 'Network request failed' ? raw : undefined);
+        setFailRaw(raw && raw !== 'Network request failed' ? sanitizeDiagnostic(raw) : undefined);
         setFailed(true);
         return;
       }
       // Re-point the target at the candidate that actually answered.
-      const fallbackName = presetName || stripProto(base);
-      setTarget({ base, url: stripProto(base), name: fallbackName });
+      const fallbackName = presetName || stripProto(chosen.origin);
+      setTarget({
+        base: chosen.raw,
+        origin: chosen.origin,
+        url: stripProto(chosen.origin),
+        name: fallbackName,
+      });
       // Flag cleartext on a non-local host — whether the probe silently fell
       // back from https (an on-path attacker could force that by blocking the
       // https attempt) or the listener picked http explicitly. Either way a
       // public-looking host over plain HTTP needs one-tap consent; local hosts
       // carry bounded risk and skip it.
-      setInsecure(base.startsWith('http://') && !isLocalHost(hostOf(base)));
+      setInsecure(chosen.origin.startsWith('http://') && !isLocalHost(hostOf(chosen.origin)));
       set(1, 'ok');
 
       // 3 · Icecast /stream (cosmetic — controller answered, mount assumed up)

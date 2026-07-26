@@ -52,7 +52,7 @@ export default function NavidromeBanner({
   return (
     <div
       role="alert"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] px-7 py-2 text-[11px] text-ink"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] px-5 py-2 text-[11px] text-ink sm:px-7"
     >
       <AlertTriangle size={14} className="shrink-0 text-[var(--danger)]" aria-hidden="true" />
       <span>
@@ -62,7 +62,7 @@ export default function NavidromeBanner({
       </span>
       <Link
         href="/admin/settings?section=music"
-        className="ml-auto font-bold text-[var(--danger)] underline-offset-2 hover:underline"
+        className="ml-auto inline-flex min-h-9 items-center font-bold text-[var(--danger)] underline-offset-2 hover:underline sm:min-h-0"
       >
         Music source &rarr;
       </Link>
