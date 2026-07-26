@@ -10,12 +10,12 @@
 // show's facets, airtime and validity are derived.
 
 import { useMemo } from 'react';
-import { Pill, MetaChip } from './ui';
-import { RosterTable } from './RosterTable';
-import type { RosterColumn } from './RosterTable';
-import { RosterAvatar } from './RosterAvatar';
+import { Pill, MetaChip } from '../ui';
+import { RosterTable } from '../RosterTable';
+import type { RosterColumn } from '../RosterTable';
+import { RosterAvatar } from '../RosterAvatar';
 
-export interface ShowFace {
+interface ShowFace {
   key: string;
   initials: string;
   src: string | null;
@@ -78,7 +78,10 @@ export function ShowsTable({ rows, onEdit }: ShowsTableProps) {
     {
       key: 'name',
       label: 'Show',
-      className: 'whitespace-nowrap',
+      // Below md the Host column is hidden, so nothing carries the
+      // `w-full max-w-0` pair that lets a cell truncate instead of widening
+      // the table — the show name takes that role until Host reappears.
+      className: 'whitespace-nowrap w-full max-w-0 md:w-auto md:max-w-none',
       render: (r) => (
         // No wrapping anywhere in the row: a chip or pill dropping to a second
         // line would inflate the row height and undo the point of the list.

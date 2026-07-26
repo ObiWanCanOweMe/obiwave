@@ -202,7 +202,9 @@ export default function LibraryTaggingModal(p: Props) {
         ))}
       </div>
 
-      <div className="flex flex-col gap-4 p-5">
+      {/* p-3 on phones: the Modal body already carries px-5, so the nested p-5
+          left ~275px of usable width inside a 358px dialog. */}
+      <div className="flex flex-col gap-4 p-3 sm:p-5">
         {/* Daily-token-budget caution — shown on both tabs when the day's spend
             is near (soft) or past (hard) the cap, so a run's LLM steps won't
             surprise the operator with extra spend or mid-run failures. */}
@@ -338,7 +340,7 @@ export default function LibraryTaggingModal(p: Props) {
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-end gap-2.5 border-t border-dashed border-separator-strong pt-3.5">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-dashed border-separator-strong pt-3.5">
               <Btn onClick={() => p.onOpenChange(false)}>Cancel</Btn>
               <Btn tone="accent" disabled={!anyPass || p.busy} onClick={runRescan}>
                 <RefreshCw size={12} /> {passAllSelected ? 'Run full re-scan' : 'Run re-scan'}
@@ -388,7 +390,7 @@ export default function LibraryTaggingModal(p: Props) {
                 </span>
               </span>
             </button>
-            <div className="flex items-center justify-end gap-2.5 border-t border-dashed border-separator-strong pt-3.5">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-dashed border-separator-strong pt-3.5">
               <Btn onClick={() => p.onOpenChange(false)}>Cancel</Btn>
               {/* second confirmation happens in the danger dialog this opens */}
               <Btn tone="danger" disabled={!resetAck || p.busy} onClick={() => setConfirmReset(true)}>

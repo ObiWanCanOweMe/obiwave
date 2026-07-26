@@ -57,6 +57,7 @@ const fallback = await recordingGateway();
 const onboarding = await recordingGateway();
 const environment = await recordingGateway();
 const compatFallback = await recordingGateway();
+const unsavedLocca = await recordingGateway();
 let routeServer: http.Server | undefined;
 
 try {
@@ -159,6 +160,18 @@ try {
       },
     },
   });
+  const switchBackProbe = await post('/settings/llm/probe-compat', {
+    provider: 'litellm',
+    leg: 'primary',
+    baseUrl: primary.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal(switchBackProbe.status, 200);
+  assert.equal((await switchBackProbe.json()).ok, true);
+  assert.deepEqual(primary.requests[1], {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-leg-token',
+  }, 'switching an unsaved form back to LiteLLM uses only the stored LiteLLM key');
+
   const legacyProbe = await post('/settings/llm/probe-compat', {
     provider: 'openai-compatible',
     baseUrl: compatFallback.baseUrl,
@@ -170,6 +183,59 @@ try {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-compat-fallback-token',
   });
 
+  const mismatchedProbe = await post('/settings/llm/probe-compat', {
+    provider: 'locca',
+    leg: 'fallback',
+    baseUrl: unsavedLocca.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal(mismatchedProbe.status, 200);
+  assert.equal((await mismatchedProbe.json()).ok, true);
+  assert.deepEqual(unsavedLocca.requests[0], {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
+  }, 'an unsaved Locca endpoint receives only the SDK placeholder, never the saved fallback provider token');
+
+  await settings.update({
+    llm: {
+      provider: 'locca',
+      model: 'vendor/model',
+      baseUrl: unsavedLocca.baseUrl,
+      apiKey: 'saved-locca-token',
+    },
+  });
+  await settings.update({
+    llm: {
+      provider: 'ollama',
+      model: 'glm-5.1:cloud',
+      baseUrl: '',
+      fallback: {
+        enabled: true,
+        provider: 'openai-compatible',
+        model: 'vendor/model',
+        baseUrl: compatFallback.baseUrl,
+      },
+    },
+  });
+  const providerOwnedProbe = await post('/settings/llm/probe-compat', {
+    provider: 'locca',
+    leg: 'fallback',
+    baseUrl: unsavedLocca.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal(providerOwnedProbe.status, 200);
+  assert.equal((await providerOwnedProbe.json()).ok, true);
+  assert.deepEqual(unsavedLocca.requests[1], {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-locca-token',
+  }, 'the submitted provider must resolve only its own stored token');
+
+  await settings.update({
+    llm: {
+      provider: 'litellm',
+      model: 'vendor/model',
+      baseUrl: environment.baseUrl,
+      apiKey: '',
+    },
+  });
   await settings.update({
     llm: { provider: 'ollama', model: 'glm-5.1:cloud', baseUrl: '', fallback: { enabled: false } },
   });
@@ -188,5 +254,12 @@ try {
   if (routeServer) {
     await new Promise<void>((resolve) => routeServer!.close(() => resolve()));
   }
-  await Promise.all([primary.close(), fallback.close(), onboarding.close(), environment.close(), compatFallback.close()]);
+  await Promise.all([
+    primary.close(),
+    fallback.close(),
+    onboarding.close(),
+    environment.close(),
+    compatFallback.close(),
+    unsavedLocca.close(),
+  ]);
 }

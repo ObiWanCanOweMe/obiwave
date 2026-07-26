@@ -4,6 +4,7 @@ import type { ChangeEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { AsyncResultGeneration } from '../../../lib/asyncResultGeneration';
+import { runManagedKeyProbe } from '../../../lib/managedKeyProbe';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -44,11 +45,21 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [primaryKeyTesting, setPrimaryKeyTesting] = useState(false);
   const [fallbackKeyTest, setFallbackKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [fallbackKeyTesting, setFallbackKeyTesting] = useState(false);
+  const primaryManagedKeyGeneration = useRef(new AsyncResultGeneration());
+  const fallbackManagedKeyGeneration = useRef(new AsyncResultGeneration());
 
-  useEffect(() => { setPrimaryKeyInput(''); }, [form.llm.provider]);
-  useEffect(() => { setFallbackKeyInput(''); }, [form.llm.fallback.provider]);
-  useEffect(() => { setPrimaryKeyTest(null); }, [form.llm.provider]);
-  useEffect(() => { setFallbackKeyTest(null); }, [form.llm.fallback.provider]);
+  useEffect(() => {
+    primaryManagedKeyGeneration.current.invalidate();
+    setPrimaryKeyInput('');
+    setPrimaryKeyTest(null);
+    setPrimaryKeyTesting(false);
+  }, [form.llm.provider]);
+  useEffect(() => {
+    fallbackManagedKeyGeneration.current.invalidate();
+    setFallbackKeyInput('');
+    setFallbackKeyTest(null);
+    setFallbackKeyTesting(false);
+  }, [form.llm.fallback.provider]);
 
   const [compatKeyInput, setCompatKeyInput] = useState('');
   const [compatFallbackKeyInput, setCompatFallbackKeyInput] = useState('');
@@ -95,6 +106,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [embedPinNotice, setEmbedPinNotice] = useState<{ model: string; dim: number; newProvider: string } | null>(null);
   const changeLlmProvider = (v: string) => {
     if (v === form.llm.provider) return;
+    primaryManagedKeyGeneration.current.invalidate();
     const inheriting = (form.embedding.provider ?? '') === '';
     const meta = data.libraryStats?.embeddingMeta;
     const pin = inheriting && !!meta?.model;
@@ -182,31 +194,33 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     value: string,
     setTesting: (v: boolean) => void,
     setResult: (r: { ok: boolean; message: string; latencyMs: number } | null) => void,
+    generationState: AsyncResultGeneration,
     clearInput?: () => void,
   ) => {
     const hasTyped = !!value.trim();
     if (!hasTyped && !data.env?.[envVar]) return;
-    setTesting(true);
-    setResult(null);
-    try {
-      const r = await adminFetch('/settings/secrets/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: envVar, value: value.trim() }),
-      });
-      const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setResult(j);
-      if (j.ok && hasTyped) {
-        const saved = await saveKey(envVar, value);
-        if (saved) { notify.ok('Key verified and saved'); clearInput?.(); refresh(); }
-      } else if (j.ok) {
-        notify.ok('Key verified (on file)');
-      }
-    } catch (e) {
-      setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
-    } finally {
-      setTesting(false);
-    }
+    await runManagedKeyProbe({
+      generation: generationState,
+      test: async () => {
+        const r = await adminFetch('/settings/secrets/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: envVar, value: value.trim() }),
+        });
+        return await r.json() as { ok: boolean; message: string; latencyMs: number };
+      },
+      save: hasTyped ? () => saveKey(envVar, value) : undefined,
+      onStart: () => { setTesting(true); setResult(null); },
+      onResult: setResult,
+      onSaved: () => {
+        notify.ok('Key verified and saved');
+        clearInput?.();
+        refresh();
+      },
+      onVerified: () => notify.ok('Key verified (on file)'),
+      onError: e => setResult({ ok: false, message: errorMessage(e), latencyMs: 0 }),
+      onFinish: () => setTesting(false),
+    });
   };
 
   const testCompatKey = async (
@@ -456,7 +470,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             <>
               <div className="field">
                 <Label>Bearer token</Label>
-                <div className="flex items-stretch gap-2">
+                <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                   <Input
                     type="password"
                     autoComplete="off"
@@ -528,17 +542,29 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               <>
                 <div className="field">
                   <Label>{llmProviderLabel(form.llm.provider)} API key</Label>
-                  <div className="flex items-stretch gap-2">
+                  <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                     <Input
                       type="password"
                       autoComplete="off"
                       value={primaryKeyInput}
                       placeholder={data.env?.[keyVar] ? '•••••• (on file)' : (KEY_HINTS[keyVar] ?? '')}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => setPrimaryKeyInput(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                        primaryManagedKeyGeneration.current.invalidate();
+                        setPrimaryKeyInput(e.target.value);
+                        setPrimaryKeyTest(null);
+                        setPrimaryKeyTesting(false);
+                      }}
                       className="max-w-[360px]"
                     />
                     <Btn
-                      onClick={() => testKey(keyVar, primaryKeyInput, setPrimaryKeyTesting, setPrimaryKeyTest, () => setPrimaryKeyInput(''))}
+                      onClick={() => testKey(
+                        keyVar,
+                        primaryKeyInput,
+                        setPrimaryKeyTesting,
+                        setPrimaryKeyTest,
+                        primaryManagedKeyGeneration.current,
+                        () => setPrimaryKeyInput(''),
+                      )}
                       disabled={primaryKeyTesting || (!primaryKeyInput.trim() && !data.env?.[keyVar])}
                     >
                       {primaryKeyTesting ? 'Testing…' : 'Test key'}
@@ -560,7 +586,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
           <div className="field">
             <Label>Model</Label>
-            <div className="flex items-stretch gap-2">
+            <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
               {primaryDiscovery.models.length > 0 ? (
                 <ModelCombobox
                   models={primaryDiscovery.models}
@@ -645,7 +671,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
       <Card title="Fallback" sub="backup when the primary is offline">
         <div className="grid gap-[18px]">
-          <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Use a backup LLM</div>
               <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">
@@ -677,9 +703,10 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <Label>Backup provider</Label>
                 <Select
                   value={form.llm.fallback.provider}
-                  onValueChange={v =>
-                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v } } }))
-                  }
+                  onValueChange={v => {
+                    fallbackManagedKeyGeneration.current.invalidate();
+                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v } } }));
+                  }}
                 >
                   <SelectTrigger className="max-w-[360px]" aria-label="Backup provider"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -782,7 +809,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <>
                   <div className="field">
                     <Label>Bearer token</Label>
-                    <div className="flex items-stretch gap-2">
+                    <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                       <Input
                         type="password"
                         autoComplete="off"
@@ -849,17 +876,29 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   <>
                     <div className="field">
                       <Label>{llmProviderLabel(form.llm.fallback.provider)} API key</Label>
-                      <div className="flex items-stretch gap-2">
+                      <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                         <Input
                           type="password"
                           autoComplete="off"
                           value={fallbackKeyInput}
                           placeholder={data.env?.[keyVar] ? '•••••• (on file)' : (KEY_HINTS[keyVar] ?? '')}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setFallbackKeyInput(e.target.value)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                            fallbackManagedKeyGeneration.current.invalidate();
+                            setFallbackKeyInput(e.target.value);
+                            setFallbackKeyTest(null);
+                            setFallbackKeyTesting(false);
+                          }}
                           className="max-w-[360px]"
                         />
                         <Btn
-                          onClick={() => testKey(keyVar, fallbackKeyInput, setFallbackKeyTesting, setFallbackKeyTest, () => setFallbackKeyInput(''))}
+                          onClick={() => testKey(
+                            keyVar,
+                            fallbackKeyInput,
+                            setFallbackKeyTesting,
+                            setFallbackKeyTest,
+                            fallbackManagedKeyGeneration.current,
+                            () => setFallbackKeyInput(''),
+                          )}
                           disabled={fallbackKeyTesting || (!fallbackKeyInput.trim() && !data.env?.[keyVar])}
                         >
                           {fallbackKeyTesting ? 'Testing…' : 'Test key'}
@@ -876,7 +915,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
               <div className="field">
                 <Label>Backup model</Label>
-                <div className="flex items-stretch gap-2">
+                <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                   {fallbackDiscovery.models.length > 0 ? (
                     <ModelCombobox
                       models={fallbackDiscovery.models}
@@ -931,7 +970,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <KeyStatus envVar={fallbackKeyVar} present={!!data.env?.[fallbackKeyVar]} />
               )}
 
-              <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
                 <div>
                   <div className="text-[13px] font-bold">Backup chain-of-thought</div>
                   <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">
@@ -957,7 +996,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       </Card>
 
       <Card title="Reasoning" sub="thinking models">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
           <div>
             <div className="text-[13px] font-bold">Chain-of-thought</div>
             <div className="field-hint mt-1 max-w-[440px]">
@@ -1007,7 +1046,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       </Card>
 
       <Card title="Next-track picker" sub="how the DJ chooses">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
           <div>
             <div className="text-[13px] font-bold">Agentic picker</div>
             <div className="field-hint mt-1 max-w-[440px]">
@@ -1053,7 +1092,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         )}
 
         {form.llm.pickerAgent && (
-          <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Resolve described requests via web</div>
               <div className="field-hint mt-1 max-w-[440px]">
@@ -1119,7 +1158,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       </Card>
 
       <Card title="Idle behaviour" sub="when no one's listening">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
           <div>
             <div className="text-[13px] font-bold">Pause DJ when empty</div>
             <div className="field-hint mt-1 max-w-[440px]">
@@ -1189,7 +1228,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         )}
 
         {form.llm.dailyTokenCap > 0 && (
-          <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Always answer requests</div>
               <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">

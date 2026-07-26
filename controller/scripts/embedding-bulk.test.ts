@@ -152,7 +152,10 @@ await test('a throttled cloud batch advances progress once, only after all upser
 });
 
 await test('tagger wires bulk retry only around document embeddings', () => {
-  const tagger = readFileSync(new URL('../src/music/tag-library.ts', import.meta.url), 'utf8');
+  const tagger = readFileSync(
+    new URL('../src/music/tag-library/embed.ts', import.meta.url),
+    'utf8',
+  );
   assert.match(tagger, /bulkEmbeddingBatchSize\(/);
   assert.match(tagger, /commitBulkEmbeddingBatch\(/);
   assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);

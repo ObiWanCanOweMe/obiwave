@@ -298,7 +298,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
       />
 
       <Card title="Tagger" sub="enabled?">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
           <div>
             <div className="text-[13px] font-bold">Embedding-propagated tagging</div>
             <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">
@@ -428,7 +428,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
 
           <div className="field">
             <Label>Model</Label>
-            <div className="flex items-stretch gap-2">
+            <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
               {embedDiscovery.models.length > 0 ? (
                 <ModelCombobox
                   models={embedDiscovery.models}
@@ -809,7 +809,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
 
       <Card title="Enrichment" sub="signals folded into the embedding text">
         <div className="grid gap-4">
-          <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Last.fm tags</div>
               <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">
@@ -839,7 +839,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
             />
           </div>
 
-          <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Lyrics</div>
               <div className="mt-0.5 max-w-[480px] text-[14px] leading-[1.5] text-muted">

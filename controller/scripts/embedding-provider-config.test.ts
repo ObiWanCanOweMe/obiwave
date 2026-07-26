@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +44,53 @@ async function test(name: string, run: () => Promise<void>) {
 }
 
 await settings.load();
+
+await test('restart with blank embeddings and LiteLLM chat pins the embedding leg to Ollama', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'subwave-embedding-restart-'));
+  writeFileSync(
+    join(stateDir, 'settings.json'),
+    JSON.stringify({
+      llm: {
+        provider: 'litellm',
+        model: 'vendor/chat-model',
+        providerBaseUrls: { litellm: 'https://litellm-chat.example/v1' },
+        baseUrl: 'https://litellm-chat.example/v1',
+      },
+      embedding: { provider: '', model: '', providerBaseUrls: {}, baseUrl: '' },
+    }),
+  );
+  const settingsUrl = new URL('../src/settings.ts', import.meta.url).href;
+  const providerUrl = new URL('../src/llm/provider.ts', import.meta.url).href;
+  const source = `
+    const settings = await import(${JSON.stringify(settingsUrl)});
+    const { resolveEmbeddingCfg } = await import(${JSON.stringify(providerUrl)});
+    await settings.load();
+    const cfg = resolveEmbeddingCfg();
+    console.log(JSON.stringify({
+      storedProvider: settings.get().embedding.provider,
+      provider: cfg.provider,
+      baseUrl: cfg.baseUrl,
+    }));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', source],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, STATE_DIR: stateDir },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(
+    JSON.parse(child.stdout.trim()),
+    {
+      storedProvider: 'ollama',
+      provider: 'ollama',
+      baseUrl: '',
+    },
+  );
+});
 
 await test('persisted compatible embedding bearer cannot mask the dedicated env key', async () => {
   assert.equal(settings.get().embedding.apiKey, '');

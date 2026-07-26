@@ -5,7 +5,7 @@ const [source, ttsSource, settingsSource, routesSource, cloudSpeechSource] = awa
   readFile(new URL('../components/admin/settings/LlmSection.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/admin/settings/TtsSection.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/settings.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../../controller/src/routes/settings.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../../controller/src/routes/settings/tts.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/llm/internal/speech/cloud-speech.ts', import.meta.url), 'utf8'),
 ]);
 
@@ -43,7 +43,7 @@ for (const [label, text] of [
   ['LlmSection.tsx', source],
   ['TtsSection.tsx', ttsSource],
   ['settings.ts', settingsSource],
-  ['routes/settings.ts', routesSource],
+  ['routes/settings/tts.ts', routesSource],
   ['cloud-speech.ts', cloudSpeechSource],
 ] as const) {
   assertNoConflictMarkers(text, label);

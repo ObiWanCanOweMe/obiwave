@@ -19,6 +19,7 @@ import * as settings from '../settings.js';
 import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
+import { voiceStatus } from '../broadcast/voice-policy.js';
 import * as requestLog from '../broadcast/request-log.js';
 import { getStationTimezone } from '../time.js';
 import { publicOrigin } from './public.js';
@@ -224,6 +225,10 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     // Daily token budget — today's usage vs the cap and the resulting tier
     // (normal / soft / hard). `enabled:false` when no cap is set.
     budget: (() => { try { return budgetStatus(); } catch (err: any) { return { error: err.message }; } })(),
+    // Station-wide voice switch (settings.tts.enabled). `enabled:false` means
+    // every autonomous talk moment is standing down — worth seeing here before
+    // anyone debugs "why is the DJ quiet".
+    voice: (() => { try { return voiceStatus(); } catch (err: any) { return { error: err.message }; } })(),
     recentCalls: dj.recentCalls,
     // Raw-request capture status — the admin UI shows the toggle + the file path
     // so operators know where to look. `viaEnv` means LLM_DEBUG_RAW forces it on

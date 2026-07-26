@@ -561,7 +561,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   return (
     <section className="card">
       {/* headline */}
-      <div className="border-b border-ink p-6">
+      <div className="border-b border-ink p-4 sm:p-6">
         <Eyebrow className="text-vermilion">library · tagging</Eyebrow>
         <h1 className="lib-hero-title">
           {pct != null ? (
@@ -580,7 +580,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
 
       {/* coverage — the single hero meter */}
       <div className="border-b border-ink">
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <span className="flex items-center gap-2 text-[11px] font-bold tracking-[0.16em] text-ink uppercase">
               <Sparkles size={14} /> Mood &amp; energy tagged
@@ -667,7 +667,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           analyze/backfill run is in flight so progress and Pause stay visible;
           manual state wins again once the run finishes. Not persisted — a
           fresh load starts collapsed, same as the log drawer. */}
-      <div className="border-b border-ink px-6 py-3.5">
+      <div className="border-b border-ink px-4 py-3.5 sm:px-6">
         <button
           type="button"
           className={cn(
@@ -687,7 +687,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </button>
       </div>
       {showAnalysis && (
-      <div className="flex flex-col gap-3 border-b border-ink px-6 py-4">
+      <div className="flex flex-col gap-3 border-b border-ink px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
           <span className="caption flex items-center gap-2">
             <Activity size={13} /> Acoustic analysis · bpm / key
@@ -962,7 +962,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       {/* last-run failure banner — idle only; matches the embeddingStale banner's
           danger styling. 'stopped' runs (Stop / restart-kill) show nothing. */}
       {showFailBanner && (
-        <div className="mx-6 mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 border border-l-[3px] border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-ink">
+        <div className="mx-4 mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 border border-l-[3px] border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-ink sm:mx-6">
           <span>
             <b>The last {failModeLabel} run failed.</b>
             {lastRun?.error ? <> {lastRun.error}</> : ' Check the log for what went wrong.'}
@@ -986,8 +986,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
 
       {/* action zone — idle vs running */}
       {!running ? (
-        <div className="flex flex-wrap items-center gap-4 p-6">
-          <div className="min-w-[220px] flex-1 text-[13px]">
+        <div className="flex flex-wrap items-center gap-4 p-4 sm:p-6">
+          <div className="min-w-0 flex-1 text-[13px] sm:min-w-[220px]">
             {libraryCounting ? (
               <>Counting your library&hellip; this only takes a moment.</>
             ) : remaining != null && remaining > 0 ? (
@@ -1015,7 +1015,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 p-6">
+        <div className="flex flex-col gap-3 p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3.5">
             <span className="flex items-center gap-2.5 text-[13px] font-bold">
               <span className="lib-livedot" />
@@ -1103,7 +1103,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
 
       {/* last-run phase breakdown — only when idle and the child reported timings */}
       {lastTimingEntries.length > 0 && (
-        <div className="border-t border-dashed border-separator-strong px-6 py-3 text-[11px] text-muted">
+        <div className="border-t border-dashed border-separator-strong px-4 py-3 text-[11px] text-muted sm:px-6">
           <span className="font-bold text-ink">Last run</span>
           <span className="!normal-case">
             {' · '}
@@ -1115,7 +1115,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       )}
 
       {/* footer */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-dashed border-separator-strong px-6 py-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-dashed border-separator-strong px-4 py-3 sm:px-6">
         <button
           type="button"
           className={cn(

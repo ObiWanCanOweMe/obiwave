@@ -14,11 +14,11 @@
 // rule (#50) bans the inline `style` prop.
 
 import { useRef } from 'react';
-import { cn } from '../../lib/cn';
-import { useDynamicStyle } from '../../hooks/useDynamicStyle';
-import { SWATCH_KEYS } from '../../lib/theme-tokens.generated';
+import { cn } from '../../../lib/cn';
+import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
+import { SWATCH_KEYS } from '../../../lib/theme-tokens.generated';
 
-export interface PersonaOpt {
+interface PersonaOpt {
   id: string;
   name?: string;
   tagline?: string;
@@ -26,7 +26,7 @@ export interface PersonaOpt {
   tts?: { engine?: string; voice?: string };
 }
 
-export interface ThemeOpt {
+interface ThemeOpt {
   id: string;
   name: string;
   mode?: string;
@@ -81,7 +81,7 @@ export function PersonaPicker({
 }) {
   if (!personas.length) return null;
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {personas.map((p) => {
         const selected = p.id === value;
         const src = p.avatar ? `${apiBase}/persona-avatar/${encodeURIComponent(p.id)}` : null;
@@ -145,7 +145,7 @@ export function GuestPersonaPicker({
     else if (value.length < max) onChange([...value, id]);
   };
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {personas.map((p) => {
         const selected = value.includes(p.id);
         const full = !selected && value.length >= max;
