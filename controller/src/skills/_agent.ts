@@ -626,12 +626,8 @@ export const forcedDirectorAgent = defineAgent({
 
 // Operator override — fire one capability on demand, bypassing cooldowns, the
 // frequency floor, persona ownership and the enable toggle. Backs POST
-// /dj/skill, and the programme feature beat (broadcast/programme.ts), which
-// passes `brief` (the episode plan's feature topic, appended to the situation
-// so the segment is built AROUND it) and `persona` (the rotated on-air
-// speaker — voice, prompt seat, and session attribution move together, same
-// rule as every other rotated segment). Returns the spoken text; throws on an
-// unknown/unready capability or empty output.
+// /dj/skill. Returns the spoken text; throws on an unknown/unready capability
+// or empty output.
 export async function runCapability(which, ctx, { brief = null, persona = null }: { brief?: string | null; persona?: { id?: string; name?: string; skills?: string[]; tts?: unknown } | null } = {}) {
   const cap = allCapabilities().find(c => c.kind === which || c.skill === which);
   if (!cap) throw new Error(`unknown skill: ${which}`);
@@ -710,6 +706,22 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     }
   }
   return text;
+}
+
+// Scheduled/programme execution is autonomous, not an operator override. Check
+// the live station catalogue immediately before entering the forced director
+// so a disabled pin, or a skill disabled since planning, cannot air. The
+// manual runCapability path intentionally remains unrestricted.
+export async function runAutonomousCapability(
+  which,
+  ctx,
+  options: { brief?: string | null; persona?: { id?: string; name?: string; skills?: string[]; tts?: unknown } | null } = {},
+) {
+  const current = skillCatalog().find((entry) => entry.kind === which || entry.name === which);
+  if (!current) throw new Error(`unknown skill: ${which}`);
+  if (!current.enabled) throw new Error(`skill "${current.name}" is disabled`);
+  if (!current.ready) throw new Error(`skill "${current.name}" is not ready`);
+  return runCapability(current.kind, ctx, options);
 }
 
 // Skill metadata for the admin command-center UI — derived straight from

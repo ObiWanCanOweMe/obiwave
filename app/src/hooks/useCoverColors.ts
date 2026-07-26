@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { getColors } from 'react-native-image-colors';
+import type { StationImageSource } from '@/lib/api';
 
 export interface CoverColors {
   vibrant: string | null;
@@ -15,7 +16,7 @@ export interface CoverColors {
 
 const EMPTY: CoverColors = { vibrant: null, average: null };
 
-export function useCoverColors(coverSrc: string | null): CoverColors {
+export function useCoverColors(coverSrc: StationImageSource | null): CoverColors {
   const [colors, setColors] = useState<CoverColors>(EMPTY);
 
   useEffect(() => {
@@ -24,7 +25,12 @@ export function useCoverColors(coverSrc: string | null): CoverColors {
       return;
     }
     let cancelled = false;
-    getColors(coverSrc, { cache: true, key: coverSrc, quality: 'low' })
+    getColors(coverSrc.uri, {
+      cache: true,
+      key: coverSrc.uri,
+      quality: 'low',
+      ...(coverSrc.headers ? { headers: coverSrc.headers } : {}),
+    })
       .then((res) => {
         if (cancelled) return;
         // The result shape differs per platform; pick a vivid + a calm colour.

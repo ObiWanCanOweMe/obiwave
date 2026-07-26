@@ -7,6 +7,7 @@
 // rendering no matter what fell over upstream.
 
 import { Pressable, Text, View } from 'react-native';
+import { sanitizeDiagnostic } from '@/lib/stationSecurity';
 
 const BG = '#100e0c';
 const INK = '#ece6dc';
@@ -52,7 +53,7 @@ export default function ErrorScreen({ error, retry }: ErrorScreenProps) {
           }}
           numberOfLines={4}
         >
-          {error.message}
+          {sanitizeDiagnostic(error.message)}
         </Text>
       ) : null}
       <Pressable

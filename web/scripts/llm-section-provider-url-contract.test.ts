@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [source, ttsSource, settingsSource, routesSource, cloudSpeechSource] = await Promise.all([
+const [
+  source,
+  ttsSource,
+  librarySource,
+  voiceHookSource,
+  settingsSource,
+  routesSource,
+  cloudSpeechSource,
+] = await Promise.all([
   readFile(new URL('../components/admin/settings/LlmSection.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/admin/settings/TtsSection.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../components/admin/settings/LibrarySection.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../hooks/useVoiceDiscovery.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/settings.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/routes/settings/tts.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/llm/internal/speech/cloud-speech.ts', import.meta.url), 'utf8'),
@@ -42,6 +52,8 @@ function assertSpeechModelUsesResolvedKey(text: string) {
 for (const [label, text] of [
   ['LlmSection.tsx', source],
   ['TtsSection.tsx', ttsSource],
+  ['LibrarySection.tsx', librarySource],
+  ['useVoiceDiscovery.ts', voiceHookSource],
   ['settings.ts', settingsSource],
   ['routes/settings/tts.ts', routesSource],
   ['cloud-speech.ts', cloudSpeechSource],
@@ -71,6 +83,22 @@ assert.match(source, /const INLINE_KEY_PROVIDERS = \['openai-compatible', 'locca
 assert.match(source, /const CUSTOM_URL_PROVIDERS = \['openai-compatible', 'litellm'\];/);
 assert.match(source, /const primaryBaseUrl = form\.llm\.providerBaseUrls\[primaryProvider\] \?\? '';/);
 assert.match(source, /const fallbackBaseUrl = form\.llm\.fallback\.providerBaseUrls\[fallbackProvider\] \?\? '';/);
+const embedDiscoveryBlock = blockBetween(
+  librarySource,
+  'const embedDiscoveryEnabled =',
+  'const embedDiscovery =',
+);
+assert.match(
+  embedDiscoveryBlock,
+  /embedKeyPresent \|\| !!embeddingKeyInput\.trim\(\)/,
+  'saved EMBEDDING_API_KEY must enable model discovery using runtime credential precedence',
+);
+assert.match(
+  librarySource,
+  /adminFetch\('\/settings\/llm\/discover', \{[\s\S]*?method: 'POST',[\s\S]*?body: JSON\.stringify\(\{ baseUrl: url \}\)/,
+  'direct Locca discovery must keep its unsaved URL in a POST body',
+);
+assert.doesNotMatch(librarySource, /settings\/llm\/discover\?baseUrl=/);
 assert.match(
   source,
   /providerBaseUrls: \{ \.\.\.f\.llm\.providerBaseUrls, \[primaryProvider\]: e\.target\.value \}/,
@@ -101,8 +129,16 @@ assert.match(
   /providerBaseUrls: \{ \.\.\.f\.llm\.fallback\.providerBaseUrls, locca: e\.target\.value \}/,
   'fallback Locca URL edits must write fallback.providerBaseUrls.locca',
 );
-assert.match(source, /leg: 'primary',[\s\S]*?apiKey: compatKeyInput,[\s\S]*?baseUrl: primaryBaseUrl,/);
-assert.match(source, /leg: 'fallback',[\s\S]*?apiKey: compatFallbackKeyInput,[\s\S]*?baseUrl: fallbackBaseUrl,/);
+assert.match(
+  source,
+  /owner: 'chat',[\s\S]*?leg: 'primary',[\s\S]*?apiKey: INLINE_KEY_PROVIDERS\.includes\(primaryProvider\)[\s\S]*?\? compatKeyInput[\s\S]*?: primaryKeyInput,[\s\S]*?baseUrl: primaryBaseUrl,/,
+  'primary discovery must identify the chat owner and use the key typed for the selected provider',
+);
+assert.match(
+  source,
+  /owner: 'chat',[\s\S]*?leg: 'fallback',[\s\S]*?apiKey: INLINE_KEY_PROVIDERS\.includes\(fallbackProvider\)[\s\S]*?\? compatFallbackKeyInput[\s\S]*?: fallbackKeyInput,[\s\S]*?baseUrl: fallbackBaseUrl,/,
+  'fallback discovery must identify the chat owner and use the key typed for the selected provider',
+);
 assert.match(
   source,
   /\[primaryProvider, primaryBaseUrl, form\.llm\.model, compatKeyInput\]/,
@@ -128,12 +164,24 @@ assert.match(ttsSource, /const \[compatKeyInput, setCompatKeyInput\] = useState\
 assert.match(ttsSource, /\.\.\.\(isCompat && compatKeyInput\.trim\(\) \? \{ apiKey: compatKeyInput\.trim\(\) \} : \{\}\)/);
 assert.match(ttsSource, /placeholder=\{savedCloud\.apiKey === 'set' \? '•••••• \(on file\)' : 'Optional'\}/);
 assert.match(ttsSource, /if \(!isCompat && cloudKeyInput\.trim\(\)\)/);
+assert.match(
+  ttsSource,
+  /useVoiceDiscovery\(\{[\s\S]*?apiKey: isCompat \? compatKeyInput : cloudKeyInput,/,
+  'voice discovery must receive the unsaved key owned by the selected TTS provider',
+);
+assert.match(voiceHookSource, /buildVoiceDiscoveryRequest\(\{/);
+assert.doesNotMatch(
+  voiceHookSource,
+  /settings\/tts\/voices\?\$\{params\}/,
+  'voice discovery URL must not carry an unsaved server or credential',
+);
 assert.match(settingsSource, /stored\.tts\?\.cloud\?\.provider === 'openai-compatible'[\s\S]*?stored\.tts\.cloud\.apiKey/);
 assert.match(settingsSource, /if \(next\.tts\.cloud\.provider !== 'openai-compatible'\) \{\s*next\.tts\.cloud\.apiKey = '';/);
 assert.match(cloudSpeechSource, /export function resolveCloudApiKey\(/);
 assert.match(cloudSpeechSource, /if \(c\.provider === 'openai-compatible'\) return String\(c\.apiKey \|\| ''\)\.trim\(\);/);
 assert.match(cloudSpeechSource, /if \(c\.provider === 'elevenlabs'\) return String\(env\.ELEVENLABS_API_KEY \|\| ''\)\.trim\(\);/);
 assert.match(cloudSpeechSource, /if \(c\.provider === 'openai'\) return String\(env\.OPENAI_API_KEY \|\| ''\)\.trim\(\);/);
-assert.match(routesSource, /const apiKey = speech\.resolveCloudApiKey\(\{/);
+assert.match(routesSource, /router\.post\('\/settings\/tts\/voices'/);
+assert.match(routesSource, /storedCredentialIsBound/);
 
 console.log('✓ LLM settings composes provider-scoped URLs with LiteLLM transport safeguards');

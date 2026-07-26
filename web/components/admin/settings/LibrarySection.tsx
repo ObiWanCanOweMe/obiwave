@@ -176,13 +176,16 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
     || effectiveProvider === 'locca'
     || (effectiveProvider === 'openai-compatible' && !!embedBaseUrl.trim())
     || (effectiveProvider === 'openrouter')
-    || (!!embedKeyVar && embedKeySet);
+    || (!!embedKeyVar && (embedKeyPresent || !!embeddingKeyInput.trim()));
 
   const embedDiscovery = useModelDiscovery({
+    owner: 'embedding',
     provider: effectiveProvider,
+    apiKey: effectiveProvider === 'openai-compatible'
+      ? compatEmbedKeyInput
+      : embeddingKeyInput,
     baseUrl: embedBaseUrl,
     ollamaUrl: e.ollamaUrl || form.llm.ollamaUrl,
-    scope: 'embedding',
     enabled: embedDiscoveryEnabled,
     adminFetch,
   });
@@ -226,7 +229,11 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
       let model = 'nomic-embed-text';
       try {
         const d = await (
-          await adminFetch(`/settings/llm/discover?baseUrl=${encodeURIComponent(url)}`)
+          await adminFetch('/settings/llm/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ baseUrl: url }),
+          })
         ).json();
         if (d.reachable && Array.isArray(d.models) && d.models.length) model = d.models[0];
       } catch {

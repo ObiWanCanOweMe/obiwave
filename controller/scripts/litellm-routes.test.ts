@@ -58,6 +58,7 @@ const onboarding = await recordingGateway();
 const environment = await recordingGateway();
 const compatFallback = await recordingGateway();
 const unsavedLocca = await recordingGateway();
+const changedOrigin = await recordingGateway();
 let routeServer: http.Server | undefined;
 
 try {
@@ -101,7 +102,7 @@ try {
   });
 
   for (const leg of ['primary', 'fallback'] as const) {
-    const response = await post('/settings/llm/models', { provider: 'litellm', leg });
+    const response = await post('/settings/llm/models', { owner: 'chat', provider: 'litellm', leg });
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.ok, true);
@@ -122,7 +123,40 @@ try {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-leg-token',
   });
 
+  const changedLegacyProbe = await post('/settings/llm/probe-compat', {
+    baseUrl: changedOrigin.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal((await changedLegacyProbe.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
+  }, 'regression: an unmatched legacy probe URL must not receive the primary stored bearer');
+
+  const changedLiteProbe = await post('/settings/llm/probe-compat', {
+    provider: 'litellm',
+    leg: 'primary',
+    baseUrl: changedOrigin.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal((await changedLiteProbe.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
+  }, 'regression: a changed LiteLLM URL must not receive the stored LiteLLM bearer');
+
+  const explicitChangedLiteProbe = await post('/settings/llm/probe-compat', {
+    provider: 'litellm',
+    leg: 'primary',
+    baseUrl: changedOrigin.baseUrl,
+    apiKey: 'explicit-changed-token',
+    model: 'vendor/model',
+  });
+  assert.equal((await explicitChangedLiteProbe.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-changed-token',
+  });
+
   const onboardingResponse = await post('/settings/llm/models', {
+    owner: 'chat',
     provider: 'litellm',
     leg: 'onboarding',
     baseUrl: onboarding.baseUrl,
@@ -145,6 +179,38 @@ try {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer unsaved-onboarding-token',
   });
   console.log('  ✓ mounted /onboarding/test-llm uses the unsaved URL and bearer token');
+
+  process.env.LITELLM_API_BASE = environment.baseUrl;
+  process.env.LITELLM_API_KEY = 'environment-only-token';
+  const changedOnboarding = await post('/onboarding/test-llm', {
+    provider: 'litellm',
+    model: 'vendor/model',
+    baseUrl: changedOrigin.baseUrl,
+  });
+  assert.equal((await changedOnboarding.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer unused',
+  }, 'regression: a changed onboarding URL must not receive the environment LiteLLM bearer');
+
+  const explicitChangedOnboarding = await post('/onboarding/test-llm', {
+    provider: 'litellm',
+    model: 'vendor/model',
+    baseUrl: changedOrigin.baseUrl,
+    apiKey: 'explicit-onboarding-token',
+  });
+  assert.equal((await explicitChangedOnboarding.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-onboarding-token',
+  });
+
+  const environmentOnboarding = await post('/onboarding/test-llm', {
+    provider: 'litellm',
+    model: 'vendor/model',
+  });
+  assert.equal((await environmentOnboarding.json()).ok, true);
+  assert.deepEqual(environment.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer environment-only-token',
+  });
 
   await settings.update({
     llm: {
@@ -181,6 +247,29 @@ try {
   assert.equal((await legacyProbe.json()).ok, true);
   assert.deepEqual(compatFallback.requests[0], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-compat-fallback-token',
+  });
+
+  const changedCompatProbe = await post('/settings/llm/probe-compat', {
+    provider: 'openai-compatible',
+    leg: 'fallback',
+    baseUrl: changedOrigin.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal((await changedCompatProbe.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
+  }, 'regression: a changed compatibility URL must not receive the stored provider bearer');
+
+  const explicitChangedCompatProbe = await post('/settings/llm/probe-compat', {
+    provider: 'openai-compatible',
+    leg: 'fallback',
+    baseUrl: changedOrigin.baseUrl,
+    apiKey: 'explicit-compat-token',
+    model: 'vendor/model',
+  });
+  assert.equal((await explicitChangedCompatProbe.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-compat-token',
   });
 
   const mismatchedProbe = await post('/settings/llm/probe-compat', {
@@ -239,11 +328,11 @@ try {
   await settings.update({
     llm: { provider: 'ollama', model: 'glm-5.1:cloud', baseUrl: '', fallback: { enabled: false } },
   });
-  process.env.LITELLM_API_BASE = environment.baseUrl;
-  process.env.LITELLM_API_KEY = 'environment-only-token';
-  const environmentResponse = await post('/settings/llm/models', { provider: 'litellm', leg: 'primary' });
+  const environmentResponse = await post('/settings/llm/models', {
+    owner: 'chat', provider: 'litellm', leg: 'primary',
+  });
   assert.equal((await environmentResponse.json()).ok, true);
-  assert.deepEqual(environment.requests[0], {
+  assert.deepEqual(environment.requests.at(-1), {
     method: 'GET', url: '/v1/models', authorization: 'Bearer environment-only-token',
   });
 
@@ -261,5 +350,6 @@ try {
     environment.close(),
     compatFallback.close(),
     unsavedLocca.close(),
+    changedOrigin.close(),
   ]);
 }

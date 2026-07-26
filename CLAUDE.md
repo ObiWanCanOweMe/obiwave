@@ -36,9 +36,9 @@ docker compose up -d --build broadcast      # after radio.liq / icecast.xml.temp
 
 `web` runs as a Next.js dev server (`npm run dev`) and hot-reloads in dev; prod builds the web image and needs a rebuild like the others.
 
-**Lint is the merge gate; tests are not.** `controller/` and `web/` each expose `npm run lint` (`eslint . && tsc --noEmit`), and `mcp-subwave/` exposes `npm run lint` (`tsc --noEmit`); CI runs all three on every PR (`.github/workflows/lint.yml`, plus a theme-token mirror drift check on `controller`) and those jobs are what block a merge.
+**Lint, tests, builds, deployment contracts, and image smoke checks are merge gates.** The quality matrix in `.github/workflows/ci.yml` runs controller lint plus the full controller test suite; web lint, its selected `test:*` contract scripts, and a production build; MCP lint; CLI typecheck; and native lint, typecheck, and contract scripts. The controller leg also checks generated theme-token drift.
 
-`controller/` also has a test suite — `npm test` (`scripts/run-tests.ts`) auto-discovers every `scripts/*.test.ts` and runs each as its own tsx subprocess, so a test that fails by `process.exit(1)` and one that fails by a thrown `assert` are caught the same way. **Dropping a `*.test.ts` file into `controller/scripts/` is the whole registration step** — no package.json edit. `npm test -- <substring>` filters to matching files. `web/` and `mcp-subwave/` have no tests. Since CI doesn't run any of this, run `npm test` yourself before pushing controller changes.
+`controller/`'s `npm test` (`scripts/run-tests.ts`) auto-discovers every `scripts/*.test.ts` and runs each as its own tsx subprocess, so a test that fails by `process.exit(1)` and one that fails by a thrown `assert` are caught the same way. **Dropping a `*.test.ts` file into `controller/scripts/` is the whole registration step** — no package.json edit. `npm test -- <substring>` filters to matching files. `web/` exposes focused contract commands in `package.json` (including audio format, stream auth/format, LLM provider and provider-URL, onboarding provider state, and async generation); run the matching contract command for the boundary you change. `mcp-subwave/` has no separate test suite.
 
 ## Architecture
 

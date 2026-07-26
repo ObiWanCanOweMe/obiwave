@@ -16,6 +16,7 @@
     "test:onboarding-provider-state": "node --experimental-strip-types scripts/onboarding-provider-state.test.ts",
     "test:async-generation": "node --experimental-strip-types scripts/async-result-generation.test.ts",
     "test:managed-key-probe": "node --experimental-strip-types scripts/managed-key-probe.test.ts",
+    "test:model-discovery-request": "node --experimental-strip-types scripts/model-discovery-request.test.ts",
     "test:admin-navigation-schedule": "node --experimental-strip-types scripts/admin-navigation-schedule-contract.test.ts",
     "test:llm-section-provider-url-contract": "node --experimental-strip-types scripts/llm-section-provider-url-contract.test.ts"
   },

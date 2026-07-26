@@ -11,10 +11,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, View } from 'react-native';
 import { useAppActive } from '@/hooks/useAppActive';
+import type { StationImageSource } from '@/lib/api';
 import { useTheme } from '@/theme/ThemeContext';
 
 export interface CoverArtProps {
-  uri: string;
+  source: StationImageSource;
   live: boolean;
   /** ~3s window after a track change or DJ turn — drives the glitch + ticks. */
   burst?: boolean;
@@ -38,7 +39,7 @@ const TEAL = '#16d6cf';
 // ghosts) plus jumping colour tears. Mounted only during a burst, so its
 // interval lives and dies with the effect. RN has no `mix-blend-mode: screen`,
 // so offset low-opacity copies stand in for the web's tinted channels.
-function CoverGlitch({ uri, size, accent }: { uri: string; size: number; accent: string }) {
+function CoverGlitch({ source, size, accent }: { source: StationImageSource; size: number; accent: string }) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % GLITCH_FRAMES.length), 90);
@@ -48,12 +49,12 @@ function CoverGlitch({ uri, size, accent }: { uri: string; size: number; accent:
   return (
     <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
       <Image
-        source={{ uri }}
+        source={source}
         style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.4, transform: [{ translateX: f.dx1 }] }}
         contentFit="cover"
       />
       <Image
-        source={{ uri }}
+        source={source}
         style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.4, transform: [{ translateX: f.dx2 }] }}
         contentFit="cover"
       />
@@ -80,7 +81,7 @@ function Tick({ corner, color, opacity }: { corner: 'tl' | 'tr' | 'bl' | 'br'; c
   );
 }
 
-export default function CoverArt({ uri, live, burst = false, size = 160, onPress }: CoverArtProps) {
+export default function CoverArt({ source, live, burst = false, size = 160, onPress }: CoverArtProps) {
   const { colors } = useTheme();
   const appActive = useAppActive();
   const scan = useRef(new Animated.Value(0)).current;
@@ -146,8 +147,8 @@ export default function CoverArt({ uri, live, burst = false, size = 160, onPress
 
       {/* cover + glitch + scanline (clipped) */}
       <View style={{ width: size, height: size, borderWidth: 1, borderColor: colors.muted, backgroundColor: colors.field, overflow: 'hidden' }}>
-        <Image source={{ uri }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={280} />
-        {burst ? <CoverGlitch uri={uri} size={size} accent={colors.accent} /> : null}
+        <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={280} />
+        {burst ? <CoverGlitch source={source} size={size} accent={colors.accent} /> : null}
         {live ? (
           <Animated.View
             pointerEvents="none"

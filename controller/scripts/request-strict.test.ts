@@ -69,6 +69,59 @@ test('strict failure message names the missing requested track', () => {
   );
 });
 
+test('regression: title cleaning must not erase unrequested remix/live/cover/tribute/karaoke editions', () => {
+  const target = { title: 'Midnight City', artist: 'M83', specific: true };
+  for (const title of [
+    'Midnight City (Tribute Remix)',
+    'Midnight City - Remix',
+    'Midnight City (Live)',
+    'Midnight City [Cover]',
+    'Midnight City (Karaoke Version)',
+  ]) {
+    assert.equal(
+      strictRequestSatisfied(target, { title, artist: 'M83' }),
+      false,
+      `unrequested edition was accepted: ${title}`,
+    );
+  }
+});
+
+test('regression: arbitrary artist containment must not accept tribute bands', () => {
+  const target = { title: 'Midnight City', artist: 'M83', specific: true };
+  for (const artist of ['M83 Tribute Band', 'The M83 Experience', 'Sounds Like M83']) {
+    assert.equal(
+      strictRequestSatisfied(target, { title: 'Midnight City', artist }),
+      false,
+      `tribute/containment artist was accepted: ${artist}`,
+    );
+  }
+});
+
+test('legitimate feature and collaboration separators remain valid artist credits', () => {
+  const target = { title: 'Midnight City', artist: 'M83', specific: true };
+  for (const artist of [
+    'M83 feat. Susanne Sundfør',
+    'Susanne Sundfør & M83',
+    'M83, Susanne Sundfør',
+    'Susanne Sundfør x M83',
+    'M83 with Susanne Sundfør',
+  ]) {
+    assert.equal(
+      strictRequestSatisfied(target, { title: 'Midnight City', artist }),
+      true,
+      `collaboration credit was rejected: ${artist}`,
+    );
+  }
+});
+
+test('an explicitly requested edition still matches that exact edition', () => {
+  const target = { title: 'Midnight City (Live)', artist: 'M83', specific: true };
+  assert.equal(
+    strictRequestSatisfied(target, { title: 'Midnight City [Live]', artist: 'M83' }),
+    true,
+  );
+});
+
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed`);
   process.exit(1);

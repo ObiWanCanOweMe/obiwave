@@ -135,12 +135,15 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     || primaryProvider === 'locca'
     || (CUSTOM_URL_PROVIDERS.includes(primaryProvider) && primaryUrlAvailable)
     || primaryProvider === 'openrouter'
-    || (!!primaryKeyVar && primaryKeySet);
+    || (!!primaryKeyVar && (primaryKeySet || !!primaryKeyInput.trim()));
 
   const primaryDiscovery = useModelDiscovery({
+    owner: 'chat',
     provider: primaryProvider,
     leg: 'primary',
-    apiKey: compatKeyInput,
+    apiKey: INLINE_KEY_PROVIDERS.includes(primaryProvider)
+      ? compatKeyInput
+      : primaryKeyInput,
     baseUrl: primaryBaseUrl,
     ollamaUrl: form.llm.ollamaUrl,
     enabled: primaryDiscoveryEnabled,
@@ -156,13 +159,16 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       || fallbackProvider === 'locca'
       || (CUSTOM_URL_PROVIDERS.includes(fallbackProvider) && fallbackUrlAvailable)
       || fallbackProvider === 'openrouter'
-      || (!!fallbackKeyVar && fallbackKeySet)
+      || (!!fallbackKeyVar && (fallbackKeySet || !!fallbackKeyInput.trim()))
     );
 
   const fallbackDiscovery = useModelDiscovery({
+    owner: 'chat',
     provider: fallbackProvider,
     leg: 'fallback',
-    apiKey: compatFallbackKeyInput,
+    apiKey: INLINE_KEY_PROVIDERS.includes(fallbackProvider)
+      ? compatFallbackKeyInput
+      : fallbackKeyInput,
     baseUrl: fallbackBaseUrl,
     ollamaUrl: form.llm.fallback.ollamaUrl,
     enabled: fallbackDiscoveryEnabled,

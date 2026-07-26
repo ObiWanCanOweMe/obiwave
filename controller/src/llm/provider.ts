@@ -26,6 +26,7 @@ export {
   embeddingProviderInfo,
   embeddingInfoOf,
   resolveEmbeddingCfg,
+  embeddingBaseUrl,
   buildEmbeddingModel,
   isHeavyEmbeddingModel,
   isLocalEmbeddingProvider,

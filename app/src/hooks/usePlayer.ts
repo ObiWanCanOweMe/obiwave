@@ -19,12 +19,13 @@ import {
 import { getLastLiveMeta, loadAndPlay, setupPlayer, teardown } from '@/audio/player';
 import type { StationApi } from '@/lib/api';
 import type { StreamFormat } from '@/lib/streamFormat';
+import { sanitizeDiagnostic } from '@/lib/stationSecurity';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 
 // Dev-build diagnostics for the audio pipeline (route handoffs, watchdog
 // reloads). No-op in Release.
 function plog(msg: string) {
-  if (__DEV__) console.log(`[player ${new Date().toISOString().slice(11, 23)}] ${msg}`);
+  if (__DEV__) console.log(`[player ${new Date().toISOString().slice(11, 23)}] ${sanitizeDiagnostic(msg)}`);
 }
 
 export type PlayerStatus = 'idle' | 'connecting' | 'playing';

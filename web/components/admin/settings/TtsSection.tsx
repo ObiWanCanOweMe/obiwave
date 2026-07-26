@@ -324,11 +324,13 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const ttsDiscoveryEnabled = isCloudEngine && (
     (isCompat && !!form.tts.cloud.baseUrl.trim())
-    || (!isCompat && ttsKeySet)
+    || (!isCompat && (ttsKeySet || !!cloudKeyInput.trim()))
   );
 
   const ttsDiscovery = useModelDiscovery({
+    owner: 'tts',
     provider: isCompat ? 'openai-compatible' : form.tts.cloud.provider,
+    apiKey: isCompat ? compatKeyInput : cloudKeyInput,
     baseUrl: form.tts.cloud.baseUrl,
     enabled: ttsDiscoveryEnabled,
     adminFetch,
@@ -340,6 +342,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const voiceDiscovery = useVoiceDiscovery({
     provider: form.tts.cloud.provider,
     baseUrl: form.tts.cloud.baseUrl,
+    apiKey: isCompat ? compatKeyInput : cloudKeyInput,
     enabled: ttsDiscoveryEnabled && providerSupportsDiscovery(form.tts.cloud.provider),
     adminFetch,
   });

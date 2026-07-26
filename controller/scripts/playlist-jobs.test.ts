@@ -53,6 +53,19 @@ const T0 = 1_000_000;
   assert.equal(jobs.get(job.id, T0 + 3000)?.status, 'done', 'fail after complete ignored');
 }
 
+// The inverse landing order is equally terminal: a late completion must not
+// overwrite the original failure or attach a result.
+{
+  jobs._clear();
+  const job = jobs.create(T0)!;
+  jobs.fail(job.id, 'model unreachable', T0 + 1000);
+  jobs.complete(job.id, RESULT, T0 + 2000);
+  const seen = jobs.get(job.id, T0 + 3000);
+  assert.equal(seen?.status, 'error', 'complete after fail ignored');
+  assert.equal(seen?.error, 'model unreachable', 'first failure remains readable');
+  assert.equal(seen?.result, null, 'late completion does not attach a result');
+}
+
 // ── sweep ────────────────────────────────────────────────────────────────────
 
 // A finished job survives within RESULT_TTL_MS and expires after it.
@@ -101,6 +114,15 @@ const T0 = 1_000_000;
   assert.equal(jobs.create(T0), null, 'cap refuses another concurrent run');
   jobs.complete(running[0]!.id, RESULT, T0 + 1000);
   assert.ok(jobs.create(T0 + 2000), 'a landed job frees its slot');
+}
+
+// Failure is terminal too and must free the same concurrent-run slot.
+{
+  jobs._clear();
+  const running = Array.from({ length: jobs.MAX_RUNNING }, () => jobs.create(T0)!);
+  assert.equal(jobs.create(T0), null, 'cap refuses another concurrent run');
+  jobs.fail(running[0]!.id, 'model unreachable', T0 + 1000);
+  assert.ok(jobs.create(T0 + 2000), 'a failed job frees its slot');
 }
 
 console.log('playlist-jobs tests passed');

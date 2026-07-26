@@ -292,4 +292,48 @@ await test('dedicated embedding env key wins after switching away from compatibl
   delete process.env.EMBEDDING_API_KEY;
 });
 
+await test('regression: an unsaved provider override resolves atomically without the saved compatible URL or bearer', async () => {
+  await settings.update({
+    llm: { provider: 'ollama', model: '' },
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      providerBaseUrls: { 'openai-compatible': 'https://saved-compat.example/v1' },
+      apiKey: 'saved-compat-bearer',
+    },
+  });
+  delete process.env.EMBEDDING_API_KEY;
+
+  const cfg = resolveEmbeddingCfg({ provider: 'openai', model: 'text-embedding-3-large' });
+  assert.deepEqual(
+    { provider: cfg.provider, model: cfg.model, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey },
+    { provider: 'openai', model: 'text-embedding-3-large', baseUrl: '', apiKey: '' },
+  );
+});
+
+await test('regression: a same-provider unsaved embedding URL cannot inherit the saved compatible bearer', async () => {
+  await settings.update({
+    llm: { provider: 'ollama', model: '' },
+    embedding: {
+      provider: 'openai-compatible',
+      model: 'text-embedding-3-small',
+      providerBaseUrls: { 'openai-compatible': 'https://saved-compat.example/v1' },
+      apiKey: 'saved-compat-bearer',
+    },
+  });
+
+  const changed = resolveEmbeddingCfg({
+    provider: 'openai-compatible',
+    baseUrl: 'https://unsaved-compat.example/v1',
+  });
+  assert.equal(changed.apiKey, '');
+
+  const explicit = resolveEmbeddingCfg({
+    provider: 'openai-compatible',
+    baseUrl: 'https://unsaved-compat.example/v1',
+    apiKey: 'explicit-unsaved-bearer',
+  });
+  assert.equal(explicit.apiKey, 'explicit-unsaved-bearer');
+});
+
 if (failures) process.exit(1);

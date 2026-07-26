@@ -237,7 +237,7 @@ export default function PlayerScreen() {
   const { player, cast } = useCast(api, localPlayer, {
     stationName,
     djName,
-    artworkUrl: coverSrc,
+    artworkUrl: coverSrc && !coverSrc.headers ? coverSrc.uri : null,
   });
   const { tunedIn, status, volume, setVolume, tune, stop, toggleMute, muted } = player;
 

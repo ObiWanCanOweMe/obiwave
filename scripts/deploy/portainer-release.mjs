@@ -28,7 +28,10 @@ function releaseConfig(env) {
     throw new Error(`Missing required release configuration: ${missing.join(', ')}`);
   }
   parseForkTag(env.SUBWAVE_RELEASE_TAG);
-  return Object.fromEntries(REQUIRED_ENV.map((name) => [name, env[name]]));
+  return {
+    ...Object.fromEntries(REQUIRED_ENV.map((name) => [name, env[name]])),
+    SUBWAVE_STREAM_PASSWORD: env.SUBWAVE_STREAM_PASSWORD || undefined,
+  };
 }
 
 function displayVersion(value) {
@@ -67,6 +70,7 @@ export async function runRelease({
       targetVersion: config.SUBWAVE_RELEASE_TAG,
       healthUrl: config.SUBWAVE_HEALTH_URL,
       streamUrl: config.SUBWAVE_STREAM_URL,
+      streamPassword: config.SUBWAVE_STREAM_PASSWORD,
     });
   } catch (error) {
     if (error instanceof DeploymentRolledBackError) {

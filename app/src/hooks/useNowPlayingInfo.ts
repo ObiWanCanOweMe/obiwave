@@ -86,16 +86,19 @@ export function useNowPlayingInfo({
 
   useEffect(() => {
     if (!api || !tunedIn) return;
-    const coverUrl = nowPlaying?.subsonic_id ? api.cover(nowPlaying.subsonic_id) : undefined;
-    const avatarUrl = personaAvatar ? api.avatar(personaAvatar) : undefined;
-    const useAvatar = talking && !!avatarUrl;
+    const coverSource = nowPlaying?.subsonic_id ? api.cover(nowPlaying.subsonic_id) : undefined;
+    const avatarSource = personaAvatar ? api.avatar(personaAvatar) : undefined;
+    const useAvatar = talking && !!avatarSource?.uri;
 
     const title = nowPlaying?.title || 'SUB/WAVE';
     const artist = useAvatar
       ? personaName || nowPlaying?.artist || 'Live broadcast'
       : nowPlaying?.artist || 'Live broadcast';
     const album = nowPlaying?.album || 'SUB/WAVE';
-    const artwork = useAvatar ? avatarUrl : coverUrl;
+    const artworkSource = useAvatar ? avatarSource : coverSource;
+    // RNTP metadata accepts only a URL string, not request headers. Never
+    // recreate a credential URL or make an unauthenticated private request.
+    const artwork = artworkSource?.headers ? undefined : artworkSource?.uri;
 
     TrackPlayer.updateNowPlayingMetadata({
       title,

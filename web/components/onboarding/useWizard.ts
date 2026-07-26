@@ -196,6 +196,7 @@ export function useWizard() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        owner: 'chat',
         provider: data.llm.provider,
         leg: 'onboarding',
         baseUrl: data.llm.baseUrl,

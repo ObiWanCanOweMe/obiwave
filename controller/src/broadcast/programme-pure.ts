@@ -63,3 +63,18 @@ export function planFeature(plan: any, hourIndex: number): { topic: string; kind
   const f = features[Math.min(Math.max(0, hourIndex), features.length - 1)];
   return f?.topic ? { topic: String(f.topic), kind: f.kind ? String(f.kind) : null } : null;
 }
+
+// Resolve a pinned/planned feature against the live station catalogue at the
+// moment it is about to air. A pin owns the slot (so a disabled pin does not
+// silently substitute a different planned capability); either miss falls
+// through to programme.ts's straight-talk floor.
+export function airtimeFeatureKind(
+  pinnedKind: unknown,
+  plannedKind: unknown,
+  catalog: Array<{ name?: string; kind?: string; enabled?: boolean; ready?: boolean }> | null | undefined,
+): string | null {
+  const selected = String(pinnedKind ?? '').trim() || String(plannedKind ?? '').trim();
+  if (!selected) return null;
+  const capability = (catalog || []).find((entry) => entry?.kind === selected || entry?.name === selected);
+  return capability?.enabled && capability?.ready && capability.kind ? capability.kind : null;
+}

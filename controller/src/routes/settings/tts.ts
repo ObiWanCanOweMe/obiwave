@@ -59,7 +59,7 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /settings/tts/voices — discover the voices a cloud TTS provider offers,
+// POST /settings/tts/voices — discover the voices a cloud TTS provider offers,
 // so persona + station-default voice fields can be a dropdown instead of a
 // free-text box the operator fills from memory. The TTS twin of
 // /settings/llm/models.
@@ -70,30 +70,35 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
 // the one that matters most since cloned voices can never be hardcoded).
 // `openai` publishes no list endpoint; its curated UI list is already complete.
 //
-// `baseUrl` rides in on the query so the operator can discover against a URL
-// they've typed but not yet saved — same affordance the model dropdown gives.
-// The API key deliberately does NOT: it's read from saved config, so it can't
-// leak into access logs or browser history. ElevenLabs discovery therefore
-// only works once the key is saved, which the UI gates on.
+// Unsaved `baseUrl` and `apiKey` values ride only in the POST body. A stored
+// compatible bearer is usable only with its exact saved origin; an explicit
+// body key wins for a changed/unsaved origin.
 //
 // Always 200s with { ok, voices, provider, error? } — an unreachable server is
 // a normal answer, and the UI falls back to the free-text input.
 // ---------------------------------------------------------------------------
-router.get('/settings/tts/voices', requireAdmin, async (req, res) => {
-  const provider = String(req.query.provider || '').trim();
+router.post('/settings/tts/voices', requireAdmin, async (req, res) => {
+  const provider = String(req.body?.provider || '').trim();
   if (!provider) {
     return res.json({ ok: false, voices: [], provider: '', error: 'provider is required' });
   }
-  const baseUrl = String(req.query.baseUrl || '').trim();
+  const suppliedBaseUrl = String(req.body?.baseUrl || '').trim().replace(/\/+$/, '');
+  const explicitApiKey = String(req.body?.apiKey || '').trim();
   await settings.load();
   const cloud = settings.get().tts?.cloud || {};
-
-  // Same provider ownership as synthesis: the inline settings key belongs only
-  // to openai-compatible; managed providers use their normal env credentials.
-  const apiKey = speech.resolveCloudApiKey({
-    provider,
-    apiKey: provider === cloud.provider ? cloud.apiKey : '',
-  });
+  const savedBaseUrl = provider === cloud.provider
+    ? String(cloud.baseUrl || '').trim().replace(/\/+$/, '')
+    : '';
+  const storedCredentialIsBound =
+    provider === cloud.provider
+    && (!suppliedBaseUrl || (!!savedBaseUrl && suppliedBaseUrl === savedBaseUrl));
+  const apiKey = explicitApiKey || (
+    provider === 'openai-compatible'
+      ? storedCredentialIsBound
+        ? speech.resolveCloudApiKey({ provider, apiKey: cloud.apiKey })
+        : ''
+      : speech.resolveCloudApiKey({ provider })
+  );
 
   // Backstop only — listVoices runs its own per-provider budget (10s managed,
   // 8s across the compat probe). Sits above both so the inner deadline is what
@@ -103,9 +108,8 @@ router.get('/settings/tts/voices', requireAdmin, async (req, res) => {
   try {
     const result = await speech.listVoices({
       provider,
-      // Fall back to the saved baseUrl so a persona card can discover without
-      // re-sending the station-wide server URL.
-      baseUrl: baseUrl || cloud.baseUrl || '',
+      // Persona cards omit the URL and safely reuse the saved provider origin.
+      baseUrl: suppliedBaseUrl || savedBaseUrl,
       apiKey,
       signal: ctrl.signal,
     });
@@ -113,4 +117,13 @@ router.get('/settings/tts/voices', requireAdmin, async (req, res) => {
   } finally {
     clearTimeout(timer);
   }
+});
+
+router.get('/settings/tts/voices', requireAdmin, (_req, res) => {
+  res.status(405).json({
+    ok: false,
+    voices: [],
+    provider: '',
+    error: 'Voice discovery requires POST',
+  });
 });

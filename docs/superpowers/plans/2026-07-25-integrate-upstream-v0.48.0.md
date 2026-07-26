@@ -166,7 +166,7 @@ Expected: both checks exit 0.
 
 - [ ] **Step 5: Record the ignored merge ledger**
 
-Create `.superpowers/sdd/2026-07-25-upstream-v048/progress.md` with:
+Create `.superpowers/sdd/2026-07-25-integrate-upstream-v0.48.0/progress.md` with:
 
 ```markdown
 # SUB/WAVE v0.48.0 integration progress
@@ -773,7 +773,7 @@ done < <(
 )
 ```
 
-Expected: exactly 12 path sections. Record one concrete composition sentence per path in `.superpowers/sdd/2026-07-25-upstream-v048/task-7-report.md`.
+Expected: exactly 12 path sections. Record one concrete composition sentence per path in `.superpowers/sdd/2026-07-25-integrate-upstream-v0.48.0/task-7-report.md`.
 
 - [ ] **Step 5: Verify renderer, publication, and workflow contracts**
 
