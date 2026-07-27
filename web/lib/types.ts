@@ -116,23 +116,28 @@ export interface ListenerCount {
 }
 
 /** Structured description of the live broadcast mounts (`stream` on
- *  `/now-playing`). mount/format/bitrate describe the always-served MP3 floor;
- *  the *Enabled flags advertise which optional mounts (`/stream.opus`,
- *  `/stream.flac`, `/stream.aac`) are also live. */
+ * `/now-playing`). MP3 is the required floor; the enabled flags advertise
+ * optional sibling mounts. */
 export interface StreamInfo {
-  mount?: string;
-  format?: string;
+  mount: string;
+  format: 'mp3';
   bitrate?: number | null;
   sampleRate?: number | null;
   channels?: number | null;
-  opusEnabled?: boolean;
-  flacEnabled?: boolean;
-  aacEnabled?: boolean;
+  opusEnabled: boolean;
+  flacEnabled: boolean;
+  aacEnabled: boolean;
   /** Seconds of audio Icecast bursts on connect — i.e. how far behind the live
    *  edge this listener is for the whole connection. Every timestamp on the
    *  payload is live-edge; subtract this to render listener-time (issue #1114). */
   bufferSeconds?: number | null;
+  /** Exact listener delay for the selected mount. Added alongside the legacy
+   * MP3 `bufferSeconds` field so older controllers remain compatible. */
+  bufferSecondsByFormat?: Partial<Record<'mp3' | 'opus' | 'aac' | 'flac', number | null>>;
 }
+
+// Compatibility name retained for the fork web selector.
+export type PublicStreamInfo = StreamInfo;
 
 /** `/now-playing` response. */
 export interface NowPlayingResponse {
@@ -199,6 +204,8 @@ export interface StationState {
   upcoming: QueueEntry[];
   history: QueueEntry[];
   djLog: DjLogEntry[];
+  /** The track the controller has on air right now, stamped at the live edge. */
+  current?: { title?: string; artist?: string; startedAt?: string } | null;
   timezone?: string;
   locale?: StationLocale;
   /** Station-wide listener-player UI settings (from GET /state). `skin` is

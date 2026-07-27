@@ -20,10 +20,12 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useMemo,
   useRef,
   type Dispatch,
+  type RefCallback,
   type ReactNode,
   type RefObject,
   type SetStateAction,
@@ -33,15 +35,20 @@ import { usePlayer, type PlayerStatus } from '@/hooks/usePlayer';
 import { useSignal, type Signal } from '@/hooks/useSignal';
 import { useMediaSession } from '@/hooks/useMediaSession';
 import { useStationClient, type LikeResult, type LikeStatus } from '@/lib/stationClient';
+import { streamEnablementFor, type AudioFormat, type FormatAvailability } from '@/lib/audioFormat';
 import type { RequestResult } from '@/lib/types';
 
 export interface PlayerAudio {
   audioRef: RefObject<HTMLAudioElement | null>;
+  audioElementRef: RefCallback<HTMLAudioElement>;
   tunedIn: boolean;
   status: PlayerStatus;
   volume: number;
   muted: boolean;
   idleStopped: boolean;
+  format: AudioFormat;
+  availability: FormatAvailability;
+  formatFailure: AudioFormat | null;
   /** Stream confirmed offline. useStationFeed's streamOnline is null until
    *  the first poll and only flips false after the confirm window, so this
    *  never flashes true on load. */
@@ -54,6 +61,7 @@ export interface PlayerActions {
   tune: () => void;
   stop: () => void;
   toggleMute: () => void;
+  selectFormat: (format: AudioFormat) => void;
   setVolume: Dispatch<SetStateAction<number>>;
   /** Submit a listener request. Rejects on network error — form state and
    *  error toasts are the skin's business. */
@@ -92,8 +100,15 @@ export function usePlayerActions(): PlayerActions {
 
 export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
+  // Break the feed/player dependency cycle without duplicating format state:
+  // the poll reads the latest player-owned selection and measured lag.
+  const activeFormatRef = useRef<AudioFormat>('mp3');
+  const listenerLagGetterRef = useRef<() => number | null>(() => null);
+  const getListenerLagMs = useCallback(() => listenerLagGetterRef.current(), []);
+  const feed = useStationFeed({ activeFormat: activeFormatRef, getListenerLagMs });
   const {
     audioRef,
+    audioElementRef,
     tunedIn,
     status,
     volume,
@@ -103,13 +118,14 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     toggleMute,
     muted,
     idleStopped,
-    getListenerLagMs,
-  } = usePlayer();
-  // Player before feed: the feed's listener-time hold prefers the audio
-  // element's measured lag over the advertised stream.bufferSeconds, so the
-  // title flip and elapsed clock track what THIS tab actually hears
-  // (getListenerLagMs is identity-stable — no feed resubscription).
-  const feed = useStationFeed(getListenerLagMs);
+    format,
+    availability,
+    selectFormat,
+    formatFailure,
+    getListenerLagMs: measureListenerLagMs,
+  } = usePlayer({ streamEnablement: streamEnablementFor(feed.stream) });
+  activeFormatRef.current = format;
+  listenerLagGetterRef.current = measureListenerLagMs;
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;
@@ -122,15 +138,18 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const tuneRef = useRef(tune);
   const stopRef = useRef(stop);
   const muteRef = useRef(toggleMute);
+  const selectFormatRef = useRef(selectFormat);
   tuneRef.current = tune;
   stopRef.current = stop;
   muteRef.current = toggleMute;
+  selectFormatRef.current = selectFormat;
 
   const actions = useMemo<PlayerActions>(
     () => ({
       tune: () => tuneRef.current(),
       stop: () => stopRef.current(),
       toggleMute: () => muteRef.current(),
+      selectFormat: next => selectFormatRef.current(next),
       setVolume,
       submitRequest: (text, name) => client.submitRequest(text, name),
       pollRequest: requestId => client.requestStatus(requestId),
@@ -173,25 +192,27 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   // reference-stable (setIfChanged). Memoize on the fields so audio-context
   // churn (a volume drag) doesn't cascade into every feed consumer.
   const {
-    nowPlaying, context, dj, activeShow, listeners, streamOnline,
+    nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
     llmTokens, state, session, trackStartedAt, timezone, locale,
   } = feed;
   const feedValue = useMemo<StationFeed>(
     () => ({
-      nowPlaying, context, dj, activeShow, listeners, streamOnline,
+      nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
       llmTokens, state, session, trackStartedAt, timezone, locale,
     }),
-    [nowPlaying, context, dj, activeShow, listeners, streamOnline,
+    [nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
      llmTokens, state, session, trackStartedAt, timezone, locale],
   );
 
   const { latencyMs, quality } = signal;
   const audioValue = useMemo<PlayerAudio>(
     () => ({
-      audioRef, tunedIn, status, volume, muted, idleStopped, offline,
+      audioRef, audioElementRef, tunedIn, status, volume, muted, idleStopped, format,
+      availability, formatFailure, offline,
       signal: { latencyMs, quality },
     }),
-    [audioRef, tunedIn, status, volume, muted, idleStopped, offline, latencyMs, quality],
+    [audioRef, audioElementRef, tunedIn, status, volume, muted, idleStopped, format,
+     availability, formatFailure, offline, latencyMs, quality],
   );
 
   return (

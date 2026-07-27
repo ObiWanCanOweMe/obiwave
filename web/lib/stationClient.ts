@@ -180,10 +180,10 @@ export const defaultStationClient: StationClient =
 export function useStationClient(): StationClient {
   const {
     apiUrl,
-    streams: { mp3, opus },
+    streams: { mp3, opus, aac, flac },
   } = useStationOrigin();
   return useMemo(
-    () => createStationClient({ apiUrl, streams: { mp3, opus } }),
-    [apiUrl, mp3, opus],
+    () => createStationClient({ apiUrl, streams: { mp3, opus, aac, flac } }),
+    [apiUrl, mp3, opus, aac, flac],
   );
 }

@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { pollWhileVisible } from '@/lib/poll';
 import { useStationClient } from '@/lib/stationClient';
+import { bufferSecondsForFormat, type AudioFormat } from '@/lib/audioFormat';
 import type {
   ActiveShow,
   DjState,
   ListenerCount,
   NowPlayingTrack,
+  PublicStreamInfo,
   SessionPayload,
   StationContext,
   StationState,
@@ -22,6 +24,7 @@ export interface StationFeed {
   listeners: ListenerCount | number | null;
   /** null until the first poll resolves — distinguishes "not yet known" from "offline". */
   streamOnline: boolean | null;
+  stream: PublicStreamInfo | null;
   /** Cumulative since-boot LLM token total, or null before the first poll. */
   llmTokens: number | null;
   state: StationState;
@@ -57,18 +60,18 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
   setter(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 }
 
+export interface StationFeedTiming {
+  activeFormat?: { readonly current: AudioFormat };
+  getListenerLagMs?: () => number | null;
+}
+
 // 5s polling of /now-playing + /state + /session, paused while the tab is
 // hidden (with an immediate refetch on return). Single source of truth for
 // "what's on air right now".
-//
-// getListenerLagMs (optional, stable identity): the player's measured
-// seconds-behind-live of THIS tab's audio (usePlayer.getListenerLagMs). When
-// it returns a number, it wins over the advertised stream.bufferSeconds —
-// the flat figure is only correct for a full burst on the MP3 mount, while
-// the measurement is exact for whatever mount/connection is actually playing
-// (issue #1114 follow-up: Opus/FLAC listeners saw the title flip tens of
-// seconds off because the byte-sized burst means a different depth per mount).
-export function useStationFeed(getListenerLagMs?: () => number | null): StationFeed {
+export function useStationFeed({
+  activeFormat,
+  getListenerLagMs,
+}: StationFeedTiming = {}): StationFeed {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
@@ -76,6 +79,7 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
   const [activeShow, setActiveShow] = useState<ActiveShow | null>(null);
   const [listeners, setListeners] = useState<ListenerCount | number | null>(null);
   const [streamOnline, setStreamOnline] = useState<boolean | null>(null);
+  const [stream, setStream] = useState<PublicStreamInfo | null>(null);
   const [llmTokens, setLlmTokens] = useState<number | null>(null);
   const [state, setState] = useState<StationState>(EMPTY_STATE);
   const [session, setSession] = useState<SessionPayload>(EMPTY_SESSION);
@@ -105,10 +109,8 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
         // Refresh the buffer depth before it's used below. Clamped to a sane
         // window: a bad value here would either park the clock in the far
         // future or wind it back past the track start.
-        const bufSec = npRes.stream?.bufferSeconds;
-        if (typeof bufSec === 'number' && Number.isFinite(bufSec)) {
-          leadMsRef.current = Math.min(Math.max(bufSec, 0), 60) * 1000;
-        }
+        const bufSec = bufferSecondsForFormat(npRes.stream, activeFormat?.current ?? 'mp3');
+        if (bufSec !== null) leadMsRef.current = bufSec * 1000;
         const trackKey = np ? `${np.title}\u0000${np.artist}` : null;
         // Prefer the queue's authoritative start time over "first seen by this
         // client": a tab that was hidden at the transition (or a poll that hit
@@ -122,12 +124,8 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
           const t = Date.parse(cur.startedAt);
           if (Number.isFinite(t) && t <= Date.now()) serverStart = t;
         }
-        // Shift into listener-time. serverStart is the live edge; the audio
-        // reaches this listener leadMs later, so that's when the track is
-        // genuinely "now playing" for them (issue #1114). Prefer the audio
-        // element's own measurement when this tab is playing — it reflects the
-        // actual mount and the burst this connection really got; the flat
-        // advertised depth is the fallback for viewers not listening here.
+        // Shift into listener-time. Prefer this tab's measured playback lag;
+        // fall back to the advertised depth for its active mount.
         const measuredLagMs = getListenerLagMs?.() ?? null;
         const leadMs = measuredLagMs ?? leadMsRef.current;
         const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMs : Date.now();
@@ -171,6 +169,7 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
         setIfChanged(setContext, npRes.context);
         if (npRes.dj) setIfChanged<DjState | null>(setDj, npRes.dj);
         setIfChanged(setActiveShow, npRes.activeShow ?? npRes.context?.activeShow ?? null);
+        setIfChanged(setStream, npRes.stream ?? null);
         if (npRes.listeners != null) setIfChanged<ListenerCount | number | null>(setListeners, npRes.listeners);
         if (typeof npRes.streamOnline === 'boolean') {
           if (npRes.streamOnline) {
@@ -197,7 +196,7 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
         promoteTimerRef.current = null;
       }
     };
-  }, [client, getListenerLagMs]);
+  }, [activeFormat, client, getListenerLagMs]);
 
-  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, timezone, locale };
+  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale };
 }

@@ -27,25 +27,43 @@ import {
   clearStationAuthToken,
   getStationAuthToken,
   setStationAuthToken,
+  stationAuthPhaseForContext,
+  stationAuthPresentation,
+  type StationAuthPhase,
+  type StationAuthState,
 } from '@/lib/stationAuth';
 import { usePlayerFeed } from './PlayerCore';
 
-type AuthPhase = 'checking' | 'prompt' | 'ok';
-
 // Is a stored token still good? Exported so the shell can decide whether to
 // render the player at all before this component mounts.
-export function useStationAuth(): { required: boolean; phase: AuthPhase; unlock: (pw: string) => Promise<boolean> } {
+export function useStationAuth(): { required: boolean; phase: StationAuthPhase; unlock: (pw: string) => Promise<boolean> } {
   const { state } = usePlayerFeed();
   const { apiUrl } = useStationOrigin();
   const required =
     state.privacy?.privatePlayer === true || state.privacy?.listenerAuth === true;
 
-  const [phase, setPhase] = useState<AuthPhase>('checking');
+  const [authState, setAuthState] = useState<StationAuthState>(() => ({
+    required,
+    apiBase: apiUrl,
+    phase: 'checking',
+  }));
+  if (authState.required !== required || authState.apiBase !== apiUrl) {
+    setAuthState({ required, apiBase: apiUrl, phase: 'checking' });
+  }
+  const phase = stationAuthPhaseForContext(required, apiUrl, authState);
 
   useEffect(() => {
     if (!required) return;
+    const setPhase = (next: StationAuthPhase) => {
+      setAuthState(current =>
+        current.required === required && current.apiBase === apiUrl
+          ? { ...current, phase: next }
+          : current
+      );
+    };
+    setPhase('checking');
     let cancelled = false;
-    const stored = getStationAuthToken();
+    const stored = getStationAuthToken(apiUrl);
     if (!stored) {
       setPhase('prompt');
       return;
@@ -55,7 +73,7 @@ export function useStationAuth(): { required: boolean; phase: AuthPhase; unlock:
       if (ok) {
         setPhase('ok');
       } else {
-        clearStationAuthToken();
+        clearStationAuthToken(apiUrl);
         setPhase('prompt');
       }
     });
@@ -65,31 +83,37 @@ export function useStationAuth(): { required: boolean; phase: AuthPhase; unlock:
   const unlock = async (pw: string) => {
     const ok = await checkStationAuth(apiUrl, pw);
     if (ok) {
-      setStationAuthToken(pw);
-      setPhase('ok');
+      setStationAuthToken(apiUrl, pw);
+      setAuthState(current =>
+        current.required === required && current.apiBase === apiUrl
+          ? { ...current, phase: 'ok' }
+          : current
+      );
     }
     return ok;
   };
 
-  return { required, phase, unlock };
+  return { required, phase: stationAuthPresentation(required, phase).phase, unlock };
 }
 
 export function StationPasswordGate({
   phase,
   unlock,
+  required,
   /** true when privatePlayer is on — the gate stands in for the whole player
    *  rather than sitting over it, so it gets an opaque backdrop. */
   solid,
 }: {
-  phase: AuthPhase;
+  phase: StationAuthPhase;
   unlock: (pw: string) => Promise<boolean>;
+  required: boolean;
   solid: boolean;
 }) {
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  if (phase !== 'prompt') return null;
+  if (!stationAuthPresentation(required, phase).showGate) return null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

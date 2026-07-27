@@ -21,6 +21,7 @@ import TimelineDrawer from './drawers/TimelineDrawer';
 import BoothDrawer from './drawers/BoothDrawer';
 import RequestDrawer from './drawers/RequestDrawer';
 import ScheduleDrawer from './drawers/ScheduleDrawer';
+import AudioDrawer from './drawers/AudioDrawer';
 import { Sheet } from '@/components/ui/sheet';
 import {
   usePlayerActions,
@@ -41,6 +42,7 @@ const DRAWER_TITLES: Record<PlayerDrawer, string> = {
   booth: 'Booth feed',
   request: 'Make a request',
   schedule: 'Schedule',
+  audio: 'Audio format',
 };
 
 // Hoisted so the DotRail counts memo below keeps stable element references —
@@ -56,8 +58,14 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
     state, session, trackStartedAt, timezone, locale,
   } = usePlayerFeed();
   const boothFeed = session.messages;
-  const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
-  const { tune, toggleMute, setVolume, submitRequest: coreSubmitRequest, pollRequest } =
+  const {
+    audioRef, tunedIn, status, volume, muted, offline, signal,
+    format, availability, formatFailure,
+  } = usePlayerAudio();
+  const {
+    tune, toggleMute, setVolume, selectFormat,
+    submitRequest: coreSubmitRequest, pollRequest,
+  } =
     usePlayerActions();
   const { showOverlay, tuneInFromOverlay, handleTune } = useTuneInGate();
 
@@ -257,6 +265,14 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
           />
         )}
         {drawer === 'schedule' && <ScheduleDrawer activeShow={activeShow} context={context} />}
+        {drawer === 'audio' && (
+          <AudioDrawer
+            format={format}
+            availability={availability}
+            failure={formatFailure}
+            onSelect={selectFormat}
+          />
+        )}
       </Sheet>
 
       <AnimatePresence>

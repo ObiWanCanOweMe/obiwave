@@ -58,7 +58,7 @@ function targetInsideDialog(e?: KeyboardEvent): boolean {
 }
 
 function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boolean }) {
-  const { audioRef } = usePlayerAudio();
+  const { audioElementRef } = usePlayerAudio();
   const { state } = usePlayerFeed();
   const stationSkinRaw = typeof state.ui?.skin === 'string' && state.ui.skin ? state.ui.skin : null;
 
@@ -173,14 +173,14 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
           // audio element, just the password prompt. Live-flipped by the
           // /state poll like themes/skins. Unlocking (or an already-valid
           // stored token) drops straight through to the branch below.
-          <StationPasswordGate phase={auth.phase} unlock={auth.unlock} solid />
+          <StationPasswordGate required={auth.required} phase={auth.phase} unlock={auth.unlock} solid />
         ) : (
           <>
-            <audio ref={audioRef} crossOrigin="anonymous" preload="auto" />
+            <audio ref={audioElementRef} crossOrigin="anonymous" preload="auto" />
             <Skin contained={contained} portalNode={portalNode} />
             {/* Same prompt, overlaid, when only the stream is locked —
                 shell-level so every skin gets it without changes. */}
-            <StationPasswordGate phase={auth.phase} unlock={auth.unlock} solid={false} />
+            <StationPasswordGate required={auth.required} phase={auth.phase} unlock={auth.unlock} solid={false} />
           </>
         )}
         {/* Toaster is mounted once at the app shell (app/layout.tsx). */}

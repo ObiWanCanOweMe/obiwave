@@ -1,13 +1,38 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefCallback,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
+import {
+  AUDIO_MIME_TYPES,
+  availabilityFor,
+  browserSupportFor,
+  currentPlaybackTarget,
+  loadFormatPreference,
+  resolveFormatPreference,
+  saveFormatPreference,
+  type AudioFormat,
+  type BrowserSupport,
+  type FormatAvailability,
+  type StreamEnablement,
+} from '@/lib/audioFormat';
 import { isIOSDevice } from '@/lib/platform';
+import { replacePlayerAudioElement, teardownDetachedPlayerAudio } from '@/lib/playerAudioBinding';
 import { useStationOrigin } from '@/lib/stationOrigin';
 import { withStreamAuth } from '@/lib/stationAuth';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 
-// We pick MP3 vs Ogg-Opus on the client via canPlayType — Opus is roughly
-// equal-or-better quality at half the bandwidth on browsers that decode it.
+// The listener explicitly chooses among MP3, Opus, AAC, and FLAC. Browser
+// canPlayType results and station mount flags determine which choices are
+// available; MP3 remains the default until a valid preference is restored.
 //
 // The mount URLs come from StationOriginContext (env defaults when no
 // provider; a remote station's host when the landing showcase tabs over).
@@ -35,6 +60,7 @@ export type PlayerStatus = 'idle' | 'connecting' | 'playing';
 
 export interface Player {
   audioRef: RefObject<HTMLAudioElement | null>;
+  audioElementRef: RefCallback<HTMLAudioElement>;
   tunedIn: boolean;
   status: PlayerStatus;
   volume: number;
@@ -47,30 +73,46 @@ export interface Player {
   // consumer should explain why and offer a one-tap resume. Cleared on the
   // next tune().
   idleStopped: boolean;
-  /** Measured seconds-behind-the-live-edge of THIS tab's audio, in ms, or
-   *  null when the tab isn't audibly playing the stream. buffered.end is the
-   *  freshest audio the connection has delivered (≈ the live edge, since
-   *  Icecast serves in real time after the connect burst), so end − currentTime
-   *  is exactly how far behind it this listener's ears are — whatever mount
-   *  they're on and however much of the burst they actually got. Stable
-   *  identity; safe in effect deps. */
+  format: AudioFormat;
+  availability: FormatAvailability;
+  selectFormat: (format: AudioFormat) => void;
+  formatFailure: AudioFormat | null;
   getListenerLagMs: () => number | null;
 }
 
 export interface UsePlayerOptions {
   initialVolume?: number;
+  streamEnablement?: StreamEnablement;
+}
+
+const MP3_ONLY: StreamEnablement = { mp3: true, opus: false, aac: false, flac: false };
+const INITIAL_BROWSER_SUPPORT: BrowserSupport = { mp3: true, opus: false, aac: false, flac: false };
+
+function detectBrowserSupport(): BrowserSupport {
+  const tester = document.createElement('audio');
+  const ua = navigator.userAgent;
+  const safari = /safari/i.test(ua) && !/(?:chrome|chromium|crios|edg|opr|firefox|fxios)/i.test(ua);
+  return browserSupportFor({
+    mp3: tester.canPlayType(AUDIO_MIME_TYPES.mp3),
+    opus: tester.canPlayType(AUDIO_MIME_TYPES.opus),
+    aac: tester.canPlayType(AUDIO_MIME_TYPES.aac),
+    flac: tester.canPlayType(AUDIO_MIME_TYPES.flac),
+  }, { ios: isIOSDevice(), firefox: /firefox/i.test(ua), safari });
 }
 
 // Owns the <audio> element + tune-in state. The audioRef must be attached to
 // an <audio> tag rendered by the consumer (so the Waveform's Web Audio API
 // can also reach it).
-export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player {
-  const { streams } = useStationOrigin();
+export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: UsePlayerOptions = {}): Player {
+  const { apiUrl, streams } = useStationOrigin();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Resolved at mount via canPlayType. SSR + first render use the MP3 URL so
-  // server and client markup agree; the useEffect below upgrades to Opus when
-  // the browser confirms it can decode it.
+  const audioListenerCleanupRef = useRef<(() => void) | null>(null);
+  // SSR + first render use the MP3 URL so server and client markup agree; the
+  // effect below applies a valid explicit preference after capability checks.
   const [streamUrl, setStreamUrl] = useState<string>(streams.mp3);
+  const [format, setFormat] = useState<AudioFormat>('mp3');
+  const [formatFailure, setFormatFailure] = useState<AudioFormat | null>(null);
+  const [browserSupport, setBrowserSupport] = useState<BrowserSupport>(INITIAL_BROWSER_SUPPORT);
   const [tunedIn, setTunedIn] = useState(false);
   // 'idle' | 'connecting' | 'playing'. 'connecting' covers the unavoidable
   // gap between the tune-in gesture and the first audible audio frames —
@@ -93,6 +135,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
   const tunedInRef = useRef(tunedIn);
   const streamUrlRef = useRef(streamUrl);
   const streamsRef = useRef(streams);
+  const activeFormatRef = useRef<AudioFormat>('mp3');
   const volumeRef = useRef(volume);
   const watchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Consecutive failed reconnects since the last successful 'playing' —
@@ -105,14 +148,35 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
   // The idle sweep mounts once but must call the latest stop() (defined
   // below, recreated per render) — bridge with a ref.
   const stopRef = useRef<() => void>(() => {});
-  // Set once if the optional Opus mount fails to load — pins us to MP3 so the
-  // watchdog stops retrying a dead Opus URL (e.g. an operator who disabled the
-  // server-side Opus encoder, so /stream.opus 404s).
-  const opusFailedRef = useRef(false);
+  const failedFormatsRef = useRef(new Set<AudioFormat>());
+  const formatHydrationKeyRef = useRef<string | null>(null);
   useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
   useEffect(() => { streamUrlRef.current = streamUrl; }, [streamUrl]);
   useEffect(() => { streamsRef.current = streams; }, [streams]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
+
+  const clearWatchdog = useCallback(() => {
+    if (watchdogTimer.current !== null) {
+      clearTimeout(watchdogTimer.current);
+      watchdogTimer.current = null;
+    }
+  }, []);
+
+  const switchLiveStream = useCallback((nextUrl: string, errorLabel: string) => {
+    clearWatchdog();
+    if (!tunedInRef.current || !audioRef.current) return;
+    const audio = audioRef.current;
+    const myGen = ++gen.current;
+    audio.src = withStreamAuth(apiUrl, `${nextUrl}?t=${Date.now()}`);
+    audio.volume = volumeRef.current;
+    setStatus('connecting');
+    const p = audio.play();
+    playPromise.current = p;
+    Promise.resolve(p).catch((err: unknown) => {
+      const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
+      if (gen.current === myGen && name !== 'AbortError') console.error(`${errorLabel}:`, err);
+    });
+  }, [apiUrl, clearWatchdog]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -143,33 +207,54 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     return () => clearTimeout(id);
   }, [volume]);
 
-  // Pick Opus on browsers that *definitively* decode it (Chrome, Edge — they
-  // return 'probably' for Ogg-Opus). Two browser families say they can decode
-  // Opus but choke on the live chained Ogg stream Icecast emits at a crossfade
-  // boundary, going silent at the first track change with no error/stalled
-  // event for the watchdog to catch — so we keep both on the universal MP3
-  // 192 kbps mount instead:
-  //   • Safari iOS/iPadOS — returns the optimistic 'maybe', and its
-  //     AVFoundation Opus decoder can't tolerate the Ogg page-chain boundary.
-  //   • Firefox/Gecko — returns 'probably', decodes Opus fine in general, but
-  //     its media stack can't follow the chained Ogg stream either (issue #212).
-  // Three layers of defence: require 'probably' (drops Safari's 'maybe'), skip
-  // iOS-family devices (iPad on iPadOS 13+ reports the desktop Macintosh UA so
-  // we also check maxTouchPoints), and skip Firefox by UA.
+  const formatHydrationKey = JSON.stringify([apiUrl, streamEnablement, streams, [...failedFormatsRef.current].sort()]);
+  const hydrateFormatPreference = useCallback(() => {
+    const support = detectBrowserSupport();
+    const resolved = resolveFormatPreference(
+      loadFormatPreference(localStorage, apiUrl),
+      streamEnablement,
+      support,
+      streams,
+      failedFormatsRef.current,
+    );
+    setBrowserSupport(support);
+    activeFormatRef.current = resolved.format;
+    streamUrlRef.current = resolved.streamUrl;
+    setFormat(resolved.format);
+    setStreamUrl(resolved.streamUrl);
+    formatHydrationKeyRef.current = formatHydrationKey;
+    return resolved;
+  }, [apiUrl, formatHydrationKey, streamEnablement, streams]);
+
   useEffect(() => {
-    if (!streams.opus || opusFailedRef.current) return;
-    const ua = navigator.userAgent;
-    // Desktop/Android Firefox + Gecko forks (LibreWolf, Waterfox) carry
-    // "Firefox" in the UA; Firefox-for-iOS reports "FxiOS" and is already
-    // caught by isIOSDevice() below, so /firefox/i doesn't double-handle it.
-    const isFirefox = /firefox/i.test(ua);
-    if (isIOSDevice() || isFirefox) return;
-    const tester = document.createElement('audio');
-    const opusOk = tester.canPlayType('audio/ogg; codecs=opus');
-    if (opusOk === 'probably') {
-      setStreamUrl(streams.opus);
+    const previousFormat = activeFormatRef.current;
+    const previousUrl = streamUrlRef.current;
+    const restored = hydrateFormatPreference();
+    if (previousFormat !== restored.format || previousUrl !== restored.streamUrl) {
+      switchLiveStream(restored.streamUrl, 'Restored format switch failed');
     }
-  }, [streams.opus]);
+  }, [hydrateFormatPreference, switchLiveStream]);
+
+  const effectiveEnablement = useMemo<StreamEnablement>(() => ({
+    mp3: streamEnablement.mp3,
+    opus: streamEnablement.opus && streams.opus !== null,
+    aac: streamEnablement.aac && streams.aac !== null,
+    flac: streamEnablement.flac && streams.flac !== null,
+  }), [streamEnablement, streams]);
+  const availability = availabilityFor(effectiveEnablement, browserSupport, failedFormatsRef.current);
+
+  const selectFormat = (next: AudioFormat) => {
+    if (!availability[next].available) return;
+    const nextUrl = streams[next];
+    if (!nextUrl) return;
+    saveFormatPreference(localStorage, apiUrl, next);
+    activeFormatRef.current = next;
+    streamUrlRef.current = nextUrl;
+    setFormat(next);
+    setStreamUrl(nextUrl);
+    setFormatFailure(null);
+    switchLiveStream(nextUrl, 'Format switch failed');
+  };
 
   // Drive `status` from the <audio> element's own events, and reconnect the
   // stream when the element gets stuck mid-broadcast (the symptom: a few
@@ -179,77 +264,79 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
   // arm a 5s timer that re-sets src if 'playing' hasn't fired by then;
   // 'error' reconnects with exponential backoff (500 ms doubling to a 60 s
   // ceiling, reset on the next successful 'playing').
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
+  const audioElementRef = useCallback<RefCallback<HTMLAudioElement>>((el) => {
+    replacePlayerAudioElement(audioRef, audioListenerCleanupRef, el, boundEl => {
+      const reconnect = () => {
+        clearWatchdog();
+        if (!tunedInRef.current || !audioRef.current) return;
+        const audio = audioRef.current;
+        const myGen = ++gen.current;
+        audio.src = withStreamAuth(apiUrl, `${streamUrlRef.current}?t=${Date.now()}`);
+        audio.volume = volumeRef.current;
+        setStatus('connecting');
+        const p = audio.play();
+        playPromise.current = p;
+        Promise.resolve(p).catch((err: unknown) => {
+          const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
+          if (gen.current === myGen && name !== 'AbortError') {
+            console.error('Reconnect failed:', err);
+          }
+        });
+      };
 
-    const clearWatchdog = () => {
-      if (watchdogTimer.current !== null) {
-        clearTimeout(watchdogTimer.current);
-        watchdogTimer.current = null;
-      }
-    };
+      const armWatchdog = (delay: number) => {
+        if (!tunedInRef.current) return;
+        clearWatchdog();
+        watchdogTimer.current = setTimeout(reconnect, delay);
+      };
 
-    const reconnect = () => {
-      clearWatchdog();
-      if (!tunedInRef.current || !audioRef.current) return;
-      const audio = audioRef.current;
-      const myGen = ++gen.current;
-      audio.src = withStreamAuth(`${streamUrlRef.current}?t=${Date.now()}`);
-      audio.volume = volumeRef.current;
-      setStatus('connecting');
-      const p = audio.play();
-      playPromise.current = p;
-      Promise.resolve(p).catch((err: unknown) => {
-        const name = err && typeof err === 'object' && 'name' in err ? (err as { name?: string }).name : undefined;
-        if (gen.current === myGen && name !== 'AbortError') {
-          console.error('Reconnect failed:', err);
+      const onPlaying = () => {
+        clearWatchdog();
+        retryCount.current = 0;
+        setStatus('playing');
+      };
+      const onWaiting = () => {
+        setStatus(s => (s === 'playing' ? 'connecting' : s));
+        armWatchdog(5000);
+      };
+      const onError = () => {
+        setStatus('idle');
+        const { mp3 } = streamsRef.current;
+        const failedFormat = activeFormatRef.current;
+        if (failedFormat !== 'mp3') {
+          failedFormatsRef.current.add(failedFormat);
+          setFormatFailure(failedFormat);
+          activeFormatRef.current = 'mp3';
+          streamUrlRef.current = mp3;
+          setFormat('mp3');
+          setStreamUrl(mp3);
         }
-      });
-    };
-
-    const armWatchdog = (delay: number) => {
-      if (!tunedInRef.current) return;
-      clearWatchdog();
-      watchdogTimer.current = setTimeout(reconnect, delay);
-    };
-
-    const onPlaying = () => {
-      clearWatchdog();
-      retryCount.current = 0;
-      setStatus('playing');
-    };
-    const onWaiting = () => {
-      setStatus(s => (s === 'playing' ? 'connecting' : s));
-      armWatchdog(5000);
-    };
-    const onError = () => {
-      setStatus('idle');
-      // If the optional Opus mount errors (commonly a 404 when the operator
-      // has disabled Opus server-side), fall back permanently to the universal
-      // MP3 mount rather than reconnecting to the dead Opus URL on every retry.
-      const { mp3, opus } = streamsRef.current;
-      if (opus && streamUrlRef.current === opus) {
-        opusFailedRef.current = true;
-        streamUrlRef.current = mp3;
-        setStreamUrl(mp3);
-      }
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
-      retryCount.current += 1;
-      armWatchdog(delay);
-    };
-    el.addEventListener('playing', onPlaying);
-    el.addEventListener('waiting', onWaiting);
-    el.addEventListener('stalled', onWaiting);
-    el.addEventListener('error', onError);
-    return () => {
-      clearWatchdog();
-      el.removeEventListener('playing', onPlaying);
-      el.removeEventListener('waiting', onWaiting);
-      el.removeEventListener('stalled', onWaiting);
-      el.removeEventListener('error', onError);
-    };
-  }, []);
+        const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
+        retryCount.current += 1;
+        armWatchdog(delay);
+      };
+      boundEl.addEventListener('playing', onPlaying);
+      boundEl.addEventListener('waiting', onWaiting);
+      boundEl.addEventListener('stalled', onWaiting);
+      boundEl.addEventListener('error', onError);
+      return () => {
+        clearWatchdog();
+        boundEl.removeEventListener('playing', onPlaying);
+        boundEl.removeEventListener('waiting', onWaiting);
+        boundEl.removeEventListener('stalled', onWaiting);
+        boundEl.removeEventListener('error', onError);
+        teardownDetachedPlayerAudio(boundEl, () => {
+          gen.current += 1;
+          tunedInRef.current = false;
+          playPromise.current = null;
+          retryCount.current = 0;
+          setTunedIn(false);
+          setStatus('idle');
+          setIdleStopped(false);
+        });
+      };
+    });
+  }, [apiUrl, clearWatchdog]);
 
   // Idle cutoff (issue #343): a tab left tuned in with no listener activity
   // for IDLE_TUNE_OUT_MS gets tuned out, so an abandoned browser doesn't sit
@@ -288,10 +375,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     if (!audioRef.current) return;
     const el = audioRef.current;
     const myGen = ++gen.current;
-    if (watchdogTimer.current !== null) {
-      clearTimeout(watchdogTimer.current);
-      watchdogTimer.current = null;
-    }
+    clearWatchdog();
     setTunedIn(false);
     setStatus('idle');
     // Let any in-flight play() settle before pausing, then bail if a later
@@ -319,8 +403,18 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     lastActivityAt.current = Date.now();
     setIdleStopped(false);
     retryCount.current = 0;
-    el.src = withStreamAuth(`${streamUrl}?t=${Date.now()}`);
-    el.volume = volume;
+    // Preference and volume restoration update these refs synchronously before
+    // React rerenders. Read them here so a first-click tune cannot use stale
+    // render-captured defaults during that window.
+    const resolved = formatHydrationKeyRef.current === formatHydrationKey
+      ? null
+      : hydrateFormatPreference();
+    const target = currentPlaybackTarget(
+      resolved ? { current: resolved.streamUrl } : streamUrlRef,
+      volumeRef,
+    );
+    el.src = withStreamAuth(apiUrl, `${target.streamUrl}?t=${Date.now()}`);
+    el.volume = target.volume;
     setTunedIn(true);
     setStatus('connecting');
     const p = el.play();
@@ -345,14 +439,6 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     }
   };
 
-  // How far behind the live edge this tab's audio actually is. The flat
-  // stream.bufferSeconds from /now-playing is only the depth Icecast *tries*
-  // to burst on the MP3 mount — the real per-connection lag differs whenever
-  // the mount's byte rate differs (Opus/FLAC/AAC), the ring was short at
-  // connect, or playback paused and drifted. The element knows the truth:
-  // buffered.end − currentTime. Null (→ callers fall back to bufferSeconds)
-  // unless this tab is tuned in and audibly playing, since a paused element's
-  // stale ranges say nothing about what the viewer is hearing elsewhere.
   const getListenerLagMs = useCallback((): number | null => {
     const el = audioRef.current;
     if (!el || !tunedInRef.current || el.paused) return null;
@@ -361,13 +447,15 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
       if (n === 0) return null;
       const lag = el.buffered.end(n - 1) - el.currentTime;
       if (!Number.isFinite(lag) || lag <= 0) return null;
-      // Cap at 2 minutes: beyond that the ranges describe a wedged element,
-      // not a live listener, and a huge hold would freeze the display.
       return Math.min(lag, 120) * 1000;
     } catch {
       return null;
     }
   }, []);
 
-  return { audioRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute, muted: volume === 0, idleStopped, getListenerLagMs };
+  return {
+    audioRef, audioElementRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute,
+    muted: volume === 0, idleStopped, format, availability, selectFormat, formatFailure,
+    getListenerLagMs,
+  };
 }
