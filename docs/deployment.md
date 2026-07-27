@@ -263,11 +263,31 @@ SUBWAVE_HEALTH_URL=https://radio.kener.org/api/health
 SUBWAVE_STREAM_URL=https://radio.kener.org/stream.mp3
 ```
 
-The Portainer stack Environment must also contain `SUBWAVE_VERSION` and the
-normal operator configuration used by the compose file, including
-`ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`. Set `SUBWAVE_VERSION` to an image
-tag that already exists in `ghcr.io/obiwancanoweme`; do not use a floating
-tag.
+The Portainer stack Environment must also contain these exact image pins,
+along with the normal operator configuration used by the compose file,
+including `ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`:
+
+```text
+SUBWAVE_VERSION=<exact ObiWave release tag>
+UPSTREAM_ANALYZER_VERSION=1.0.0
+```
+
+`SUBWAVE_VERSION` must name an image tag that already exists in
+`ghcr.io/obiwancanoweme`; do not use a floating tag. The analyzer pin is
+independent: Portainer uses upstream
+`ghcr.io/perminder-klair/subwave-analyzer-cuda:1.0.0`, not a fork image.
+
+Before updating the stack, ark must pass both GPU checks:
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+Portainer sets `ANALYZE_DEVICE=cuda` and reserves all NVIDIA GPUs for the
+analyzer. This is fail-closed: if the driver, NVIDIA Container Toolkit, or
+Docker GPU runtime is unavailable, the analyzer fails rather than falling back
+to CPU.
 
 The fork GHCR packages are **private**. Confirm every `subwave-*` fork package
 is Private in GitHub Packages and does not inherit public repository access.
@@ -341,6 +361,9 @@ only**. The CLI remains linted and typechecked in normal CI, but
 `.github/workflows/publish-cli.yml` is manual `workflow_dispatch` maintenance
 only. Fork tags do not publish CLI binaries, and the upstream installer and
 self-update behavior remain untouched.
+
+Fork releases advance `SUBWAVE_VERSION` only. They preserve
+`UPSTREAM_ANALYZER_VERSION=1.0.0` and never publish a fork CUDA analyzer.
 
 ---
 
