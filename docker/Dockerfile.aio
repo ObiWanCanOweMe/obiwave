@@ -244,7 +244,8 @@ COPY liquidsoap/radio.liq /etc/liquidsoap/radio.liq
 COPY sounds /sounds
 COPY docker/aio/Caddyfile /etc/caddy/Caddyfile
 COPY docker/aio/supervisor.sh /usr/local/bin/subwave-supervisor
-RUN chmod +x /usr/local/bin/subwave-supervisor
+COPY docker/icecast-render.sh /usr/local/bin/icecast-render
+RUN chmod +x /usr/local/bin/subwave-supervisor /usr/local/bin/icecast-render
 
 # Shared state dir (the supervisor re-asserts perms on every boot).
 RUN mkdir -p /var/sub-wave && chmod 777 /var/sub-wave

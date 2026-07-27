@@ -6,7 +6,8 @@
         <clients>${ICECAST_MAX_CLIENTS}</clients>
         <sources>4</sources>
         <!-- queue-size: per-client backlog before Icecast drops a lagging
-             listener. Computed by broadcast-entrypoint.sh as 4x burst-size
+             listener. Computed by icecast-render.sh as 4x the largest mount
+             burst-size
              (floored at the historical 2 MB) — it must comfortably exceed the
              burst or a client is evicted the moment it falls behind its own
              primed buffer, and it gives jittery mobile and Cloudflare-proxied
@@ -24,7 +25,7 @@
              the live edge. Every player-watchdog reconnect carries a ?t=
              cache-buster, so each reconnect primes a fresh burst.
 
-             Computed by broadcast-entrypoint.sh from settings.stream.
+             Computed by icecast-render.sh from settings.stream.
              bufferSeconds x the live bitrate, NOT hardcoded: this is a byte
              count, so a fixed value drifts badly across bitrates (the old flat
              512 KB was ~22s at 192k but ~66s at 64k). Deriving it keeps the
@@ -38,9 +39,9 @@
              falls back to the advertised figure when it isn't the thing
              playing the audio.
 
-             These <limits> values are sized for the MP3 mount and act as the
-             default; every stream mount below carries its own burst/queue
-             sized for its own bitrate. -->
+             The <limits> burst is sized for MP3, while its queue is sized for
+             the largest mount burst. They act as safe defaults; every stream
+             mount below carries its own burst/queue sized for its bitrate. -->
         <burst-size>${ICECAST_BURST_SIZE}</burst-size>
     </limits>
 
@@ -62,11 +63,12 @@
     <!-- Stream mounts: the entrypoint replaces the marker below with one
          <mount> block per stream mount, always rendered. Each carries its own
          <burst-size>/<queue-size> sized from settings.stream.bufferSeconds x
-         THAT mount's bitrate — the global <limits> values above are sized for
-         the MP3 mount only, and a byte count that means 22s of MP3 is ~43s of
-         Opus or ~6s of FLAC. When state/icecast_listener_auth.txt is 'true'
-         (#478), each block additionally carries <authentication type="url">
-         pointing at the controller's POST /listener-auth. -->
+         THAT mount's bitrate — the global <limits> burst above is sized for
+         MP3, while its queue accommodates the largest mount burst. A byte
+         count that means 22s of MP3 is ~43s of Opus or ~6s of FLAC. When
+         state/icecast_listener_auth.txt is 'true' (#478), each block
+         additionally carries <authentication type="url"> pointing at the
+         controller's POST /listener-auth. -->
     <!--@STREAM_MOUNTS@-->
 
 
