@@ -66,7 +66,7 @@ https://github.com/user-attachments/assets/0a2ba78a-eda3-44c1-adce-bfa78ae992cd
 - **Swappable LLM provider.** Ollama, Anthropic, OpenAI, Google, DeepSeek, OpenRouter, Requesty, Vercel AI Gateway, or any OpenAI-compatible server. Change it from the admin UI with no redeploy. A daily token budget can cap hosted-model spend; past the cap the music keeps playing without the chatter.
 - **Six TTS engines.** Piper and Kokoro (multilingual) in-process for fast local speech, plus an optional `tts-heavy` sidecar (`docker compose --profile tts-heavy up -d`) that adds Chatterbox (zero-shot voice cloning) and PocketTTS (6× real-time, EN/FR/DE/IT/ES/PT). Cloud (OpenAI / ElevenLabs) and a Remote engine (any self-hosted HTTP endpoint, audio over the wire) round it out. Pick a different engine per kind of speech.
 - **Multiple DJ personas.** Up to 24 in the roster, each with its own voice and writing style. A show can seat up to three guest co-hosts who trade scripted banter with the host, and ready-made personas install from the [community catalog](https://www.getsubwave.com/personas).
-- **Multi-format broadcast.** MP3 always served (configurable bitrate) for Sonos, hardware radios, and cars; optional Opus, AAC, and lossless FLAC mounts, each toggleable from the admin UI. The web player picks automatically.
+- **Multi-format broadcast.** MP3 always served (configurable bitrate) for Sonos, hardware radios, and cars; optional Opus, AAC, and lossless FLAC mounts, each toggleable from the admin UI. Web and native listeners can choose any supported enabled format, with MP3 as the automatic fallback.
 - **Native apps and PWA.** Native iOS (on the App Store) and Android (on Google Play) players — background audio, lock-screen / CarPlay / Android Auto controls, multi-station — a [native desktop player](https://github.com/getsubwave/subwave-desktop) for macOS / Windows / Linux with a menu-bar mini player and live spectrum, plus an installable PWA on phone and desktop.
 - **Scheduled shows.** A 24×7 grid; each slot has its own persona, mood, and skills, or anchors to a Navidrome playlist. Ready-made show templates install from the [community catalog](https://www.getsubwave.com/shows).
 - **Programmes.** A show can air as a produced episode: the DJ drafts a per-episode plan — an angle, one feature beat each hour, an intro and an outro — so a three-hour slot hangs together instead of being three hours of unrelated links.
@@ -182,18 +182,18 @@ That repoints the `analyzer` service at `subwave-analyzer-heavy` (CLAP + Demucs,
 also offers it, and Unraid one-click users pull the `subwave-aio-heavy` image
 instead. Only the expressive *voices* above need the separate `tts-heavy` sidecar.
 
-Hosts with an NVIDIA GPU can run the heavy stack on CUDA instead — layer the
-`docker-compose.analyzer-gpu.yml` overlay, which swaps the service to the
-`subwave-analyzer-cuda` image and reserves the GPU (needs the NVIDIA driver +
-Container Toolkit, nothing else):
+GPU-specific analyzer packaging remains upstream-owned and is outside
+ObiWave's image-only Ark release pipeline. The checked-in upstream-compatible
+overlay remains available to operators who intentionally manage that image and
+host passthrough themselves:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 ```
 
-All-in-one installs have no `analyzer` service to swap, so they take the GPU on
-the image instead: pull `subwave-aio-cuda` and hand the container the card
-(`--gpus all`, or the Unraid steps in [`docs/unraid.md`](docs/unraid.md)).
+The Ark deployment uses its local analyzer service at
+`http://analyzer:8080` inside the split-stack network and does not depend on a
+remote GPU host.
 
 ### Local dev (contributors)
 
@@ -244,6 +244,12 @@ prerequisites, Cloudflare setup, updates, and backup.
 (search **SUB/WAVE** in the Apps tab) — or run the full split-container stack via
 the Compose Manager Plus plugin. Both in **[`docs/unraid.md`](docs/unraid.md)**.
 
+The `ObiWanCanOweMe/obiwave` fork also has an image-only, exact-tag release
+pipeline for its ark Portainer stack. It publishes fork images and performs a
+verified deployment with automatic rollback; it does not publish a fork CLI
+or change the upstream installer/self-update path. Operators should use the
+secret-free [fork release and Portainer runbook](docs/deployment.md#obiwave-fork-releases-on-ark).
+
 **Bring your own reverse proxy.** If you already run Traefik, nginx, or your
 own Caddy in your homelab, swap the bundled-Caddy compose for the BYO variant:
 
@@ -256,7 +262,11 @@ Icecast stream on `:7702` (all configurable). Point your proxy at those three.
 `docker/Caddyfile` is a working reference for the route table you need to
 replicate. Details in [`DEPLOY.md`](DEPLOY.md#bring-your-own-reverse-proxy).
 
-**Images on GHCR.** Tagged releases publish to `ghcr.io/perminder-klair/subwave-{caddy,broadcast,controller,web}`, the default-on `subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in `subwave-tts-heavy` (expressive voices) sidecar. Heavy-analysis variants — `subwave-analyzer-heavy` and `subwave-aio-heavy` (CLAP + Demucs, amd64) — are published for operators who enable "sounds-like"/vocals, plus the NVIDIA CUDA builds of that heavy stack (amd64) — `subwave-analyzer-cuda` for split-stack hosts via the `docker-compose.analyzer-gpu.yml` overlay, and `subwave-aio-cuda` for one-click all-in-one hosts.
+**Images on GHCR.** Tagged releases publish the core services, the default-on
+`subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in
+`subwave-tts-heavy` (expressive voices) sidecar. ObiWave also publishes
+`subwave-analyzer-heavy` and `subwave-aio-heavy` for operators who enable
+"sounds-like" and vocal analysis; GPU-specific variants remain upstream-owned.
 All compose files pull `:latest` by default; pin a version with
 `SUBWAVE_VERSION=v1.2.3` in the root `.env`.
 
@@ -273,7 +283,7 @@ controller/        Node.js controller, the AI DJ brain
   src/audio/       TTS engines: Piper, Kokoro, Chatterbox, PocketTTS, cloud
   src/routes/      HTTP API split by surface (public, request, onboarding, settings, …)
 liquidsoap/        radio.liq, the Liquidsoap mixing pipeline
-web/               Next.js 15 web UI (player, landing, admin, setup)
+web/               Next.js 16 web UI (player, landing, admin, setup)
 docker/            Caddyfile, Dockerfiles, icecast.xml.template, supervisor entrypoint
 scripts/           setup, jingle generation, update, health check
 mcp-subwave/       MCP server that lets an agent request songs / drive the DJ
@@ -316,6 +326,7 @@ bin/subwave        Operator CLI entry: setup, status, doctor, lifecycle
 ## Documentation
 
 - **[`DEPLOY.md`](DEPLOY.md):** production deployment, updates, backup.
+- **[`docs/deployment.md`](docs/deployment.md):** deployment modes and the obiwave fork's Portainer release runbook.
 - **[`docs/unraid.md`](docs/unraid.md):** running on Unraid — one-click from Community Applications, or the Compose Manager Plus stack.
 - **[`docs/tts-heavy.md`](docs/tts-heavy.md):** the opt-in `tts-heavy` voices and the default-on acoustic `analyzer` service — what each does and how to toggle them.
 - **[`docs/navidrome-libraries.md`](docs/navidrome-libraries.md):** keeping audiobooks / seasonal collections off air with a dedicated, library-scoped Navidrome user.
