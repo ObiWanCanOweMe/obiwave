@@ -61,6 +61,17 @@ test('CUDA analyzer is mirrored, never rebuilt', () => {
   assert.doesNotMatch(buildMatrix, /subwave-analyzer-cuda/);
 });
 
+test('reusable CI deployment gate runs the CUDA mirror helper contract', () => {
+  const deploymentCommand = ci.match(
+    /- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/,
+  )?.[1];
+  assert.ok(deploymentCommand, 'missing reusable deployment-contract test command');
+  assert.match(
+    deploymentCommand,
+    /(?:^| )scripts\/release\/mirror-cuda-analyzer\.test\.mjs(?: |$)/,
+  );
+});
+
 test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
   assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
   assert.match(publish, /scan-images:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);

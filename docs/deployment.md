@@ -286,10 +286,12 @@ nvidia-smi
 docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 ```
 
-Portainer sets `ANALYZE_DEVICE=cuda` and reserves all NVIDIA GPUs for the
-analyzer. This is fail-closed: if the driver, NVIDIA Container Toolkit, or
-Docker GPU runtime is unavailable, the analyzer fails rather than falling back
-to CPU.
+Portainer gates analyzer server startup on `torch.cuda.is_available()`, sets
+`ANALYZE_DEVICE=cuda` for the worker at runtime, and reserves all NVIDIA GPUs.
+The startup gate and runtime setting enforce CUDA together: a missing torch
+install, import failure, unavailable CUDA device, broken driver, NVIDIA
+Container Toolkit, or Docker GPU runtime leaves the analyzer in a visible
+restart loop rather than allowing CPU fallback.
 
 The fork GHCR packages are **private**. Confirm every `subwave-*` fork package
 is Private in GitHub Packages and does not inherit public repository access.
@@ -319,9 +321,10 @@ command until the ark migration reaches its release checkpoint.
 That fork-qualified tag is the only automatic publication boundary. It builds
 and publishes the full fork image matrix under the exact tag only after the
 reusable CI gate repeats all package quality checks, deployment-contract tests,
-and image smoke builds for the tagged commit. A nine-image preflight matrix
-checks every exact GHCR tag after login; the complete preflight must pass before
-any image build can start. Workflow concurrency serializes runs for the same
+and image smoke builds for the tagged commit. A ten-tag preflight matrix checks
+the nine locally built images plus the one mirrored CUDA analyzer after login;
+the complete preflight must pass before any image build can start. Workflow
+concurrency serializes runs for the same
 qualified tag without cancellation. It then scans the authenticated private
 images and serially deploys production through the GitHub Environment. The
 deployment snapshots the current Portainer stack file and Environment. Before

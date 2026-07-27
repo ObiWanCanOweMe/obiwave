@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as validator from './validate-portainer-compose.mjs';
@@ -9,6 +16,12 @@ import * as validator from './validate-portainer-compose.mjs';
 const { validatePortainerCompose } = validator;
 
 const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
+const portainerManifest = readFileSync(
+  new URL('../../deploy/portainer/docker-compose.yml', import.meta.url),
+  'utf8',
+);
+const cudaGateScript = '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
+const cudaGateCommand = ['/bin/sh', '-c', cudaGateScript];
 const validResolved = {
   services: {
     caddy: {
@@ -21,6 +34,7 @@ const validResolved = {
     web: {},
     analyzer: {
       image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.0.0-obiwave.1',
+      command: cudaGateCommand,
       environment: { ANALYZE_DEVICE: 'cuda' },
       deploy: {
         resources: {
@@ -103,6 +117,12 @@ services:
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
   analyzer:
     image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     logging: *default-logging
     mem_limit: \${ANALYZER_MEM_LIMIT:-6g}
     environment:
@@ -142,8 +162,16 @@ function renderCompose(source) {
   const file = join(directory, 'compose.yml');
   try {
     writeFileSync(file, source);
+    writeFileSync(join(directory, 'stack.env'), '');
     const result = spawnSync('docker', ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'], {
       encoding: 'utf8',
+      env: {
+        ...process.env,
+        SUBWAVE_VERSION: 'v1.0.0-obiwave.1',
+        ADMIN_USER: 'ci',
+        ADMIN_PASS: 'ci',
+        SITE_URL: 'https://radio.kener.org',
+      },
     });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
@@ -316,6 +344,74 @@ test('resolved analyzer requires the release-tagged CUDA mirror and NVIDIA reser
   const dockerNormalized = structuredClone(validResolved);
   dockerNormalized.services.analyzer.deploy.resources.reservations.devices[0].count = -1;
   assert.deepEqual(resolvedErrors(dockerNormalized), []);
+});
+
+test('source and resolved analyzer require the fail-closed CUDA startup gate', () => {
+  assert.deepEqual(errorsFor(valid), []);
+  assertRejects(
+    valid.replace(/    command:\n(?:      .*\n){5}/, ''),
+    'service analyzer is missing its fail-closed CUDA startup gate',
+  );
+  assertRejects(
+    valid.replace(
+      'sys.exit(0 if torch.cuda.is_available() else 1)',
+      'sys.exit(0)',
+    ),
+    'service analyzer is missing its fail-closed CUDA startup gate',
+  );
+
+  for (const command of [
+    undefined,
+    ['/bin/sh', '-c', cudaGateScript.replace(' && ', ' ; ')],
+    ['/bin/sh', '-c', cudaGateScript.replace('/opt/analyzer/venv/bin/python', 'python')],
+    ['/bin/sh', '-c', cudaGateScript.replace('exec uvicorn', 'uvicorn')],
+  ]) {
+    const model = structuredClone(validResolved);
+    if (command === undefined) delete model.services.analyzer.command;
+    else model.services.analyzer.command = command;
+    assert.ok(
+      resolvedErrors(model).includes('resolved analyzer has an invalid fail-closed CUDA startup gate'),
+    );
+  }
+});
+
+test('CUDA preflight gates analyzer server startup', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-cuda-gate-'));
+  const preflight = join(directory, 'cuda-preflight');
+  const server = join(directory, 'analyzer-server');
+  const started = join(directory, 'server-started');
+  try {
+    writeFileSync(preflight, '#!/bin/sh\nexit "$CUDA_PREFLIGHT_STATUS"\n');
+    writeFileSync(server, '#!/bin/sh\n: > \"$ANALYZER_STARTED\"\n');
+    chmodSync(preflight, 0o755);
+    chmodSync(server, 0o755);
+
+    const command = renderCompose(portainerManifest).services.analyzer.command[2]
+      .replace(
+        '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)"',
+        '"$CUDA_PREFLIGHT"',
+      )
+      .replace(
+        'exec uvicorn server:app --host 0.0.0.0 --port 8080',
+        'exec "$ANALYZER_SERVER"',
+      );
+    const runGate = (status) => spawnSync('/bin/sh', ['-c', command], {
+      env: {
+        ...process.env,
+        CUDA_PREFLIGHT: preflight,
+        CUDA_PREFLIGHT_STATUS: String(status),
+        ANALYZER_SERVER: server,
+        ANALYZER_STARTED: started,
+      },
+    });
+
+    assert.equal(runGate(1).status, 1);
+    assert.equal(existsSync(started), false);
+    assert.equal(runGate(0).status, 0);
+    assert.equal(existsSync(started), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('accepts the full seven-service Caddy production contract', () => {

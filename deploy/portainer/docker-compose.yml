@@ -231,6 +231,16 @@ services:
     container_name: sub-wave-analyzer
     restart: unless-stopped
     logging: *default-logging
+    # The upstream worker treats explicit CUDA as a preference and can fall
+    # back to CPU. Gate the HTTP server itself on a positive CUDA probe so a
+    # missing torch install, import error, or unavailable GPU leaves this
+    # restart-visible instead of moving analysis onto ark's CPU.
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     # OOM containment: cap the resident set so a runaway analysis (a long track,
     # a CLAP/Demucs allocation spike on the heavy image) is killed inside this
     # container instead of triggering the host OOM-killer and taking broadcast or

@@ -19,6 +19,15 @@ const serviceImages = new Map([
   ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}'],
 ]);
 
+const analyzerCudaGateScript = '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
+const analyzerCudaGateCommand = ['/bin/sh', '-c', analyzerCudaGateScript];
+const analyzerCudaGateSource = `command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080`;
+
 const serviceRequirements = [
   ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
   ['caddy', 'web:\n        condition: service_started', 'service caddy is missing web service_started dependency'],
@@ -48,6 +57,7 @@ const serviceRequirements = [
   ['tts-heavy', 'tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache', 'service tts-heavy is missing its pocket cache mount'],
   ['analyzer', 'logging: *default-logging', 'service analyzer is missing default log rotation'],
   ['analyzer', 'mem_limit:', 'service analyzer is missing its memory limit'],
+  ['analyzer', analyzerCudaGateSource, 'service analyzer is missing its fail-closed CUDA startup gate'],
   ['analyzer', 'ANALYZE_DEVICE: cuda', 'service analyzer must require CUDA'],
   [
     'analyzer',
@@ -186,6 +196,9 @@ export function validateResolvedPortainerCompose(model) {
   }
   if (analyzer?.environment?.ANALYZE_DEVICE !== 'cuda') {
     errors.push('resolved analyzer must require CUDA');
+  }
+  if (JSON.stringify(analyzer?.command) !== JSON.stringify(analyzerCudaGateCommand)) {
+    errors.push('resolved analyzer has an invalid fail-closed CUDA startup gate');
   }
   const devices = analyzer?.deploy?.resources?.reservations?.devices;
   if (
