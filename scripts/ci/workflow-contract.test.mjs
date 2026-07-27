@@ -48,8 +48,35 @@ test('app quality matrix runs the native stream-buffer contract', () => {
   assert.match(appCommand, /(?:^|&& )npm run test:stream-buffer-format(?: &&|$)/);
 });
 
-test('fork releases deliberately exclude the upstream CUDA analyzer image', () => {
-  assert.doesNotMatch(publish, /subwave-analyzer-cuda/);
+test('CUDA analyzer is mirrored, never rebuilt', () => {
+  assert.match(publish, /mirror-cuda-analyzer:/);
+  assert.match(
+    publish,
+    /RELEASE_TAG: \$\{\{ github\.ref_name \}\}[\s\S]*node scripts\/release\/mirror-cuda-analyzer\.mjs/,
+  );
+  const buildMatrix = publish.slice(
+    publish.indexOf('  build:'),
+    publish.indexOf('    steps:', publish.indexOf('  build:')),
+  );
+  assert.doesNotMatch(buildMatrix, /subwave-analyzer-cuda/);
+});
+
+test('reusable CI deployment gate runs the CUDA mirror helper contract', () => {
+  const deploymentCommand = ci.match(
+    /- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/,
+  )?.[1];
+  assert.ok(deploymentCommand, 'missing reusable deployment-contract test command');
+  assert.match(
+    deploymentCommand,
+    /(?:^| )scripts\/release\/mirror-cuda-analyzer\.test\.mjs(?: |$)/,
+  );
+});
+
+test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
+  assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
+  assert.match(publish, /scan-images:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
+  assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images\]/);
+  assert.match(scan, /matrix:\s*\n\s+image: \[[^\]]*analyzer-cuda/);
 });
 
 test('CLI asset drift watches the analyzer GPU overlay', () => {
@@ -59,15 +86,39 @@ test('CLI asset drift watches the analyzer GPU overlay', () => {
 test('release publication waits for the reusable CI gate', () => {
   assert.match(publish, /release-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
   assert.match(publish, /build:\s*\n\s+needs: \[validate, release-gate, tag-preflight\]/);
-  assert.match(publish, /scan-images:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build\]/);
-  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, scan-images\]/);
+  assert.match(publish, /scan-images:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
+  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images\]/);
+});
+
+test('publication grants package access only to jobs that need it', () => {
+  const workflowPermissions = publish.slice(
+    publish.indexOf('\npermissions:'),
+    publish.indexOf('\nconcurrency:'),
+  );
+  const preflight = publish.slice(
+    publish.indexOf('  tag-preflight:'),
+    publish.indexOf('  mirror-cuda-analyzer:'),
+  );
+  const mirror = publish.slice(
+    publish.indexOf('  mirror-cuda-analyzer:'),
+    publish.indexOf('  build:'),
+  );
+  const build = publish.slice(
+    publish.indexOf('  build:'),
+    publish.indexOf('  scan-images:'),
+  );
+
+  assert.match(workflowPermissions, /^\npermissions:\n  contents: read\n$/);
+  assert.match(preflight, /permissions:\n      contents: read\n      packages: read/);
+  assert.match(mirror, /permissions:\n      contents: read\n      packages: write/);
+  assert.match(build, /permissions:\n      contents: read\n      packages: write/);
 });
 
 test('release tag concurrency never cancels an in-flight publication', () => {
   assert.match(publish, /concurrency:\s*\n\s+group: publish-images-\$\{\{ github\.ref_name \}\}\s*\n\s+cancel-in-progress: false/);
 });
 
-test('all nine exact tags pass a complete preflight before any build starts', () => {
+test('all ten exact tags pass a complete preflight before any build starts', () => {
   const preflightStart = publish.indexOf('  tag-preflight:');
   const buildStart = publish.indexOf('  build:');
   const scanStart = publish.indexOf('  scan-images:');
@@ -75,7 +126,10 @@ test('all nine exact tags pass a complete preflight before any build starts', ()
 
   const preflight = publish.slice(preflightStart, buildStart);
   const build = publish.slice(buildStart, scanStart);
-  for (const image of [
+  const matrix = preflight.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
+  assert.ok(matrix, 'missing tag-preflight image matrix');
+  const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
+  assert.deepEqual(images, [
     'subwave-caddy',
     'subwave-broadcast',
     'subwave-controller',
@@ -85,9 +139,8 @@ test('all nine exact tags pass a complete preflight before any build starts', ()
     'subwave-tts-heavy',
     'subwave-analyzer',
     'subwave-analyzer-heavy',
-  ]) {
-    assert.match(preflight, new RegExp(`- ${image.replaceAll('-', '\\-')}(?:\\n|$)`));
-  }
+    'subwave-analyzer-cuda',
+  ]);
   assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
 });

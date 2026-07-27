@@ -263,11 +263,35 @@ SUBWAVE_HEALTH_URL=https://radio.kener.org/api/health
 SUBWAVE_STREAM_URL=https://radio.kener.org/stream.mp3
 ```
 
-The Portainer stack Environment must also contain `SUBWAVE_VERSION` and the
-normal operator configuration used by the compose file, including
-`ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`. Set `SUBWAVE_VERSION` to an image
-tag that already exists in `ghcr.io/obiwancanoweme`; do not use a floating
-tag.
+The Portainer stack Environment must contain this exact image pin,
+along with the normal operator configuration used by the compose file,
+including `ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`:
+
+```text
+SUBWAVE_VERSION=<exact ObiWave release tag>
+```
+
+`SUBWAVE_VERSION` must name an image tag that already exists in
+`ghcr.io/obiwancanoweme`; do not use a floating tag. Portainer uses
+`ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION}`. The release
+workflow copies that image byte-for-byte from
+`ghcr.io/perminder-klair/subwave-analyzer-cuda:<upstream base version>` and
+requires top-level digest equality before scanning and deployment. It never
+rebuilds the CUDA image and never publishes a `latest` mirror.
+
+Before updating the stack, ark must pass both GPU checks:
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+Portainer gates analyzer server startup on `torch.cuda.is_available()`, sets
+`ANALYZE_DEVICE=cuda` for the worker at runtime, and reserves all NVIDIA GPUs.
+The startup gate and runtime setting enforce CUDA together: a missing torch
+install, import failure, unavailable CUDA device, broken driver, NVIDIA
+Container Toolkit, or Docker GPU runtime leaves the analyzer in a visible
+restart loop rather than allowing CPU fallback.
 
 The fork GHCR packages are **private**. Confirm every `subwave-*` fork package
 is Private in GitHub Packages and does not inherit public repository access.
@@ -297,9 +321,10 @@ command until the ark migration reaches its release checkpoint.
 That fork-qualified tag is the only automatic publication boundary. It builds
 and publishes the full fork image matrix under the exact tag only after the
 reusable CI gate repeats all package quality checks, deployment-contract tests,
-and image smoke builds for the tagged commit. A nine-image preflight matrix
-checks every exact GHCR tag after login; the complete preflight must pass before
-any image build can start. Workflow concurrency serializes runs for the same
+and image smoke builds for the tagged commit. A ten-tag preflight matrix checks
+the nine locally built images plus the one mirrored CUDA analyzer after login;
+the complete preflight must pass before any image build can start. Workflow
+concurrency serializes runs for the same
 qualified tag without cancellation. It then scans the authenticated private
 images and serially deploys production through the GitHub Environment. The
 deployment snapshots the current Portainer stack file and Environment. Before
@@ -341,6 +366,21 @@ only**. The CLI remains linted and typechecked in normal CI, but
 `.github/workflows/publish-cli.yml` is manual `workflow_dispatch` maintenance
 only. Fork tags do not publish CLI binaries, and the upstream installer and
 self-update behavior remain untouched.
+
+Fork releases advance `SUBWAVE_VERSION` only. The CUDA analyzer is a
+release-tagged, byte-for-byte mirror of the upstream base version; it is not
+rebuilt, and no `latest` mirror is published.
+
+### Non-Portainer GPU overlays
+
+This guidance is outside Ark's Portainer mirror contract. Non-Portainer
+deployments can use upstream's GPU overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
+```
+
+AIO GPU packaging is upstream-owned and is not published by ObiWave.
 
 ---
 

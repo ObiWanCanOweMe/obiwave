@@ -227,13 +227,20 @@ services:
   # (Chatterbox/PocketTTS) stay opt-in under the `tts-heavy` profile; acoustic
   # analysis is default-on. To skip it, `docker compose stop analyzer`.
   analyzer:
-    # Default: the LEAN, multi-arch image. ANALYZER_HEAVY=1 switches to
-    # the CLAP + Demucs `subwave-analyzer-heavy` image (amd64-only; on arm64 also
-    # set DOCKER_DEFAULT_PLATFORM=linux/amd64).
-    image: ghcr.io/obiwancanoweme/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:${SUBWAVE_VERSION:?required}
+    image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}
     container_name: sub-wave-analyzer
     restart: unless-stopped
     logging: *default-logging
+    # The upstream worker treats explicit CUDA as a preference and can fall
+    # back to CPU. Gate the HTTP server itself on a positive CUDA probe so a
+    # missing torch install, import error, or unavailable GPU leaves this
+    # restart-visible instead of moving analysis onto ark's CPU.
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     # OOM containment: cap the resident set so a runaway analysis (a long track,
     # a CLAP/Demucs allocation spike on the heavy image) is killed inside this
     # container instead of triggering the host OOM-killer and taking broadcast or
@@ -242,22 +249,30 @@ services:
     # ANALYZER_MEM_LIMIT.
     mem_limit: ${ANALYZER_MEM_LIMIT:-6g}
     environment:
+      ANALYZE_DEVICE: cuda
       # Force CLAP / Demucs on for the whole pass. Usually unnecessary — the
       # admin toggles drive these per request.
-      - ANALYZE_AUDIO_EMBEDDING=${ANALYZE_AUDIO_EMBEDDING:-}
-      - ANALYZE_VOCAL_ACTIVITY=${ANALYZE_VOCAL_ACTIVITY:-}
-      - CLAP_MODEL=${CLAP_MODEL:-}
-      - CLAP_MODEL_PATH=${CLAP_MODEL_PATH:-}
+      ANALYZE_AUDIO_EMBEDDING: ${ANALYZE_AUDIO_EMBEDDING:-}
+      ANALYZE_VOCAL_ACTIVITY: ${ANALYZE_VOCAL_ACTIVITY:-}
+      CLAP_MODEL: ${CLAP_MODEL:-}
+      CLAP_MODEL_PATH: ${CLAP_MODEL_PATH:-}
       # Demucs model + analysis-window overrides (worker reads both; see
       # .env.example "Optional model overrides").
-      - DEMUCS_MODEL=${DEMUCS_MODEL:-}
-      - ANALYZE_SECONDS=${ANALYZE_SECONDS:-}
-      - ANALYZE_CLAP_WINDOWS=${ANALYZE_CLAP_WINDOWS:-}
-      - ANALYZE_OUTRO_SECONDS=${ANALYZE_OUTRO_SECONDS:-}
+      DEMUCS_MODEL: ${DEMUCS_MODEL:-}
+      ANALYZE_SECONDS: ${ANALYZE_SECONDS:-}
+      ANALYZE_CLAP_WINDOWS: ${ANALYZE_CLAP_WINDOWS:-}
+      ANALYZE_OUTRO_SECONDS: ${ANALYZE_OUTRO_SECONDS:-}
       # CLAP isn't gated, but an anonymous HF Hub download is rate-limited and
       # slow. Same var as tts-heavy — set HF_TOKEN=hf_... in Portainer once
       # and both sidecars pick it up.
-      - HF_TOKEN=${HF_TOKEN:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - *state-mount
       - analyzer-cache:/opt/analyzer/hf-cache

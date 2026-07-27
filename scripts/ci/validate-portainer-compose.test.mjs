@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as validator from './validate-portainer-compose.mjs';
@@ -9,6 +16,12 @@ import * as validator from './validate-portainer-compose.mjs';
 const { validatePortainerCompose } = validator;
 
 const trustedProxyRanges = '10.20.0.14/32 2600:1700:3210:5314:10:20:0:14/128';
+const portainerManifest = readFileSync(
+  new URL('../../deploy/portainer/docker-compose.yml', import.meta.url),
+  'utf8',
+);
+const cudaGateScript = '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
+const cudaGateCommand = ['/bin/sh', '-c', cudaGateScript];
 const validResolved = {
   services: {
     caddy: {
@@ -19,6 +32,18 @@ const validResolved = {
       ],
     },
     web: {},
+    analyzer: {
+      image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.0.0-obiwave.1',
+      command: cudaGateCommand,
+      environment: { ANALYZE_DEVICE: 'cuda' },
+      deploy: {
+        resources: {
+          reservations: {
+            devices: [{ driver: 'nvidia', count: 'all', capabilities: ['gpu'] }],
+          },
+        },
+      },
+    },
   },
 };
 
@@ -91,9 +116,24 @@ services:
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
   analyzer:
-    image: ghcr.io/obiwancanoweme/subwave-analyzer\${ANALYZER_HEAVY:+-heavy}:\${SUBWAVE_VERSION:?required}
+    image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     logging: *default-logging
     mem_limit: \${ANALYZER_MEM_LIMIT:-6g}
+    environment:
+      ANALYZE_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - *state-mount
       - analyzer-cache:/opt/analyzer/hf-cache
@@ -122,8 +162,16 @@ function renderCompose(source) {
   const file = join(directory, 'compose.yml');
   try {
     writeFileSync(file, source);
+    writeFileSync(join(directory, 'stack.env'), '');
     const result = spawnSync('docker', ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'], {
       encoding: 'utf8',
+      env: {
+        ...process.env,
+        SUBWAVE_VERSION: 'v1.0.0-obiwave.1',
+        ADMIN_USER: 'ci',
+        ADMIN_PASS: 'ci',
+        SITE_URL: 'https://radio.kener.org',
+      },
     });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
@@ -270,21 +318,123 @@ test('resolved model requires exact Caddy trusted proxy ranges', () => {
   }
 });
 
+test('resolved analyzer requires the release-tagged CUDA mirror and NVIDIA reservation', () => {
+  assert.deepEqual(resolvedErrors(validResolved), []);
+
+  const cases = [
+    ['image', 'example.invalid/analyzer:1.0.0', 'resolved analyzer has an invalid CUDA mirror image'],
+    ['device', 'cpu', 'resolved analyzer must require CUDA'],
+    ['driver', 'other', 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+    ['count', 1, 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+    ['capabilities', ['compute'], 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+  ];
+
+  for (const [field, value, expected] of cases) {
+    const model = structuredClone(validResolved);
+    if (field === 'image') model.services.analyzer.image = value;
+    if (field === 'device') model.services.analyzer.environment.ANALYZE_DEVICE = value;
+    if (field === 'driver') model.services.analyzer.deploy.resources.reservations.devices[0].driver = value;
+    if (field === 'count') model.services.analyzer.deploy.resources.reservations.devices[0].count = value;
+    if (field === 'capabilities') {
+      model.services.analyzer.deploy.resources.reservations.devices[0].capabilities = value;
+    }
+    assert.ok(resolvedErrors(model).includes(expected));
+  }
+
+  const dockerNormalized = structuredClone(validResolved);
+  dockerNormalized.services.analyzer.deploy.resources.reservations.devices[0].count = -1;
+  assert.deepEqual(resolvedErrors(dockerNormalized), []);
+});
+
+test('source and resolved analyzer require the fail-closed CUDA startup gate', () => {
+  assert.deepEqual(errorsFor(valid), []);
+  assertRejects(
+    valid.replace(/    command:\n(?:      .*\n){5}/, ''),
+    'service analyzer is missing its fail-closed CUDA startup gate',
+  );
+  assertRejects(
+    valid.replace(
+      'sys.exit(0 if torch.cuda.is_available() else 1)',
+      'sys.exit(0)',
+    ),
+    'service analyzer is missing its fail-closed CUDA startup gate',
+  );
+
+  for (const command of [
+    undefined,
+    ['/bin/sh', '-c', cudaGateScript.replace(' && ', ' ; ')],
+    ['/bin/sh', '-c', cudaGateScript.replace('/opt/analyzer/venv/bin/python', 'python')],
+    ['/bin/sh', '-c', cudaGateScript.replace('exec uvicorn', 'uvicorn')],
+  ]) {
+    const model = structuredClone(validResolved);
+    if (command === undefined) delete model.services.analyzer.command;
+    else model.services.analyzer.command = command;
+    assert.ok(
+      resolvedErrors(model).includes('resolved analyzer has an invalid fail-closed CUDA startup gate'),
+    );
+  }
+});
+
+test('CUDA preflight gates analyzer server startup', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-cuda-gate-'));
+  const preflight = join(directory, 'cuda-preflight');
+  const server = join(directory, 'analyzer-server');
+  const started = join(directory, 'server-started');
+  try {
+    writeFileSync(preflight, '#!/bin/sh\nexit "$CUDA_PREFLIGHT_STATUS"\n');
+    writeFileSync(server, '#!/bin/sh\n: > \"$ANALYZER_STARTED\"\n');
+    chmodSync(preflight, 0o755);
+    chmodSync(server, 0o755);
+
+    const command = renderCompose(portainerManifest).services.analyzer.command[2]
+      .replace(
+        '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)"',
+        '"$CUDA_PREFLIGHT"',
+      )
+      .replace(
+        'exec uvicorn server:app --host 0.0.0.0 --port 8080',
+        'exec "$ANALYZER_SERVER"',
+      );
+    const runGate = (status) => spawnSync('/bin/sh', ['-c', command], {
+      env: {
+        ...process.env,
+        CUDA_PREFLIGHT: preflight,
+        CUDA_PREFLIGHT_STATUS: String(status),
+        ANALYZER_SERVER: server,
+        ANALYZER_STARTED: started,
+      },
+    });
+
+    assert.equal(runGate(1).status, 1);
+    assert.equal(existsSync(started), false);
+    assert.equal(runGate(0).status, 0);
+    assert.equal(existsSync(started), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
 });
 
 test('rejects mutable or checkout-coupled deployment', () => {
   const invalid = `${valid}\nbuild: .\nimage: example:latest\n` +
-    `ghcr.io/perminder-klair/subwave-web\n./state:/var/sub-wave\n` +
+    `./state:/var/sub-wave\n` +
     `env_file: ./.env\n0.0.0.0:7700:7700\n[::]:7700:7700\n`;
   for (const expected of [
     'manifest contains a build directive',
     'manifest references latest',
-    'manifest references the upstream image namespace',
     'manifest contains a repository-relative state mount',
     'manifest depends on a repository .env file',
   ]) assertRejects(invalid, expected);
+  assertRejects(
+    valid.replace(
+      'ghcr.io/obiwancanoweme/subwave-web:\${SUBWAVE_VERSION:?required}',
+      'ghcr.io/perminder-klair/subwave-web:\${SUBWAVE_VERSION:?required}',
+    ),
+    'service web has an invalid image',
+  );
 });
 
 test('rejects missing services and exact first-party images', () => {
@@ -295,10 +445,21 @@ test('rejects missing services and exact first-party images', () => {
       `service ${service} has an invalid image`,
     );
   }
-  assertRejects(
-    valid.replace('subwave-analyzer\${ANALYZER_HEAVY:+-heavy}', 'subwave-analyzer'),
-    'service analyzer has an invalid image',
-  );
+  for (const image of [
+    'ghcr.io/obiwancanoweme/subwave-analyzer:\${SUBWAVE_VERSION:?required}',
+    'ghcr.io/perminder-klair/subwave-analyzer-cuda:v1.0.0-obiwave.1',
+    'ghcr.io/perminder-klair/subwave-analyzer-cuda:latest',
+    'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:latest',
+    'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}',
+  ]) {
+    assertRejects(
+      valid.replace(
+        'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}',
+        image,
+      ),
+      'service analyzer has an invalid image',
+    );
+  }
   assertRejects(
     valid.replace('ghcr.io/tecnativa/docker-socket-proxy:0.3.0', 'ghcr.io/tecnativa/docker-socket-proxy:latest'),
     'service docker-socket-proxy has an invalid image',
@@ -311,6 +472,11 @@ test('rejects material topology removals', () => {
     ['    profiles: ["tts-heavy"]\n', 'service tts-heavy is missing profile tts-heavy'],
     ['    healthcheck:\n      test: ["CMD-SHELL", "curl -f http://localhost:7701/health"]\n', 'service controller is missing a healthcheck'],
     ['      docker-socket-proxy:\n        condition: service_started\n', 'service controller is missing docker-socket-proxy service_started dependency'],
+    ['      ANALYZE_DEVICE: cuda\n', 'service analyzer must require CUDA'],
+    [
+      '    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n',
+      'service analyzer is missing its NVIDIA GPU reservation',
+    ],
     ['      - analyzer-cache:/opt/analyzer/hf-cache\n', 'service analyzer is missing its named cache mount'],
     ['  analyzer-cache:\n', 'manifest is missing named volume analyzer-cache'],
     [
