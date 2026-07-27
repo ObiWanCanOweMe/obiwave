@@ -263,19 +263,21 @@ SUBWAVE_HEALTH_URL=https://radio.kener.org/api/health
 SUBWAVE_STREAM_URL=https://radio.kener.org/stream.mp3
 ```
 
-The Portainer stack Environment must also contain these exact image pins,
+The Portainer stack Environment must contain this exact image pin,
 along with the normal operator configuration used by the compose file,
 including `ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`:
 
 ```text
 SUBWAVE_VERSION=<exact ObiWave release tag>
-UPSTREAM_ANALYZER_VERSION=1.0.0
 ```
 
 `SUBWAVE_VERSION` must name an image tag that already exists in
-`ghcr.io/obiwancanoweme`; do not use a floating tag. The analyzer pin is
-independent: Portainer uses upstream
-`ghcr.io/perminder-klair/subwave-analyzer-cuda:1.0.0`, not a fork image.
+`ghcr.io/obiwancanoweme`; do not use a floating tag. Portainer uses
+`ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION}`. The release
+workflow copies that image byte-for-byte from
+`ghcr.io/perminder-klair/subwave-analyzer-cuda:<upstream base version>` and
+requires top-level digest equality before scanning and deployment. It never
+rebuilds the CUDA image and never publishes a `latest` mirror.
 
 Before updating the stack, ark must pass both GPU checks:
 
@@ -362,8 +364,20 @@ only**. The CLI remains linted and typechecked in normal CI, but
 only. Fork tags do not publish CLI binaries, and the upstream installer and
 self-update behavior remain untouched.
 
-Fork releases advance `SUBWAVE_VERSION` only. They preserve
-`UPSTREAM_ANALYZER_VERSION=1.0.0` and never publish a fork CUDA analyzer.
+Fork releases advance `SUBWAVE_VERSION` only. The CUDA analyzer is a
+release-tagged, byte-for-byte mirror of the upstream base version; it is not
+rebuilt, and no `latest` mirror is published.
+
+### Non-Portainer GPU overlays
+
+This guidance is outside Ark's Portainer mirror contract. Non-Portainer
+deployments can use upstream's GPU overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
+```
+
+AIO GPU packaging is upstream-owned and is not published by ObiWave.
 
 ---
 
