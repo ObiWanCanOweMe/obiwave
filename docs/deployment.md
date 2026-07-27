@@ -194,6 +194,156 @@ the graphical operator UI.
 
 ---
 
+## obiwave fork releases on ark
+
+The `ObiWanCanOweMe/obiwave` fork has a separate, image-only release path for
+the station hosted on **ark**. Portainer manages that deployment as a **Web
+Editor** stack using `deploy/portainer/docker-compose.yml`; it is not a Git
+repository-backed stack and does not build from a checkout. Paste the compose
+file into the Web Editor and maintain the stack's operator settings in
+Portainer's **Environment variables** panel. Portainer renders those variables
+as `stack.env`, which the controller consumes through its `env_file` entry.
+Never commit `stack.env` or secret values.
+
+Persistent station data has one fixed ark host path:
+
+```text
+/mnt/NVMe/container-data/subwave/state:/var/sub-wave
+```
+
+Only the bundled Caddy service publishes a host port, bound on both of ark's
+fixed addresses:
+
+```text
+10.20.0.9:7700 -> caddy:80
+[2600:1700:3210:5314:10:20:0:9]:7700 -> caddy:80
+```
+
+**bender retains the edge role.** It terminates public TLS for
+`radio.kener.org` and forwards the complete origin to ark port `7700`; it does
+not split routes between SUB/WAVE services. Bundled Caddy owns `/api`, all
+enabled stream mounts, the tune-in files, and web routing over the internal
+Compose network. Web, controller, and Icecast publish no host ports.
+
+The ark Caddy service sets `TRUSTED_PROXY_RANGES` to bender's exact source
+CIDRs, `10.20.0.14/32` and
+`2600:1700:3210:5314:10:20:0:14/128`. Caddy uses strict forwarded-IP parsing,
+so only the trusted proxy chain can supply the client address used by logs and
+rate limits. Moving the containers to ark does not move public DNS,
+certificates, or TLS ownership away from bender.
+
+### GitHub production environment
+
+Create a GitHub Actions Environment named `production`. Add the required
+Portainer secret, entering its value only at the interactive prompt:
+
+```bash
+gh secret set PORTAINER_API_KEY --env production --repo ObiWanCanOweMe/obiwave
+```
+
+If the production stream mount is private, also add its listener password as
+the optional `SUBWAVE_STREAM_PASSWORD` Environment secret:
+
+```bash
+gh secret set SUBWAVE_STREAM_PASSWORD --env production --repo ObiWanCanOweMe/obiwave
+```
+
+The release probe builds a Basic `listener:<password>` header in memory for
+both target and rollback verification. Keep the public stream URL below free
+of credentials; the secret is never placed in the URL or release output.
+
+Add these Environment variables. Copy the two numeric IDs from Portainer; do
+not put the API key in a variable or commit any real secret or deployment ID:
+
+```text
+PORTAINER_URL=https://portainer.kener.org
+PORTAINER_STACK_ID=numeric ID copied from Portainer
+PORTAINER_ENDPOINT_ID=numeric ark environment ID
+SUBWAVE_HEALTH_URL=https://radio.kener.org/api/health
+SUBWAVE_STREAM_URL=https://radio.kener.org/stream.mp3
+```
+
+The Portainer stack Environment must also contain `SUBWAVE_VERSION` and the
+normal operator configuration used by the compose file, including
+`ADMIN_USER`, `ADMIN_PASS`, and `SITE_URL`. Set `SUBWAVE_VERSION` to an image
+tag that already exists in `ghcr.io/obiwancanoweme`; do not use a floating
+tag.
+
+The fork GHCR packages are **private**. Confirm every `subwave-*` fork package
+is Private in GitHub Packages and does not inherit public repository access.
+In Portainer, create a `ghcr.io` registry credential with a dedicated classic PAT that has only
+`read:packages`, associate that registry with the ark environment, and keep the
+credential in Portainer's registry store. Never put that PAT in GitHub
+repository secrets, the stack Environment, `stack.env`, or the compose file.
+GitHub Actions uses its own scoped `GITHUB_TOKEN` for publication and scans.
+
+### Cut and deploy an exact fork release
+
+Fork production tags have exactly this form:
+`v<upstream-version>-obiwave.<positive-revision>`. A plain upstream tag such
+as `v0.42.0` cannot publish fork images or deploy this stack. For the initial
+fork release, run:
+
+```bash
+gh workflow run cut-fork-release.yml --repo ObiWanCanOweMe/obiwave -f version=0.42.0 -f revision=1 -f target=develop
+```
+
+Upstream `v0.42.0` is already merged into the fork's `develop` branch and already
+deployed as the baseline. The workflow verifies that upstream tag is an
+ancestor of `develop`; it does **not** merge or deploy `v0.42.0` again. It creates
+the new exact tag `v0.42.0-obiwave.1` at the selected target. Do not run this
+command until the ark migration reaches its release checkpoint.
+
+That fork-qualified tag is the only automatic publication boundary. It builds
+and publishes the full fork image matrix under the exact tag only after the
+reusable CI gate repeats all package quality checks, deployment-contract tests,
+and image smoke builds for the tagged commit. A nine-image preflight matrix
+checks every exact GHCR tag after login; the complete preflight must pass before
+any image build can start. Workflow concurrency serializes runs for the same
+qualified tag without cancellation. It then scans the authenticated private
+images and serially deploys production through the GitHub Environment. The
+deployment snapshots the current Portainer stack file and Environment. Before
+the Portainer update, the client replaces every exact
+`${SUBWAVE_VERSION:?required}` image placeholder with the validated release
+tag. The deployed stack revision is therefore self-contained even when the
+previous stack had no version variable. The client still records one
+`SUBWAVE_VERSION` Environment entry as operator metadata. It preserves the
+rest of the existing Environment, pulls and recreates the stack, and verifies
+both the public on-air health response and a non-empty MP3 stream through
+bender. A private stream uses the optional Environment secret above.
+
+If deployment or verification fails, the client restores the complete saved
+stack file and Environment (including the prior `SUBWAVE_VERSION`), then runs
+the same public health and stream checks against the rollback. The release job
+still fails after a verified rollback. If rollback verification also fails,
+the job reports both failures for operator intervention.
+
+Portainer reads and probes use short per-request timeouts; a stack update gets
+up to five minutes. Each public probe is bounded to six ten-second attempts
+with five-second gaps. If an update itself times out, the client waits a
+bounded 15-second grace period before restoring the snapshot. Portainer's
+synchronous update API exposes no operation handle, so this reduces but cannot
+mathematically eliminate overlap with server-side work that outlives the
+client timeout. The 30-minute workflow budget covers target update and
+verification, rollback update and verification, grace, and snapshot overhead.
+Failure output contains versions and rollback status only; inspect Portainer
+directly for incident detail rather than printing API bodies, headers, stack
+Environment, manifests, or tokens into Actions logs.
+
+Release tags are immutable as a complete matrix. If publication stops after
+only some images were pushed, delete **every** GHCR package version carrying
+that release tag across the full release matrix, verify none remain, and rerun
+the workflow. Never rerun in a way that overwrites only the missing subset or
+reuses a partially published tag.
+
+Fork releases intentionally publish **images and the Portainer deployment
+only**. The CLI remains linted and typechecked in normal CI, but
+`.github/workflows/publish-cli.yml` is manual `workflow_dispatch` maintenance
+only. Fork tags do not publish CLI binaries, and the upstream installer and
+self-update behavior remain untouched.
+
+---
+
 ## State layout
 
 Everything that survives `docker compose down` lives in `state/`:
