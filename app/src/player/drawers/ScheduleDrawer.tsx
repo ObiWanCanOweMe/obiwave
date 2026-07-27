@@ -251,7 +251,7 @@ export default function ScheduleDrawer({ api, activeShow, context }: ScheduleDra
             </Text>
             {slot.persona?.avatar ? (
               <Image
-                source={{ uri: api.avatar(slot.persona.avatar) }}
+                source={api.avatar(slot.persona.avatar)}
                 style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.field }}
                 contentFit="cover"
               />

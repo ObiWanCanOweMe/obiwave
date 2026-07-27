@@ -12,3 +12,8 @@ Architecture-critical and easy to break — read [`app/docs/TESTING.md`](app/doc
 - **`ios/` and `android/` are gitignored** (Continuous Native Generation) — regenerated from `app.json` + `assets/` by `expo prebuild` / EAS. The source of truth for icons/splash is `assets/` (disc-mark branding) + `app.json`.
 
 Distribution is **EAS cloud builds** → iOS TestFlight + Android internal-distribution link (project `@pinku1/subwave`, bundle `com.getsubwave.app`). The repeat-release workflow lives in the `subwave-app-ios-release` and `subwave-app-android-release` skills; getting it onto a physical Android phone over USB is `subwave-app-android`. See `app/README.md`.
+
+### Fork contracts
+
+- The MP3/AAC/Opus/FLAC preference is stored per station base URL. The effective format must also be advertised by that station and decodable by the current platform; otherwise playback falls back to MP3. Never reuse one station's preference for another.
+- Listener-time fallback uses the active format's `stream.bufferSecondsByFormat` value and only then the legacy `stream.bufferSeconds`. Keep `activeStreamFormatRef` wired through `PlayerScreen` to `useStationFeed`; native has no measured browser-buffer lag.

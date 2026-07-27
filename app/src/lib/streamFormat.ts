@@ -9,9 +9,11 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { normalizeStationOrigin } from './stationSecurity';
+import type { StreamFormat } from './streamMount';
 import type { StreamInfo } from './types';
 
-export type StreamFormat = 'mp3' | 'aac' | 'opus' | 'flac';
+export { mountFor, type StreamFormat } from './streamMount';
 
 export interface StreamFormatOption {
   format: StreamFormat;
@@ -31,12 +33,6 @@ const ALL_FORMATS = OPTION_META.map((o) => o.format);
 
 export function isStreamFormat(v: unknown): v is StreamFormat {
   return typeof v === 'string' && (ALL_FORMATS as string[]).includes(v);
-}
-
-/** Icecast mount path for a format — matches the Liquidsoap outputs and the
- *  Caddy route table (`/stream.mp3`, `/stream.opus`, …). */
-export function mountFor(format: StreamFormat): string {
-  return `/stream.${format}`;
 }
 
 /** Can THIS device's player engine decode the format? ExoPlayer (Android)
@@ -96,7 +92,14 @@ async function loadMap(): Promise<Record<string, string>> {
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, string>;
+      const clean: Record<string, string> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        const origin = normalizeStationOrigin(key);
+        if (origin && typeof value === 'string') clean[origin] = value;
+      }
+      const migrated = JSON.stringify(clean);
+      if (migrated !== raw) await AsyncStorage.setItem(STORAGE_KEY, migrated);
+      return clean;
     }
   } catch {
     /* corrupt / unavailable — behave as unset */
@@ -107,9 +110,10 @@ async function loadMap(): Promise<Record<string, string>> {
 /** Read the stored format for a station base URL, or null when unset/invalid
  *  so the caller keeps its MP3 default. */
 export async function loadFormatPref(base: string): Promise<StreamFormat | null> {
-  if (!base) return null;
+  const origin = normalizeStationOrigin(base);
+  if (!origin) return null;
   const map = await loadMap();
-  const v = map[base];
+  const v = map[origin];
   return isStreamFormat(v) ? v : null;
 }
 
@@ -117,11 +121,12 @@ export async function loadFormatPref(base: string): Promise<StreamFormat | null>
  *  entry — an unset key and the default are the same thing. Failures are
  *  swallowed; playback is unaffected. */
 export async function saveFormatPref(base: string, format: StreamFormat): Promise<void> {
-  if (!base) return;
+  const origin = normalizeStationOrigin(base);
+  if (!origin) return;
   try {
     const map = await loadMap();
-    if (format === 'mp3') delete map[base];
-    else map[base] = format;
+    if (format === 'mp3') delete map[origin];
+    else map[origin] = format;
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     /* storage full / unavailable — non-fatal */

@@ -20,7 +20,7 @@ import { fetchDirectory, type DirectoryStation } from '@/lib/directory';
 import type { StationRef } from '@/lib/station';
 import { useTheme } from '@/theme/ThemeContext';
 
-const stripProto = (u: string) => u.replace(/^https?:\/\//, '');
+const stripProto = (u: string) => normalizeBase(u).replace(/^https?:\/\//, '');
 
 function Divider({ children }: { children: string }) {
   const { colors } = useTheme();

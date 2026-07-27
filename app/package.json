@@ -21,6 +21,7 @@
     "expo-linear-gradient": "~56.0.4",
     "expo-linking": "~56.0.13",
     "expo-router": "~56.2.9",
+    "expo-secure-store": "~56.0.4",
     "expo-splash-screen": "~56.0.10",
     "expo-status-bar": "~56.0.4",
     "expo-updates": "~56.0.19",
@@ -41,7 +42,10 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "babel-preset-expo": "~56.0.0",
+    "eslint": "^9.25.0",
+    "eslint-config-expo": "56.0.3",
     "patch-package": "^8.0.1",
+    "tsx": "^4.23.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -50,6 +54,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "test:stream-buffer-format": "node --experimental-strip-types scripts/stream-buffer-format.test.mjs",
+    "test:station-credentials": "tsx scripts/station-credentials.test.mjs",
     "lint": "expo lint",
     "postinstall": "patch-package"
   },

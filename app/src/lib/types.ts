@@ -131,6 +131,8 @@ export interface StreamInfo {
    *  Every timestamp the controller publishes is live-edge; subtract this to
    *  render listener-time (issue #1114). */
   bufferSeconds?: number | null;
+  /** Exact listener delay for each selectable mount. */
+  bufferSecondsByFormat?: Partial<Record<'mp3' | 'opus' | 'aac' | 'flac', number | null>>;
 }
 
 /** `/now-playing` response. */
