@@ -76,13 +76,13 @@ jobs:
         run: |
           trap 'rm -f deploy/portainer/stack.env' EXIT
           : > deploy/portainer/stack.env
-          SUBWAVE_VERSION=v0.42.0-obiwave.1 UPSTREAM_ANALYZER_VERSION=1.0.0 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
+          SUBWAVE_VERSION=v0.42.0-obiwave.1 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
 
       - name: Render Portainer Compose configuration
         run: |
           trap 'rm -f deploy/portainer/stack.env' EXIT
           : > deploy/portainer/stack.env
-          SUBWAVE_VERSION=v0.42.0-obiwave.1 UPSTREAM_ANALYZER_VERSION=1.0.0 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org docker compose -f deploy/portainer/docker-compose.yml config --quiet
+          SUBWAVE_VERSION=v0.42.0-obiwave.1 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org docker compose -f deploy/portainer/docker-compose.yml config --quiet
 
   image-smoke:
     name: image smoke (${{ matrix.image }})

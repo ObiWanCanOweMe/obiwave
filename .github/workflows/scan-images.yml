@@ -7,10 +7,11 @@ name: Scan images
 # REPORTS findings rather than failing the job on them (exit-code 0). Once a
 # clean baseline exists, flip exit-code to fail on CRITICAL/HIGH.
 #
-# Scans only the lean, multi-arch images that the default install pulls. The
-# heavy amd64-only images (tts-heavy, aio, aio-heavy) are intentionally
-# skipped to keep the matrix runtime sane — they are opt-in and share the same
-# base layers as their lean counterparts.
+# Scans the lean, multi-arch images that the default install pulls, plus the
+# upstream CUDA analyzer deployed on Ark. The heavy amd64-only images
+# (tts-heavy, aio, aio-heavy) are intentionally skipped to keep the matrix
+# runtime sane — they are opt-in and share the same base layers as their lean
+# counterparts.
 
 on:
   workflow_call:
@@ -64,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [caddy, broadcast, controller, web, analyzer]
+        image: [caddy, broadcast, controller, web, analyzer, analyzer-cuda]
     steps:
       - uses: docker/login-action@v4
         with:
