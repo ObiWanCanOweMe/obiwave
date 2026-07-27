@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { generateText, APICallError } from 'ai';
+import { generateText, APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, snapV3Stability, modelTolerant, schemaHint, clipText, soulBrief, SOUL_BRIEF_MAX, renderTerminalPrompt, messageText } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
@@ -16,8 +16,9 @@ import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx,
 import { agentPlan } from '../src/llm/internal/strategy/plan.js';
 import { introBudgetPhrase, enforceIntroBudget } from '../src/llm/internal/prompts/intro-budget.js';
 import { embeddingBaseUrl } from '../src/llm/internal/provider/embedding.js';
-import { DEFAULT_LOCCA_EMBED_BASE_URL, openAICompatibleFetch } from '../src/llm/internal/provider/registry.js';
-import { personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
+import { createLiteLlmModel, DEFAULT_LOCCA_EMBED_BASE_URL, openAICompatibleFetch } from '../src/llm/internal/provider/registry.js';
+import { effectiveLiteLlmBaseUrl, effectiveLiteLlmApiKey } from '../src/litellm-config.js';
+import { LLM_PROVIDERS, EMBEDDING_PROVIDERS, personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
 import { lengthMode, lengthPhrase } from '../src/llm/internal/prompts/system.js';
 import { showMusicLean } from '../src/llm/internal/prompts/picker.js';
 import { planSchema } from '../src/llm/internal/prompts/programme.js';
@@ -32,6 +33,91 @@ function test(name: string, fn: () => void | Promise<void>) {
 }
 
 async function main() {
+  await test('LiteLLM URL precedence: saved override, then LITELLM, then OPENAI fallback', () => {
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: 'https://saved.example/v1' }, {
+      LITELLM_API_BASE: 'https://litellm.example/v1',
+      OPENAI_API_BASE: 'https://openai.example/v1',
+    }), 'https://saved.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {
+      LITELLM_API_BASE: 'https://litellm.example/v1/',
+      OPENAI_API_BASE: 'https://openai.example/v1',
+    }), 'https://litellm.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {
+      OPENAI_API_BASE: 'https://openai.example/v1/',
+    }), 'https://openai.example/v1');
+    assert.equal(effectiveLiteLlmBaseUrl({ baseUrl: '' }, {}), '');
+  });
+
+  await test('LiteLLM token precedence is provider-scoped before environment fallbacks', () => {
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: 'saved' }, {
+      LITELLM_API_KEY: 'litellm-env', OPENAI_API_KEY: 'openai-env',
+    }), 'saved');
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: '' }, {
+      LITELLM_API_KEY: 'litellm-env', OPENAI_API_KEY: 'openai-env',
+    }), 'litellm-env');
+    assert.equal(effectiveLiteLlmApiKey({ apiKey: '' }, {
+      OPENAI_API_KEY: 'openai-env',
+    }), 'openai-env');
+  });
+
+  await test('LiteLLM is a native cloud strategy with no body sampling injection', () => {
+    assert.equal(needsToolCallObject({ provider: 'litellm' }), false);
+    assert.equal(appliedRepeatPenalty({ provider: 'litellm', repeatPenalty: 1.2 }), null);
+    assert.equal(reasoningFor({ provider: 'litellm', model: 'vendor/model', reasoning: false }), undefined);
+  });
+
+  await test('LiteLLM is a chat provider but not an embedding provider', () => {
+    assert.equal(LLM_PROVIDERS.includes('litellm'), true);
+    assert.equal(EMBEDDING_PROVIDERS.includes('litellm'), false);
+  });
+
+  await test('LiteLLM sends a plain OpenAI chat body without local-only fields', async () => {
+    let sent: any;
+    const fetchImpl = async (_url: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'vendor/model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
+    await generateText({ model, prompt: 'Say OK', maxOutputTokens: 32 });
+    for (const key of ['repeat_penalty', 'chat_template_kwargs', 'reasoning_format', 'thinking', 'reasoning', 'parallel_tool_calls']) {
+      assert.equal(sent[key], undefined, `${key} must not be injected`);
+    }
+  });
+
+  await test('LiteLLM keeps tools but sends only temperature when callers provide both sampling knobs', async () => {
+    let sent: any;
+    const fetchImpl = async (_url: any, init: any) => {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'vendor/model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const model = createLiteLlmModel({ model: 'vendor/model', baseUrl: 'https://gateway.example/v1', apiKey: 'secret' }, fetchImpl);
+    await generateText({
+      model,
+      prompt: 'Say OK',
+      temperature: 0.8,
+      topP: 0.95,
+      maxOutputTokens: 32,
+      tools: {
+        lookup: tool({
+          description: 'Look up a value',
+          inputSchema: z.object({ query: z.string() }),
+        }),
+      },
+    });
+    assert.equal(sent.temperature, 0.8);
+    assert.equal(sent.top_p, undefined);
+    assert.equal(sent.tools.length, 1);
+    assert.equal(sent.tools[0].function.name, 'lookup');
+  });
+
   // ---- failover gate: isUnreachable ⊂ isTransient, but EXCLUDES 5xx/429 ----
   console.log('isUnreachable vs isTransient (the failover gate):');
   await test('500 is transient but NOT unreachable', () => {

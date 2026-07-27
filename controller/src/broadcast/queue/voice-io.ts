@@ -205,4 +205,3 @@ function wavDurationMs(path: string): number | null {
     if (fd != null) closeSync(fd);
   }
 }
-

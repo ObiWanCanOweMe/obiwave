@@ -11,6 +11,10 @@ import { envHasNavidrome } from '../setup/firstRun.js';
 import { MAX_STATIONS } from '../stations/pure.js';
 import * as settings from '../settings.js';
 import * as manager from '../stations/manager.js';
+import {
+  StationMutationConflictError,
+  stationMutationGuard,
+} from '../stations/lifecycle.js';
 import * as libraryDb from '../music/library-db.js';
 import { restartLiquidsoap } from '../broadcast/liquidsoap-control.js';
 
@@ -87,6 +91,12 @@ function scheduleSwitchExit(): void {
 
 const currentName = () => settings.get()?.station || 'SUB/WAVE';
 
+function rejectMutationConflict(err: unknown, res: express.Response): boolean {
+  if (!(err instanceof StationMutationConflictError)) return false;
+  res.status(409).json({ error: err.message, switching: err.switching });
+  return true;
+}
+
 router.get('/stations', requireAdmin, (req, res) => {
   try {
     res.json({
@@ -103,25 +113,33 @@ router.get('/stations', requireAdmin, (req, res) => {
 router.post('/stations', requireAdmin, async (req, res) => {
   try {
     const { name, mode } = req.body || {};
-    const { id, converted } = await manager.createStation(STATE_ROOT, {
-      name: String(name || ''),
-      mode: mode === 'duplicate' ? 'duplicate' : 'fresh',
-      currentName: currentName(),
-      // Fresh installs may never have opened library.db — a duplicate without
-      // the analysis cache is still a valid station, so tolerate failure.
-      backupLibraryDb: async (dest) => {
-        try {
-          await libraryDb.backup(dest);
-        } catch (err) {
-          console.warn('[stations] library.db copy skipped:', (err as Error).message);
-        }
+    const { id, converted } = await stationMutationGuard.run(
+      () => manager.createStation(STATE_ROOT, {
+        name: String(name || ''),
+        mode: mode === 'duplicate' ? 'duplicate' : 'fresh',
+        currentName: currentName(),
+        // Fresh installs may never have opened library.db — a duplicate without
+        // the analysis cache is still a valid station, so tolerate failure.
+        backupLibraryDb: async (dest) => {
+          try {
+            await libraryDb.backup(dest);
+          } catch (err) {
+            console.warn('[stations] library.db copy skipped:', (err as Error).message);
+          }
+        },
+      }),
+      {
+        switchOnResult: (result) => result.converted,
+        switchOnError: (err) =>
+          err instanceof manager.StationCreateError && err.converted,
       },
-    });
+    );
     // Conversion moved the running station's files under stations/main — this
     // process is now reading a stale root and must restart (spec §6).
     res.status(converted ? 202 : 201).json({ ok: true, id, converted, switching: converted });
     if (converted) scheduleSwitchExit();
   } catch (err) {
+    if (rejectMutationConflict(err, res)) return;
     // A StationCreateError with converted:true means the legacy-root
     // conversion completed before something afterward failed — that
     // conversion is durable (pointer + stations/main already on disk), so the
@@ -138,38 +156,49 @@ router.post('/stations', requireAdmin, async (req, res) => {
 
 router.patch('/stations/:id', requireAdmin, async (req, res) => {
   try {
-    const id = String(req.params.id);
-    const resolved = manager.renameStation(STATE_ROOT, id, String(req.body?.name || ''));
-    // The active station's settings live in the running process, not just on
-    // disk — route the name through settings.update() so /state (the player's
-    // name source) flips immediately. It also rewrites settings.json from
-    // memory, which is why renameStation's fs patch alone can't cover this.
-    let requiresRestart = false;
-    if (manager.activeIdOnDisk(STATE_ROOT) === id) {
-      ({ requiresRestart } = await settings.update({ station: resolved }));
-    }
+    const { requiresRestart } = await stationMutationGuard.run(async () => {
+      const id = String(req.params.id);
+      const resolved = manager.renameStation(STATE_ROOT, id, String(req.body?.name || ''));
+      // The active station's settings live in the running process, not just on
+      // disk — route the name through settings.update() so /state (the player's
+      // name source) flips immediately. It also rewrites settings.json from
+      // memory, which is why renameStation's fs patch alone can't cover this.
+      let requiresRestart = false;
+      if (manager.activeIdOnDisk(STATE_ROOT) === id) {
+        ({ requiresRestart } = await settings.update({ station: resolved }));
+      }
+      return { requiresRestart };
+    });
     res.json({ ok: true, requiresRestart });
   } catch (err) {
+    if (rejectMutationConflict(err, res)) return;
     res.status(400).json({ error: (err as Error).message });
   }
 });
 
-router.delete('/stations/:id', requireAdmin, (req, res) => {
+router.delete('/stations/:id', requireAdmin, async (req, res) => {
   try {
-    manager.deleteStation(STATE_ROOT, String(req.params.id));
+    await stationMutationGuard.run(
+      () => manager.deleteStation(STATE_ROOT, String(req.params.id)),
+    );
     res.json({ ok: true });
   } catch (err) {
+    if (rejectMutationConflict(err, res)) return;
     res.status(400).json({ error: (err as Error).message });
   }
 });
 
-router.post('/stations/:id/activate', requireAdmin, (req, res) => {
+router.post('/stations/:id/activate', requireAdmin, async (req, res) => {
   try {
     const id = String(req.params.id);
-    manager.activateStation(STATE_ROOT, id);
+    await stationMutationGuard.run(
+      () => manager.activateStation(STATE_ROOT, id),
+      { switchOnResult: () => true },
+    );
     res.status(202).json({ ok: true, switching: true, activeId: id });
     scheduleSwitchExit();
   } catch (err) {
+    if (rejectMutationConflict(err, res)) return;
     res.status(400).json({ error: (err as Error).message });
   }
 });

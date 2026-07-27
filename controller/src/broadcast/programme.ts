@@ -29,7 +29,7 @@ import * as session from './session.js';
 import type { SessionContext } from './session.js';
 import type { QueueApi } from './queue.js';
 import * as dj from '../llm/dj.js';
-import { runCapability, skillCatalog } from '../skills/_agent.js';
+import { runAutonomousCapability, skillCatalog } from '../skills/_agent.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { optionalSegmentsAllowed } from './dj-budget.js';
@@ -44,8 +44,8 @@ const INTRO_SUPPRESSES_HOURLY_MS = 45 * 60 * 1000;
 
 // Pure arc helpers live in programme-pure.ts (dependency-free, so the unit
 // test doesn't drag in the queue/settings graph) — re-exported for callers.
-import { showSpan, overrideSpan, planFeature, beatWindow } from './programme-pure.js';
-export { showSpan, overrideSpan, planFeature, beatWindow };
+import { showSpan, overrideSpan, planFeature, beatWindow, airtimeFeatureKind } from './programme-pure.js';
+export { showSpan, overrideSpan, planFeature, beatWindow, airtimeFeatureKind };
 
 // The episode's position/length at `now`. A live takeover (#930) IS the
 // episode — its window drives the arc, since the pinned show usually isn't in
@@ -299,13 +299,13 @@ export async function runFeature(queue: QueueApi, ctx: SessionContext, { hourInd
   const idx = hourIndex ?? episodeSpan(now).index;
   const feature = planFeature(plan, idx);
   const topic = feature?.topic || show.topic || `the heart of "${show.name}"`;
-  const kind = String(show.segmentSkill || '').trim() || feature?.kind || null;
+  const kind = airtimeFeatureKind(show.segmentSkill, feature?.kind, skillCatalog());
 
   return withTrace({ kind: 'programme-feature', show: show.name, capability: kind || 'talk' }, async () => {
     const speaker = settings.pickOnAirSpeaker(now);
     if (kind) {
       try {
-        return await runCapability(kind, ctx, {
+        return await runAutonomousCapability(kind, ctx, {
           brief: `This segment is the planned feature of the programme "${show.name}". Today's feature: ${topic}${plan?.angle ? ` (episode angle: ${plan.angle})` : ''}. Build the segment around it.`,
           persona: speaker,
         });
@@ -385,4 +385,3 @@ export async function onSessionSettled(queue: QueueApi, ctx: SessionContext, now
   await ensurePlan(ctx, now);
   return maybeRunIntro(queue, ctx, now);
 }
-

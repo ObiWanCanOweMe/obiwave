@@ -7,7 +7,13 @@
 // node:assert-via-tsx style, matching scripts/auto-pool.test.ts.
 
 import assert from 'node:assert/strict';
-import { showSpan, overrideSpan, planFeature, beatWindow } from '../src/broadcast/programme-pure.js';
+import {
+  showSpan,
+  overrideSpan,
+  planFeature,
+  beatWindow,
+  airtimeFeatureKind,
+} from '../src/broadcast/programme-pure.js';
 
 // A 7×24 grid with every slot null.
 function emptyWeek(): Record<number, (string | null)[]> {
@@ -101,6 +107,36 @@ function emptyWeek(): Record<number, (string | null)[]> {
   assert.equal(planFeature({ features: [] }, 0), null, 'empty features');
   assert.equal(planFeature({ features: [{ kind: 'news' }] }, 0), null, 'feature without a topic is unusable');
   assert.deepEqual(planFeature({ features: [{ topic: 't' }] }, -2), { topic: 't', kind: null }, 'negative index clamps to the first feature');
+}
+
+// Airtime must re-check station enablement. A disabled pin never bypasses the
+// live catalogue, and a kind which was valid at planning but was disabled
+// before :35 falls through to the straight-talk feature.
+{
+  const disabledPinCatalog = [
+    { name: 'weather', kind: 'weather', enabled: false, ready: true },
+    { name: 'news', kind: 'news', enabled: true, ready: true },
+  ];
+  assert.equal(
+    airtimeFeatureKind('weather', 'news', disabledPinCatalog),
+    null,
+    'regression: a disabled pinned skill must fall back to straight talk at airtime',
+  );
+
+  const plannedCatalog = [
+    { name: 'news', kind: 'news', enabled: true, ready: true },
+  ];
+  assert.equal(
+    airtimeFeatureKind(null, 'news', plannedCatalog),
+    'news',
+    'an enabled planned skill is eligible at airtime',
+  );
+  plannedCatalog[0]!.enabled = false;
+  assert.equal(
+    airtimeFeatureKind(null, 'news', plannedCatalog),
+    null,
+    'regression: a skill disabled after planning must fall back to straight talk',
+  );
 }
 
 // ── beatWindow ───────────────────────────────────────────────────────────────

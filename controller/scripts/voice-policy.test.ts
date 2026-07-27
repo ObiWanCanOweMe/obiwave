@@ -16,7 +16,7 @@
 // node:assert-via-tsx style, matching scripts/stations-manager.test.ts.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -84,6 +84,45 @@ try {
   // intro field entirely, so no tokens are ever spent writing a line that
   // can't air (the pick-path counterpart is wantLink=false).
   assert.ok(!('intro' in requestSchema().shape), 'voice off: requestSchema drops the intro field');
+
+  // A boundary-deferred autonomous ident may have been rendered while voice
+  // was ON, then wait minutes for the next track. Flipping voice OFF during
+  // that wait must drop and clean the clip at the boundary, while the track
+  // queue still progresses and the lower-level manual speech path stays live.
+  //
+  // Seed the pending value directly at the post-render seam so this regression
+  // exercises the real air-time policy without invoking an external TTS
+  // engine. This is the exact state announceAtNextTrack() stores after speak().
+  await settings.update({ tts: { enabled: true } });
+  const { queue } = await import('../src/broadcast/queue.js');
+  const { airVoice } = await import('../src/broadcast/queue/voice-io.js');
+  const { config } = await import('../src/config.js');
+  const identWav = join(root, 'rendered-ident.wav');
+  writeFileSync(identWav, 'rendered ident fixture');
+  const current = { track: { id: 'on-air', title: 'On Air', artist: 'Artist A' } };
+  const next = { track: { id: 'next', title: 'Next', artist: 'Artist B' } };
+  (queue as any).current = current;
+  (queue as any).upcoming = [next];
+  (queue as any)._pendingVoice = {
+    text: 'This is Subwave.',
+    kind: 'station-id',
+    wavPath: identWav,
+    persona: null,
+    meta: {},
+    t: Date.now(),
+  };
+
+  await settings.update({ tts: { enabled: false } });
+  await queue.airPendingVoice();
+  assert.equal((queue as any)._pendingVoice, null, 'voice off cleans the rendered pending ident');
+  assert.equal(existsSync(config.liquidsoap.introFile), false, 'voice off never hands the pending ident to Liquidsoap');
+  assert.equal(queue.current, current, 'dropping pending voice leaves the on-air track untouched');
+  assert.deepEqual(queue.upcoming, [next], 'dropping pending voice leaves music progression untouched');
+
+  await airVoice(config.liquidsoap.sayFile, identWav, 'Manual operator speech');
+  assert.equal(existsSync(config.liquidsoap.sayFile), true, 'voice off does not gate the manual speech handoff');
+  (queue as any).current = null;
+  (queue as any).upcoming = [];
 
   // ── Back ON: the ladder resumes exactly as before ──────────────────────────
   await settings.update({ tts: { enabled: true } });

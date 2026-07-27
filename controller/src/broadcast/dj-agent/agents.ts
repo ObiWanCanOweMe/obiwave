@@ -75,5 +75,3 @@ export const requestAgent = defineAgent({
   // same model through the same harness, so it fabricates the same way.
   validateObject: (object, extras) => !!(object?.id && extras?.seen?.has(object.id)),
 });
-
-

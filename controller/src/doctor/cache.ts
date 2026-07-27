@@ -91,4 +91,3 @@ export async function lastRun(): Promise<DoctorCache> {
 
 // Wrap a check so a thrown error becomes a single fail finding rather than
 // aborting runDoctor.
-

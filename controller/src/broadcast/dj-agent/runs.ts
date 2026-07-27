@@ -139,4 +139,3 @@ export function advanceRun(djMode: boolean, current: any): RunStep {
 export function runActive(): boolean {
   return !!(runState && runState.remaining > 0);
 }
-

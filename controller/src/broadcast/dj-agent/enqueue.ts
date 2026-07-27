@@ -141,5 +141,3 @@ export async function enqueuePick(
   recordPick({ song, reason, source });
   return pos;
 }
-
-

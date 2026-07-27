@@ -163,5 +163,3 @@ export function formatAgo(ms: number) {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
 }
-
-

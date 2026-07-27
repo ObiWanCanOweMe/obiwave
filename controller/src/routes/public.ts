@@ -13,6 +13,7 @@ import { getFullContext, geocodePlace } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
 import { getStreamStatus } from '../broadcast/listeners.js';
+import { streamBufferSecondsByFormat } from '../broadcast/stream-buffer.js';
 import { isIdle } from '../broadcast/stream-idle.js';
 import { getSetupStatusSync } from '../setup/firstRun.js';
 import { getStationTimezone } from '../time.js';
@@ -280,6 +281,9 @@ router.get('/now-playing', async (req, res) => {
         // varies with the mount's byte rate and the burst actually received.
         // Operator surfaces (admin dash, MCP) intentionally keep live edge.
         bufferSeconds: stationSettings.stream?.bufferSeconds ?? 22,
+        bufferSecondsByFormat: streamBufferSecondsByFormat(
+          stationSettings.stream?.bufferSeconds ?? 22,
+        ),
         opusEnabled: stationSettings.stream?.opusEnabled === true,
         flacEnabled: stationSettings.stream?.flacEnabled === true,
         aacEnabled: stationSettings.stream?.aacEnabled === true,

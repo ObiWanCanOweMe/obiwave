@@ -42,5 +42,3 @@ export function registerSkillKinds(kinds: string[]): void {
     DEDUPE_KINDS.add(k);
   }
 }
-
-

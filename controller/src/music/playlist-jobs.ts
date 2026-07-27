@@ -26,9 +26,9 @@ export interface GenerateJob {
   error: string | null;
 }
 
-// Finished jobs stay claimable this long after landing; anything older than
-// MAX_AGE_MS is dropped regardless of status, so a wedged run can't hold one
-// of the MAX_RUNNING slots forever.
+// Finished jobs stay claimable this long after landing. MAX_AGE_MS applies
+// only while running, so a wedged run can't hold one of the MAX_RUNNING slots
+// forever without shortening a late-finishing job's terminal claim window.
 export const RESULT_TTL_MS = 10 * 60_000;
 export const MAX_AGE_MS = 30 * 60_000;
 // Each run is pool building + an LLM call — refuse to stack more than this.
@@ -78,7 +78,7 @@ export function get(id: string, now: number = Date.now()): GenerateJob | undefin
 export function sweep(now: number = Date.now()): void {
   for (const [id, job] of jobs) {
     const expired = job.finishedAt !== null && now - job.finishedAt > RESULT_TTL_MS;
-    const ancient = now - job.createdAt > MAX_AGE_MS;
+    const ancient = job.status === 'running' && now - job.createdAt > MAX_AGE_MS;
     if (expired || ancient) jobs.delete(id);
   }
 }

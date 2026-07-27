@@ -62,5 +62,3 @@ export function breakerFailure(queue: any) {
 export function agentDeadline(): number {
   return settings.get().llm?.agentTimeoutMs ?? 45000;
 }
-
-

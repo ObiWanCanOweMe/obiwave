@@ -1337,6 +1337,13 @@ class Queue {
       this.dropPendingVoice('the show handoff covers this boundary');
       return;
     }
+    // The clip may have been rendered while voice was ON and waited for this
+    // boundary across a later OFF toggle. Re-check the live policy at air time
+    // and clean the autonomous clip; manual speech does not use this slot.
+    if (!autoVoiceAllowed()) {
+      this.dropPendingVoice('station voice is off');
+      return;
+    }
     const p = this._pendingVoice;
     if (!p) return;
     this._pendingVoice = null;

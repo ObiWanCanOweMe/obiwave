@@ -92,5 +92,3 @@ export async function runDoctor(): Promise<DoctorReport> {
   for await (const sec of runDoctorSections()) sections.push(sec);
   return finalizeReport(sections);
 }
-
-

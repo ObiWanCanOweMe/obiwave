@@ -197,5 +197,3 @@ function renderReportText(report: DoctorReport): string {
   }
   return lines.join('\n');
 }
-
-

@@ -106,5 +106,3 @@ export async function checkSetup(): Promise<Finding[]> {
 
   return out;
 }
-
-

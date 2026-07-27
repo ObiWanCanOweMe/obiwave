@@ -186,5 +186,3 @@ ${wantIntro
     ? `The currently-playing track named in that line is there ONLY so you can interpret asks that lean on it ("something like this", "match this energy"). It is not the track your intro introduces and it may well have finished by the time the intro airs — never mention it, back-announce it, or describe the mood it set.${dj.AIR_TIME_CLAUSE}`
     : `The currently-playing track named in that line is there ONLY so you can interpret asks that lean on it ("something like this", "match this energy") — it is not the track you are choosing.`}`;
 }
-
-
