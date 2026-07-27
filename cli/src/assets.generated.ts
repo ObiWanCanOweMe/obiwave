@@ -1224,37 +1224,40 @@ SITE_URL=
 
 # ───────── Acoustic analysis (CLAP audio-similarity + Demucs vocals) ─────────
 # The analysis pass (npm run analyze / admin "Analyze audio") computes bpm, key,
-# loudness, structure, pace and a beat grid for every track. This runs by
-# default in the lean, multi-arch \`analyzer\` sidecar — no config needed.
+# loudness, structure, pace and a beat grid for every track.
 #
-# Two heavier dimensions — CLAP "sounds-like" embeddings and Demucs vocal ranges
-# — need a CPU-torch stack that's NOT in the default image. Enable them by
-# pulling the heavy analyzer image (a one-liner, no rebuild):
-# ANALYZER_HEAVY=1   # switch the \`analyzer\` service to subwave-analyzer-heavy
-#                    # (CLAP + Demucs, ~1.9GB). amd64-only; on an arm64 host also
-#                    # set DOCKER_DEFAULT_PLATFORM=linux/amd64 (runs emulated).
-#                    # Unraid one-click (AIO) users instead pull subwave-aio-heavy.
+# Ark's Portainer split stack uses the release-tagged fork CUDA mirror:
+# ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION}.
+# The release workflow copies it byte-for-byte from
+# ghcr.io/perminder-klair/subwave-analyzer-cuda:<upstream base version>.
+# It requires top-level digest equality before scanning and deployment, never
+# rebuilds the CUDA image, and never publishes a \`latest\` mirror. Set only
+# SUBWAVE_VERSION in Portainer; use the exact fork release tag.
 #
-# NVIDIA GPU? The heavy stack can run on CUDA instead — not an .env toggle (a
-# GPU device reservation can't live here); layer the analyzer-gpu overlay:
+# Portainer gates server startup on torch.cuda.is_available(), also forces
+# ANALYZE_DEVICE=cuda at runtime, and reserves all NVIDIA GPUs. A missing torch
+# install, import failure, unavailable CUDA device, broken driver, NVIDIA
+# Container Toolkit, or Docker GPU runtime keeps the analyzer in a visible
+# restart loop instead of letting work fall back to CPU.
+# ANALYZE_IDLE_UNLOAD_S=  # seconds idle before models leave VRAM (default 300)
+#
+# Outside Ark's Portainer mirror contract: non-Portainer deployments can use
+# the upstream GPU overlay:
 #   docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 # AIO GPU packaging is upstream-owned and is not published by ObiWave.
-# ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
-#                    # only meaningful on the cuda analyzer flavour
-# ANALYZE_IDLE_UNLOAD_S=  # cuda flavour: seconds of no analysis before models are
-#                         # dropped from VRAM (default 300; 0 = keep resident).
-#                         # Frees the GPU for co-resident TTS/LLM between passes.
 #
+# Non-Portainer CPU-heavy builds only:
 # Runtime flags — env wins ON over the admin toggles (settings.audio.*), never
 # off. A flag with no matching backend in the image is a clean no-op.
-# ANALYZE_AUDIO_EMBEDDING=   # 1/true = fill CLAP audio vectors (needs ANALYZER_HEAVY)
-# ANALYZE_VOCAL_ACTIVITY=    # 1/true = fill Demucs vocal ranges (needs ANALYZER_HEAVY)
+# ANALYZE_AUDIO_EMBEDDING=   # 1/true = fill CLAP audio vectors (needs CPU-heavy build)
+# ANALYZE_VOCAL_ACTIVITY=    # 1/true = fill Demucs vocal ranges (needs CPU-heavy build)
 # ANALYZE_QUIET_ONLY=        # 1/true = pause analysis while anyone is listening;
 #                            # resumes after settings.audio.analyzeQuietMinutes
 #                            # (default 10) with no listeners (#1099)
 #
-# Building from source instead of pulling? \`docker compose build analyzer\` with
-# ANALYZER_HEAVY=1 bakes the stack (or pass WITH_CLAP=1 / WITH_DEMUCS=1 directly).
+# Building a non-Portainer CPU-heavy image from source? \`docker compose build
+# analyzer\` with ANALYZER_HEAVY=1 bakes the stack (or pass WITH_CLAP=1 /
+# WITH_DEMUCS=1 directly).
 #
 # Vocal-gate tuning (#1125). The Demucs vocal stem is thresholded against BOTH
 # its own loud level AND a fraction of the FULL-MIX loud level — the mix floor
