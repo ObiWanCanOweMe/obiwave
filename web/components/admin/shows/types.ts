@@ -169,4 +169,3 @@ export interface SettingsResponse {
   };
   tts?: { moods?: string[] };
 }
-

@@ -134,5 +134,3 @@ export function SwitchRow({ label, hint, on, onToggle, mutedLabel }: {
     </div>
   );
 }
-
-

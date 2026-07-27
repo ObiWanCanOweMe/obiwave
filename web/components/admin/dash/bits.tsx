@@ -120,4 +120,3 @@ export function oneLine(s: unknown, n = 80): string {
 
 // The Requests card — every listener request and exactly how the AI DJ
 // resolved it. Newest first; each row expands to the full debug trace.
-

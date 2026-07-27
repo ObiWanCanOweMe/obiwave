@@ -111,4 +111,3 @@ export function relTime(iso: string): string {
   if (d < 30) return `${d}d ago`;
   return new Date(iso).toLocaleDateString();
 }
-

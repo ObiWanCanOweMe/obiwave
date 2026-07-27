@@ -42,5 +42,3 @@ export function FilesTable({ files }: { files: FilesValue }) {
     </div>
   );
 }
-
-

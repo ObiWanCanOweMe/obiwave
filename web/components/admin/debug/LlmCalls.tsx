@@ -247,5 +247,3 @@ export function LlmCalls({ llm }: { llm: DebugLlm | undefined }) {
     </Card>
   );
 }
-
-

@@ -69,6 +69,27 @@ export function cloneWeek(s: Schedule): Schedule {
   return w;
 }
 
+/**
+ * Apply edits made after a save began over the controller's sanitized result.
+ * Cells unchanged since submission stay authoritative; only genuinely newer
+ * draft cells remain dirty for the next save.
+ */
+export function rebaseScheduleEdits(
+  submitted: Schedule,
+  currentDraft: Schedule,
+  authoritative: Schedule,
+): Schedule {
+  const rebased = cloneWeek(authoritative);
+  for (let d = 0; d < 7; d++) {
+    for (let h = 0; h < 24; h++) {
+      const submittedValue = submitted[d]?.[h] ?? null;
+      const currentValue = currentDraft[d]?.[h] ?? null;
+      if (currentValue !== submittedValue) rebased[d]![h] = currentValue;
+    }
+  }
+  return rebased;
+}
+
 export function dayName(day: number): string {
   return DAYS.find(d => d.key === day)?.name ?? '';
 }

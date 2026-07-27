@@ -57,5 +57,3 @@ export function SessionChat({ session }: { session: DebugSession }) {
     </Conversation>
   );
 }
-
-

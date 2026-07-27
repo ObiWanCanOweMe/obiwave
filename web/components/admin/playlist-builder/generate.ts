@@ -81,4 +81,3 @@ export async function runGenerationJob(adminFetch: AdminFetch, body: unknown): P
 }
 
 export const energyPct = (e?: string | null): number => (e === 'low' ? 34 : e === 'high' ? 92 : 64);
-

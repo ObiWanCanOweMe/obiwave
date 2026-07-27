@@ -151,5 +151,3 @@ export function FilterChip({ active, onClick, children }: FilterChipProps) {
     </button>
   );
 }
-
-

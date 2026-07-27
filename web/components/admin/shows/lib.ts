@@ -167,5 +167,3 @@ export function showRow(s: Show, index: number, personas: Persona[], apiBase: st
     ok: showValid(s),
   };
 }
-
-

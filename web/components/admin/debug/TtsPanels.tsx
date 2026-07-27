@@ -140,5 +140,3 @@ function TtsCallList({ calls }: { calls: TtsCall[] }) {
 export function mapChatRole(role?: string): 'user' | 'assistant' | 'system' {
   return role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'system';
 }
-
-

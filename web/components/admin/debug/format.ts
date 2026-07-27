@@ -45,4 +45,3 @@ export function kindTone(k?: string): string {
       return 'accent';
   }
 }
-

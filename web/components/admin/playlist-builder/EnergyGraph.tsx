@@ -103,5 +103,3 @@ export function EnergyGraph({ tracks, arc, open, onToggle, onBarClick }: {
     </div>
   );
 }
-
-

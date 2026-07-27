@@ -96,6 +96,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { DiscMark } from '../../lib/discMark';
+import { requestGuardedNavigation } from '../../lib/guardedNavigation';
 import { animate as motionAnimate } from 'motion/react';
 
 type NavIcon = ComponentType<{
@@ -387,6 +388,8 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
 // field is focused (it never intercepts a bare keystroke).
 function AdminCommandMenu() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -405,7 +408,13 @@ function AdminCommandMenu() {
 
   const go = (href: string) => () => {
     setOpen(false);
-    router.push(href);
+    const search = searchParams.toString();
+    requestGuardedNavigation({
+      kind: 'push',
+      href,
+      currentHref: `${pathname || ''}${search ? `?${search}` : ''}`,
+      proceed: () => router.push(href),
+    });
   };
 
   // Flatten the sidebar nav (section items + their route/tab children) into one
@@ -893,4 +902,3 @@ function SignedOutHeader() {
     </header>
   );
 }
-

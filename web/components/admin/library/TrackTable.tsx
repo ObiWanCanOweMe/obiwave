@@ -10,7 +10,7 @@ import { Fragment, useRef, useState } from 'react';
 import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical } from 'lucide-react';
 import { Btn } from '../ui';
 import { cn } from '../../../lib/cn';
- 
+
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { BlockType, TableVariant, Track } from './types';
@@ -350,4 +350,3 @@ function BlockMenu({ track, busy, disabled, onBlock, className }: {
 // blocked tracks still appear in browse/search (the library browser shows the
 // library), they just never make it to the queue.
 // ---------------------------------------------------------------------------
-

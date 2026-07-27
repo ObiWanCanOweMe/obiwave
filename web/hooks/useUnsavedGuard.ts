@@ -1,46 +1,58 @@
 'use client';
 
-// Unsaved-work guard for an admin panel that batches edits locally and pushes
-// them in one save (the Rundown's week, and anything else that grows the same
-// shape). Two exits are covered:
-//
-//   - leaving the site / reloading the tab → the browser's own beforeunload
-//     prompt, which is all a page can do there;
-//   - clicking any in-app link (sidebar, breadcrumb, a card) → intercepted in
-//     the CAPTURE phase before Next's router sees it, handed to the caller as
-//     a href so it can ask what to do and navigate itself.
-//
-// Deliberately NOT covered: the browser back button. Trapping it means pushing
-// a decoy history entry, which breaks back for everyone who has nothing
-// pending — a worse trade than the case it saves.
-
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
+import {
+  installUnsavedNavigationGuard,
+  requestGuardedNavigation,
+  type GuardedNavigationIntent,
+  UnsavedHistoryBarrier,
+  UnsavedHistoryBarrierLifecycle,
+} from '../lib/guardedNavigation';
 
 /**
- * @param active     guard only while there is something to lose.
- * @param onNavigate called with the intercepted in-app destination (path +
- *                   query + hash). The caller owns the prompt and the
- *                   subsequent `router.push`.
+ * Protects a locally edited admin screen from every client-side exit:
+ * anchors, shared programmatic navigation, and browser Back. Reloads and
+ * off-origin exits retain the browser's native beforeunload prompt.
  */
-export function useUnsavedGuard(active: boolean, onNavigate: (href: string) => void): void {
-  // Held in a ref so a caller passing an inline arrow doesn't re-register the
-  // listeners on every render.
+export function useUnsavedGuard(
+  active: boolean,
+  onNavigate: (intent: GuardedNavigationIntent) => void,
+): void {
+  const router = useRouter();
   const cb = useRef(onNavigate);
+  const lifecycleRef = useRef<UnsavedHistoryBarrierLifecycle | null>(null);
+  lifecycleRef.current ??= new UnsavedHistoryBarrierLifecycle();
   cb.current = onNavigate;
 
   useEffect(() => {
     if (!active) return;
 
+    const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const lease = lifecycleRef.current!.acquire(
+      () => new UnsavedHistoryBarrier(window.history, currentHref, {
+        events: {
+          add: listener => window.addEventListener('popstate', listener),
+          remove: listener => window.removeEventListener('popstate', listener),
+        },
+        onGuardedBack: () => {
+          requestGuardedNavigation({
+            kind: 'back',
+            currentHref,
+            proceed: () => {},
+          });
+        },
+      }),
+    );
+    const barrier = lease.barrier;
+    const removeGuard = installUnsavedNavigationGuard(barrier, intent => cb.current(intent));
+
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      // Legacy browsers still key off returnValue; the string itself is never
-      // shown (browsers render their own copy).
       e.returnValue = '';
     };
 
     const onClick = (e: MouseEvent) => {
-      // Anything but a plain left click is the operator asking for a new tab,
-      // a context menu, or a download — none of which lose the pending work.
       if (e.defaultPrevented || e.button !== 0) return;
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const target = e.target as Element | null;
@@ -54,21 +66,27 @@ export function useUnsavedGuard(active: boolean, onNavigate: (href: string) => v
       } catch {
         return;
       }
-      // Off-origin navigations unload the document, so beforeunload already
-      // prompts — intercepting here would double up.
       if (url.origin !== window.location.origin) return;
-      // A link back to this very screen changes nothing.
       if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+
       e.preventDefault();
       e.stopPropagation();
-      cb.current(`${url.pathname}${url.search}${url.hash}`);
+      const href = `${url.pathname}${url.search}${url.hash}`;
+      requestGuardedNavigation({
+        kind: 'push',
+        href,
+        currentHref,
+        proceed: () => router.push(href),
+      });
     };
 
     window.addEventListener('beforeunload', onBeforeUnload);
     document.addEventListener('click', onClick, true);
     return () => {
+      removeGuard();
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClick, true);
+      lease.release();
     };
-  }, [active]);
+  }, [active, router]);
 }

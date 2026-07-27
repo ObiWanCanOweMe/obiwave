@@ -113,5 +113,3 @@ export function SubsonicCalls({ subsonic }: { subsonic: DebugSubsonic | undefine
     </Card>
   );
 }
-
-

@@ -46,4 +46,3 @@ export function ChipRow({ options, selected, onToggle, cap = FILTER_VALUES_MAX }
     </div>
   );
 }
-

@@ -2,7 +2,7 @@
 //
 // Part of the library/ split - see ../LibraryPanel.tsx.
 
- 
+
 import type { TaggerState, LibraryStatsLite, BudgetMode } from '../LibraryTaggingPanel';
 
 // ---------------------------------------------------------------------------
@@ -122,4 +122,3 @@ export const SORTS: Sort[] = ['artist', 'title', 'year', 'taggedAt', 'bpm', 'lou
 // ---------------------------------------------------------------------------
 // Track length as m:ss, or null when unknown/zero (Navidrome omits duration on
 // some rows — don't render "0:00" for those).
-

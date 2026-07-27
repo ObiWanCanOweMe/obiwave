@@ -140,4 +140,3 @@ export function ShowDefRow({ show: s, index: i, ok, hrs, host, guests, apiBase, 
     </article>
   );
 }
-

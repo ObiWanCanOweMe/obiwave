@@ -8,7 +8,7 @@ import type { RefObject } from 'react';
 import { useEffect, useState } from 'react';
 import { ADMIN_API_URL } from '../../../lib/adminAuth';
 import { cn } from '../../../lib/cn';
- 
+
 import type { Track } from './types';
 
 export function fmtDuration(sec?: number | null): string | null {
@@ -36,7 +36,7 @@ export function Thumb({ track }: { track: Track }) {
   return (
     <span className="lib-thumb">
       {showImg ? (
-         
+
         <img
           src={`${ADMIN_API_URL}/cover/${encodeURIComponent(track.id)}`}
           alt=""
@@ -111,4 +111,3 @@ export const MENU_ITEM =
 // and the inline cluster hides. Same actions, same handlers — no mobile-only
 // behaviour, just a different affordance.
 // ---------------------------------------------------------------------------
-

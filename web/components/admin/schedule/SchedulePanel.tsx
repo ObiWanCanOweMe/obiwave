@@ -15,8 +15,8 @@
 import type { ChangeEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAdminAuth } from '../../../lib/adminAuth';
+import type { GuardedNavigationIntent } from '../../../lib/guardedNavigation';
 import { notify, errorMessage } from '../../../lib/notify';
 import { fmtClock, normalizeStationLocale, zonedDayHour } from '../../../lib/format';
 import type { StationLocale } from '../../../lib/types';
@@ -36,7 +36,7 @@ import { ColorChip, Mu, SegBtn, SlotMenu } from './bits';
 import type { Block, Schedule, ScheduleShow } from './lib';
 import {
   DAYS, SHOW_COLORS, blockAhead, blockAt, bookedHours, cloneWeek, dayBlocks,
-  dayName, diffCells, diffRanges, emptyWeek, hhmm, setRange, showHours,
+  dayName, diffCells, diffRanges, emptyWeek, hhmm, rebaseScheduleEdits, setRange, showHours,
   weekOrders,
 } from './lib';
 
@@ -96,7 +96,6 @@ function hydrateShow(raw: Record<string, unknown>): ScheduleShow | null {
 
 export default function SchedulePanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
-  const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
   const [shows, setShows] = useState<ScheduleShow[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -121,9 +120,8 @@ export default function SchedulePanel() {
 
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
-  // The in-app destination an unsaved-edits click was held back from (see the
-  // leave guard below); null when nothing is pending.
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  // The link, command-menu jump, or Back action held by the shared leave guard.
+  const [pendingNavigation, setPendingNavigation] = useState<GuardedNavigationIntent | null>(null);
 
   // Takeover (#930).
   const [override, setOverride] = useState<ScheduleOverride | null>(null);
@@ -271,18 +269,29 @@ export default function SchedulePanel() {
   // ── persistence ──────────────────────────────────────────────────────────
   const saveWeek = async (): Promise<boolean> => {
     if (!schedule) return false;
+    const submittedSchedule = cloneWeek(schedule);
     setBusy(true);
     try {
       const r = await adminFetch('/schedule', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedule }),
+        body: JSON.stringify({ schedule: submittedSchedule }),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string; dropped?: number };
+      const j = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        dropped?: number;
+        schedule?: Schedule;
+      };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
-      setServerSchedule(cloneWeek(schedule));
-      notify.ok(j.dropped
-        ? `Week saved — ${j.dropped} slot(s) skipped (unsaved shows). The current hour applies on the next pick.`
+      if (!j.schedule) throw new Error('controller returned no saved schedule');
+      const authoritativeSchedule = j.schedule;
+      setSchedule(currentDraft => currentDraft
+        ? rebaseScheduleEdits(submittedSchedule, currentDraft, authoritativeSchedule)
+        : cloneWeek(authoritativeSchedule));
+      setServerSchedule(cloneWeek(authoritativeSchedule));
+      const skipped = j.dropped ?? 0;
+      notify.ok(skipped
+        ? `Week saved — ${skipped} slot(s) skipped (unsaved shows). The current hour applies on the next pick.`
         : 'Week saved — the current hour applies on the next pick.');
       return true;
     } catch (e) {
@@ -318,11 +327,11 @@ export default function SchedulePanel() {
 
   // Leaving with edits pending used to lose them silently — the whole reason
   // the save is easy to miss. Hold the click, ask, then navigate.
-  useUnsavedGuard(dirty > 0, setPendingHref);
+  useUnsavedGuard(dirty > 0, setPendingNavigation);
 
-  const leaveTo = (href: string) => {
-    setPendingHref(null);
-    router.push(href);
+  const leave = (navigation: GuardedNavigationIntent) => {
+    setPendingNavigation(null);
+    navigation.proceed();
   };
 
   // ── takeover ─────────────────────────────────────────────────────────────
@@ -455,9 +464,10 @@ export default function SchedulePanel() {
   }
 
   // ── now band derivations ─────────────────────────────────────────────────
-  const curBlock = blockAt(schedule, nowDay, nowHour);
-  const nextBlock = blockAhead(schedule, nowDay, nowHour, 1);
-  const laterBlock = blockAhead(schedule, nowDay, nowHour, 2);
+  const liveSchedule = serverSchedule ?? schedule;
+  const curBlock = blockAt(liveSchedule, nowDay, nowHour);
+  const nextBlock = blockAhead(liveSchedule, nowDay, nowHour, 1);
+  const laterBlock = blockAhead(liveSchedule, nowDay, nowHour, 2);
   const elapsedMin = (nowHour - curBlock.start) * 60 + stationMinute;
   const totalMin = curBlock.span * 60;
   const leftMin = Math.max(0, totalMin - elapsedMin);
@@ -758,14 +768,14 @@ export default function SchedulePanel() {
       {/* Leave guard — a link was clicked with the week still unsaved. Three
           ways out, and the default (accent) one keeps the work. */}
       <Modal
-        open={pendingHref !== null}
-        onOpenChange={open => { if (!open) setPendingHref(null); }}
+        open={pendingNavigation !== null}
+        onOpenChange={open => { if (!open) setPendingNavigation(null); }}
         title="Leave without saving?"
         sub={`${dirty} hour${dirty === 1 ? '' : 's'} changed`}
         width={520}
         footer={
           <div className="flex w-full flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setPendingHref(null)}>
+            <Button variant="ghost" size="sm" onClick={() => setPendingNavigation(null)}>
               Stay here
             </Button>
             <span className="ml-auto flex flex-wrap gap-2">
@@ -773,7 +783,7 @@ export default function SchedulePanel() {
                 variant="default"
                 size="sm"
                 disabled={busy}
-                onClick={() => { if (pendingHref) leaveTo(pendingHref); }}
+                onClick={() => { if (pendingNavigation) leave(pendingNavigation); }}
               >
                 Discard and leave
               </Button>
@@ -782,10 +792,10 @@ export default function SchedulePanel() {
                 size="sm"
                 disabled={busy}
                 onClick={async () => {
-                  const href = pendingHref;
+                  const navigation = pendingNavigation;
                   // Only leave once the week is actually on the controller —
                   // a failed save keeps the operator here with the edits.
-                  if (href && await saveWeek()) leaveTo(href);
+                  if (navigation && await saveWeek()) leave(navigation);
                 }}
               >
                 {busy ? 'Saving…' : 'Save and leave'}

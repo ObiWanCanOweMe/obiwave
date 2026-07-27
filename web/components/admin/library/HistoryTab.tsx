@@ -128,4 +128,3 @@ export function HistoryTab({ rows, total, page, setPage, loading, queuing, onQue
 // LLM tagger's, and "apply to whole album" tags every track on the album so a
 // folder/album of content can be targeted at once (discussion #336).
 // ---------------------------------------------------------------------------
-

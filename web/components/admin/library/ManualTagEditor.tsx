@@ -8,7 +8,7 @@ import type { ChangeEvent } from 'react';
 import { useState } from 'react';
 import { Btn, Eyebrow, Pill, Seg } from '../ui';
 import { cn } from '../../../lib/cn';
- 
+
 import { SkeletonText } from '@/components/ui/skeleton';
 import type { Track } from './types';
 
@@ -91,4 +91,3 @@ export function ManualTagEditor(props: {
 // through the controller's /playlists routes (Subsonic createPlaylist /
 // updatePlaylist under the hood).
 // ---------------------------------------------------------------------------
-

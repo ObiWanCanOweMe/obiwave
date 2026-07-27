@@ -8,7 +8,7 @@ import { Fragment } from 'react';
 import { RefreshCw, X, Ban } from 'lucide-react';
 import { Card, Btn } from '../ui';
 import { cn } from '../../../lib/cn';
- 
+
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { BlockEntry } from './types';
@@ -77,4 +77,3 @@ export function BlockedTab({ entries, loading, unblocking, onUnblock, onRefresh 
 // re-queued straight from here. Grouped by day so a scan of "what aired last
 // night" doesn't need to parse timestamps.
 // ---------------------------------------------------------------------------
-

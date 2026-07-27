@@ -83,5 +83,3 @@ function BudgetRow({ label, value }: { label: string; value: ReactNode }) {
     </div>
   );
 }
-
-

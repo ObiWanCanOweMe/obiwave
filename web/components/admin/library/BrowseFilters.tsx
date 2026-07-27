@@ -12,7 +12,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '../../ui/input-gro
 import { Field, FieldLabel } from '../../ui/field';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../ui/select';
 import { cn } from '../../../lib/cn';
- 
+
 import type { Energy, Sort, Vocal } from './types';
 import { EnergyMeter } from './bits';
 
@@ -188,4 +188,3 @@ export function BrowseFilters(p: BrowseFiltersProps) {
 // ---------------------------------------------------------------------------
 // track table
 // ---------------------------------------------------------------------------
-

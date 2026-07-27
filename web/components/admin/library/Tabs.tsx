@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react';
 import { Search, Ban, Music, LayoutGrid, History } from 'lucide-react';
 import { cn } from '../../../lib/cn';
- 
+
 import type { Tab } from './types';
 
 export function Tabs({ tab, setTab }: {
@@ -44,4 +44,3 @@ export function Tabs({ tab, setTab }: {
 // ---------------------------------------------------------------------------
 // browse filters
 // ---------------------------------------------------------------------------
-

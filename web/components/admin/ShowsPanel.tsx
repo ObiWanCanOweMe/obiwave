@@ -616,4 +616,3 @@ export default function ShowsPanel() {
     </div>
   );
 }
-
