@@ -21,14 +21,19 @@ const newFile = 'services:\n  controller:\n    image: new\n';
 const releaseManifest = `services:
   controller:
     image: ghcr.io/obiwancanoweme/subwave-controller:\${SUBWAVE_VERSION:?required}
+  analyzer:
+    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}
 `;
 const renderedManifest = `services:
   controller:
     image: ghcr.io/obiwancanoweme/subwave-controller:v0.42.0-obiwave.1
+  analyzer:
+    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}
 `;
 const oldEnv = [
   { name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' },
   { name: 'SUBWAVE_VERSION', value: 'v0.41.0-obiwave.3' },
+  { name: 'UPSTREAM_ANALYZER_VERSION', value: '1.0.0', preserved: 'upstream-pin' },
 ];
 
 function jsonResponse(body, init = {}) {
@@ -123,7 +128,11 @@ test('renders every exact release placeholder with the immutable target tag', ()
   const rendered = renderReleaseManifest(twice, 'v0.42.0-obiwave.1');
 
   assert.equal(rendered.match(/v0\.42\.0-obiwave\.1/g)?.length, 2);
-  assert.doesNotMatch(rendered, /SUBWAVE_VERSION/);
+  assert.doesNotMatch(rendered, /\$\{SUBWAVE_VERSION[^}]*\}/);
+  assert.match(
+    rendered,
+    /ghcr\.io\/perminder-klair\/subwave-analyzer-cuda:\$\{UPSTREAM_ANALYZER_VERSION:\?required\}/,
+  );
 });
 
 test('rejects missing or unsupported release placeholders before deployment', () => {
@@ -369,8 +378,11 @@ test('stream probe preserves the original read error when cancellation also fail
   );
 });
 
-test('deploys the rendered checked-in manifest with an unseeded operator environment', async () => {
-  const unseededEnv = [{ name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' }];
+test('deploys the rendered checked-in manifest while preserving the operator upstream pin', async () => {
+  const unseededEnv = [
+    { name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' },
+    { name: 'UPSTREAM_ANALYZER_VERSION', value: '1.0.0', preserved: 'upstream-pin' },
+  ];
   const successfulUpdateCalls = [];
   const portainerFetch = async (url, options = {}) => {
     const parsed = new URL(url);
@@ -400,10 +412,11 @@ test('deploys the rendered checked-in manifest with an unseeded operator environ
   const update = JSON.parse(successfulUpdateCalls[0].body);
   assert.deepEqual(update.Env, [
     { name: 'ADMIN_USER', value: 'operator', preserved: 'exactly' },
+    { name: 'UPSTREAM_ANALYZER_VERSION', value: '1.0.0', preserved: 'upstream-pin' },
     { name: 'SUBWAVE_VERSION', value: 'v0.42.0-obiwave.1' },
   ]);
   assert.equal(update.StackFileContent, renderedManifest);
-  assert.doesNotMatch(update.StackFileContent, /SUBWAVE_VERSION/);
+  assert.doesNotMatch(update.StackFileContent, /\$\{SUBWAVE_VERSION[^}]*\}/);
   assert.deepEqual(result, {
     previousVersion: null,
     targetVersion: 'v0.42.0-obiwave.1',

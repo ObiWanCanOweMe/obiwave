@@ -52,6 +52,14 @@ test('fork releases deliberately exclude the upstream CUDA analyzer image', () =
   assert.doesNotMatch(publish, /subwave-analyzer-cuda/);
 });
 
+test('CI resolves the independently pinned upstream CUDA analyzer', () => {
+  assert.match(
+    ci,
+    /UPSTREAM_ANALYZER_VERSION=1\.0\.0[\s\S]*validate-portainer-compose\.mjs/,
+  );
+  assert.doesNotMatch(publish, /subwave-analyzer-cuda/);
+});
+
 test('CLI asset drift watches the analyzer GPU overlay', () => {
   assert.match(verifyCliAssets, /docker-compose\.analyzer-gpu\.yml/);
 });
