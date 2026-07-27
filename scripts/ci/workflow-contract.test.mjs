@@ -79,6 +79,30 @@ test('release publication waits for the reusable CI gate', () => {
   assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images\]/);
 });
 
+test('publication grants package access only to jobs that need it', () => {
+  const workflowPermissions = publish.slice(
+    publish.indexOf('\npermissions:'),
+    publish.indexOf('\nconcurrency:'),
+  );
+  const preflight = publish.slice(
+    publish.indexOf('  tag-preflight:'),
+    publish.indexOf('  mirror-cuda-analyzer:'),
+  );
+  const mirror = publish.slice(
+    publish.indexOf('  mirror-cuda-analyzer:'),
+    publish.indexOf('  build:'),
+  );
+  const build = publish.slice(
+    publish.indexOf('  build:'),
+    publish.indexOf('  scan-images:'),
+  );
+
+  assert.match(workflowPermissions, /^\npermissions:\n  contents: read\n$/);
+  assert.match(preflight, /permissions:\n      contents: read\n      packages: read/);
+  assert.match(mirror, /permissions:\n      contents: read\n      packages: write/);
+  assert.match(build, /permissions:\n      contents: read\n      packages: write/);
+});
+
 test('release tag concurrency never cancels an in-flight publication', () => {
   assert.match(publish, /concurrency:\s*\n\s+group: publish-images-\$\{\{ github\.ref_name \}\}\s*\n\s+cancel-in-progress: false/);
 });
@@ -91,7 +115,10 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
 
   const preflight = publish.slice(preflightStart, buildStart);
   const build = publish.slice(buildStart, scanStart);
-  for (const image of [
+  const matrix = preflight.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
+  assert.ok(matrix, 'missing tag-preflight image matrix');
+  const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
+  assert.deepEqual(images, [
     'subwave-caddy',
     'subwave-broadcast',
     'subwave-controller',
@@ -102,9 +129,7 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
     'subwave-analyzer',
     'subwave-analyzer-heavy',
     'subwave-analyzer-cuda',
-  ]) {
-    assert.match(preflight, new RegExp(`- ${image.replaceAll('-', '\\-')}(?:\\n|$)`));
-  }
+  ]);
   assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
 });
