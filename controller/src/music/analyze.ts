@@ -411,15 +411,15 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   type Prefetch = Promise<{ path: string; complete: boolean } | { err: any }>;
   const prefetch = (songId: string): Prefetch =>
     analyzer.downloadCapped(songId).then((r) => r, (err) => ({ err }));
-  let inflight: Prefetch | null = ids.length > 0 ? prefetch(ids[0]) : null;
+  let inflight: Prefetch | null = null;
 
   for (let i = 0; i < ids.length; i++) {
-    // Gate BEFORE the next prefetch is kicked off: while paused, only the
-    // already-inflight download (this track's) is outstanding — the pass
-    // doesn't keep pulling audio for a queue it isn't going to compute yet.
+    // Gate BEFORE any new prefetch is kicked off. On the first iteration this
+    // means no audio download starts until the quiet gate permits work; later
+    // iterations may have only the current track's one-ahead download in flight.
     await waitForQuiet(quietGate, { done: i, total: ids.length });
     const id = ids[i];
-    const downloadPromise = inflight;
+    const downloadPromise = inflight ?? prefetch(id);
     // Kick off the NEXT download before awaiting this one's analysis so the
     // fetch overlaps the compute.
     inflight = i + 1 < ids.length ? prefetch(ids[i + 1]) : null;

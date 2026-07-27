@@ -203,5 +203,3 @@ export function allTaggedSampled(max: number, totalTagged: number): ObservatoryT
   `;
   return (requireDb().prepare(sql).all(m, total) as TrackRow[]).map(rowToObservatory);
 }
-
-

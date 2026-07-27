@@ -80,5 +80,3 @@ export function setHandle(next: {
   if ('embeddingDim' in next) currentEmbeddingDim = next.embeddingDim ?? null;
   if (next.nonce !== undefined) dbNonce = next.nonce;
 }
-
-

@@ -5,6 +5,12 @@
 
 import * as db from '../library-db.js';
 import * as embeddings from '../embeddings.js';
+import {
+  bulkEmbeddingBatchSize,
+  bulkEmbeddingFailureMessage,
+  commitBulkEmbeddingBatch,
+  withBulkEmbeddingRateLimit,
+} from '../embedding-bulk.js';
 import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 
@@ -40,7 +46,8 @@ export async function phaseEmbed(
   logEvent('info', `Building similarity vectors for ${unique.length.toLocaleString('en-GB')} tracks…`);
   reportProgress({ phase: 'embed', label: 'Embedding tracks', done: 0, total: unique.length });
 
-  const embedBatchSize = Math.max(8, Math.min(64, batchSize * 2));
+  const local = embeddings.embeddingPerfAdvisory().local;
+  const embedBatchSize = bulkEmbeddingBatchSize(batchSize, local);
   for (let i = 0; i < unique.length; i += embedBatchSize) {
     const batch = unique.slice(i, i + embedBatchSize);
     const songs = batch.map(id => db.getTrack(id)).filter((t): t is db.TrackRecord => !!t);
@@ -52,18 +59,31 @@ export async function phaseEmbed(
     );
     let vecs: number[][];
     try {
-      vecs = await embeddings.embedDocTexts(texts, textMode);
-    } catch (err: any) {
-      console.error(`[tag] embedding batch failed at offset ${i}: ${err.message}`);
-      throw err;
+      vecs = await withBulkEmbeddingRateLimit(
+        () => embeddings.embedDocTexts(texts, textMode, { maxRetries: 0 }),
+        {
+          onWait: ({ seconds, attempt }) =>
+            logEvent('info', `Embedding rate limit — waiting ${seconds}s (attempt ${attempt})`),
+        },
+      );
+    } catch (err) {
+      const message = bulkEmbeddingFailureMessage(err);
+      logEvent('error', message);
+      throw new Error(message);
     }
-    for (let j = 0; j < songs.length; j++) {
-      db.upsertTrackVector(songs[j].id, vecs[j]);
-    }
-    if ((i + batch.length) % 500 === 0 || i + batch.length === unique.length) {
-      console.log(`[tag] embedded ${i + batch.length}/${unique.length}`);
-      reportProgress({ phase: 'embed', label: 'Embedding tracks', done: i + batch.length, total: unique.length });
-    }
+    commitBulkEmbeddingBatch({
+      result: vecs,
+      commit: vecs => {
+        for (let j = 0; j < songs.length; j++) db.upsertTrackVector(songs[j].id, vecs[j]);
+      },
+      onCommitted: () => {
+        reportProgress({
+          phase: 'embed',
+          label: 'Embedding tracks',
+          done: Math.min(i + batch.length, unique.length),
+          total: unique.length,
+        });
+      },
+    });
   }
 }
-

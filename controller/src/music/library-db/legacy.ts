@@ -92,5 +92,3 @@ async function archiveMoodsJson(): Promise<void> {
     }
   }
 }
-
-

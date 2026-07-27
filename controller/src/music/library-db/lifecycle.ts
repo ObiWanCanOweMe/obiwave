@@ -149,5 +149,3 @@ export async function reset(): Promise<void> {
   await rm(`${DB_PATH}-wal`, { force: true });
   await rm(`${DB_PATH}-shm`, { force: true });
 }
-
-

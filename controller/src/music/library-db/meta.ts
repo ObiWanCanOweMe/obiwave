@@ -54,5 +54,3 @@ export function setAudioEmbeddingMeta(model: string, dim: number): void {
     )
     .run(model, dim, new Date().toISOString());
 }
-
-

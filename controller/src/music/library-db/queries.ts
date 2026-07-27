@@ -180,5 +180,3 @@ export function genreCentroids(): Array<{ genre: string; count: number; centroid
   }
   return out;
 }
-
-

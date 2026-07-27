@@ -119,5 +119,3 @@ function computeStats(): LibraryStats {
     withEmbedding, withAudioEmbedding, updatedAt,
   };
 }
-
-

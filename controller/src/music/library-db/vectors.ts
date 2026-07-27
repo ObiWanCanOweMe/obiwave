@@ -166,5 +166,3 @@ export function setMapProjectionMeta(algo: string, space: string, count: number)
     )
     .run(algo, space, count, new Date().toISOString());
 }
-
-

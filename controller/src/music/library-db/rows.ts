@@ -189,4 +189,3 @@ export function normaliseYear(y: unknown): number | null {
   }
   return null;
 }
-

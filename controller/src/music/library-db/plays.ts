@@ -57,5 +57,3 @@ export function listPlays(opts: { limit?: number; offset?: number } = {}): { tot
   }));
   return { total, rows };
 }
-
-

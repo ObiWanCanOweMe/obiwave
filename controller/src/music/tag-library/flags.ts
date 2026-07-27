@@ -179,4 +179,3 @@ export async function applyWizardOverlay() {
     console.error('[setup-config] load failed:', err.message);
   }
 }
-

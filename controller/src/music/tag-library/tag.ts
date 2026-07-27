@@ -262,4 +262,3 @@ export async function resolveTagConsumers(): Promise<TagConsumer[]> {
     { pin: 'fallback', label: fb.label },
   ];
 }
-
