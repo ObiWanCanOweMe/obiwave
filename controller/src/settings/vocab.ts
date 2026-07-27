@@ -235,6 +235,7 @@ export function validateTtsCorrectionsStrict(raw: any): Array<{ from: string; to
 export const LLM_PROVIDERS = [
   'ollama',
   'openai-compatible',
+  'litellm',
   'locca',
   'openrouter',
   'requesty',
@@ -265,6 +266,21 @@ export const EMBEDDING_PROVIDERS = [
   'google',
   'requesty',
 ];
+
+export function defaultEmbeddingModelForProvider(provider: string): string {
+  switch (provider) {
+    case 'openai':
+    case 'openai-compatible':
+      return 'text-embedding-3-small';
+    case 'google':
+      return 'text-embedding-004';
+    case 'openrouter':
+    case 'requesty':
+      return 'openai/text-embedding-3-small';
+    default:
+      return 'nomic-embed-text';
+  }
+}
 
 // Coerce a stored Ollama context-window value. 0 disables (use Ollama's own
 // default); any other number is clamped to a sane [2048, 131072] band and
@@ -448,8 +464,8 @@ export function applyInlineKey(llmHost: { keys?: Record<string, string> }, provi
 // Sanitises any persisted `keys` (string values, known providers only) and
 // migrates the two legacy single slots (settings.llm.apiKey /
 // settings.llm.fallback.apiKey). Those were only ever written by the
-// openai-compatible / locca inline-key path, so a value found while the leg's
-// provider is something else is a STALE compat token that leaked into the
+// openai-compatible / locca / LiteLLM inline-key path, so a value found while
+// the leg's provider is something else is a STALE compat token that leaked into the
 // shared slot (issue #657) — attribute it to its true owner (openai-compatible)
 // rather than the current provider, which both preserves the real key and keeps
 // the env-var provider's slot empty so it resolves from secrets.env again.
@@ -469,7 +485,9 @@ export function normalizeLlmKeys(storedLlm: unknown): Record<string, string> {
     }
   }
   const ownerFor = (prov: unknown): string =>
-    prov === 'openai-compatible' || prov === 'locca' ? (prov as string) : 'openai-compatible';
+    prov === 'openai-compatible' || prov === 'locca' || prov === 'litellm'
+      ? (prov as string)
+      : 'openai-compatible';
   const legacyPrimary = typeof sl?.apiKey === 'string' ? sl.apiKey : '';
   if (legacyPrimary) {
     const owner = ownerFor(sl?.provider);
@@ -1074,4 +1092,3 @@ export const AAC_BITRATES = [128, 192, 256] as const;
 // the analyzer's measured LUFS, or tag-with-measured-fallback (the default).
 export const LOUDNESS_SOURCES = ['replaygain-then-measured', 'replaygain', 'measured'] as const;
 export type LoudnessSource = (typeof LOUDNESS_SOURCES)[number];
-

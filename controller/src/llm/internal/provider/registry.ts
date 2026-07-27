@@ -24,7 +24,9 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { createHash } from 'node:crypto';
 import { config } from '../../../config.js';
+import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../../../litellm-config.js';
 import * as settings from '../../../settings.js';
 import { recordRawRequest, rawDebugEnabled } from '../telemetry/raw-debug.js';
 import { capabilitiesFor, appliedRepeatPenalty, appliedNumCtx } from './capabilities.js';
@@ -272,12 +274,47 @@ export function resolveModelId(cfg: any): string {
   );
 }
 
+// LiteLLM can route one OpenAI-compatible request to providers with different
+// sampling contracts. Anthropic rejects requests that contain both
+// `temperature` and `top_p`, so keep the explicit temperature and drop top_p
+// when callers supplied both. Other request fields pass through unchanged.
+export function liteLlmFetch(baseFetch: any = fetch) {
+  return (url: any, init: any) => {
+    if (init?.body && typeof init.body === 'string') {
+      try {
+        const body = JSON.parse(init.body);
+        if (body.temperature !== undefined && body.top_p !== undefined) {
+          delete body.top_p;
+          init = { ...init, body: JSON.stringify(body) };
+        }
+      } catch { /* not JSON — leave the request untouched */ }
+    }
+    return baseFetch(url, init);
+  };
+}
+
+export function createLiteLlmModel(cfg: any, fetchImpl: any = debugFetch) {
+  const baseURL = effectiveLiteLlmBaseUrl(cfg);
+  if (!baseURL) throw new Error('LiteLLM base URL is empty');
+  const provider = createOpenAI({
+    baseURL,
+    apiKey: effectiveLiteLlmApiKey(cfg) || 'unused',
+    name: 'litellm',
+    fetch: liteLlmFetch(fetchImpl),
+  });
+  return provider.chat(resolveModelId(cfg));
+}
+
 // Returns an AI SDK LanguageModel for the given config (the active primary leg
 // by default). Passing an explicit cfg — the fallback leg — reuses the same
 // client cache, since the signature below already keys on every field.
 export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolean } = {}) {
   const id = resolveModelId(cfg);
-  const baseUrlSig = cfg.provider === 'locca' ? loccaBaseUrl(cfg) : (cfg.baseUrl || '');
+  const baseUrlSig = cfg.provider === 'locca'
+    ? loccaBaseUrl(cfg)
+    : cfg.provider === 'litellm'
+      ? effectiveLiteLlmBaseUrl(cfg)
+      : (cfg.baseUrl || '');
   // Construction-time no-think: two provider families can't suppress thinking
   // per-call, so a forced-tool leg needs its own reasoning-disabled INSTANCE.
   //   - OpenRouter (reasoningConstructionOnly): reasoning is fixed at model build.
@@ -289,7 +326,13 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
   const caps = capabilitiesFor(cfg.provider);
   const constructionNoThink = opts.forceNoThink === true && caps.reasoningConstructionOnly === true;
   const bodyNoThink = opts.forceNoThink === true && caps.samplingViaBody === true;
-  const sig = `${cfg.provider}|${id}|${cfg.apiKey || ''}|${ollamaBaseUrl(cfg)}|${baseUrlSig}|${cfg.reasoning ? 'r1' : 'r0'}|${(constructionNoThink || bodyNoThink) ? 'nt1' : 'nt0'}|ctx${appliedNumCtx(cfg) ?? ''}`;
+  // LiteLLM can source its token from the live environment. Include only a
+  // digest in the cache signature so an in-process key rotation rebuilds the
+  // SDK client without putting the raw secret in a cache key or diagnostic.
+  const keySig = cfg.provider === 'litellm'
+    ? createHash('sha256').update(effectiveLiteLlmApiKey(cfg)).digest('hex')
+    : (cfg.apiKey || '');
+  const sig = `${cfg.provider}|${id}|${keySig}|${ollamaBaseUrl(cfg)}|${baseUrlSig}|${cfg.reasoning ? 'r1' : 'r0'}|${(constructionNoThink || bodyNoThink) ? 'nt1' : 'nt0'}|ctx${appliedNumCtx(cfg) ?? ''}`;
 
   const cached = clientCache.get(sig);
   if (cached) return cached;
@@ -308,6 +351,10 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
     }
     case 'openai-compatible': {
       model = openAICompatibleModel(cfg, id, cfg.baseUrl, 'openai-compatible', bodyNoThink);
+      break;
+    }
+    case 'litellm': {
+      model = createLiteLlmModel(cfg);
       break;
     }
     case 'locca': {

@@ -185,6 +185,9 @@ router.get('/settings', requireAdmin, async (req, res) => {
       // via controller/.env, never typed into the admin surface.
       env: {
         OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
+        LITELLM_API_BASE: !!process.env.LITELLM_API_BASE,
+        OPENAI_API_BASE: !!process.env.OPENAI_API_BASE,
+        LITELLM_API_KEY: !!process.env.LITELLM_API_KEY,
         ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY,
         ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
         GOOGLE_GENERATIVE_AI_API_KEY: !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
@@ -242,7 +245,7 @@ router.post('/settings', requireAdmin, async (req, res) => {
     if (req.body?.tts?.remote?.url !== undefined) {
       await remoteTts.refresh();
     }
-    res.json(result);
+    res.json(settings.publicUpdateResult(result));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -366,5 +369,3 @@ router.post('/settings/navidrome/test', requireAdmin, async (req, res) => {
   }
   res.json(await subsonic.pingWith({ url, user, pass, client: 'sub-wave-admin' }));
 });
-
-

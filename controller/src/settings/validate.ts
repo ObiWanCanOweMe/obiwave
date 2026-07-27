@@ -693,4 +693,3 @@ export function validateFestivalsStrict(raw, moodNames: string[] = SHOW_MOODS) {
 }
 
 // Validate + persist. Returns { saved, requiresRestart } so the UI can react.
-

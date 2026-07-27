@@ -105,6 +105,11 @@ const CAPS: Record<string, ProviderCapabilities> = {
     samplingViaBody: true,
     reasoningLevel: NONE,
   },
+  litellm: {
+    objectStrategy: 'native',
+    repeatPenaltyApplies: false,
+    reasoningLevel: NONE,
+  },
   // locca serves local llama.cpp GGUF models — the SAME model class as Ollama,
   // not a cloud endpoint. Under native Output.object + auto tool_choice they emit
   // a schema-valid object WITHOUT calling any discovery tool (verified 32/32

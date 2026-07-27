@@ -36,7 +36,6 @@ export function effectiveFrequency(persona: unknown = getEffectivePersona()) {
   const i = FREQUENCIES.indexOf(base);
   return FREQUENCIES[Math.min(i + 1, FREQUENCIES.length - 1)];
 }
-
 // Single gate for the transition effects (filter sweep + echo washout): they're
 // on whenever the on-air persona is in DJ mode — no separate toggle. The picker
 // schema/prompt builders use this to decide whether to offer the DJ the
@@ -357,4 +356,3 @@ export function onAirRosterClause(persona: unknown, date: Date = new Date()): st
   }
   return '';
 }
-

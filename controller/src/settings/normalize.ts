@@ -74,7 +74,6 @@ function normalizeSkills(raw: unknown) {
   }
   return out;
 }
-
 function normalizeTts(raw: unknown) {
   const r = (raw ?? {}) as Record<string, unknown>;
   const engine = TTS_ENGINES.includes(r.engine as string) ? (r.engine as string) : 'piper';
@@ -310,8 +309,6 @@ export function normalizeScheduleOverride(raw: unknown, showIds: string[]): Sche
   if (startedAt >= expiresAt || expiresAt <= Date.now()) return null;
   return { showId, startedAt, expiresAt };
 }
-
-
 export function normalizeWebhooks(raw: unknown): Webhook[] {
   if (!Array.isArray(raw)) return [];
   const out: Webhook[] = [];
@@ -339,5 +336,3 @@ export function normalizeWebhooks(raw: unknown): Webhook[] {
   }
   return out;
 }
-
-

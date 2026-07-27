@@ -25,24 +25,38 @@ import { llmCfg, ollamaBaseUrl, loccaEmbedBaseUrl, OPENROUTER_APP_HEADERS } from
 // mutable Map across modules. Memoisation only; outputs are identical.
 const embedCache = new Map();
 
-function embeddingCfg() {
+function embeddingCfg(providerOverride = '') {
   const s: any = settings.get().embedding || {};
   const llm = llmCfg();
+  const savedProvider = s.provider || llm.provider || 'ollama';
+  const provider = providerOverride || savedProvider;
+  // The single inline embedding bearer belongs to the saved compatible
+  // provider only. A transient form override must not carry it to another
+  // adapter (or to a different compatible origin).
+  const inlineApiKey =
+    provider === savedProvider && provider === 'openai-compatible' ? s.apiKey : '';
+  const providerBaseUrl = s.providerBaseUrls?.[provider] || '';
   return {
     enabled: s.enabled !== false,
-    provider: s.provider || llm.provider || 'ollama',
-    model: s.model || '',
+    provider,
+    model: provider === savedProvider ? s.model || '' : '',
     // Key precedence: the saved settings field wins, then a dedicated
     // `EMBEDDING_API_KEY` env var (the env path most installs use -- keys live in
-    // state/secrets.env, not settings.json), then the chat key. This is a
-    // runtime env read like config.ts does for SEARCH_API_KEY, so the env value
-    // never gets baked into the persisted settings.json. It covers every
-    // provider uniformly -- including openai-compatible/locca, which can't safely
-    // grab a provider-conventional env var (createOpenAI would otherwise reach
-    // for OPENAI_API_KEY against an arbitrary self-hosted server).
-    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || llm.apiKey || '',
+    // state/secrets.env, not settings.json), then the effective embedding
+    // provider's inline key. This runtime env read never gets baked into the
+    // persisted settings.json. It covers every provider uniformly -- including
+    // openai-compatible/locca, which can't safely grab a provider-conventional
+    // env var (createOpenAI would otherwise reach for OPENAI_API_KEY against an
+    // arbitrary self-hosted server).
+    apiKey: inlineApiKey || process.env.EMBEDDING_API_KEY || settings.llmKeyFor(provider) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
-    baseUrl: s.baseUrl || llm.baseUrl || '',
+    // Locca chat and embeddings are separate servers; a blank embedding URL
+    // must reach loccaEmbedBaseUrl() so it selects the dedicated port-8090 default.
+    baseUrl:
+      providerBaseUrl
+      || (provider === savedProvider ? s.baseUrl : '')
+      || (provider !== 'locca' && provider === llm.provider ? llm.baseUrl : '')
+      || '',
   };
 }
 
@@ -134,11 +148,15 @@ export function embeddingTextPrefixes(model: string): EmbeddingTextPrefixes {
 
 // Does this embedding provider run on the operator's own hardware (so model
 // weight is a CPU/RAM concern they pay for), vs a cloud API that does the work
-// off-box? Gates the heavy-model perf advisory — a big model on OpenAI/Google is
-// not the operator's performance problem. ollama / locca / openai-compatible are
-// the self-hosted transports.
-export function isLocalEmbeddingProvider(provider: string): boolean {
-  return provider === 'ollama' || provider === 'locca' || provider === 'openai-compatible';
+// off-box? Gates the heavy-model perf advisory and bulk batch sizing. Ollama and
+// Locca are always local. OpenAI-compatible is normally self-hosted, but SUB/WAVE
+// also represents remote LiteLLM gateways with that provider id; an explicit
+// HTTPS endpoint distinguishes that cloud leg while HTTP retains the local
+// homelab behaviour.
+export function isLocalEmbeddingProvider(provider: string, baseUrl = ''): boolean {
+  if (provider === 'ollama' || provider === 'locca') return true;
+  if (provider === 'openai-compatible') return !/^https:\/\//i.test(baseUrl.trim());
+  return false;
 }
 
 // Resolved embedding config. `settings.embedding` overrides settings.llm field
@@ -154,16 +172,26 @@ export interface EmbeddingCfg {
 }
 
 export function resolveEmbeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
-  const base = embeddingCfg();
+  const base = embeddingCfg(overrides.provider || '');
+  const provider = overrides.provider || base.provider;
+  const baseUrl = overrides.baseUrl ?? base.baseUrl;
+  const customEndpoint = provider === 'openai-compatible' || provider === 'locca';
+  const changedCustomEndpoint =
+    customEndpoint
+    && overrides.baseUrl !== undefined
+    && embeddingBaseUrl({ provider, baseUrl }).replace(/\/+$/, '')
+      !== embeddingBaseUrl({ provider, baseUrl: base.baseUrl }).replace(/\/+$/, '');
   return {
     enabled: overrides.enabled ?? base.enabled,
     // '' is meaningful for provider (= follow llm), so only override when a
     // non-empty value is supplied.
-    provider: overrides.provider || base.provider,
+    provider,
     model: overrides.model ?? base.model,
-    apiKey: overrides.apiKey || base.apiKey,
-    ollamaUrl: overrides.ollamaUrl || base.ollamaUrl,
-    baseUrl: overrides.baseUrl || base.baseUrl,
+    // A persisted/dedicated bearer is owned by its resolved compatible origin.
+    // An unsaved origin receives a credential only when the POST supplied it.
+    apiKey: overrides.apiKey ?? (changedCustomEndpoint ? '' : base.apiKey),
+    ollamaUrl: overrides.ollamaUrl ?? base.ollamaUrl,
+    baseUrl,
   };
 }
 

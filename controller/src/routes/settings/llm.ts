@@ -5,20 +5,25 @@
 // Part of the settings/ route split - see ../settings.ts.
 
 import express from 'express';
-import { config } from '../../config.js';
 import * as settings from '../../settings.js';
 import * as llmProvider from '../../llm/provider.js';
 import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { SECRET_ENV_KEYS } from '../../setup/secrets.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
-import { generateText, createGateway } from 'ai';
+import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { fetchWithTimeout } from '../../util/fetch-timeout.js';
+import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../../litellm-config.js';
+import {
+  discoverModels,
+  type ChatLeg,
+  type ModelOwner,
+} from './model-discovery.js';
 
 // Mounted onto the parent settings router in ../settings.ts.
 export const router = express.Router();
@@ -237,18 +242,17 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   }
 });
 
-
 // ---------------------------------------------------------------------------
-// GET /settings/llm/discover — probe a locca / openai-compatible server for
+// POST /settings/llm/discover — probe a locca / openai-compatible server for
 // liveness + its loaded model list, so the onboarding wizard and admin
 // Settings UI can auto-fill the model field with no hand-typing. Non-mutating.
 // `?baseUrl=` overrides; default is the locca host URL (host.docker.internal:8080).
 // Always 200s with { reachable, models, baseUrl } — an unreachable server is a
 // normal answer, not an error.
 // ---------------------------------------------------------------------------
-router.get('/settings/llm/discover', requireAdmin, async (req, res) => {
+router.post('/settings/llm/discover', requireAdmin, async (req, res) => {
   const baseUrl =
-    String(req.query.baseUrl || '').trim().replace(/\/+$/, '') ||
+    String(req.body?.baseUrl || '').trim().replace(/\/+$/, '') ||
     llmProvider.DEFAULT_LOCCA_BASE_URL;
   try {
     const r = await fetchWithTimeout(`${baseUrl}/models`, { timeoutMs: 3000, bodyDeadline: true });
@@ -265,14 +269,139 @@ router.get('/settings/llm/discover', requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/settings/llm/discover', requireAdmin, (_req, res) => {
+  res.status(405).json({
+    reachable: false,
+    models: [],
+    baseUrl: '',
+    error: 'Direct model discovery requires POST',
+  });
+});
+
+type LlmLegIdentity = 'primary' | 'fallback' | 'onboarding';
+
+function normalizedProviderEndpoint(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
+}
+
+function savedProviderEndpoints(provider: string): Set<string> {
+  const state = settings.get();
+  const endpoints = new Set<string>();
+  for (const leg of [state.llm, state.llm?.fallback]) {
+    const mapped = normalizedProviderEndpoint(leg?.providerBaseUrls?.[provider]);
+    if (mapped) endpoints.add(mapped);
+    if (leg?.provider === provider) {
+      const active = normalizedProviderEndpoint(leg.baseUrl);
+      if (active) endpoints.add(active);
+    }
+  }
+  // Locca's blank saved URL resolves to this fixed built-in endpoint.
+  if (provider === 'locca') endpoints.add(llmProvider.DEFAULT_LOCCA_BASE_URL);
+  return endpoints;
+}
+
+function llmLegIdentity(value: unknown): LlmLegIdentity {
+  const leg = String(value || 'primary');
+  if (leg === 'primary' || leg === 'fallback' || leg === 'onboarding') return leg;
+  throw new Error('leg must be primary, fallback, or onboarding');
+}
+
+async function resolveLiteLlmRouteConfig(input: {
+  leg: LlmLegIdentity;
+  baseUrl?: unknown;
+  apiKey?: unknown;
+}) {
+  await settings.load();
+  const s = settings.get();
+  const savedLeg = input.leg === 'primary'
+    ? s.llm
+    : input.leg === 'fallback'
+      ? s.llm?.fallback
+      : undefined;
+  const savedIsLiteLlm = savedLeg?.provider === 'litellm';
+  const suppliedBaseUrl = normalizedProviderEndpoint(input.baseUrl);
+  const suppliedApiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  const savedBaseUrl = normalizedProviderEndpoint(
+    savedLeg?.providerBaseUrls?.litellm || (savedIsLiteLlm ? savedLeg?.baseUrl : ''),
+  );
+  const environmentBaseUrl = effectiveLiteLlmBaseUrl({});
+  const baseUrl = suppliedBaseUrl || savedBaseUrl || environmentBaseUrl;
+  let apiKey = suppliedApiKey;
+  if (!apiKey && savedProviderEndpoints('litellm').has(baseUrl)) {
+    apiKey = settings.llmKeyFor('litellm');
+  }
+  if (!apiKey && baseUrl === environmentBaseUrl) {
+    apiKey = effectiveLiteLlmApiKey({});
+  }
+  return {
+    baseUrl,
+    apiKey,
+  };
+}
+
+// Owner-aware model discovery. POST keeps unsaved URLs/tokens out of browser,
+// proxy, and server query logs. The owner selects runtime credential precedence
+// and the chat leg selects the primary/fallback credential boundary.
+router.post('/settings/llm/models', requireAdmin, async (req, res) => {
+  const owner = String(req.body?.owner || '').trim() as ModelOwner;
+  const provider = String(req.body?.provider || '').trim();
+  if (!['chat', 'embedding', 'tts'].includes(owner)) {
+    return res.status(400).json({ ok: false, models: [], provider, error: 'owner must be chat, embedding, or tts' });
+  }
+  if (!provider) {
+    return res.status(400).json({ ok: false, models: [], provider, error: 'provider is required' });
+  }
+  let leg: ChatLeg | undefined;
+  if (owner === 'chat') {
+    try {
+      leg = llmLegIdentity(req.body?.leg);
+    } catch (error) {
+      return res.status(400).json({
+        ok: false,
+        models: [],
+        provider,
+        error: (error as Error).message,
+      });
+    }
+  }
+  try {
+    const result = await discoverModels({
+      owner,
+      provider,
+      leg,
+      baseUrl: typeof req.body?.baseUrl === 'string' ? req.body.baseUrl : '',
+      ollamaUrl: typeof req.body?.ollamaUrl === 'string' ? req.body.ollamaUrl : '',
+      apiKey: typeof req.body?.apiKey === 'string' ? req.body.apiKey : '',
+    });
+    res.json({ ok: true, ...result });
+  } catch (err: unknown) {
+    res.json({
+      ok: false,
+      models: [],
+      provider,
+      error: (err as { message?: string })?.message || 'discovery failed',
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /settings/llm/probe-compat — live probe for an openai-compatible key.
 // Body: { apiKey: string, baseUrl: string, model: string }
 // Always 200s with { ok, message, latencyMs }. The key is NOT saved.
 // ---------------------------------------------------------------------------
 router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
-  const { apiKey, baseUrl, model } = req.body || {};
-  if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
+  const { apiKey, baseUrl, model, provider } = req.body || {};
+  const submittedProvider = typeof provider === 'string' ? provider.trim() : '';
+  const hasSubmittedLeg = Object.prototype.hasOwnProperty.call(req.body || {}, 'leg');
+  const compatibleProviders = new Set(['openai-compatible', 'locca', 'litellm']);
+  if (submittedProvider && !compatibleProviders.has(submittedProvider)) {
+    return res.status(400).json({ ok: false, message: 'provider must be openai-compatible, locca, or litellm', latencyMs: 0 });
+  }
+  if (!submittedProvider && hasSubmittedLeg) {
+    return res.status(400).json({ ok: false, message: 'provider is required when leg is supplied', latencyMs: 0 });
+  }
+  const isLiteLlm = submittedProvider === 'litellm';
+  if (!isLiteLlm && (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim())) {
     return res.status(400).json({ ok: false, message: 'baseUrl is required', latencyMs: 0 });
   }
   if (!model || typeof model !== 'string' || !model.trim()) {
@@ -280,24 +409,43 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
   }
   const t0 = Date.now();
   try {
+    let resolvedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : '';
     let resolvedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
-    if (!resolvedApiKey) {
+    if (isLiteLlm) {
+      const cfg = await resolveLiteLlmRouteConfig({
+        leg: llmLegIdentity(req.body?.leg),
+        baseUrl,
+        apiKey,
+      });
+      resolvedBaseUrl = cfg.baseUrl;
+      resolvedApiKey = cfg.apiKey;
+      if (!resolvedBaseUrl) {
+        return res.status(400).json({ ok: false, message: 'baseUrl is required', latencyMs: 0 });
+      }
+    } else if (!resolvedApiKey) {
       await settings.load();
-      const s = settings.get();
-      const fallbackUrl = (s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
-      const targetUrl = baseUrl.trim().replace(/\/+$/, '');
-      // Match the target server to a leg, then read that leg's provider's inline
-      // key from the per-provider map (issue #657). Falls back to the
-      // openai-compatible slot when neither leg's URL matches.
-      const legProvider = (targetUrl && targetUrl === fallbackUrl)
-        ? s.llm?.fallback?.provider
-        : s.llm?.provider;
-      resolvedApiKey = settings.llmKeyFor(legProvider || 'openai-compatible');
+      if (submittedProvider) {
+        // Provider-scoped keys may be reused across legs, but only at an exact
+        // saved endpoint (or Locca's fixed built-in endpoint).
+        resolvedApiKey = savedProviderEndpoints(submittedProvider).has(resolvedBaseUrl)
+          ? settings.llmKeyFor(submittedProvider)
+          : '';
+      } else {
+        // Backward compatibility for pre-provider/pre-leg clients only:
+        // identify an exact saved leg by URL, then use that leg's provider key.
+        const s = settings.get();
+        const savedLeg = [s.llm, s.llm?.fallback].find((leg) =>
+          !!resolvedBaseUrl
+          && resolvedBaseUrl === normalizedProviderEndpoint(leg?.baseUrl));
+        resolvedApiKey = savedLeg
+          ? settings.llmKeyFor(savedLeg.provider || 'openai-compatible')
+          : '';
+      }
     }
 
     const m = createOpenAI({
       apiKey: resolvedApiKey || 'no-key',
-      baseURL: baseUrl.trim().replace(/\/+$/, ''),
+      baseURL: resolvedBaseUrl,
     }).chat(model.trim());
     await generateText({
       model: m,
@@ -311,221 +459,14 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
   }
 });
 
-// Providers whose model API returns one mixed list (chat + embedding) with no
-// type flag. For scope=embedding we can't tell them apart at the API level like
-// openai/google/openrouter/gateway do, so we trim by model-name heuristic below
-// — otherwise the embedding picker offers chat models that just fail to embed.
-const MIXED_MODEL_LIST_PROVIDERS = new Set(['ollama', 'openai-compatible', 'locca', 'requesty']);
-
-// Heuristic: does this model id look like a text-embedding model? Embedding
-// model naming is conventional — almost all carry "embed", the rest come from a
-// short list of known families (bge / gte / e5 / minilm / instructor). Anything
-// unmatched can still be typed by hand (the field falls back to a free-text
-// input when discovery returns nothing).
-function looksLikeEmbeddingModel(id: string): boolean {
-  const s = id.toLowerCase();
-  if (s.includes('embed')) return true; // nomic-embed-text, mxbai-embed-large, text-embedding-3-*, *-arctic-embed
-  return /(^|[/:_-])(bge|gte|e5|all-minilm|minilm|instructor)([/:_-]|$)/.test(s);
-}
-
-// ---------------------------------------------------------------------------
-// GET /settings/llm/models — discover available models for any LLM provider.
-// Query: provider (required), baseUrl (optional), ollamaUrl (optional).
-// Always 200s with { ok, models, provider, error? }.
-// ---------------------------------------------------------------------------
-router.get('/settings/llm/models', requireAdmin, async (req, res) => {
-  const provider = String(req.query.provider || '').trim();
-  if (!provider) {
-    return res.json({ ok: false, models: [], provider: '', error: 'provider is required' });
-  }
-  const baseUrl = String(req.query.baseUrl || '').trim().replace(/\/+$/, '');
-  const ollamaUrl = String(req.query.ollamaUrl || '').trim().replace(/\/+$/, '');
-  const scope = String(req.query.scope || '').trim(); // 'embedding' | '' (chat)
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
-
-  const resolveKey = (envName: string) => (process.env[envName] || '').trim() || '';
-
-  try {
-    let models: string[] = [];
-
-    switch (provider) {
-      case 'ollama': {
-        const url = ollamaUrl || config.ollama.url || 'http://localhost:11434';
-        const r = await fetch(`${url}/api/tags`, { signal: ctrl.signal });
-        if (!r.ok) throw new Error(`Ollama HTTP ${r.status}`);
-        const data = (await r.json()) as { models?: unknown };
-        models = Array.isArray(data?.models)
-          ? (data.models as { name?: unknown }[]).map((m) => m?.name).filter((n): n is string => typeof n === 'string')
-          : [];
-        break;
-      }
-
-      case 'openai-compatible':
-      case 'locca': {
-        const url = baseUrl
-          || (provider === 'locca' ? llmProvider.DEFAULT_LOCCA_BASE_URL : '');
-        if (!url) throw new Error('baseUrl is required for openai-compatible');
-        await settings.load();
-        // Inline key for this provider from the per-provider map (issue #657).
-        // Primary and fallback inline legs of the same provider share one entry,
-        // so the key resolves by provider id without a baseUrl match.
-        const apiKey = settings.llmKeyFor(provider);
-        const headers: Record<string, string> = {};
-        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-        const r = await fetch(`${url}/models`, { signal: ctrl.signal, headers });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string')
-          : [];
-        break;
-      }
-
-      case 'openai': {
-        const apiKey = resolveKey('OPENAI_API_KEY');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not set');
-        const r = await fetch('https://api.openai.com/v1/models', {
-          signal: ctrl.signal,
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
-        if (!r.ok) throw new Error(`OpenAI HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[])
-              .map((m) => m?.id)
-              .filter((id): id is string => typeof id === 'string')
-              .filter((id: string) => scope === 'embedding' ? id.startsWith('text-embedding-') : !id.startsWith('text-embedding-'))
-              .sort()
-          : [];
-        break;
-      }
-
-      case 'anthropic': {
-        const apiKey = resolveKey('ANTHROPIC_API_KEY');
-        if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-        const r = await fetch('https://api.anthropic.com/v1/models?limit=100', {
-          signal: ctrl.signal,
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-        });
-        if (!r.ok) throw new Error(`Anthropic HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string').sort()
-          : [];
-        break;
-      }
-
-      case 'google': {
-        const apiKey = resolveKey('GOOGLE_GENERATIVE_AI_API_KEY');
-        if (!apiKey) throw new Error('GOOGLE_GENERATIVE_AI_API_KEY not set');
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
-          signal: ctrl.signal,
-        });
-        if (!r.ok) throw new Error(`Google HTTP ${r.status}`);
-        const data = (await r.json()) as { models?: unknown };
-        models = Array.isArray(data?.models)
-          ? (data.models as { supportedGenerationMethods?: unknown; name?: unknown }[])
-              .filter((m) => {
-                const methods: string[] = Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
-                return scope === 'embedding'
-                  ? methods.includes('embedContent')
-                  : methods.includes('generateContent');
-              })
-              .map((m) => String(m?.name || '').replace(/^models\//, ''))
-              .filter(Boolean)
-              .sort()
-          : [];
-        break;
-      }
-
-      case 'deepseek': {
-        const apiKey = resolveKey('DEEPSEEK_API_KEY');
-        if (!apiKey) throw new Error('DEEPSEEK_API_KEY not set');
-        const r = await fetch('https://api.deepseek.com/v1/models', {
-          signal: ctrl.signal,
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
-        if (!r.ok) throw new Error(`DeepSeek HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string').sort()
-          : [];
-        break;
-      }
-
-      case 'openrouter': {
-        const url = scope === 'embedding'
-          ? 'https://openrouter.ai/api/v1/models?output_modalities=embeddings'
-          : 'https://openrouter.ai/api/v1/models';
-        const r = await fetch(url, { signal: ctrl.signal });
-        if (!r.ok) throw new Error(`OpenRouter HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string').sort()
-          : [];
-        break;
-      }
-
-      case 'requesty': {
-        const apiKey = resolveKey('REQUESTY_API_KEY');
-        if (!apiKey) throw new Error('REQUESTY_API_KEY not set');
-        const r = await fetch(`${llmProvider.DEFAULT_REQUESTY_BASE_URL}/models`, {
-          signal: ctrl.signal,
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
-        if (!r.ok) throw new Error(`Requesty HTTP ${r.status}`);
-        const data = (await r.json()) as { data?: unknown };
-        models = Array.isArray(data?.data)
-          ? (data.data as { id?: unknown }[]).map((m) => m?.id).filter((id): id is string => typeof id === 'string').sort()
-          : [];
-        break;
-      }
-
-      case 'gateway': {
-        // Vercel AI Gateway. Use the SDK's getAvailableModels() rather than a
-        // hand-rolled URL — the gateway lives at ai-gateway.vercel.sh/v3/ai (not
-        // Cloudflare) and the SDK resolves the key / OIDC exactly as the registry's
-        // createGateway does. No apiKey → fall through to env / OIDC credentials.
-        const apiKey = resolveKey('AI_GATEWAY_API_KEY');
-        const gw = createGateway({
-          ...(apiKey ? { apiKey } : {}),
-          fetch: (u: string | URL | Request, init?: RequestInit) => fetch(u, { ...init, signal: ctrl.signal }),
-        });
-        const { models: gwModels } = await gw.getAvailableModels();
-        models = (Array.isArray(gwModels) ? gwModels : [])
-          .filter((m: { modelType?: unknown }) => {
-            if (!scope) return true;
-            const t = m?.modelType;
-            return scope === 'embedding' ? t === 'embedding' : t !== 'embedding';
-          })
-          .map((m: { id?: unknown }) => m?.id)
-          .filter((id): id is string => typeof id === 'string')
-          .sort();
-        break;
-      }
-
-      default:
-        return res.json({ ok: false, models: [], provider, error: `unknown provider: ${provider}` });
-    }
-
-    // These providers hand back a mixed chat+embedding list; keep only the
-    // embedding-looking models so the tagger's embedding picker isn't cluttered
-    // with chat models that can't embed. Other providers already filtered by
-    // their API above.
-    if (scope === 'embedding' && MIXED_MODEL_LIST_PROVIDERS.has(provider)) {
-      models = models.filter(looksLikeEmbeddingModel);
-    }
-
-    res.json({ ok: true, models, provider });
-  } catch (err: unknown) {
-    res.json({ ok: false, models: [], provider, error: (err as { message?: string })?.message || 'discovery failed' });
-  } finally {
-    clearTimeout(timer);
-  }
+// Discovery is POST-only: URL/key form values must never enter access logs.
+router.get('/settings/llm/models', requireAdmin, (_req, res) => {
+  res.status(405).json({
+    ok: false,
+    models: [],
+    provider: '',
+    error: 'Model discovery requires POST with an explicit credential owner',
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -561,5 +502,3 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
     res.json({ ok: false, dim: null, code: 'unknown', message: (err as { message?: string })?.message || 'probe failed' });
   }
 });
-
-

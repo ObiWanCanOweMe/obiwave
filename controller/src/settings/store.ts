@@ -33,6 +33,10 @@ export function getDefaults() {
   return DEFAULTS;
 }
 
+export function publicUpdateResult(result: { requiresRestart?: unknown }) {
+  return { requiresRestart: !!result?.requiresRestart };
+}
+
 // --- Live mood accessors — the single seam every consumer reads through, so an
 // operator edit takes effect with no restart. Pre-load, get() returns DEFAULTS,
 // so these still answer with the seed vocabulary (keeps the standalone
@@ -125,4 +129,3 @@ export function minTrackSeconds(s: { crossfadeDuration?: unknown } | null | unde
   const cross = Number.isFinite(xf) && xf > 0 ? xf : DEFAULTS.crossfadeDuration;
   return Math.max(30, Math.ceil(2 * cross));
 }
-

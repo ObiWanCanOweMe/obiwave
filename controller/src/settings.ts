@@ -26,6 +26,7 @@ import { STATE_DIR } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
 import { DEFAULT_THEME_ID, isValidThemeId, listThemes } from './themes.js';
 import { isValidTimezone, setStationTimezone } from './time.js';
+import { effectiveLiteLlmBaseUrl } from './litellm-config.js';
 import {
   AAC_BITRATES,
   CHATTERBOX_VOICE_RE,
@@ -35,6 +36,7 @@ import {
   DJ_PROMPT_TEXT_MAX,
   DJ_PROMPT_TEXT_MIN,
   DjPromptEntry,
+  EMBEDDING_PROVIDERS,
   FESTIVAL_DEFAULTS,
   KOKORO_LANGS,
   KOKORO_LANG_RE,
@@ -64,6 +66,7 @@ import {
   clampTtsGain,
   clampTtsSpeed,
   coerceGuestPersonaIds,
+  defaultEmbeddingModelForProvider,
   mintId,
   normalizeLlmKeys,
   normalizeLlmProviderBaseUrls,
@@ -180,6 +183,7 @@ export {
   moodPromptFor,
   moodScheduleFor,
   moodVocab,
+  publicUpdateResult,
   resolveMaxOutputTokens,
   weatherMoodFor,
 } from './settings/store.js';
@@ -329,12 +333,13 @@ export async function load() {
     { ...fbStored, provider: fbProvider },
     LLM_PROVIDERS,
   );
-  // The embedding leg inherits the chat provider when its own is empty, so the
-  // legacy dedicated embedding URL (issue #405) must migrate under the
-  // EFFECTIVE provider — that's the key the admin UI reads and writes.
-  const embedProvider =
-    (typeof stored.embedding?.provider === 'string' && stored.embedding.provider.trim()) ||
-    llmProvider;
+  // Blank embeddings follow the chat provider only when it can embed. A
+  // chat-only provider (LiteLLM, DeepSeek, Gateway, Anthropic) is pinned to the
+  // default embedding provider on load, matching update() and surviving restart.
+  const storedEmbedProvider =
+    typeof stored.embedding?.provider === 'string' ? stored.embedding.provider.trim() : '';
+  const embedProvider = storedEmbedProvider
+    || (EMBEDDING_PROVIDERS.includes(llmProvider) ? llmProvider : 'ollama');
   const embedBaseUrls = normalizeLlmProviderBaseUrls(
     { ...stored.embedding, provider: embedProvider },
     LLM_PROVIDERS,
@@ -382,6 +387,13 @@ export async function load() {
         typeof stored.stream?.bitrate === 'number' && MP3_BITRATE_SET.has(stored.stream.bitrate)
           ? stored.stream.bitrate
           : DEFAULTS.stream.bitrate,
+      bufferSeconds:
+        typeof stored.stream?.bufferSeconds === 'number' &&
+        Number.isFinite(stored.stream.bufferSeconds) &&
+        stored.stream.bufferSeconds >= 0 &&
+        stored.stream.bufferSeconds <= 60
+          ? Math.round(stored.stream.bufferSeconds)
+          : DEFAULTS.stream.bufferSeconds,
       oggIcyMetadata:
         typeof stored.stream?.oggIcyMetadata === 'boolean'
           ? stored.stream.oggIcyMetadata
@@ -569,7 +581,14 @@ export async function load() {
           typeof stored.tts?.cloud?.voice === 'string' && stored.tts.cloud.voice.trim()
             ? stored.tts.cloud.voice.trim()
             : DEFAULTS.tts.cloud.voice,
-        apiKey: typeof stored.tts?.cloud?.apiKey === 'string' ? stored.tts.cloud.apiKey : '',
+        // The inline key is owned by openai-compatible. Discard a stale value
+        // persisted while a managed provider was selected so it can never mask
+        // OPENAI_API_KEY / ELEVENLABS_API_KEY after an upgrade or hand edit.
+        apiKey:
+          stored.tts?.cloud?.provider === 'openai-compatible'
+          && typeof stored.tts.cloud.apiKey === 'string'
+            ? stored.tts.cloud.apiKey
+            : '',
         baseUrl:
           typeof stored.tts?.cloud?.baseUrl === 'string'
             ? stored.tts.cloud.baseUrl.trim()
@@ -704,9 +723,8 @@ export async function load() {
           ? stored.embedding.enabled
           : DEFAULTS.embedding.enabled,
       provider:
-        typeof stored.embedding?.provider === 'string'
-          ? stored.embedding.provider.trim()
-          : DEFAULTS.embedding.provider,
+        storedEmbedProvider
+        || (EMBEDDING_PROVIDERS.includes(llmProvider) ? DEFAULTS.embedding.provider : embedProvider),
       model:
         typeof stored.embedding?.model === 'string'
           ? stored.embedding.model.trim()
@@ -714,14 +732,23 @@ export async function load() {
       providerBaseUrls: embedBaseUrls,
       // Derived with the effective provider (own, else the chat provider) so a
       // dedicated embedding URL keeps working when the provider is inherited.
+      // A same-provider chat URL is the fallback; a different chat provider's
+      // active flat URL must never leak into the embedding leg. Locca is the
+      // exception: its chat and embedding servers are deliberately distinct.
       baseUrl: embedBaseUrls[embedProvider]
-        ?? (typeof stored.embedding?.baseUrl === 'string' ? stored.embedding.baseUrl.trim() : DEFAULTS.embedding.baseUrl),
+        || (embedProvider === 'locca' ? '' : llmBaseUrls[embedProvider])
+        || '',
       ollamaUrl:
         typeof stored.embedding?.ollamaUrl === 'string'
           ? stored.embedding.ollamaUrl.trim()
           : DEFAULTS.embedding.ollamaUrl,
       apiKey:
-        typeof stored.embedding?.apiKey === 'string'
+        // The inline settings key belongs only to an OpenAI-compatible
+        // embedding server. Managed providers use EMBEDDING_API_KEY or their
+        // own SDK env credential; Locca may reuse its provider-matched LLM key.
+        // Drop stale pre-fix values on load so they cannot mask those paths.
+        embedProvider === 'openai-compatible'
+        && typeof stored.embedding?.apiKey === 'string'
           ? stored.embedding.apiKey.trim()
           : DEFAULTS.embedding.apiKey,
       seedCount:
@@ -888,6 +915,10 @@ export async function load() {
 export async function update(patch) {
   const cur = await load();
   const next = JSON.parse(JSON.stringify(cur));
+  const inheritedEmbeddingProvider = next.embedding.provider
+    || (EMBEDDING_PROVIDERS.includes(next.llm.provider) ? next.llm.provider : 'ollama');
+  const inheritedEmbeddingModel = next.embedding.model
+    || defaultEmbeddingModelForProvider(inheritedEmbeddingProvider);
   let restart = false;
 
   if ('jingleRatio' in patch) {
@@ -1414,6 +1445,12 @@ export async function update(patch) {
       if (c.voiceUseSpeakerBoost !== undefined) {
         next.tts.cloud.voiceUseSpeakerBoost = !!c.voiceUseSpeakerBoost;
       }
+      // `tts.cloud.apiKey` is the optional bearer for an operator-supplied
+      // OpenAI-compatible server, never a managed-provider credential. Clear
+      // it on a provider switch so redaction and later saves reflect ownership.
+      if (next.tts.cloud.provider !== 'openai-compatible') {
+        next.tts.cloud.apiKey = '';
+      }
       // An OpenAI-compatible TTS server has no canonical endpoint — refuse to
       // save the provider without one. Mirrors the LLM-side check below.
       if (next.tts.cloud.provider === 'openai-compatible' && !next.tts.cloud.baseUrl) {
@@ -1510,6 +1547,12 @@ export async function update(patch) {
     if (next.llm.provider === 'openai-compatible' && !next.llm.baseUrl) {
       throw new Error('llm.baseUrl is required when provider is "openai-compatible"');
     }
+    if (next.llm.provider === 'litellm' && !effectiveLiteLlmBaseUrl(next.llm)) {
+      throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+    }
+    if (next.llm.provider === 'litellm' && !next.llm.model) {
+      throw new Error('LiteLLM model is required');
+    }
     // Backup leg — same connection fields, validated identically. The
     // openai-compatible-needs-baseUrl rule is enforced only when the fallback
     // is enabled, so a half-filled, disabled backup never blocks a save.
@@ -1531,6 +1574,20 @@ export async function update(patch) {
         throw new Error(
           'llm.fallback.baseUrl is required when its provider is "openai-compatible"',
         );
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !effectiveLiteLlmBaseUrl(next.llm.fallback)
+      ) {
+        throw new Error('LiteLLM base URL is required in Settings or LITELLM_API_BASE/OPENAI_API_BASE');
+      }
+      if (
+        next.llm.fallback.enabled &&
+        next.llm.fallback.provider === 'litellm' &&
+        !next.llm.fallback.model
+      ) {
+        throw new Error('LiteLLM model is required');
       }
     }
   }
@@ -1692,15 +1749,6 @@ export async function update(patch) {
         next.embedding.enrichment.originalYear = !!en.originalYear;
       }
     }
-  }
-  // Re-derive the embedding leg's flat baseUrl on EVERY update, not just when
-  // the embedding block was patched: the leg inherits the chat provider when
-  // its own is empty, so an llm.provider-only change also moves which map slot
-  // is live. Runtime (embeddingCfg) reads the flat field — issues #405/#1082.
-  {
-    const embedProv = (next.embedding.provider || next.llm.provider || '') as string;
-    const embedUrls = (next.embedding.providerBaseUrls as Record<string, string> | undefined) ?? {};
-    next.embedding.baseUrl = (embedProv && embedUrls[embedProv]) ? embedUrls[embedProv] : '';
   }
   if ('skills' in patch) {
     const sk = patch.skills || {};
@@ -1926,6 +1974,32 @@ export async function update(patch) {
       }
       next.likes.windowDays = n;
     }
+  }
+
+  // LiteLLM is chat-only. Enforce this after BOTH llm and embedding patches so
+  // neither an embedding-only clear nor a combined patch can re-enable chat
+  // provider inheritance. Preserve the prior effective embedding choice.
+  if (next.llm.provider === 'litellm' && !next.embedding.provider) {
+    next.embedding.provider = inheritedEmbeddingProvider;
+    if (!next.embedding.model) next.embedding.model = inheritedEmbeddingModel;
+  }
+
+  // Re-derive the embedding leg's flat baseUrl on EVERY update, after the
+  // LiteLLM chat-only pin establishes the effective embedding identity. A
+  // dedicated embedding URL wins; otherwise non-Locca providers inherit only
+  // the URL retained for that same provider on the primary LLM leg. Locca's
+  // blank means its dedicated embedding default — issues #405/#1082.
+  {
+    const embedProv = (next.embedding.provider || next.llm.provider || '') as string;
+    const embedUrls = (next.embedding.providerBaseUrls as Record<string, string> | undefined) ?? {};
+    const llmUrls = (next.llm.providerBaseUrls as Record<string, string> | undefined) ?? {};
+    // The inline bearer is owned by openai-compatible. Clear it whenever the
+    // effective embedding provider moves away so redaction and persisted state
+    // cannot imply that a managed/Locca provider will use it.
+    if (embedProv !== 'openai-compatible') next.embedding.apiKey = '';
+    next.embedding.baseUrl = embedUrls[embedProv]
+      || (embedProv === 'locca' ? '' : llmUrls[embedProv])
+      || '';
   }
 
   // Post-patch integrity sweep — a personas/shows change in this patch may

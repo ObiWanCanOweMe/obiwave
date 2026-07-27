@@ -30,6 +30,7 @@ import { refreshAutoPlaylist } from '../broadcast/scheduler.js';
 import { applyNavidromeToLiveConfig, saveSetupConfig, clearSetupConfigCache } from '../setup/config.js';
 import { saveSecrets, SECRET_ENV_KEYS } from '../setup/secrets.js';
 import { getSetupStatus } from '../setup/firstRun.js';
+import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../litellm-config.js';
 import { pingWith } from '../music/subsonic.js';
 
 export const router = express.Router();
@@ -103,6 +104,22 @@ router.post('/onboarding/test-llm', requireAdmin, async (req, res) => {
         // in the test rather than spending its budget in the reasoning channel.
         m = createOpenAI({ baseURL: baseUrl, apiKey: apiKey || 'unused', fetch: noThinkFetch }).chat(model);
         break;
+      case 'litellm': {
+        const cfg = { provider, model, baseUrl, apiKey };
+        const resolvedBaseUrl = effectiveLiteLlmBaseUrl(cfg);
+        if (!resolvedBaseUrl) throw new Error('LiteLLM base URL is required');
+        const environmentBaseUrl = effectiveLiteLlmBaseUrl({});
+        const resolvedApiKey = apiKey || (
+          resolvedBaseUrl === environmentBaseUrl
+            ? effectiveLiteLlmApiKey({})
+            : ''
+        );
+        m = createOpenAI({
+          baseURL: resolvedBaseUrl,
+          apiKey: resolvedApiKey || 'unused',
+        }).chat(model);
+        break;
+      }
       case 'locca':
         // First-class locca: openai-compatible llama.cpp, base URL defaults to
         // the host locca server when not supplied.

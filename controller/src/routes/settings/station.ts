@@ -33,7 +33,6 @@ router.post('/restart-mixer', requireAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // ---------------------------------------------------------------------------
 // POST /stream-stop — take the station off air by stopping the Icecast output.
 // The mixer process keeps running; the /stream.mp3 mount disconnects.
@@ -151,4 +150,3 @@ router.post('/settings/search/test-searxng', requireAdmin, async (req, res) => {
     return res.json({ ok: false, error: msg });
   }
 });
-

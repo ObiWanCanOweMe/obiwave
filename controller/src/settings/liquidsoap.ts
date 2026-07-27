@@ -49,4 +49,3 @@ export async function writeLiquidsoapSettings(s) {
     s.privacy?.listenerAuth ? 'true' : 'false',
   );
 }
-
