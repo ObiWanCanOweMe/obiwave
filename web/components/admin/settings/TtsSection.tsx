@@ -1,8 +1,9 @@
 'use client';
 
 import type { ChangeEvent, ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { AsyncResultGeneration, runManagedKeyProbe } from '../../../lib/managedKeyProbe';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { useVoiceDiscovery } from '@/hooks/useVoiceDiscovery';
 import { CLOUD_VOICES, CLOUD_MODELS } from '../../../lib/cloudVoices';
@@ -303,12 +304,18 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [cloudKeyInput, setCloudKeyInput] = useState('');
   const [cloudKeyTest, setCloudKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [cloudKeyTesting, setCloudKeyTesting] = useState(false);
+  const cloudKeyGeneration = useRef(new AsyncResultGeneration());
   // Compat servers don't use the OPENAI/ELEVENLABS env keys — their optional
   // bearer lives in settings.tts.cloud.apiKey, so it rides the settings payload.
   const [compatKeyInput, setCompatKeyInput] = useState('');
 
-  useEffect(() => { setCloudKeyInput(''); setCompatKeyInput(''); }, [form.tts.cloud.provider]);
-  useEffect(() => { setCloudKeyTest(null); }, [form.tts.cloud.provider]);
+  useEffect(() => {
+    cloudKeyGeneration.current.invalidate();
+    setCloudKeyInput('');
+    setCompatKeyInput('');
+    setCloudKeyTest(null);
+    setCloudKeyTesting(false);
+  }, [form.tts.cloud.provider]);
 
   const isCloudEngine = form.tts.defaultEngine === 'cloud';
   const isCompat = form.tts.cloud.provider === 'openai-compatible';
@@ -317,11 +324,13 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const ttsDiscoveryEnabled = isCloudEngine && (
     (isCompat && !!form.tts.cloud.baseUrl.trim())
-    || (!isCompat && ttsKeySet)
+    || (!isCompat && (ttsKeySet || !!cloudKeyInput.trim()))
   );
 
   const ttsDiscovery = useModelDiscovery({
+    owner: 'tts',
     provider: isCompat ? 'openai-compatible' : form.tts.cloud.provider,
+    apiKey: isCompat ? compatKeyInput : cloudKeyInput,
     baseUrl: form.tts.cloud.baseUrl,
     enabled: ttsDiscoveryEnabled,
     adminFetch,
@@ -333,6 +342,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const voiceDiscovery = useVoiceDiscovery({
     provider: form.tts.cloud.provider,
     baseUrl: form.tts.cloud.baseUrl,
+    apiKey: isCompat ? compatKeyInput : cloudKeyInput,
     enabled: ttsDiscoveryEnabled && providerSupportsDiscovery(form.tts.cloud.provider),
     adminFetch,
   });
@@ -361,27 +371,28 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     const cloudKeyVar = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
     const hasTyped = !!cloudKeyInput.trim();
     if (!hasTyped && !data.env?.[cloudKeyVar]) return;
-    setCloudKeyTesting(true);
-    setCloudKeyTest(null);
-    try {
-      const r = await adminFetch('/settings/secrets/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: cloudKeyVar, value: cloudKeyInput.trim() }),
-      });
-      const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setCloudKeyTest(j);
-      if (j.ok && hasTyped) {
-        const saved = await saveKey(cloudKeyVar, cloudKeyInput);
-        if (saved) { notify.ok('Key verified and saved'); setCloudKeyInput(''); refresh(); }
-      } else if (j.ok) {
-        notify.ok('Key verified (on file)');
-      }
-    } catch (e) {
-      setCloudKeyTest({ ok: false, message: errorMessage(e), latencyMs: 0 });
-    } finally {
-      setCloudKeyTesting(false);
-    }
+    await runManagedKeyProbe({
+      generation: cloudKeyGeneration.current,
+      test: async () => {
+        const r = await adminFetch('/settings/secrets/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: cloudKeyVar, value: cloudKeyInput.trim() }),
+        });
+        return await r.json() as { ok: boolean; message: string; latencyMs: number };
+      },
+      save: hasTyped ? () => saveKey(cloudKeyVar, cloudKeyInput) : undefined,
+      onStart: () => { setCloudKeyTesting(true); setCloudKeyTest(null); },
+      onResult: setCloudKeyTest,
+      onSaved: () => {
+        notify.ok('Key verified and saved');
+        setCloudKeyInput('');
+        refresh();
+      },
+      onVerified: () => notify.ok('Key verified (on file)'),
+      onError: e => setCloudKeyTest({ ok: false, message: errorMessage(e), latencyMs: 0 }),
+      onFinish: () => setCloudKeyTesting(false),
+    });
   };
   const engines = data.tts?.engines || ['piper'];
   const available = data.tts?.available || {};
@@ -843,7 +854,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 accent
                 value={form.tts.cloud.provider}
                 options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'openai-compatible']).map(p => ({ id: p, label: p }))}
-                onChange={v => setForm(f => selectCloudProvider(f, v))}
+                onChange={v => {
+                  cloudKeyGeneration.current.invalidate();
+                  setForm(f => selectCloudProvider(f, v));
+                }}
               />
             </div>
             {isCompat && (
@@ -993,7 +1007,12 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                         autoComplete="off"
                         value={cloudKeyInput}
                         placeholder={data.env?.[cloudKeyVar] ? '•••••• (on file)' : (KEY_HINTS[cloudKeyVar] ?? '')}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setCloudKeyInput(e.target.value)}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          cloudKeyGeneration.current.invalidate();
+                          setCloudKeyInput(e.target.value);
+                          setCloudKeyTest(null);
+                          setCloudKeyTesting(false);
+                        }}
                         className="max-w-[360px]"
                       />
                       <Btn

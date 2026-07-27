@@ -222,6 +222,7 @@ export default function SettingsPanel() {
         pickerAgent: !!v.llm?.pickerAgent,
         noRepeatWindow: String(typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 100),
         requestWebResolve: !!v.llm?.requestWebResolve,
+        strictRequests: !!v.llm?.strictRequests,
         agentTimeoutMs: typeof v.llm?.agentTimeoutMs === 'number' ? v.llm.agentTimeoutMs : 45000,
         pauseWhenEmpty: !!v.llm?.pauseWhenEmpty,
         dailyTokenCap: typeof v.llm?.dailyTokenCap === 'number' ? v.llm.dailyTokenCap : 0,

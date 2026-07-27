@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  buildModelDiscoveryRequest,
+  type ModelDiscoveryOwner,
+} from '@/lib/modelDiscoveryRequest';
 
 interface UseModelDiscoveryOpts {
+  owner: ModelDiscoveryOwner;
   provider: string;
+  leg?: 'primary' | 'fallback' | 'onboarding';
+  apiKey?: string;
   baseUrl?: string;
   ollamaUrl?: string;
-  scope?: 'embedding' | 'chat';
   enabled: boolean;
   adminFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
@@ -21,10 +27,12 @@ interface UseModelDiscoveryResult {
 const DEBOUNCE_MS = 400;
 
 export function useModelDiscovery({
+  owner,
   provider,
+  leg = 'primary',
+  apiKey,
   baseUrl,
   ollamaUrl,
-  scope,
   enabled,
   adminFetch,
 }: UseModelDiscoveryOpts): UseModelDiscoveryResult {
@@ -47,11 +55,18 @@ export function useModelDiscovery({
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ provider });
-      if (baseUrl) params.set('baseUrl', baseUrl);
-      if (ollamaUrl) params.set('ollamaUrl', ollamaUrl);
-      if (scope) params.set('scope', scope);
-      const r = await adminFetch(`/settings/llm/models?${params}`, signal ? { signal } : undefined);
+      const request = buildModelDiscoveryRequest({
+        owner,
+        provider,
+        ...(owner === 'chat' ? { leg } : {}),
+        apiKey,
+        baseUrl,
+        ollamaUrl,
+      });
+      const r = await adminFetch(request.url, {
+        ...request.init,
+        ...(signal ? { signal } : {}),
+      });
       const data = await r.json() as { ok: boolean; models: string[]; error?: string };
       if (reqId !== reqIdRef.current) return;
       if (data.ok) {
@@ -68,7 +83,7 @@ export function useModelDiscovery({
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [provider, baseUrl, ollamaUrl, scope, enabled, adminFetch]);
+  }, [owner, provider, leg, apiKey, baseUrl, ollamaUrl, enabled, adminFetch]);
 
   // Auto-discover on input change, debounced. The AbortController cancels an
   // in-flight request when the inputs change again before it resolves.
@@ -81,7 +96,11 @@ export function useModelDiscovery({
     }
     const ctrl = new AbortController();
     const t = setTimeout(() => { runFetch(ctrl.signal); }, DEBOUNCE_MS);
-    return () => { clearTimeout(t); ctrl.abort(); };
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+      reqIdRef.current += 1;
+    };
   }, [runFetch, enabled, provider]);
 
   // Manual refresh fires immediately (no debounce) and bumps the request id, so

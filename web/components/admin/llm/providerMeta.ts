@@ -18,6 +18,9 @@ export interface ProviderMeta {
   kind: ProviderKind;
   // Controller env var the key is read from — cloud providers only.
   envVar?: string;
+  // Providers that accept more than one environment key check each in order.
+  // Kept separate from envVar so LLM_ENV_VARS remains the dedicated-key map.
+  envVars?: string[];
 }
 
 // Order mirrors the controller's settings.LLM_PROVIDERS. The card grid actually
@@ -27,6 +30,7 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: 'ollama',            label: 'Ollama',            blurb: 'Homelab box · no key',          kind: 'local' },
   { id: 'locca',             label: 'locca',             blurb: 'Local llama.cpp · no key',       kind: 'local' },
   { id: 'openai-compatible', label: 'OpenAI-compatible', blurb: 'llama.cpp · vLLM · LM Studio',   kind: 'self-hosted' },
+  { id: 'litellm',           label: 'LiteLLM',           blurb: 'Custom cloud gateway',            kind: 'cloud', envVars: ['LITELLM_API_KEY', 'OPENAI_API_KEY'] },
   { id: 'anthropic',         label: 'Anthropic',         blurb: 'Claude · cloud',                 kind: 'cloud', envVar: 'ANTHROPIC_API_KEY' },
   { id: 'openai',            label: 'OpenAI',            blurb: 'GPT · cloud',                    kind: 'cloud', envVar: 'OPENAI_API_KEY' },
   { id: 'google',            label: 'Google',            blurb: 'Gemini · cloud',                 kind: 'cloud', envVar: 'GOOGLE_GENERATIVE_AI_API_KEY' },
@@ -36,9 +40,9 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: 'gateway',           label: 'AI Gateway',        blurb: 'Vercel · multi-vendor',          kind: 'cloud', envVar: 'AI_GATEWAY_API_KEY' },
 ];
 
-export const PROVIDER_META: Record<string, ProviderMeta> = Object.fromEntries(
+export const PROVIDER_META = Object.fromEntries(
   PROVIDERS.map(p => [p.id, p]),
-);
+) as Record<string, ProviderMeta> & { litellm: ProviderMeta };
 
 // Default render order (local first, then cloud). The Settings tab passes the
 // server's data.llm.providers instead; the onboarding wizard — which has no
@@ -58,6 +62,7 @@ export const LLM_PROVIDER_LABELS: Record<string, string> = {
   ollama: 'Ollama (local/cloud)',
   locca: 'locca (local llama.cpp, host)',
   'openai-compatible': 'OpenAI-compatible (llama.cpp, vLLM, LM Studio)',
+  litellm: 'LiteLLM (custom cloud gateway)',
   anthropic: 'Anthropic (Claude)',
   openai: 'OpenAI (GPT)',
   google: 'Google (Gemini)',
@@ -100,6 +105,10 @@ export function providerStatus(
     case 'self-hosted':
       return { label: 'self-host', tone: 'ok' };
     case 'cloud':
+      if (meta.envVars?.some(envVar => !!(env || {})[envVar])) {
+        return { label: 'key set', tone: 'ok' };
+      }
+      if (id === 'litellm') return { label: 'key optional', tone: 'ok' };
       if (!keyAware) return { label: 'needs key', tone: 'ok' };
       return meta.envVar && (env || {})[meta.envVar]
         ? { label: 'key set', tone: 'ok' }

@@ -8,6 +8,7 @@
 // normal outcome, not an error state to shout about — the caller falls back to
 // the free-text input it used before.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { buildVoiceDiscoveryRequest } from '../lib/voiceDiscoveryRequest';
 
 export interface DiscoveredVoice {
   id: string;
@@ -20,6 +21,8 @@ interface UseVoiceDiscoveryOpts {
   // openai-compatible server URL (including the /v1 suffix). Sent so the
   // operator can discover against a URL they've typed but not yet saved.
   baseUrl?: string;
+  // Unsaved provider credential. The request builder keeps it body-only.
+  apiKey?: string;
   enabled: boolean;
   adminFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
@@ -38,6 +41,7 @@ const DEBOUNCE_MS = 400;
 export function useVoiceDiscovery({
   provider,
   baseUrl,
+  apiKey,
   enabled,
   adminFetch,
 }: UseVoiceDiscoveryOpts): UseVoiceDiscoveryResult {
@@ -59,9 +63,11 @@ export function useVoiceDiscovery({
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ provider });
-      if (baseUrl) params.set('baseUrl', baseUrl);
-      const r = await adminFetch(`/settings/tts/voices?${params}`, signal ? { signal } : undefined);
+      const request = buildVoiceDiscoveryRequest({ provider, baseUrl, apiKey });
+      const r = await adminFetch(request.url, {
+        ...request.init,
+        ...(signal ? { signal } : {}),
+      });
       const data = await r.json() as { ok: boolean; voices: DiscoveredVoice[]; error?: string };
       if (reqId !== reqIdRef.current) return;
       if (data.ok) {
@@ -78,7 +84,7 @@ export function useVoiceDiscovery({
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [provider, baseUrl, enabled, adminFetch]);
+  }, [provider, baseUrl, apiKey, enabled, adminFetch]);
 
   // Auto-discover on input change, debounced. The AbortController cancels an
   // in-flight request when the inputs change again before it resolves.

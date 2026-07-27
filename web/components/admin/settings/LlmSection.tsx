@@ -1,8 +1,10 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { AsyncResultGeneration } from '../../../lib/asyncResultGeneration';
+import { runManagedKeyProbe } from '../../../lib/managedKeyProbe';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -28,7 +30,8 @@ import {
 // providerBaseUrls. locca's URL may be blank — the controller then falls back
 // to DEFAULT_LOCCA_BASE_URL (registry.ts); mirrored here so Test connection
 // works without an explicit override.
-const INLINE_KEY_PROVIDERS = ['openai-compatible', 'locca'];
+const INLINE_KEY_PROVIDERS = ['openai-compatible', 'locca', 'litellm'];
+const CUSTOM_URL_PROVIDERS = ['openai-compatible', 'litellm'];
 const LOCCA_DEFAULT_BASE_URL = 'http://host.docker.internal:8080/v1';
 
 interface LlmSectionProps extends SectionProps {
@@ -42,11 +45,21 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [primaryKeyTesting, setPrimaryKeyTesting] = useState(false);
   const [fallbackKeyTest, setFallbackKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [fallbackKeyTesting, setFallbackKeyTesting] = useState(false);
+  const primaryManagedKeyGeneration = useRef(new AsyncResultGeneration());
+  const fallbackManagedKeyGeneration = useRef(new AsyncResultGeneration());
 
-  useEffect(() => { setPrimaryKeyInput(''); }, [form.llm.provider]);
-  useEffect(() => { setFallbackKeyInput(''); }, [form.llm.fallback.provider]);
-  useEffect(() => { setPrimaryKeyTest(null); }, [form.llm.provider]);
-  useEffect(() => { setFallbackKeyTest(null); }, [form.llm.fallback.provider]);
+  useEffect(() => {
+    primaryManagedKeyGeneration.current.invalidate();
+    setPrimaryKeyInput('');
+    setPrimaryKeyTest(null);
+    setPrimaryKeyTesting(false);
+  }, [form.llm.provider]);
+  useEffect(() => {
+    fallbackManagedKeyGeneration.current.invalidate();
+    setFallbackKeyInput('');
+    setFallbackKeyTest(null);
+    setFallbackKeyTesting(false);
+  }, [form.llm.fallback.provider]);
 
   const [compatKeyInput, setCompatKeyInput] = useState('');
   const [compatFallbackKeyInput, setCompatFallbackKeyInput] = useState('');
@@ -54,8 +67,34 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [compatFallbackKeyTest, setCompatFallbackKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [compatKeyTesting, setCompatKeyTesting] = useState(false);
   const [compatFallbackKeyTesting, setCompatFallbackKeyTesting] = useState(false);
-  useEffect(() => { setCompatKeyInput(''); setCompatKeyTest(null); }, [form.llm.provider]);
-  useEffect(() => { setCompatFallbackKeyInput(''); setCompatFallbackKeyTest(null); }, [form.llm.fallback.provider]);
+  const primaryProbeGeneration = useRef(new AsyncResultGeneration());
+  const fallbackProbeGeneration = useRef(new AsyncResultGeneration());
+  const primaryProvider = form.llm.provider;
+  const fallbackProvider = form.llm.fallback.provider;
+  const primaryBaseUrl = form.llm.providerBaseUrls[primaryProvider] ?? '';
+  const fallbackBaseUrl = form.llm.fallback.providerBaseUrls[fallbackProvider] ?? '';
+  const liteLlmEnvBaseUrlSet = !!(data.env?.LITELLM_API_BASE || data.env?.OPENAI_API_BASE);
+  const primaryTestBaseUrl =
+    primaryBaseUrl || (primaryProvider === 'locca' ? LOCCA_DEFAULT_BASE_URL : '');
+  const fallbackTestBaseUrl =
+    fallbackBaseUrl || (fallbackProvider === 'locca' ? LOCCA_DEFAULT_BASE_URL : '');
+  const primaryUrlAvailable =
+    !!primaryTestBaseUrl.trim() || (primaryProvider === 'litellm' && liteLlmEnvBaseUrlSet);
+  const fallbackUrlAvailable =
+    !!fallbackTestBaseUrl.trim() || (fallbackProvider === 'litellm' && liteLlmEnvBaseUrlSet);
+
+  useEffect(() => { setCompatKeyInput(''); }, [primaryProvider]);
+  useEffect(() => { setCompatFallbackKeyInput(''); }, [fallbackProvider]);
+  useEffect(() => {
+    primaryProbeGeneration.current.invalidate();
+    setCompatKeyTest(null);
+    setCompatKeyTesting(false);
+  }, [primaryProvider, primaryBaseUrl, form.llm.model, compatKeyInput]);
+  useEffect(() => {
+    fallbackProbeGeneration.current.invalidate();
+    setCompatFallbackKeyTest(null);
+    setCompatFallbackKeyTesting(false);
+  }, [fallbackProvider, fallbackBaseUrl, form.llm.fallback.model, compatFallbackKeyInput]);
 
   // Embeddings inherit settings.llm by default (embedding.provider === ''), so
   // switching the CHAT provider silently changes the EMBEDDING model too — which
@@ -67,6 +106,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [embedPinNotice, setEmbedPinNotice] = useState<{ model: string; dim: number; newProvider: string } | null>(null);
   const changeLlmProvider = (v: string) => {
     if (v === form.llm.provider) return;
+    primaryManagedKeyGeneration.current.invalidate();
     const inheriting = (form.embedding.provider ?? '') === '';
     const meta = data.libraryStats?.embeddingMeta;
     const pin = inheriting && !!meta?.model;
@@ -87,46 +127,48 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     if (pin && meta) setEmbedPinNotice({ model: meta.model, dim: meta.dim, newProvider: v });
   };
 
-  const primaryKeyVar = LLM_ENV_VARS[form.llm.provider];
+  const primaryKeyVar = LLM_ENV_VARS[primaryProvider];
   const primaryKeySet = !!(primaryKeyVar && data.env?.[primaryKeyVar]);
 
-  const primaryBaseUrl = form.llm.providerBaseUrls[form.llm.provider] ?? '';
-  const primaryTestBaseUrl =
-    primaryBaseUrl || (form.llm.provider === 'locca' ? LOCCA_DEFAULT_BASE_URL : '');
-
   const primaryDiscoveryEnabled =
-    form.llm.provider === 'ollama'
-    || form.llm.provider === 'locca'
-    || (form.llm.provider === 'openai-compatible' && !!primaryBaseUrl.trim())
-    || (form.llm.provider === 'openrouter')
-    || (!!primaryKeyVar && primaryKeySet);
+    primaryProvider === 'ollama'
+    || primaryProvider === 'locca'
+    || (CUSTOM_URL_PROVIDERS.includes(primaryProvider) && primaryUrlAvailable)
+    || primaryProvider === 'openrouter'
+    || (!!primaryKeyVar && (primaryKeySet || !!primaryKeyInput.trim()));
 
   const primaryDiscovery = useModelDiscovery({
-    provider: form.llm.provider,
+    owner: 'chat',
+    provider: primaryProvider,
+    leg: 'primary',
+    apiKey: INLINE_KEY_PROVIDERS.includes(primaryProvider)
+      ? compatKeyInput
+      : primaryKeyInput,
     baseUrl: primaryBaseUrl,
     ollamaUrl: form.llm.ollamaUrl,
     enabled: primaryDiscoveryEnabled,
     adminFetch,
   });
 
-  const fallbackKeyVar = LLM_ENV_VARS[form.llm.fallback.provider];
+  const fallbackKeyVar = LLM_ENV_VARS[fallbackProvider];
   const fallbackKeySet = !!(fallbackKeyVar && data.env?.[fallbackKeyVar]);
-
-  const fallbackBaseUrl = form.llm.fallback.providerBaseUrls[form.llm.fallback.provider] ?? '';
-  const fallbackTestBaseUrl =
-    fallbackBaseUrl || (form.llm.fallback.provider === 'locca' ? LOCCA_DEFAULT_BASE_URL : '');
 
   const fallbackDiscoveryEnabled =
     form.llm.fallback.enabled && (
-      form.llm.fallback.provider === 'ollama'
-      || form.llm.fallback.provider === 'locca'
-      || (form.llm.fallback.provider === 'openai-compatible' && !!fallbackBaseUrl.trim())
-      || (form.llm.fallback.provider === 'openrouter')
-      || (!!fallbackKeyVar && fallbackKeySet)
+      fallbackProvider === 'ollama'
+      || fallbackProvider === 'locca'
+      || (CUSTOM_URL_PROVIDERS.includes(fallbackProvider) && fallbackUrlAvailable)
+      || fallbackProvider === 'openrouter'
+      || (!!fallbackKeyVar && (fallbackKeySet || !!fallbackKeyInput.trim()))
     );
 
   const fallbackDiscovery = useModelDiscovery({
-    provider: form.llm.fallback.provider,
+    owner: 'chat',
+    provider: fallbackProvider,
+    leg: 'fallback',
+    apiKey: INLINE_KEY_PROVIDERS.includes(fallbackProvider)
+      ? compatFallbackKeyInput
+      : fallbackKeyInput,
     baseUrl: fallbackBaseUrl,
     ollamaUrl: form.llm.fallback.ollamaUrl,
     enabled: fallbackDiscoveryEnabled,
@@ -158,56 +200,65 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     value: string,
     setTesting: (v: boolean) => void,
     setResult: (r: { ok: boolean; message: string; latencyMs: number } | null) => void,
+    generationState: AsyncResultGeneration,
     clearInput?: () => void,
   ) => {
     const hasTyped = !!value.trim();
     if (!hasTyped && !data.env?.[envVar]) return;
-    setTesting(true);
-    setResult(null);
-    try {
-      const r = await adminFetch('/settings/secrets/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: envVar, value: value.trim() }),
-      });
-      const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setResult(j);
-      if (j.ok && hasTyped) {
-        const saved = await saveKey(envVar, value);
-        if (saved) { notify.ok('Key verified and saved'); clearInput?.(); refresh(); }
-      } else if (j.ok) {
-        notify.ok('Key verified (on file)');
-      }
-    } catch (e) {
-      setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
-    } finally {
-      setTesting(false);
-    }
+    await runManagedKeyProbe({
+      generation: generationState,
+      test: async () => {
+        const r = await adminFetch('/settings/secrets/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: envVar, value: value.trim() }),
+        });
+        return await r.json() as { ok: boolean; message: string; latencyMs: number };
+      },
+      save: hasTyped ? () => saveKey(envVar, value) : undefined,
+      onStart: () => { setTesting(true); setResult(null); },
+      onResult: setResult,
+      onSaved: () => {
+        notify.ok('Key verified and saved');
+        clearInput?.();
+        refresh();
+      },
+      onVerified: () => notify.ok('Key verified (on file)'),
+      onError: e => setResult({ ok: false, message: errorMessage(e), latencyMs: 0 }),
+      onFinish: () => setTesting(false),
+    });
   };
 
   const testCompatKey = async (
+    leg: 'primary' | 'fallback',
+    provider: string,
     apiKey: string,
     baseUrl: string,
     model: string,
+    baseUrlAvailable: boolean,
     setTesting: (v: boolean) => void,
     setResult: (r: { ok: boolean; message: string; latencyMs: number } | null) => void,
+    generationState: AsyncResultGeneration,
   ) => {
-    if (!baseUrl.trim()) { setResult({ ok: false, message: 'Set a Base URL first', latencyMs: 0 }); return; }
+    if (!baseUrlAvailable) { setResult({ ok: false, message: 'Set a Base URL first', latencyMs: 0 }); return; }
     if (!model.trim()) { setResult({ ok: false, message: 'Set a Model first', latencyMs: 0 }); return; }
+    const generation = generationState.begin();
     setTesting(true);
     setResult(null);
     try {
       const r = await adminFetch('/settings/llm/probe-compat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
+        body: JSON.stringify({ leg, provider, apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),
       });
       const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setResult(j);
+      if (generationState.isCurrent(generation)) setResult(j);
     } catch (e) {
-      setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      if (generationState.isCurrent(generation)) {
+        setResult({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      }
     } finally {
-      setTesting(false);
+      if (generationState.isCurrent(generation)) setTesting(false);
     }
   };
 
@@ -227,6 +278,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         pickerAgent: form.llm.pickerAgent,
         noRepeatWindow: Math.max(0, parseInt(form.llm.noRepeatWindow, 10) || 0),
         requestWebResolve: form.llm.requestWebResolve,
+        strictRequests: form.llm.strictRequests,
         agentTimeoutMs: form.llm.agentTimeoutMs,
         pauseWhenEmpty: form.llm.pauseWhenEmpty,
         dailyTokenCap: form.llm.dailyTokenCap,
@@ -366,22 +418,27 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             </div>
           )}
 
-          {form.llm.provider === 'openai-compatible' && (
+          {CUSTOM_URL_PROVIDERS.includes(primaryProvider) && (
             <div className="field">
-              <Label>Server base URL</Label>
+              <Label>{primaryProvider === 'litellm' ? 'LiteLLM base URL' : 'Server base URL'}</Label>
               <Input
-                value={form.llm.providerBaseUrls['openai-compatible'] ?? ''}
+                value={form.llm.providerBaseUrls[primaryProvider] ?? ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  setForm(f => ({ ...f, llm: { ...f.llm, providerBaseUrls: { ...f.llm.providerBaseUrls, 'openai-compatible': e.target.value } } }))
+                  setForm(f => ({ ...f, llm: { ...f.llm, providerBaseUrls: { ...f.llm.providerBaseUrls, [primaryProvider]: e.target.value } } }))
                 }
-                placeholder="http://192.168.1.101:8080/v1"
+                placeholder={primaryProvider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                 className="max-w-[360px]"
               />
               <div className="field-hint">
-                Any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…),
-                including the <code>/v1</code> suffix. Must be reachable from the
-                controller container. Use the host’s LAN or Tailscale IP, not
-                <code>127.0.0.1</code>.
+                {primaryProvider === 'litellm' ? (
+                  <>Your LiteLLM cloud gateway URL, including the <code>/v1</code> suffix.
+                    Leave blank to use <code>LITELLM_API_BASE</code> or <code>OPENAI_API_BASE</code>.</>
+                ) : (
+                  <>Any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…),
+                    including the <code>/v1</code> suffix. Must be reachable from the
+                    controller container. Use the host’s LAN or Tailscale IP, not
+                    <code>127.0.0.1</code>.</>
+                )}
               </div>
             </div>
           )}
@@ -431,14 +488,18 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   <Btn
                     onClick={() =>
                       testCompatKey(
+                        'primary',
+                        primaryProvider,
                         compatKeyInput || '',
                         primaryTestBaseUrl,
                         form.llm.model,
+                        primaryUrlAvailable,
                         setCompatKeyTesting,
                         setCompatKeyTest,
+                        primaryProbeGeneration.current,
                       )
                     }
-                    disabled={compatKeyTesting || !primaryTestBaseUrl.trim()}
+                    disabled={compatKeyTesting || !primaryUrlAvailable}
                   >
                     {compatKeyTesting ? 'Testing…' : 'Test connection'}
                   </Btn>
@@ -493,11 +554,23 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                       autoComplete="off"
                       value={primaryKeyInput}
                       placeholder={data.env?.[keyVar] ? '•••••• (on file)' : (KEY_HINTS[keyVar] ?? '')}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => setPrimaryKeyInput(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                        primaryManagedKeyGeneration.current.invalidate();
+                        setPrimaryKeyInput(e.target.value);
+                        setPrimaryKeyTest(null);
+                        setPrimaryKeyTesting(false);
+                      }}
                       className="max-w-[360px]"
                     />
                     <Btn
-                      onClick={() => testKey(keyVar, primaryKeyInput, setPrimaryKeyTesting, setPrimaryKeyTest, () => setPrimaryKeyInput(''))}
+                      onClick={() => testKey(
+                        keyVar,
+                        primaryKeyInput,
+                        setPrimaryKeyTesting,
+                        setPrimaryKeyTest,
+                        primaryManagedKeyGeneration.current,
+                        () => setPrimaryKeyInput(''),
+                      )}
                       disabled={primaryKeyTesting || (!primaryKeyInput.trim() && !data.env?.[keyVar])}
                     >
                       {primaryKeyTesting ? 'Testing…' : 'Test key'}
@@ -536,12 +609,12 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   disabled={!primaryDiscoveryEnabled && form.llm.provider !== 'ollama'}
                   placeholder={
                     !primaryDiscoveryEnabled
-                      ? (form.llm.provider === 'openai-compatible' ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
+                      ? (CUSTOM_URL_PROVIDERS.includes(primaryProvider) ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
                       : form.llm.provider === 'ollama'
                         ? 'nemotron-3-super:cloud'
                         : form.llm.provider === 'deepseek'
                           ? 'deepseek-v4-flash'
-                          : form.llm.provider === 'openai-compatible' || form.llm.provider === 'locca'
+                          : CUSTOM_URL_PROVIDERS.includes(primaryProvider) || primaryProvider === 'locca'
                             ? 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf'
                             : 'model id'
                   }
@@ -559,7 +632,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               {primaryDiscovery.models.length > 0
                 ? `${primaryDiscovery.models.length} model${primaryDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
                 : !primaryDiscoveryEnabled
-                  ? (form.llm.provider === 'openai-compatible'
+                  ? (CUSTOM_URL_PROVIDERS.includes(primaryProvider)
                       ? 'Set a base URL above to discover available models.'
                       : 'Set an API key above to discover and select a model.')
                   : primaryDiscovery.error
@@ -636,9 +709,10 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <Label>Backup provider</Label>
                 <Select
                   value={form.llm.fallback.provider}
-                  onValueChange={v =>
-                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v } } }))
-                  }
+                  onValueChange={v => {
+                    fallbackManagedKeyGeneration.current.invalidate();
+                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v } } }));
+                  }}
                 >
                   <SelectTrigger className="max-w-[360px]" aria-label="Backup provider"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -695,20 +769,25 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 </div>
               )}
 
-              {form.llm.fallback.provider === 'openai-compatible' && (
+              {CUSTOM_URL_PROVIDERS.includes(fallbackProvider) && (
                 <div className="field">
-                  <Label>Backup server base URL</Label>
+                  <Label>{fallbackProvider === 'litellm' ? 'Backup LiteLLM base URL' : 'Backup server base URL'}</Label>
                   <Input
-                    value={form.llm.fallback.providerBaseUrls['openai-compatible'] ?? ''}
+                    value={form.llm.fallback.providerBaseUrls[fallbackProvider] ?? ''}
                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, providerBaseUrls: { ...f.llm.fallback.providerBaseUrls, 'openai-compatible': e.target.value } } } }))
+                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, providerBaseUrls: { ...f.llm.fallback.providerBaseUrls, [fallbackProvider]: e.target.value } } } }))
                     }
-                    placeholder="http://192.168.1.101:8080/v1"
+                    placeholder={fallbackProvider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                     className="max-w-[360px]"
                   />
                   <div className="field-hint">
-                    OpenAI-compatible server URL including the <code>/v1</code>
-                    suffix, required for this provider.
+                    {fallbackProvider === 'litellm' ? (
+                      <>LiteLLM cloud gateway URL including the <code>/v1</code> suffix.
+                        Leave blank to use <code>LITELLM_API_BASE</code> or <code>OPENAI_API_BASE</code>.</>
+                    ) : (
+                      <>OpenAI-compatible server URL including the <code>/v1</code>
+                        suffix, required for this provider.</>
+                    )}
                   </div>
                 </div>
               )}
@@ -748,20 +827,24 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                       <Btn
                         onClick={() =>
                           testCompatKey(
+                            'fallback',
+                            fallbackProvider,
                             compatFallbackKeyInput || '',
                             fallbackTestBaseUrl,
                             form.llm.fallback.model,
+                            fallbackUrlAvailable,
                             setCompatFallbackKeyTesting,
                             setCompatFallbackKeyTest,
+                            fallbackProbeGeneration.current,
                           )
                         }
-                        disabled={compatFallbackKeyTesting || !fallbackTestBaseUrl.trim()}
+                        disabled={compatFallbackKeyTesting || !fallbackUrlAvailable}
                       >
                         {compatFallbackKeyTesting ? 'Testing…' : 'Test connection'}
                       </Btn>
                     </div>
                     <div className="field-hint">
-                      Optional: only needed when the backup server requires bearer
+                      Optional: only needed when the backup {form.llm.fallback.provider === 'litellm' ? 'gateway' : 'server'} requires bearer
                       authentication. Saved to <code>settings.json</code>, takes effect on
                       next save.
                     </div>
@@ -805,11 +888,23 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                           autoComplete="off"
                           value={fallbackKeyInput}
                           placeholder={data.env?.[keyVar] ? '•••••• (on file)' : (KEY_HINTS[keyVar] ?? '')}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setFallbackKeyInput(e.target.value)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                            fallbackManagedKeyGeneration.current.invalidate();
+                            setFallbackKeyInput(e.target.value);
+                            setFallbackKeyTest(null);
+                            setFallbackKeyTesting(false);
+                          }}
                           className="max-w-[360px]"
                         />
                         <Btn
-                          onClick={() => testKey(keyVar, fallbackKeyInput, setFallbackKeyTesting, setFallbackKeyTest, () => setFallbackKeyInput(''))}
+                          onClick={() => testKey(
+                            keyVar,
+                            fallbackKeyInput,
+                            setFallbackKeyTesting,
+                            setFallbackKeyTest,
+                            fallbackManagedKeyGeneration.current,
+                            () => setFallbackKeyInput(''),
+                          )}
                           disabled={fallbackKeyTesting || (!fallbackKeyInput.trim() && !data.env?.[keyVar])}
                         >
                           {fallbackKeyTesting ? 'Testing…' : 'Test key'}
@@ -843,12 +938,12 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                       disabled={!fallbackDiscoveryEnabled && form.llm.fallback.provider !== 'ollama'}
                       placeholder={
                         !fallbackDiscoveryEnabled
-                          ? (form.llm.fallback.provider === 'openai-compatible' ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
+                          ? (CUSTOM_URL_PROVIDERS.includes(fallbackProvider) ? 'Set a base URL first' : 'Set an API key above to discover and select a model')
                           : form.llm.fallback.provider === 'ollama'
                             ? 'llama3.2:3b'
                             : form.llm.fallback.provider === 'deepseek'
                               ? 'deepseek-chat'
-                              : form.llm.fallback.provider === 'openai-compatible' || form.llm.fallback.provider === 'locca'
+                              : CUSTOM_URL_PROVIDERS.includes(fallbackProvider) || fallbackProvider === 'locca'
                                 ? 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf'
                                 : 'model id'
                       }
@@ -866,7 +961,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   {fallbackDiscovery.models.length > 0
                     ? `${fallbackDiscovery.models.length} model${fallbackDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
                     : !fallbackDiscoveryEnabled
-                      ? (form.llm.fallback.provider === 'openai-compatible'
+                      ? (CUSTOM_URL_PROVIDERS.includes(fallbackProvider)
                           ? 'Set a base URL above to discover available models.'
                           : 'Set an API key above to discover and select a model.')
                       : fallbackDiscovery.error
@@ -1024,6 +1119,26 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             />
           </div>
         )}
+
+        <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
+          <div>
+            <div className="text-[13px] font-bold">Strict song requests</div>
+            <div className="mt-0.5 max-w-[480px] text-[11px] leading-[1.5] text-muted">
+              When on, listener requests that name a specific song or artist only
+              queue an exact library match. If the track or artist is missing,
+              the request is declined instead of substituting something similar.
+            </div>
+          </div>
+          <Seg
+            accent
+            value={form.llm.strictRequests ? 'on' : 'off'}
+            options={[
+              { id: 'off', label: 'Off' },
+              { id: 'on', label: 'On' },
+            ]}
+            onChange={v => setForm(f => ({ ...f, llm: { ...f.llm, strictRequests: v === 'on' } }))}
+          />
+        </div>
 
         <div className="field mt-4">
           <Label>No-repeat window (tracks)</Label>
