@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.0.0](https://github.com/perminder-klair/subwave/compare/v0.48.0...v1.0.0) (2026-07-27)
+
+
+### Features
+
+* **analyze:** backfill the stem cache, and let the budget be edited ([#1193](https://github.com/perminder-klair/subwave/issues/1193)) ([290add9](https://github.com/perminder-klair/subwave/commit/290add9c44597e12147acd97125c3ad53f00e667))
+* **docker:** GPU acoustic analysis in the all-in-one image ([#1186](https://github.com/perminder-klair/subwave/issues/1186)) ([#1192](https://github.com/perminder-klair/subwave/issues/1192)) ([017970b](https://github.com/perminder-klair/subwave/commit/017970b05317cba8b525901e9f50eaf1d8952389))
+* **web:** replace the Spool skin with Unit SW-9 ([#1197](https://github.com/perminder-klair/subwave/issues/1197)) ([a615e75](https://github.com/perminder-klair/subwave/commit/a615e7559f4d85b597b245f658292ea531b27d4e))
+
+
+### Bug Fixes
+
+* **debug:** read radio.log from the state root, not the station dir ([#1196](https://github.com/perminder-klair/subwave/issues/1196)) ([949a0d5](https://github.com/perminder-klair/subwave/commit/949a0d5e1a52bd0585d3cb581ce3c3701bcf582c))
+* **llm:** collapse a stalled agent loop into a single-turn terminal call ([#1157](https://github.com/perminder-klair/subwave/issues/1157)) ([#1194](https://github.com/perminder-klair/subwave/issues/1194)) ([47ed11e](https://github.com/perminder-klair/subwave/commit/47ed11e0dbf78e9a5aa27c32140af6862e1a251f))
+* **picker:** ask the pool before relaxing the back-to-back artist guard ([#1190](https://github.com/perminder-klair/subwave/issues/1190)) ([fc6825b](https://github.com/perminder-klair/subwave/commit/fc6825b43598dc9e9b1518073d821484e2b70c49))
+* **tts:** keep speech corrections out of the written line ([#1191](https://github.com/perminder-klair/subwave/issues/1191)) ([6196af3](https://github.com/perminder-klair/subwave/commit/6196af31a4480b1bc06dfc98dd8cf11307168a68))
+* **web:** clamp long catalog descriptions on the public showcase pages ([#1189](https://github.com/perminder-klair/subwave/issues/1189)) ([dd8a8a4](https://github.com/perminder-klair/subwave/commit/dd8a8a4f91a2a321348a1dd026acac9228d2ec06))
+
+
+### Chores
+
+* release 1.0.0 ([82aac22](https://github.com/perminder-klair/subwave/commit/82aac22174ec4cee1295a522e5d9197e03a4d35f))
+
 ## [0.48.0](https://github.com/perminder-klair/subwave/compare/v0.47.0...v0.48.0) (2026-07-25)
 
 

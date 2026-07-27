@@ -1788,8 +1788,14 @@ export async function update(patch) {
       next.audio.stemCache = !!au.stemCache;
     }
     if (au.stemCacheGb !== undefined) {
+      // Throw rather than silently ignore, matching analyzeQuietMinutes below.
+      // Swallowing an out-of-range value meant the admin UI showed a saved
+      // budget the sweep was never using.
       const gb = Number(au.stemCacheGb);
-      if (Number.isFinite(gb) && gb >= 1 && gb <= 500) next.audio.stemCacheGb = gb;
+      if (!Number.isFinite(gb) || gb < 1 || gb > 500) {
+        throw new Error('audio.stemCacheGb must be between 1 and 500');
+      }
+      next.audio.stemCacheGb = gb;
     }
     if (au.analyzeQuietOnly !== undefined) {
       next.audio.analyzeQuietOnly = !!au.analyzeQuietOnly;

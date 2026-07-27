@@ -232,6 +232,11 @@ interface TrackAnalysisWrite {
   // pass that couldn't compute the tail (capped download, url path) must not
   // wipe an outro a previous complete-file pass measured.
   outro?: TrackOutro | null;
+  // Whether this pass ran a stem-caching attempt for the track (feature: stem
+  // backfill). true stamps stems_at so the backfill scope drops it; false/
+  // undefined leaves the stamp alone. Pass true for a MISS too — see the
+  // migration-17 note on why the stamp records the attempt, not disk presence.
+  stemsAttempted?: boolean;
 }
 
 // Write acoustic-analysis results for a track. Stamps ANALYSIS_VERSION so
@@ -260,6 +265,9 @@ export function upsertTrackAnalysis(id: string, a: TrackAnalysisWrite): void {
         -- Same for the outro: only computable off a COMPLETE file, so a pass
         -- that analysed a capped download passes null and keeps what's there.
         outro_json          = COALESCE(?, outro_json),
+        -- Same COALESCE shape: a pass with the stem cache off passes null and
+        -- must not clear a stamp an earlier stem pass set.
+        stems_at            = COALESCE(?, stems_at),
         analysis_version    = ?
       WHERE id = ?`,
     )
@@ -277,6 +285,7 @@ export function upsertTrackAnalysis(id: string, a: TrackAnalysisWrite): void {
       a.keyRanges && a.keyRanges.length ? JSON.stringify(a.keyRanges) : null,
       a.vocalRanges != null ? JSON.stringify(a.vocalRanges) : null,
       a.outro != null ? JSON.stringify(a.outro) : null,
+      a.stemsAttempted ? new Date().toISOString() : null,
       ANALYSIS_VERSION,
       id,
     );
@@ -297,14 +306,19 @@ export function needsAnalysisIds(limit?: number): string[] {
 // preserves vocal_ranges_json — used when re-analysing bpm/key + sounds-like
 // WITHOUT redoing the (very slow) Demucs vocal pass, so existing vocal data
 // isn't wiped and left NULL (it wouldn't be rebuilt that run). #646-adjacent.
-export function clearAnalysis(opts: { keepVocal?: boolean } = {}): void {
+// `clearStems` drops the stem-cache stamps for the same reason in reverse:
+// only a pass that will actually REWRITE stems (the cache is on) should reset
+// them, or the stamps would be lost to a cache-off re-analyse and the whole
+// library would re-separate the next time the operator turned the cache on.
+export function clearAnalysis(opts: { keepVocal?: boolean; clearStems?: boolean } = {}): void {
   const d = requireDb();
   const vocalCol = opts.keepVocal ? '' : ' vocal_ranges_json = NULL,';
+  const stemsCol = opts.clearStems ? ' stems_at = NULL,' : '';
   d.prepare(
     `UPDATE tracks SET bpm = NULL, musical_key = NULL, intro_ms = NULL,
       analysis_confidence = NULL, loudness_lufs = NULL, peak_db = NULL,
       structure_json = NULL, pace_json = NULL, beats_json = NULL, bars_json = NULL,
-      key_ranges_json = NULL, outro_json = NULL,${vocalCol} analysis_version = NULL,
+      key_ranges_json = NULL, outro_json = NULL,${vocalCol}${stemsCol} analysis_version = NULL,
       audio_moods = NULL, audio_mood_scores_json = NULL`,
   ).run();
   // The audio (CLAP) vectors are written in the same pass, so a --re-analyze

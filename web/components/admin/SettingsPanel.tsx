@@ -114,6 +114,7 @@ export default function SettingsPanel() {
         pairDrain: v.transitions?.pairDrain ?? true,
         stemBlends: v.transitions?.stemBlends ?? false,
         stemCache: v.audio?.stemCache ?? false,
+        stemCacheGb: String(v.audio?.stemCacheGb ?? 15),
       },
       archive: {
         enabled: v.archive?.enabled ?? false,
@@ -796,7 +797,46 @@ export default function SettingsPanel() {
                     <div className="field-hint">
                       Keeps the drum/bass/vocal/other stems the heavy analyzer already separates
                       during analysis (~25&nbsp;MB per track, oldest evicted past the budget).
-                      Needs the heavy analyzer image (Demucs) and a re-analysis pass to fill.
+                      Needs the heavy analyzer image (Demucs). Turning it on now also backfills:
+                      the analysis pass targets tracks with no cached stems, so an
+                      already-scanned library fills in over successive runs.
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <Label>Stem cache budget</Label>
+                    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                      <Input
+                        className="mono-num w-28"
+                        aria-label="Stem cache budget (GB)"
+                        type="number"
+                        step={1}
+                        min={1}
+                        max={500}
+                        value={form.transitions.stemCacheGb}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          setForm(f =>
+                            f
+                              ? { ...f, transitions: { ...f.transitions, stemCacheGb: e.target.value } }
+                              : f,
+                          )
+                        }
+                      />
+                      <span className="text-sm opacity-70">
+                        GB &middot; holds ~
+                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES (~25 MB/track) */}
+                        {Math.floor(
+                          ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 25,
+                        ).toLocaleString('en-GB')}{' '}
+                        tracks
+                      </span>
+                    </div>
+                    <div className="field-hint">
+                      How much disk the stem cache may use before the oldest entries are evicted
+                      (1&ndash;500&nbsp;GB). A blend only fires when BOTH tracks of a pair are
+                      cached, so a budget well under your library size means most seams stay
+                      plain crossfades. The backfill stops once the budget is full rather than
+                      separating tracks it would immediately evict.
                     </div>
                   </div>
 
@@ -823,7 +863,10 @@ export default function SettingsPanel() {
                               pairDrain: form.transitions.pairDrain,
                               stemBlends: form.transitions.stemBlends,
                             },
-                            audio: { stemCache: form.transitions.stemCache },
+                            audio: {
+                              stemCache: form.transitions.stemCache,
+                              stemCacheGb: Number(form.transitions.stemCacheGb),
+                            },
                           })
                         }
                         disabled={busy}

@@ -136,6 +136,34 @@ export function needsVocalIds(limit?: number, includeTailMissing = false): strin
   return rows.map(r => r.id);
 }
 
+// Ids that have never had a stem-caching pass (feature: stem backfill), so
+// turning the stem cache on for an already-analysed library fills it in
+// without the destructive, non-resumable --re-analyze that was the only path
+// before. Independent of the bpm/key scope like the two above, ordered for
+// stable resumption across nights.
+//
+// stems_at stamps the ATTEMPT, not disk presence — see the migration-17 note.
+// That is what makes this converge: the LRU sweep evicts stem dirs whenever
+// the cache outgrows its budget, and a presence-based scope would drag every
+// evicted track back in on the next pass, forever, on any library bigger than
+// the budget.
+export function needsStemsIds(limit?: number): string[] {
+  const q =
+    `SELECT id FROM tracks WHERE stems_at IS NULL ORDER BY id` +
+    (limit && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : '');
+  const rows = requireDb().prepare(q).all() as Array<{ id: string }>;
+  return rows.map(r => r.id);
+}
+
+// Coverage meter companion to vocalAnalyzedCount — how many tracks have had a
+// stem pass. Surfaced next to the analysis counts so the operator can see the
+// backfill advancing instead of guessing from the folder size.
+export function stemsCachedCount(): number {
+  return (requireDb().prepare(
+    'SELECT COUNT(*) AS n FROM tracks WHERE stems_at IS NOT NULL',
+  ).get() as { n: number }).n;
+}
+
 // Total tracks known to the catalogue. Used by the analyze CLI to decide
 // whether to walk Navidrome (only on an empty/bootstrap catalogue).
 export function trackCount(): number {

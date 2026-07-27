@@ -323,6 +323,27 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 16');
   }
 
+  if (userVersion < 17) {
+    // Stem-cache attempt stamp. The stem cache lives on DISK
+    // (state/stems/<id>/), so unlike every other backfill scope there was no
+    // column to ask "has this track had a stem pass?" — enabling the cache on
+    // an already-analysed library therefore did nothing at all, because the
+    // analysis scope only widens for missing CLAP vectors and missing vocal
+    // ranges. This is that missing column.
+    //
+    // It stamps the ATTEMPT, hit or miss, exactly like original_year_checked_at
+    // — NOT "stems are on disk right now". Two reasons it must not mean the
+    // latter: (1) a track whose stems can't be written (head separation failed)
+    // would otherwise be re-targeted on every pass forever, the "275/7093"
+    // churn class; (2) the LRU sweep deletes stem dirs BY DESIGN once the cache
+    // outgrows its budget, so a presence-based scope would re-separate every
+    // evicted track every pass and never converge on a library larger than the
+    // budget. A cache miss at transition time is already handled — the seam
+    // just falls back to a plain crossfade. NULL = no stem pass yet.
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN stems_at TEXT;`);
+    d.pragma('user_version = 17');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —

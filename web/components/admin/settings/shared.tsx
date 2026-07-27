@@ -200,6 +200,7 @@ export interface TransitionsForm {
   pairDrain: boolean;   // hold picks until the successor is known (#749 fix)
   stemBlends: boolean;  // pre-rendered stem-blend seams (needs pairDrain + stem cache)
   stemCache: boolean;   // settings.audio.stemCache — persist Demucs stems during analysis
+  stemCacheGb: string;  // settings.audio.stemCacheGb — byte budget the LRU sweep enforces
 }
 
 export interface PrivacyForm {

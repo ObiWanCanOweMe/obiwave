@@ -76,9 +76,28 @@ init_state() {
 	# archive mixdowns as junk "HH-00" tracks (issue #273).
 	touch /var/sub-wave/archive/.ndignore
 
-	# Liquidsoap writes radio.log here as the liquidsoap user.
-	mkdir -p /var/log/liquidsoap
-	chown -R liquidsoap:liquidsoap /var/log/liquidsoap 2>/dev/null || true
+	# Liquidsoap writes radio.log to /var/log/liquidsoap. Point that at the
+	# state ROOT's logs/ so the log survives container recreates and the
+	# controller's debug page can tail it (routes/debug.ts reads
+	# <stateRoot>/logs/radio.log — the same install-level location the
+	# compose stacks pin via their ${STATE_DIR}/logs bind mount). A plain
+	# in-container dir here left AIO installs with no radio.log in the
+	# state dir at all, so the debug tail always errored ENOENT.
+	if [ ! -L /var/log/liquidsoap ]; then
+		rm -rf /var/log/liquidsoap
+		ln -s /var/sub-wave/logs /var/log/liquidsoap
+	fi
+
+	# Rotate radio.log on boot once it passes 50MB — same policy as
+	# docker/broadcast-entrypoint.sh. Now that the log persists in state,
+	# it would otherwise append forever; boot is the one safe moment to
+	# move it since liquidsoap isn't holding the fd yet. One .old
+	# generation caps disk at ~2x the threshold.
+	RADIO_LOG=/var/sub-wave/logs/radio.log
+	if [ -f "$RADIO_LOG" ] && [ "$(stat -c %s "$RADIO_LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then
+		mv -f "$RADIO_LOG" "$RADIO_LOG.old"
+		echo "supervisor: rotated oversized radio.log to radio.log.old" >&2
+	fi
 }
 
 # ---------------------------------------------------------------------------

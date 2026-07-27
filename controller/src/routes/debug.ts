@@ -187,8 +187,17 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
   // state dir's logs/ subfolder (see radio.liq + the liquidsoap volume
   // mount), which the controller sees via the shared state mount.
   // Reading it here means no extra controller-side log mount is needed.
+  // Read from the state ROOT, not the active station dir: the compose bind
+  // mount pins /var/log/liquidsoap to the root logs/ (compose can't follow
+  // the active-station pointer), so radio.log is install-level — like
+  // icecast-secrets.env. In single-station mode stateRoot === stateDir.
+  // Station-dir fallback: right after a multi-station conversion the bind
+  // mount still follows the moved logs/ inode into stations/<id>/, so the
+  // live log sits there until the broadcast CONTAINER is recreated (a
+  // telnet mixer restart doesn't remount).
   try {
-    const log = await readFile(`${config.stateDir}/logs/radio.log`, 'utf8');
+    const log = await readFile(`${config.stateRoot}/logs/radio.log`, 'utf8')
+      .catch(() => readFile(`${config.stateDir}/logs/radio.log`, 'utf8'));
     out.liquidsoapLog = log.split('\n').slice(-100).join('\n');
   } catch (err) {
     out.liquidsoapLog = `error: ${err.message}`;

@@ -4607,10 +4607,54 @@ html:has(.admin-root.paper) {
     color: var(--muted);
 }
 .bs-skill-brief {
+    display: block;
     margin: 0;
     font-size: 14px;
     line-height: 1.6;
     color: var(--muted);
+}
+/* Long briefs (a persona soul runs to 1000 chars) are wrapped in a native
+   <details> by components/ui/catalog-brief.tsx and clamped to four lines while
+   closed — CSS-only, so the showcase pages stay server-rendered. */
+.bs-skill-brief-block:not([open]) .bs-skill-brief {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+}
+.bs-skill-brief-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    cursor: pointer;
+    /* Drop the native disclosure triangle — the Read more / Show less line is
+       the affordance, and the marker would sit against the clamped prose. */
+    list-style: none;
+}
+.bs-skill-brief-summary::-webkit-details-marker {
+    display: none;
+}
+.bs-skill-brief-toggle {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.bs-skill-brief-summary:hover .bs-skill-brief-toggle {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+/* One label at a time; display:none keeps the hidden one out of the a11y tree,
+   so the summary reads with the right verb. */
+.bs-skill-brief-close,
+.bs-skill-brief-block[open] .bs-skill-brief-open {
+    display: none;
+}
+.bs-skill-brief-block[open] .bs-skill-brief-close {
+    display: inline;
 }
 .bs-skill-tags {
     list-style: none;

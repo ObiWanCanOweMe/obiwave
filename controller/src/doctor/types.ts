@@ -78,7 +78,7 @@ export interface StationSettings {
   };
   tts?: { defaultEngine?: string; byKind?: Record<string, string | undefined> };
   search?: { provider?: string };
-  audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean };
+  audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean; stemCacheGb?: number };
   transitions?: { pairDrain?: boolean; stemBlends?: boolean };
   stream?: { opusEnabled?: boolean; flacEnabled?: boolean; aacEnabled?: boolean };
   archive?: { enabled?: boolean };

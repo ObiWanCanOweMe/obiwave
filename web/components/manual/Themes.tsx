@@ -26,8 +26,8 @@ const SKINS = [
     blurb: 'The original SUB/WAVE face — masthead, centre stage, waveform, transport deck. The default.',
   },
   {
-    name: 'Spool',
-    blurb: 'A walkman deck — the whole station fits on one cassette, reels turning as it plays.',
+    name: 'Unit SW-9',
+    blurb: 'A tabletop receiver — milled aluminium, soft-touch keys, weighted knobs, and every live fact on one glowing dot-matrix window.',
   },
   {
     name: 'Drift',

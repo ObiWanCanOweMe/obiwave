@@ -75,7 +75,7 @@ https://github.com/user-attachments/assets/0a2ba78a-eda3-44c1-adce-bfa78ae992cd
 - **Ending-aware transitions.** The bundled analyzer measures BPM, key, loudness, and how every track actually ends, so crossfades size themselves to the material: a real fade rides out long, a cold ending cuts tight. Vocal detection keeps the DJ from talking over a sung intro, and opt-in stem blends mix the outgoing tail into the incoming head for a produced-sounding seam. DJ speech ducks the music and lifts it back up.
 - **Playlist builder.** Describe a playlist in plain language at `/admin/playlists` and the builder turns it into a recipe, resolves it against your library, and keeps recipe-backed playlists topped up as new music lands.
 - **Station imaging.** Jingles, SFX stingers, and instrumental talk-over beds on one admin page — render them through the DJ's voice, generate them from a text prompt, or upload your own audio.
-- **Player skins + themes.** Six player faces — Classic, Spool, Platter, Drift, Subamp, and TTY — with a station default and a per-listener override, plus a theme editor with live preview for colours and type.
+- **Player skins + themes.** Six player faces — Classic, Unit SW-9, Platter, Drift, Subamp, and TTY — with a station default and a per-listener override, plus a theme editor with live preview for colours and type.
 - **Private station mode.** Two independent locks over one station password: hide the web player behind a prompt, and/or require listener auth on every stream mount.
 - **Multi-station profiles.** Keep several stations in one install — each with its own library pool, DJ roster, schedule, and settings — and switch which one is live from the admin.
 - **Hourly archives (opt-in).** Save every hour as MP3 for later replay.
@@ -182,14 +182,18 @@ That repoints the `analyzer` service at `subwave-analyzer-heavy` (CLAP + Demucs,
 also offers it, and Unraid one-click users pull the `subwave-aio-heavy` image
 instead. Only the expressive *voices* above need the separate `tts-heavy` sidecar.
 
-Hosts with an NVIDIA GPU can run the heavy stack on CUDA instead — layer the
-`docker-compose.analyzer-gpu.yml` overlay, which swaps the service to the
-`subwave-analyzer-cuda` image and reserves the GPU (needs the NVIDIA driver +
-Container Toolkit, nothing else):
+GPU-specific analyzer packaging remains upstream-owned and is outside
+ObiWave's image-only Ark release pipeline. The checked-in upstream-compatible
+overlay remains available to operators who intentionally manage that image and
+host passthrough themselves:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 ```
+
+The Ark deployment uses its local analyzer service at
+`http://analyzer:8080` inside the split-stack network and does not depend on a
+remote GPU host.
 
 ### Local dev (contributors)
 
@@ -258,7 +262,11 @@ Icecast stream on `:7702` (all configurable). Point your proxy at those three.
 `docker/Caddyfile` is a working reference for the route table you need to
 replicate. Details in [`DEPLOY.md`](DEPLOY.md#bring-your-own-reverse-proxy).
 
-**Images on GHCR.** Tagged releases publish to `ghcr.io/perminder-klair/subwave-{caddy,broadcast,controller,web}`, the default-on `subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in `subwave-tts-heavy` (expressive voices) sidecar. Heavy-analysis variants — `subwave-analyzer-heavy` and `subwave-aio-heavy` (CLAP + Demucs, amd64) — are published for operators who enable "sounds-like"/vocals, plus `subwave-analyzer-cuda` (the heavy stack on NVIDIA CUDA, amd64) for GPU hosts via the `docker-compose.analyzer-gpu.yml` overlay.
+**Images on GHCR.** Tagged releases publish the core services, the default-on
+`subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in
+`subwave-tts-heavy` (expressive voices) sidecar. ObiWave also publishes
+`subwave-analyzer-heavy` and `subwave-aio-heavy` for operators who enable
+"sounds-like" and vocal analysis; GPU-specific variants remain upstream-owned.
 All compose files pull `:latest` by default; pin a version with
 `SUBWAVE_VERSION=v1.2.3` in the root `.env`.
 

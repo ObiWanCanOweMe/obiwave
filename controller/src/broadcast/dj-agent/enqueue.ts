@@ -10,7 +10,7 @@ import * as dj from '../../llm/dj.js';
 import { stripThinking } from '../../llm/sdk.js';
 import { recordPick } from '../../llm/log.js';
 import { speechPaceScale } from '../../audio/tts.js';
-import { normalizeForSpeech } from '../../audio/speech-text.js';
+import { normalizeForDisplay, normalizeForSpeech, spokenWordScale } from '../../audio/speech-text.js';
 import { introMsOf } from './runs.js';
 
 export function trackFields(song) {
@@ -40,24 +40,39 @@ export function trackFields(song) {
 // Talk-within-the-intro budget (#962), applied to a between-track link in DJ
 // mode: trim to the pick's measured intro runway so the DJ lands before the
 // vocals — sentence/clause-complete or dropped (null), never a fragment.
-// Enforced on the SPOKEN form of the line: tts.speak() later runs
-// normalizeForSpeech(stripThinking(...)), which can EXPAND display symbols
-// into extra words ("$5 million" → "5 million dollars"), so counting the raw
-// text under-budgets the line that actually airs. The normalized text is what
-// gets aired/queued — speak()'s own normalize pass is a no-op on it.
 // speechPaceScale('link') maps the word ceiling to the rate the line will be
-// spoken at (engine × persona × daypart). Returns the text unchanged when not
-// in DJ mode; enforceIntroBudget itself no-ops on an un-analysed pick.
+// spoken at (engine × persona × daypart). Outside DJ mode there's no budget —
+// the line still gets the reader's cleanup, just un-trimmed; enforceIntroBudget
+// itself no-ops on an un-analysed pick.
+//
+// What this RETURNS is the display form (issue #1186). The returned line is
+// what gets queued as introScript — and from there it is booth-logged, appended
+// to the session the DJ remembers, and pushed to the player's feed, so it must
+// be spelled the way the listener should READ it. The pronunciation layer
+// (operator corrections, unit expansion, SUB/WAVE → "Subwave") is applied later
+// and separately by speak(), at render time. It used to be baked in here — one
+// "Ye" → "Yay" rule then had the written line say "Yay" too.
 export function trimLinkToIntro(text: string | null | undefined, song: any): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
-  if (!settings.getEffectivePersona()?.djMode) return raw;
-  // Same corrections as speak() so the word count matches the aired text.
+  const clean = stripThinking(raw);
+  const display = normalizeForDisplay(clean);
+  // Non-DJ personas skip the budget but not the cleanup: introScript is a
+  // written line wherever it lands, so leaked markdown (or a whole line that
+  // was nothing but a think-block — then '' → null, no intro) shouldn't reach
+  // the booth log just because the persona doesn't do radio-style intros.
+  if (!settings.getEffectivePersona()?.djMode) return display || null;
+  // The budget is a DURATION budget, so it has to be counted on the words the
+  // engine will actually read — the same normalize speak() will run at render
+  // time, corrections and all. spokenWordScale folds any difference between the
+  // two forms into the pace scale, so the ceiling stays a spoken-word ceiling
+  // while the trim lands on the display text's own sentence boundaries.
   // firstVocalMsFor arms the never-talk-over-a-singer drop: a MEASURED vocal
   // entry under 2.5s drops the line outright (the <2500 leniency only exists
   // because the energy heuristic is noise down there).
-  const spoken = normalizeForSpeech(stripThinking(raw), settings.get().tts?.corrections);
-  return dj.enforceIntroBudget(spoken, introMsOf(song), speechPaceScale('link'), dj.firstVocalMsFor(song)) || null;
+  const spoken = normalizeForSpeech(clean, settings.get().tts?.corrections);
+  const pace = speechPaceScale('link') * spokenWordScale(display, spoken);
+  return dj.enforceIntroBudget(display, introMsOf(song), pace, dj.firstVocalMsFor(song)) || null;
 }
 
 // `link`, when present, is the between-track line to speak as this pick starts
@@ -80,9 +95,14 @@ export async function enqueuePick(
 ): Promise<number> {
   // Single chokepoint for the intro budget: every pick path (agent, pool, any
   // future producer) funnels its link through here, so enforcement can't be
-  // skipped by a new caller. Idempotent — callers that already trimmed (the
-  // agent path does, to record the aired text in its session turn) pass
-  // through unchanged.
+  // skipped by a new caller. For callers that already trimmed (the agent path
+  // does, to record the text in its session turn) this is a pass-through in
+  // the common case, but not strictly idempotent: spokenWordScale is
+  // recomputed here on the kept text, where it's EXACT for the line that
+  // airs — when corrections cluster unevenly in a long line, the first pass's
+  // whole-line ratio was an over-estimate and this pass trims a little
+  // further. Air always honours the duration budget; the session turn can
+  // occasionally carry the slightly longer reading.
   const introLink = trimLinkToIntro(link, song);
   const track: any = trackFields(song);
   // Flag the transition effects on this pick (DJ mode only). getAnnotatedUri

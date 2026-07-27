@@ -1238,6 +1238,7 @@ SITE_URL=
 # NVIDIA GPU? The heavy stack can run on CUDA instead — not an .env toggle (a
 # GPU device reservation can't live here); layer the analyzer-gpu overlay:
 #   docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
+# AIO GPU packaging is upstream-owned and is not published by ObiWave.
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
 # ANALYZE_IDLE_UNLOAD_S=  # cuda flavour: seconds of no analysis before models are
@@ -1304,4 +1305,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `0.48.0`; // x-release-please-version
+export const CLI_VERSION = `1.0.0`; // x-release-please-version

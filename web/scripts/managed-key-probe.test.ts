@@ -28,8 +28,6 @@ const staleProbe = probeModule.runManagedKeyProbe({
   onFinish: () => { finishCount++; },
 });
 
-// Models either switching provider or replacing the typed key while the
-// previous provider's test is still in flight.
 generation.invalidate();
 resolveTest({ ok: true, message: 'old provider accepted the key', latencyMs: 4 });
 await staleProbe;

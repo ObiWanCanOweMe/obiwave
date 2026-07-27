@@ -61,8 +61,6 @@ for (const [label, text] of [
   assertNoConflictMarkers(text, label);
 }
 
-// Exercise the marker guard itself so this contract proves it rejects the
-// exact unresolved-merge shape that escaped the original source assertions.
 assert.throws(
   () => assertNoConflictMarkers('before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> v0.45.0\nafter', 'fixture'),
   /fixture contains a merge conflict marker/,
@@ -158,8 +156,6 @@ assert.match(saveBlock, /INLINE_KEY_PROVIDERS\.includes\(activeProvider\)[\s\S]*
 assert.match(saveBlock, /INLINE_KEY_PROVIDERS\.includes\(activeFallbackProvider\)[\s\S]*?apiKey: compatFallbackKeyInput\.trim\(\)/);
 assert.doesNotMatch(source, /form\.llm(\.fallback)?\.baseUrl/);
 
-// OpenAI-compatible Cloud TTS owns the inline settings bearer. Managed OpenAI
-// and ElevenLabs continue to save/use their normal environment credentials.
 assert.match(ttsSource, /const \[compatKeyInput, setCompatKeyInput\] = useState\(''\);/);
 assert.match(ttsSource, /\.\.\.\(isCompat && compatKeyInput\.trim\(\) \? \{ apiKey: compatKeyInput\.trim\(\) \} : \{\}\)/);
 assert.match(ttsSource, /placeholder=\{savedCloud\.apiKey === 'set' \? '•••••• \(on file\)' : 'Optional'\}/);

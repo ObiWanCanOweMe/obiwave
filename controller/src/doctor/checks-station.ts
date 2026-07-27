@@ -8,6 +8,8 @@ import { searchReady, searchWeb } from '../skills/web-search.js';
 import * as system from '../system.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
 import * as analyzer from '../music/analyzer.js';
+import * as db from '../music/library-db.js';
+import * as stemCache from '../music/stem-cache.js';
 import type { Finding, StationSettings } from './types.js';
 import { fmtTokens, isSchemaFailure } from './util.js';
 
@@ -268,6 +270,42 @@ export async function checkTuning(s: StationSettings | null): Promise<Finding[]>
         detail: 'enabled, but the analyzer can’t separate stems',
         hint: `The stem cache and stem-blend transitions need the heavy analyzer (Demucs). The lean build can’t separate, so these settings silently no-op. ${upgradeHint} Or turn them off.`,
       });
+    }
+    // Coverage, not just capability: stem blends only fire when BOTH tracks of
+    // a pair have cached stems, so a station with the feature on and a nearly
+    // empty cache hears plain crossfades forever and has nothing to tell it
+    // why. Report the real numbers and name the two things that cause it — a
+    // backfill that hasn't run yet, or a budget too small to hold the library.
+    //
+    // Coverage is counted from DISK (stemCache.cachedTrackCount), not the
+    // stems_at stamps: stamps record attempts and keep growing as new tracks
+    // analyse while the sweep evicts old dirs, so the stamp count drifts
+    // optimistic over time and would eventually mute this warning on exactly
+    // the stations that need it. The stamp count rides along in the detail —
+    // the gap between the two numbers is itself diagnostic (eviction or
+    // failed separations vs a backfill that simply hasn't run).
+    //
+    // db.isOpen() guard: the library DB opens lazily on the first pick, and
+    // the doctor is exactly the tool an operator reaches for when the picker
+    // ISN'T running — without the guard, requireDb() would throw and safe()
+    // would replace this whole section with a spurious "check failed".
+    if (wantStems && analyzer.vocalActivityAvailable() !== false && db.isOpen()) {
+      const cached = await stemCache.cachedTrackCount();
+      const attempted = db.stemsCachedCount();
+      const total = db.trackCount();
+      const budgetGb = Number(s?.audio?.stemCacheGb) || 15;
+      const holds = Math.floor((budgetGb * 1024 ** 3) / stemCache.APPROX_TRACK_BYTES);
+      if (total > 0 && cached < total / 2) {
+        out.push({
+          label: 'stem transitions',
+          status: 'warn',
+          detail: `only ${cached.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} tracks have stems on disk` +
+            (attempted > cached ? ` (${attempted.toLocaleString('en-GB')} attempted)` : ''),
+          hint: holds < total
+            ? `Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade. The ${budgetGb} GB budget only holds ~${holds.toLocaleString('en-GB')} tracks — raise audio.stemCacheGb in Settings → Transitions to cover more of the library, then let the analysis pass backfill the rest.`
+            : 'Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade until the backfill catches up. Run the analysis pass (it now targets tracks with no cached stems) and this fills in over a few runs.',
+        });
+      }
     }
     // Stem blends ride the pair-drain scheduling — without it no seam is ever
     // pair-annotated and a blend can never be inserted.

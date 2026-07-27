@@ -102,7 +102,11 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
   }
 }
 
-async function pickViaAgent(queue, { wantLink, audioWaypoint = null, current = null, showAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null }): Promise<boolean> {
+// `ctx` / `rankTarget` are carried only for the artist-guard's pool rescue
+// (#1187) — the agent's own run needs neither. They're the same values
+// runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
+// from exactly the pool a failed agent run would have produced.
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
   const windows = recencyWindowsForLibrary(stats.distinctArtists);
@@ -256,43 +260,75 @@ async function pickViaAgent(queue, { wantLink, audioWaypoint = null, current = n
   // enforce variety at the point of choice instead: if the pick repeats the
   // on-air artist and the run surfaced ANY other-artist candidate, re-pick from
   // just those (a constrained djObject over the run's own `seen`, so it still
-  // reasons about flow and writes a coherent link). Relax — allow the repeat —
-  // only when the whole pool is that one artist, mirroring the pool picker's
-  // never-starve. The relaxation is logged with the candidate count so an
-  // operator can tell "no alternative existed" from a real bug (#1124 ask #2).
+  // reasons about flow and writes a coherent link).
+  //
+  // When that isn't possible — the run's whole candidate set is the one artist,
+  // or the constrained re-pick call failed — do NOT relax yet (#1187). `seen` is
+  // the RUN's view, not the library's: tracksLikeThis answering with eight
+  // tracks by the on-air artist while no other tool contributed leaves `seen`
+  // single-artist on a 50k-track catalogue, and reading that as "no alternative
+  // exists" is exactly the false negative that put the repeats back on air. Ask
+  // the normal fallback pool for a pick that excludes this artist first (a hard
+  // block, so the pool can't never-starve back to the artist we're avoiding) and
+  // only allow the repeat if even that comes back empty. That last case is
+  // logged with the candidate count so an operator can still tell "no
+  // alternative existed" from a real bug (#1124 ask #2).
   const curArtist = artistKey(current || {});
   if (curArtist && artistKey(song) === curArtist) {
     const alt = new Map<string, any>([...extras.seen].filter(([, s]) => artistKey(s) !== curArtist));
+    let altSong: any = null;
     if (alt.size) {
       const repicked = await repickFromSeen({
         seen: alt, badId: null, wantLink, showAt,
         playlistResolved: !!playlistTracks?.length,
         reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
       });
-      const altSong = repicked?.id ? extras.seen.get(repicked.id) : null;
+      altSong = repicked?.id ? extras.seen.get(repicked.id) : null;
       if (altSong) {
         logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size });
         queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)`);
         object = repicked;
         song = altSong;
-      } else {
-        // The constrained re-pick call itself failed (model/parse error). Keep
-        // the original pick rather than drop the slot — but say so, since the
-        // guard did NOT get to relax by choice.
-        logEvent('pick.artistGuard', { relaxed: true, reason: 'repick-failed', artist: song.artist, candidates: alt.size });
-        queue.log('picker', `back-to-back artist "${song.artist}" — re-pick from ${alt.size} other-artist candidate(s) didn't land; keeping original`);
       }
-    } else {
-      logEvent('pick.artistGuard', { relaxed: true, reason: 'no-other-artist', artist: song.artist, candidates: 0 });
-      queue.log('picker', `back-to-back artist "${song.artist}" allowed — no other-artist candidate in the pool (relaxed)`);
+    }
+    if (!altSong) {
+      // Pool rescue. This enqueues (and links, and records its own session turn)
+      // on success, so there is nothing left for this run to do — return true
+      // and let runTrackEvent treat the slot as filled. `enqueuePick`'s dedup
+      // still applies: a pool pick that collides with something already queued
+      // reports 'collision' and we fall through to the relaxation below rather
+      // than silently dropping the slot.
+      const rescued = await pickViaPool(
+        queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
+        { avoidArtist: song.artist },
+      );
+      // Why the rescue ran, phrased for the booth log: the run either surfaced
+      // no other artist at all, or surfaced some and the constrained re-pick
+      // call over them failed — two different stations of the same rescue.
+      const runWasThin = alt.size
+        ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
+        : 'every agent candidate was that artist';
+      if (rescued === 'queued') {
+        logEvent('pick.artistGuard', { relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
+        queue.log('picker', `back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
+        return true;
+      }
+      // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
+      // from 'collision' (it produced a pick that deduped against something
+      // already queued) — an operator reading #1187-style reports must be able
+      // to tell "the library really had nothing" from "a request slipped in
+      // mid-pick".
+      const reason = alt.size ? 'repick-failed' : 'no-other-artist';
+      logEvent('pick.artistGuard', { relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
+      queue.log('picker', `back-to-back artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
     }
   }
 
   const rawSay = typeof object.say === 'string' ? object.say.trim() : '';
   // Talk-within-the-intro (feature 3a): enqueuePick re-applies this trim at
-  // the chokepoint (idempotent); it runs here too so the session turn below
-  // records the line as it will actually air — trimmed, and dropped links as
-  // null, never a line the listeners didn't hear.
+  // the chokepoint (near-idempotent — see the note there); it runs here too so
+  // the session turn below records the line as it will actually air — trimmed,
+  // and dropped links as null, never a line the listeners didn't hear.
   const say = trimLinkToIntro(rawSay, song) || '';
   // Transition effects on this pick (persona djMode via settings.effectsActive),
   // independent of whether a link airs.
@@ -330,15 +366,22 @@ async function pickViaAgent(queue, { wantLink, audioWaypoint = null, current = n
   return true;
 }
 
-async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null) {
+// Returns 'queued' when a pick was actually enqueued, 'empty' when the pool
+// produced none, 'collision' when its pick deduped against something already
+// queued. The final fallback ignores the answer (nothing is left to try), but
+// the artist-guard rescue in pickViaAgent needs the distinction: any non-queued
+// answer sends the guard back to its own same-artist pick, and only 'empty'
+// means the pool truly held no other artist — the relaxation event says which
+// (#1187).
+async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}): Promise<'queued' | 'empty' | 'collision'> {
   // A DJ-mode mini-run (feature 4) anchors the pool re-rank to the run's
   // tempo/key target instead of the current track. null → today's behaviour.
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
   // run's current waypoint vector, drifting the pool toward the destination.
-  const result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint);
+  const result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint, opts);
   if (!result) {
     queue.log('picker', 'pool produced no pick');
-    return;
+    return 'empty';
   }
   // Build the between-track link BEFORE enqueueing so it can ride on the queued
   // item and air when the pick starts. It back-announces the track on-air right
@@ -389,7 +432,7 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
-  if (queued === -1) return;
+  if (queued === -1) return 'collision';
   // The reason text is concise on a successful pool pick and useful context for
   // the next turn — but on a failed pool LLM (picker.js returns the sentinel
   // 'fallback (LLM pick failed)'), recording it as the DJ's session turn primes
@@ -405,6 +448,7 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
     text: sessionText,
     meta: { trackId: result.song.id, title: result.song.title, artist: result.song.artist },
   });
+  return 'queued';
 }
 
 // Called by the queue watcher when an autonomous track starts and the queue is
@@ -548,7 +592,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // and go straight to the one-call pool picker below to stretch the budget.
     if (settings.get().llm?.pickerAgent && !cheap && !breakerOpen()) {
       try {
-        const queued = await pickViaAgent(queue, { wantLink, audioWaypoint, current, showAt });
+        const queued = await pickViaAgent(queue, ctx, { wantLink, audioWaypoint, current, showAt, rankTarget });
         breakerSuccess();
         if (queued) return;
         // The agent produced a valid pick but it was already queued/on-air, so
