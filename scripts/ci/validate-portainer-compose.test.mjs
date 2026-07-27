@@ -19,6 +19,17 @@ const validResolved = {
       ],
     },
     web: {},
+    analyzer: {
+      image: 'ghcr.io/perminder-klair/subwave-analyzer-cuda:1.0.0',
+      environment: { ANALYZE_DEVICE: 'cuda' },
+      deploy: {
+        resources: {
+          reservations: {
+            devices: [{ driver: 'nvidia', count: 'all', capabilities: ['gpu'] }],
+          },
+        },
+      },
+    },
   },
 };
 
@@ -91,9 +102,18 @@ services:
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
   analyzer:
-    image: ghcr.io/obiwancanoweme/subwave-analyzer\${ANALYZER_HEAVY:+-heavy}:\${SUBWAVE_VERSION:?required}
+    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}
     logging: *default-logging
     mem_limit: \${ANALYZER_MEM_LIMIT:-6g}
+    environment:
+      ANALYZE_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - *state-mount
       - analyzer-cache:/opt/analyzer/hf-cache
@@ -270,21 +290,55 @@ test('resolved model requires exact Caddy trusted proxy ranges', () => {
   }
 });
 
+test('resolved analyzer requires the upstream CUDA image and NVIDIA reservation', () => {
+  assert.deepEqual(resolvedErrors(validResolved), []);
+
+  const cases = [
+    ['image', 'example.invalid/analyzer:1.0.0', 'resolved analyzer has an invalid upstream CUDA image'],
+    ['device', 'cpu', 'resolved analyzer must require CUDA'],
+    ['driver', 'other', 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+    ['count', 1, 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+    ['capabilities', ['compute'], 'resolved analyzer has an invalid NVIDIA GPU reservation'],
+  ];
+
+  for (const [field, value, expected] of cases) {
+    const model = structuredClone(validResolved);
+    if (field === 'image') model.services.analyzer.image = value;
+    if (field === 'device') model.services.analyzer.environment.ANALYZE_DEVICE = value;
+    if (field === 'driver') model.services.analyzer.deploy.resources.reservations.devices[0].driver = value;
+    if (field === 'count') model.services.analyzer.deploy.resources.reservations.devices[0].count = value;
+    if (field === 'capabilities') {
+      model.services.analyzer.deploy.resources.reservations.devices[0].capabilities = value;
+    }
+    assert.ok(resolvedErrors(model).includes(expected));
+  }
+
+  const dockerNormalized = structuredClone(validResolved);
+  dockerNormalized.services.analyzer.deploy.resources.reservations.devices[0].count = -1;
+  assert.deepEqual(resolvedErrors(dockerNormalized), []);
+});
+
 test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
 });
 
 test('rejects mutable or checkout-coupled deployment', () => {
   const invalid = `${valid}\nbuild: .\nimage: example:latest\n` +
-    `ghcr.io/perminder-klair/subwave-web\n./state:/var/sub-wave\n` +
+    `./state:/var/sub-wave\n` +
     `env_file: ./.env\n0.0.0.0:7700:7700\n[::]:7700:7700\n`;
   for (const expected of [
     'manifest contains a build directive',
     'manifest references latest',
-    'manifest references the upstream image namespace',
     'manifest contains a repository-relative state mount',
     'manifest depends on a repository .env file',
   ]) assertRejects(invalid, expected);
+  assertRejects(
+    valid.replace(
+      'ghcr.io/obiwancanoweme/subwave-web:\${SUBWAVE_VERSION:?required}',
+      'ghcr.io/perminder-klair/subwave-web:\${SUBWAVE_VERSION:?required}',
+    ),
+    'service web has an invalid image',
+  );
 });
 
 test('rejects missing services and exact first-party images', () => {
@@ -295,10 +349,19 @@ test('rejects missing services and exact first-party images', () => {
       `service ${service} has an invalid image`,
     );
   }
-  assertRejects(
-    valid.replace('subwave-analyzer\${ANALYZER_HEAVY:+-heavy}', 'subwave-analyzer'),
-    'service analyzer has an invalid image',
-  );
+  for (const image of [
+    'ghcr.io/obiwancanoweme/subwave-analyzer:\${SUBWAVE_VERSION:?required}',
+    'ghcr.io/perminder-klair/subwave-analyzer-cuda:latest',
+    'ghcr.io/perminder-klair/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}',
+  ]) {
+    assertRejects(
+      valid.replace(
+        'ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}',
+        image,
+      ),
+      'service analyzer has an invalid image',
+    );
+  }
   assertRejects(
     valid.replace('ghcr.io/tecnativa/docker-socket-proxy:0.3.0', 'ghcr.io/tecnativa/docker-socket-proxy:latest'),
     'service docker-socket-proxy has an invalid image',
@@ -311,6 +374,11 @@ test('rejects material topology removals', () => {
     ['    profiles: ["tts-heavy"]\n', 'service tts-heavy is missing profile tts-heavy'],
     ['    healthcheck:\n      test: ["CMD-SHELL", "curl -f http://localhost:7701/health"]\n', 'service controller is missing a healthcheck'],
     ['      docker-socket-proxy:\n        condition: service_started\n', 'service controller is missing docker-socket-proxy service_started dependency'],
+    ['      ANALYZE_DEVICE: cuda\n', 'service analyzer must require CUDA'],
+    [
+      '    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n',
+      'service analyzer is missing its NVIDIA GPU reservation',
+    ],
     ['      - analyzer-cache:/opt/analyzer/hf-cache\n', 'service analyzer is missing its named cache mount'],
     ['  analyzer-cache:\n', 'manifest is missing named volume analyzer-cache'],
     [

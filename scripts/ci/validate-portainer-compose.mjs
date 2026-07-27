@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url';
 const rules = [
   [/^\s*build\s*:/m, 'manifest contains a build directive'],
   [/(?:^|:)latest(?:$|\s)/m, 'manifest references latest'],
-  [/ghcr\.io\/perminder-klair\//, 'manifest references the upstream image namespace'],
   [/(?:\$\{STATE_DIR[^}]*\}|\.\/state):\/var\/sub-wave/, 'manifest contains a repository-relative state mount'],
   [/env_file:\s*(?:\n\s*-\s*)?\.\/\.env/, 'manifest depends on a repository .env file'],
 ];
@@ -17,7 +16,7 @@ const serviceImages = new Map([
   ['docker-socket-proxy', 'ghcr.io/tecnativa/docker-socket-proxy:0.3.0'],
   ['web', 'ghcr.io/obiwancanoweme/subwave-web:${SUBWAVE_VERSION:?required}'],
   ['tts-heavy', 'ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}'],
-  ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:${SUBWAVE_VERSION:?required}'],
+  ['analyzer', 'ghcr.io/perminder-klair/subwave-analyzer-cuda:${UPSTREAM_ANALYZER_VERSION:?required}'],
 ]);
 
 const serviceRequirements = [
@@ -49,6 +48,12 @@ const serviceRequirements = [
   ['tts-heavy', 'tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache', 'service tts-heavy is missing its pocket cache mount'],
   ['analyzer', 'logging: *default-logging', 'service analyzer is missing default log rotation'],
   ['analyzer', 'mem_limit:', 'service analyzer is missing its memory limit'],
+  ['analyzer', 'ANALYZE_DEVICE: cuda', 'service analyzer must require CUDA'],
+  [
+    'analyzer',
+    'driver: nvidia\n              count: all\n              capabilities: [gpu]',
+    'service analyzer is missing its NVIDIA GPU reservation',
+  ],
   ['analyzer', '*state-mount', 'service analyzer is missing the state mount'],
   ['analyzer', 'analyzer-cache:/opt/analyzer/hf-cache', 'service analyzer is missing its named cache mount'],
 ];
@@ -173,6 +178,24 @@ export function validateResolvedPortainerCompose(model) {
     if (service !== 'caddy' && resolvedPorts(configuration).length !== 0) {
       errors.push(`resolved service ${service} must not publish host ports`);
     }
+  }
+
+  const analyzer = services.analyzer;
+  if (!/^ghcr\.io\/perminder-klair\/subwave-analyzer-cuda:(?!latest$)[^${}\\s]+$/.test(analyzer?.image ?? '')) {
+    errors.push('resolved analyzer has an invalid upstream CUDA image');
+  }
+  if (analyzer?.environment?.ANALYZE_DEVICE !== 'cuda') {
+    errors.push('resolved analyzer must require CUDA');
+  }
+  const devices = analyzer?.deploy?.resources?.reservations?.devices;
+  if (
+    !Array.isArray(devices)
+    || devices.length !== 1
+    || devices[0]?.driver !== 'nvidia'
+    || !['all', -1].includes(devices[0]?.count)
+    || JSON.stringify(devices[0]?.capabilities) !== JSON.stringify(['gpu'])
+  ) {
+    errors.push('resolved analyzer has an invalid NVIDIA GPU reservation');
   }
   return errors;
 }
