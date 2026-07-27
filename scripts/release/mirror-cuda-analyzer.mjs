@@ -40,9 +40,10 @@ function inspectedDigest(result) {
 function destinationIsExplicitlyAbsent(result, destination) {
   if (result.status === 0) return false;
   const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  if (/\b(?:unauthorized|authentication|forbidden)\b|\b5[0-9]{2}\b/i.test(diagnostic)) return false;
   const escapedDestination = destination.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return /manifest unknown/i.test(diagnostic)
-    || new RegExp(`(?:^|\\n)${escapedDestination}: not found(?:\\r?$|\\n)`, 'i').test(diagnostic);
+    || new RegExp(`(?:^|\\n)(?:ERROR:\\s*)?${escapedDestination}: not found(?:\\r?$|\\n)`, 'i').test(diagnostic);
 }
 
 export function mirrorCudaAnalyzer(releaseTag, { run = commandRunner } = {}) {

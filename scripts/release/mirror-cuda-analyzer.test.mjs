@@ -56,6 +56,18 @@ test('copies an absent destination and requires equal digests', () => {
   assert.deepEqual(command.calls, expectedCalls());
 });
 
+test('copies an absent destination with Docker exact not-found diagnostic', () => {
+  const command = runner(
+    result(0, JSON.stringify(digest)),
+    result(1, '', `ERROR: ${destination}: not found`),
+    result(0),
+    result(0, JSON.stringify(digest)),
+  );
+
+  assert.deepEqual(mirrorCudaAnalyzer(releaseTag, { run: command.run }), { source, destination, digest });
+  assert.deepEqual(command.calls, expectedCalls());
+});
+
 test('fails closed when the source cannot be inspected', () => {
   for (const stderr of ['unauthorized: authentication required', 'manifest unknown', 'transport: connection reset']) {
     const command = runner(result(1, '', stderr));
@@ -72,7 +84,11 @@ test('refuses to overwrite an existing destination', () => {
 });
 
 test('fails closed when destination absence is ambiguous', () => {
-  for (const stderr of ['unauthorized: authentication required', '503 Service Unavailable']) {
+  for (const stderr of [
+    'unauthorized: authentication required',
+    '503 Service Unavailable',
+    'unauthorized: authentication required; manifest unknown',
+  ]) {
     const command = runner(result(0, JSON.stringify(digest)), result(1, '', stderr));
     assert.throws(() => mirrorCudaAnalyzer(releaseTag, { run: command.run }), /could not prove destination.*absent/i);
     assert.deepEqual(command.calls, expectedCalls().slice(0, 2));
