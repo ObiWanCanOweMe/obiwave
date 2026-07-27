@@ -16,7 +16,7 @@ const serviceImages = new Map([
   ['docker-socket-proxy', 'ghcr.io/tecnativa/docker-socket-proxy:0.3.0'],
   ['web', 'ghcr.io/obiwancanoweme/subwave-web:${SUBWAVE_VERSION:?required}'],
   ['tts-heavy', 'ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}'],
-  ['analyzer', 'ghcr.io/perminder-klair/subwave-analyzer-cuda:${UPSTREAM_ANALYZER_VERSION:?required}'],
+  ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}'],
 ]);
 
 const serviceRequirements = [
@@ -181,8 +181,8 @@ export function validateResolvedPortainerCompose(model) {
   }
 
   const analyzer = services.analyzer;
-  if (!/^ghcr\.io\/perminder-klair\/subwave-analyzer-cuda:(?!latest$)[^${}\\s]+$/.test(analyzer?.image ?? '')) {
-    errors.push('resolved analyzer has an invalid upstream CUDA image');
+  if (!/^ghcr\.io\/obiwancanoweme\/subwave-analyzer-cuda:v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-obiwave\.[1-9][0-9]*$/.test(analyzer?.image ?? '')) {
+    errors.push('resolved analyzer has an invalid CUDA mirror image');
   }
   if (analyzer?.environment?.ANALYZE_DEVICE !== 'cuda') {
     errors.push('resolved analyzer must require CUDA');

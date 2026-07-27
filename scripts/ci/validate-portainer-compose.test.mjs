@@ -20,7 +20,7 @@ const validResolved = {
     },
     web: {},
     analyzer: {
-      image: 'ghcr.io/perminder-klair/subwave-analyzer-cuda:1.0.0',
+      image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.0.0-obiwave.1',
       environment: { ANALYZE_DEVICE: 'cuda' },
       deploy: {
         resources: {
@@ -102,7 +102,7 @@ services:
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
   analyzer:
-    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}
+    image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}
     logging: *default-logging
     mem_limit: \${ANALYZER_MEM_LIMIT:-6g}
     environment:
@@ -290,11 +290,11 @@ test('resolved model requires exact Caddy trusted proxy ranges', () => {
   }
 });
 
-test('resolved analyzer requires the upstream CUDA image and NVIDIA reservation', () => {
+test('resolved analyzer requires the release-tagged CUDA mirror and NVIDIA reservation', () => {
   assert.deepEqual(resolvedErrors(validResolved), []);
 
   const cases = [
-    ['image', 'example.invalid/analyzer:1.0.0', 'resolved analyzer has an invalid upstream CUDA image'],
+    ['image', 'example.invalid/analyzer:1.0.0', 'resolved analyzer has an invalid CUDA mirror image'],
     ['device', 'cpu', 'resolved analyzer must require CUDA'],
     ['driver', 'other', 'resolved analyzer has an invalid NVIDIA GPU reservation'],
     ['count', 1, 'resolved analyzer has an invalid NVIDIA GPU reservation'],
@@ -351,12 +351,14 @@ test('rejects missing services and exact first-party images', () => {
   }
   for (const image of [
     'ghcr.io/obiwancanoweme/subwave-analyzer:\${SUBWAVE_VERSION:?required}',
+    'ghcr.io/perminder-klair/subwave-analyzer-cuda:v1.0.0-obiwave.1',
     'ghcr.io/perminder-klair/subwave-analyzer-cuda:latest',
-    'ghcr.io/perminder-klair/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}',
+    'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:latest',
+    'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}',
   ]) {
     assertRejects(
       valid.replace(
-        'ghcr.io/perminder-klair/subwave-analyzer-cuda:\${UPSTREAM_ANALYZER_VERSION:?required}',
+        'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}',
         image,
       ),
       'service analyzer has an invalid image',

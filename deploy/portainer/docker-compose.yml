@@ -227,10 +227,7 @@ services:
   # (Chatterbox/PocketTTS) stay opt-in under the `tts-heavy` profile; acoustic
   # analysis is default-on. To skip it, `docker compose stop analyzer`.
   analyzer:
-    # CUDA analysis is upstream-owned and independently pinned. Portainer must
-    # define UPSTREAM_ANALYZER_VERSION (initially 1.0.0); fork releases do not
-    # advance this image.
-    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:${UPSTREAM_ANALYZER_VERSION:?required}
+    image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}
     container_name: sub-wave-analyzer
     restart: unless-stopped
     logging: *default-logging
