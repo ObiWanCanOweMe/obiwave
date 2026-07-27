@@ -460,6 +460,8 @@ Expected: all tests pass.
 Run:
 
 ```bash
+trap 'rm -f deploy/portainer/stack.env' EXIT
+: > deploy/portainer/stack.env
 SUBWAVE_VERSION=v1.0.0-obiwave.1 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org node scripts/ci/validate-portainer-compose.mjs deploy/portainer/docker-compose.yml
 SUBWAVE_VERSION=v1.0.0-obiwave.1 ADMIN_USER=ci ADMIN_PASS=ci SITE_URL=https://radio.kener.org docker compose --profile '*' -f deploy/portainer/docker-compose.yml config --format json
 ```
