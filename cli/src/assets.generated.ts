@@ -1200,6 +1200,9 @@ SITE_URL=
 # (which the controller sources on boot). Set here only for IaC-style provisioning.
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
+# OPENAI_API_BASE=                  # fallback base URL for LiteLLM-compatible gateways
+# LITELLM_API_BASE=                 # preferred LiteLLM gateway base URL
+# LITELLM_API_KEY=                  # preferred LiteLLM gateway token
 # GOOGLE_GENERATIVE_AI_API_KEY=
 # OPENROUTER_API_KEY=
 # REQUESTY_API_KEY=
@@ -1235,8 +1238,7 @@ SITE_URL=
 # NVIDIA GPU? The heavy stack can run on CUDA instead — not an .env toggle (a
 # GPU device reservation can't live here); layer the analyzer-gpu overlay:
 #   docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
-# (AIO one-click users: no overlay — pull subwave-aio-cuda and pass the GPU to
-# the container. See docs/unraid.md.)
+# AIO GPU packaging is upstream-owned and is not published by ObiWave.
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
 # ANALYZE_IDLE_UNLOAD_S=  # cuda flavour: seconds of no analysis before models are
