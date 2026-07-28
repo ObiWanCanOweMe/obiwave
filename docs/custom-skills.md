@@ -148,7 +148,7 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 
 | call | what it does |
 |---|---|
-| `services.searchWeb(query, opts?)` | web search via the configured provider (DuckDuckGo / Tavily / Brave / SearXNG) |
+| `services.searchWeb(query, opts?)` | web search via DuckDuckGo, Tavily, Brave, SearXNG, or Kagi |
 | `services.searchReady()` | `true` when a search provider is usable |
 | `services.nowPlaying()` | the track on air — `{ artist, title, album, year, id }` or `null` |
 | `services.recentPlays(hours)` | play-log dedup sets `{ ids, keys }` over the last *hours* |
@@ -157,6 +157,10 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.fetchHeadlines({ feedUrl?, maxItems? })` | fetch + parse an RSS feed |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
 | `services.log(msg)` | append a line to the station event log |
+
+Tavily and Brave use provider-owned saved keys with `SEARCH_API_KEY` as their
+environment fallback. Kagi uses its own saved key or `KAGI_API_KEY`.
+DuckDuckGo is keyless; SearXNG uses its configured self-hosted base URL.
 
 Every skill's `tool.mjs` is **timeout-guarded (8 s)** and any throw degrades
 cleanly to "no data" — a slow or broken skill can never hang the between-track

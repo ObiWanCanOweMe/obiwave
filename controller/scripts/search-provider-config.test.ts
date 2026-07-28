@@ -11,6 +11,7 @@ for (const path of [
   'controller/src/setup/secrets.ts',
   'cli/src/util.ts',
   '.env.example',
+  'cli/src/assets.generated.ts',
 ]) {
   assert.match(read(path), /KAGI_API_KEY/, `${path} declares KAGI_API_KEY`);
 }
