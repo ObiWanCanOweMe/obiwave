@@ -103,6 +103,7 @@ const components = {
   KeyTestResult: function KeyTestResult() {},
 };
 const hookState: unknown[] = [];
+let hookStateWriteCount = 0;
 let hookCursor = 0;
 const useState = (initial: unknown) => {
   const index = hookCursor++;
@@ -114,6 +115,7 @@ const useState = (initial: unknown) => {
   return [
     hookState[index],
     (next: unknown) => {
+      hookStateWriteCount += 1;
       hookState[index] = typeof next === 'function'
         ? (next as (current: unknown) => unknown)(hookState[index])
         : next;
@@ -289,24 +291,6 @@ const firstRun = firstClick();
 tree = renderSection();
 assert.equal(searxngUi(tree).button, 'Testing…', 'probe start publishes busy state');
 
-const editUrl = searxngInput(tree).props.onChange as (
-  event: { target: { value: string } },
-) => void;
-assert.equal(typeof editUrl, 'function', 'SearXNG URL input must be editable');
-editUrl({ target: { value: 'http://new-searxng.test' } });
-tree = renderSection();
-assert.deepEqual(
-  searxngUi(tree),
-  { button: 'Test', disabled: false, status: null },
-  'editing the URL invalidates the pending probe and immediately clears its UI state',
-);
-
-const secondClick = searxngButton(tree).props.onClick as () => Promise<void>;
-assert.equal(typeof secondClick, 'function', 'replacement SearXNG URL must be testable');
-const secondRun = secondClick();
-tree = renderSection();
-assert.equal(searxngUi(tree).button, 'Testing…', 'replacement URL starts its own probe');
-
 const firstRequest = requests[0];
 assert.ok(firstRequest, 'first SearXNG request must be pending');
 firstRequest.resolve({
@@ -316,9 +300,74 @@ await firstRun;
 tree = renderSection();
 assert.deepEqual(
   searxngUi(tree),
-  { button: 'Testing…', disabled: true, status: null },
-  'stale success and finally cannot publish over the replacement probe',
+  { button: 'Test', disabled: false, status: 'Connected · 17 results' },
+  'the current SearXNG probe publishes its completed verdict',
 );
+const successfulStatus = findElement(
+  tree,
+  element => element.type === 'p' && element.props.role === 'status',
+);
+assert.ok(successfulStatus, 'successful SearXNG verdict must be rendered');
+assert.match(
+  String(successfulStatus.props.className),
+  /\btext-green-600\b/,
+  'successful SearXNG verdict must use the green status treatment',
+);
+
+const editUrl = searxngInput(tree).props.onChange as (
+  event: { target: { value: string } },
+) => void;
+assert.equal(typeof editUrl, 'function', 'SearXNG URL input must be editable');
+editUrl({ target: { value: 'http://new-searxng.test' } });
+tree = renderSection();
+assert.deepEqual(
+  searxngUi(tree),
+  { button: 'Test', disabled: false, status: null },
+  'editing the URL immediately clears the completed verdict and busy state',
+);
+
+const secondClick = searxngButton(tree).props.onClick as () => Promise<void>;
+assert.equal(typeof secondClick, 'function', 'replacement SearXNG URL must be testable');
+const secondRun = secondClick();
+tree = renderSection();
+assert.equal(searxngUi(tree).button, 'Testing…', 'replacement URL starts its own probe');
+
+const editPendingUrl = searxngInput(tree).props.onChange as (
+  event: { target: { value: string } },
+) => void;
+assert.equal(typeof editPendingUrl, 'function', 'pending SearXNG URL must be editable');
+editPendingUrl({ target: { value: 'http://newer-searxng.test' } });
+tree = renderSection();
+assert.deepEqual(
+  searxngUi(tree),
+  { button: 'Test', disabled: false, status: null },
+  'editing the URL invalidates the pending probe and immediately clears its UI state',
+);
+const writesAfterPendingUrlEdit = hookStateWriteCount;
+
+const secondRequest = requests[1];
+assert.ok(secondRequest, 'edited SearXNG request must still be pending');
+secondRequest.resolve({
+  json: async () => ({ ok: true, results: 23 }),
+} as Response);
+await secondRun;
+assert.equal(
+  hookStateWriteCount,
+  writesAfterPendingUrlEdit,
+  'stale success and finally must not publish any state writes after a URL edit',
+);
+tree = renderSection();
+assert.deepEqual(
+  searxngUi(tree),
+  { button: 'Test', disabled: false, status: null },
+  'the edited URL owns visible state before any replacement probe can supersede the old request',
+);
+
+const thirdClick = searxngButton(tree).props.onClick as () => Promise<void>;
+assert.equal(typeof thirdClick, 'function', 'edited SearXNG URL must remain testable');
+const thirdRun = thirdClick();
+tree = renderSection();
+assert.equal(searxngUi(tree).button, 'Testing…', 'provider-switch probe starts pending');
 
 const switchAway = providerSelect(tree).props.onValueChange as (provider: string) => void;
 assert.equal(typeof switchAway, 'function', 'provider must be selectable');
@@ -334,10 +383,10 @@ assert.deepEqual(
   'switching providers invalidates the pending probe and immediately clears its UI state',
 );
 
-const secondRequest = requests[1];
-assert.ok(secondRequest, 'replacement SearXNG request must be pending');
-secondRequest.reject(new Error('old provider failed'));
-await secondRun;
+const thirdRequest = requests[2];
+assert.ok(thirdRequest, 'provider-switch SearXNG request must be pending');
+thirdRequest.reject(new Error('old provider failed'));
+await thirdRun;
 tree = renderSection();
 assert.deepEqual(
   searxngUi(tree),
