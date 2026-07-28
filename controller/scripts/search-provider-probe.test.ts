@@ -140,6 +140,7 @@ try {
   });
   assert.equal(savedProbe.ok, true);
   assert.equal(seenAuthorization, 'Bearer saved-kagi-key');
+  assert.equal(JSON.stringify(savedProbe).includes('saved-kagi-key'), false);
 
   await settings.update({ search: { apiKeys: { kagi: null } } });
   process.env.KAGI_API_KEY = 'environment-kagi-key';
@@ -155,6 +156,7 @@ try {
   });
   assert.equal(envProbe.ok, true);
   assert.equal(seenAuthorization, 'Bearer environment-kagi-key');
+  assert.equal(JSON.stringify(envProbe).includes('environment-kagi-key'), false);
   delete process.env.KAGI_API_KEY;
 
   for (const mismatch of [
@@ -191,6 +193,7 @@ try {
       assert.equal(response.status, 400, `${mismatch.key}/${mismatch.provider}/${source}`);
       assert.equal(response.body.ok, false, `${mismatch.key}/${mismatch.provider}/${source}`);
       assert.match(response.body.message, /does not match provider/i);
+      assert.equal(JSON.stringify(response.body).includes(`${source}-mismatch-secret`), false);
       assert.equal(outboundSearchRequests, 0, `${mismatch.key}/${mismatch.provider}/${source}`);
     }
   }
