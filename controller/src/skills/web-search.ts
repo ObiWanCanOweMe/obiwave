@@ -20,7 +20,6 @@
 // memo to keep the homelab polite under DDG's unofficial fair-use limits and
 // to avoid burning Tavily/Brave credits on duplicate ticks.
 
-import { config } from '../config.js';
 import * as settings from '../settings.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
 
@@ -50,7 +49,7 @@ async function memo(
 }
 
 export async function tavilySearch(query: string): Promise<SearchResponse> {
-  const apiKey = settings.get().search?.apiKey || process.env.SEARCH_API_KEY || config.search.apiKey;
+  const apiKey = settings.searchKeyFor('tavily');
   const res = await fetch(TAVILY_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -196,7 +195,7 @@ export async function braveSearch(
   query: string,
   recency?: 'day' | 'week' | 'month',
 ): Promise<SearchResponse> {
-  const apiKey = settings.get().search?.apiKey || process.env.SEARCH_API_KEY || config.search.apiKey;
+  const apiKey = settings.searchKeyFor('brave');
   if (!apiKey) throw new Error('Brave Search API key not configured');
 
   const url = new URL(BRAVE_ENDPOINT);
@@ -304,6 +303,7 @@ export function searchReady(): boolean {
   const provider = s?.provider || 'duckduckgo';
   if (provider === 'duckduckgo') return true;
   if (provider === 'searxng') return !!(s?.baseUrl && s.baseUrl.trim());
-  // tavily / brave (and any future keyed provider)
-  return !!(s?.apiKey || process.env.SEARCH_API_KEY || config.search.apiKey);
+  if (provider === 'tavily') return !!settings.searchKeyFor('tavily');
+  if (provider === 'brave') return !!settings.searchKeyFor('brave');
+  return false;
 }

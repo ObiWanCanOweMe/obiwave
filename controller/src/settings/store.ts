@@ -5,7 +5,12 @@
 //
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
-import { MOOD_DEFAULTS, PERIOD_MOOD_DEFAULTS, WEATHER_MOOD_DEFAULTS } from './vocab.js';
+import {
+  MOOD_DEFAULTS,
+  PERIOD_MOOD_DEFAULTS,
+  SEARCH_KEY_PROVIDERS,
+  WEATHER_MOOD_DEFAULTS,
+} from './vocab.js';
 import { DEFAULTS } from './defaults.js';
 
 // The loaded settings. Null until load() has run. Only settings.ts writes it,
@@ -88,7 +93,11 @@ export function getRedacted() {
   }
   if (clone.llm?.fallback) clone.llm.fallback.apiKey = s.llm?.fallback?.apiKey ? 'set' : '';
   if (clone.tts?.cloud) clone.tts.cloud.apiKey = s.tts?.cloud?.apiKey ? 'set' : '';
-  if (clone.search) clone.search.apiKey = s.search?.apiKey ? 'set' : '';
+  if (clone.search?.apiKeys) {
+    for (const provider of SEARCH_KEY_PROVIDERS) {
+      clone.search.apiKeys[provider] = s.search?.apiKeys?.[provider] ? 'set' : '';
+    }
+  }
   if (clone.embedding) clone.embedding.apiKey = s.embedding?.apiKey ? 'set' : '';
   if (Array.isArray(clone.webhooks)) {
     for (let i = 0; i < clone.webhooks.length; i++) {

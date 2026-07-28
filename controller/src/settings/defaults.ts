@@ -509,12 +509,11 @@ export const DEFAULTS = {
     },
   },
   // Web-search backend for the segment director's web-search capability.
-  // Default `duckduckgo` works out of the box with no key; `tavily` and
-  // `brave` read their key from SEARCH_API_KEY (or the optional override
-  // below). `apiKey` is only meaningful for the keyed providers.
+  // Default `duckduckgo` works out of the box with no key. Keys belong to the
+  // provider that consumes them, so changing providers never reuses a key.
   search: {
     provider: 'duckduckgo',
-    apiKey: '',
+    apiKeys: { tavily: '', brave: '', kagi: '' },
     baseUrl: '',
   },
   skills: {

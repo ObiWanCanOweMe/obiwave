@@ -544,10 +544,36 @@ export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'openai-compatible']
 // and keyless, returns useful results only for entity / definition queries, and
 // silence otherwise (which the segment director already treats as a valid
 // outcome). `tavily` is the paid option for operators who want richer web
-// results; `brave` is Brave's Search API (metered, $5/mo free credits) — both
-// read their key from SEARCH_API_KEY. `searxng` is keyless self-hosted
-// meta-search via settings.search.baseUrl.
-export const SEARCH_PROVIDERS = ['duckduckgo', 'tavily', 'brave', 'searxng'] as const;
+// results; `brave` is Brave's Search API (metered, $5/mo free credits), and
+// `kagi` provides its own paid API. `searxng` is keyless self-hosted meta-search
+// via settings.search.baseUrl.
+export const SEARCH_PROVIDERS =
+  ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'] as const;
+export const SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi'] as const;
+export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
+
+const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
+  tavily: '',
+  brave: '',
+  kagi: '',
+});
+
+export function normalizeSearchApiKeys(raw: unknown): Record<SearchKeyProvider, string> {
+  const search = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const mapped = search.apiKeys && typeof search.apiKeys === 'object'
+    ? search.apiKeys as Record<string, unknown>
+    : {};
+  const out = emptySearchApiKeys();
+  for (const provider of SEARCH_KEY_PROVIDERS) {
+    if (typeof mapped[provider] === 'string') out[provider] = mapped[provider].trim();
+  }
+  const owner = search.provider;
+  const legacy = typeof search.apiKey === 'string' ? search.apiKey.trim() : '';
+  if (legacy && (owner === 'tavily' || owner === 'brave') && !out[owner]) {
+    out[owner] = legacy;
+  }
+  return out;
+}
 
 // Canonical mood vocabulary + each mood's CLAP sound-prompt. This is the SEED:
 // the operator edits the live list from /admin/moods (settings.moods), and every

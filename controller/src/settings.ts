@@ -49,7 +49,9 @@ import {
   OPUS_BITRATES,
   PERIOD_MOOD_DEFAULTS,
   POCKET_TTS_VOICE_RE,
+  SEARCH_KEY_PROVIDERS,
   SEARCH_PROVIDERS,
+  SearchKeyProvider,
   TTS_CLOUD_PROVIDERS,
   TTS_ENGINES,
   WEATHER_CONDITIONS,
@@ -73,6 +75,7 @@ import {
   normalizeLlmProviderBaseUrls,
   normalizeMoodMap,
   normalizeMoods,
+  normalizeSearchApiKeys,
   normalizeTtsCorrections,
   normalizeTtsGainMap,
   normalizeTtsSpeedMap,
@@ -87,7 +90,7 @@ import {
   coerceMaxTrackSeconds,
   rawMaxTrackSec,
 } from './settings/defaults.js';
-import { minTrackSeconds, peek, setCache } from './settings/store.js';
+import { get, minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
   normalizeDjPrompts,
@@ -151,6 +154,7 @@ export {
   PERSONA_LIMIT,
   POCKET_TTS_VOICES,
   SCRIPT_LENGTHS,
+  SEARCH_KEY_PROVIDERS,
   SEARCH_PROVIDERS,
   SEED_PERSONAS,
   SHOWS_LIMIT,
@@ -171,6 +175,7 @@ export {
   clampTtsGain,
   clampTtsSpeed,
   normalizeDial,
+  normalizeSearchApiKeys,
   personaToneDirectives,
 } from './settings/vocab.js';
 export { cloudVoiceSettingsAreDefault } from './settings/defaults.js';
@@ -222,6 +227,7 @@ export type {
   LoudnessSource,
   NormalizedShow,
   ScheduleOverride,
+  SearchKeyProvider,
   Webhook,
 } from './settings/vocab.js';
 
@@ -724,7 +730,7 @@ export async function load() {
       provider: SEARCH_PROVIDERS.includes(stored.search?.provider)
         ? stored.search.provider
         : DEFAULTS.search.provider,
-      apiKey: typeof stored.search?.apiKey === 'string' ? stored.search.apiKey : '',
+      apiKeys: normalizeSearchApiKeys(stored.search),
       baseUrl: typeof stored.search?.baseUrl === 'string' ? stored.search.baseUrl : DEFAULTS.search.baseUrl,
     },
     embedding: {
@@ -917,6 +923,18 @@ export async function load() {
   }
   setStationTimezone(loaded.timezone);
   return loaded;
+}
+
+export function searchKeyFor(
+  provider: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!SEARCH_KEY_PROVIDERS.includes(provider as SearchKeyProvider)) return '';
+  const saved = get().search?.apiKeys?.[provider as SearchKeyProvider];
+  if (saved) return saved;
+  return provider === 'kagi'
+    ? (env.KAGI_API_KEY || '').trim()
+    : (env.SEARCH_API_KEY || '').trim();
 }
 
 // Lenient normalizer — used by load(). Drops invalid entries silently rather
@@ -1611,12 +1629,32 @@ export async function update(patch) {
       }
       next.search.provider = sr.provider;
     }
-    // 'set' is the redaction sentinel from getRedacted() — ignore it so a
-    // round-tripped form doesn't overwrite the real key.
-    if (sr.apiKey !== undefined && sr.apiKey !== 'set') {
-      const v = String(sr.apiKey);
-      if (v.length > 200) throw new Error('search.apiKey must be 0-200 chars');
-      next.search.apiKey = v;
+    if (sr.apiKeys !== undefined) {
+      if (!sr.apiKeys
+          || typeof sr.apiKeys !== 'object'
+          || Array.isArray(sr.apiKeys)) {
+        throw new Error('search.apiKeys must be an object');
+      }
+      const apiKeys = sr.apiKeys as Record<string, unknown>;
+      for (const key of Object.keys(apiKeys)) {
+        if (!SEARCH_KEY_PROVIDERS.includes(key as SearchKeyProvider)) {
+          throw new Error(`unknown search key provider: ${key}`);
+        }
+        const value = apiKeys[key];
+        if (value === undefined || value === 'set') continue;
+        if (value === null) {
+          next.search.apiKeys[key as SearchKeyProvider] = '';
+          continue;
+        }
+        if (typeof value !== 'string') {
+          throw new Error(`search.apiKeys.${key} must be a string or null`);
+        }
+        if (value.length > 200) {
+          throw new Error(`search.apiKeys.${key} must be 0-200 chars`);
+        }
+        const trimmed = value.trim();
+        if (trimmed) next.search.apiKeys[key as SearchKeyProvider] = trimmed;
+      }
     }
     if (sr.baseUrl !== undefined) {
       if (typeof sr.baseUrl !== 'string') throw new Error('search.baseUrl must be a string');

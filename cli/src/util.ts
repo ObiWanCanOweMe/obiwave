@@ -232,6 +232,7 @@ export const WIZARD_SECRET_KEYS = [
   'AI_GATEWAY_API_KEY',
   'ELEVENLABS_API_KEY',
   'SEARCH_API_KEY',
+  'KAGI_API_KEY',
   'EMBEDDING_API_KEY',
 ] as const;
 
