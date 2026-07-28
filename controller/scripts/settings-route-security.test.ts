@@ -46,7 +46,36 @@ try {
   assert.equal('saved' in body, false);
   assert.equal(JSON.stringify(body).includes(token), false);
   assert.equal(settings.llmKeyFor('litellm'), token, 'the key should still be retained internally');
+
+  const searchToken = 'route-only-kagi-token';
+  const searchResponse = await fetch(`http://127.0.0.1:${address.port}/settings`, {
+    method: 'POST',
+    headers: { authorization, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      search: {
+        provider: 'kagi',
+        apiKeys: { kagi: searchToken },
+      },
+    }),
+  });
+  assert.equal(searchResponse.status, 200);
+  const searchBody = await searchResponse.json();
+  assert.deepEqual(searchBody, { requiresRestart: false });
+  assert.equal(JSON.stringify(searchBody).includes(searchToken), false);
+  assert.equal(settings.searchKeyFor('kagi'), searchToken);
+
+  const environmentToken = 'route-only-kagi-environment-token';
+  process.env.KAGI_API_KEY = environmentToken;
+  const metadataResponse = await fetch(`http://127.0.0.1:${address.port}/settings`, {
+    headers: { authorization },
+  });
+  assert.equal(metadataResponse.status, 200);
+  const metadataBody = await metadataResponse.json();
+  assert.equal(metadataBody.env.KAGI_API_KEY, true);
+  assert.equal(JSON.stringify(metadataBody).includes(environmentToken), false);
+  delete process.env.KAGI_API_KEY;
   console.log('settings route security: POST response is public-only and token-free');
 } finally {
+  delete process.env.KAGI_API_KEY;
   await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
 }

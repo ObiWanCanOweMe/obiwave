@@ -196,6 +196,7 @@ router.get('/settings', requireAdmin, async (req, res) => {
         REQUESTY_API_KEY: !!process.env.REQUESTY_API_KEY,
         AI_GATEWAY_API_KEY: !!process.env.AI_GATEWAY_API_KEY,
         SEARCH_API_KEY: !!process.env.SEARCH_API_KEY,
+        KAGI_API_KEY: !!process.env.KAGI_API_KEY,
         EMBEDDING_API_KEY: !!process.env.EMBEDDING_API_KEY,
         LASTFM_API_KEY: !!process.env.LASTFM_API_KEY,
         LASTFM_API_SECRET: !!process.env.LASTFM_API_SECRET,

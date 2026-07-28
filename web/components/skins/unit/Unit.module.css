@@ -11,7 +11,9 @@
    its accent lines follow the theme. Everything that moves is a co-located
    keyframe idling at `paused` until `.playing` lands, so a tuned-out unit
    sits still and html.lite's global keyframe kill stops the whole panel for
-   free. */
+   free. The meter bars are the one hybrid: they run on the real stream
+   spectrum when the Web Audio analyser can attach (`.live`, driven from
+   UnitSkin's Bars) and fall back to their keyframe when it can't. */
 
 @keyframes unit-bar {
   0%, 100% { transform: scaleY(0.28); }
@@ -326,6 +328,13 @@
   animation-play-state: paused;
 }
 .playing .bar { animation-play-state: running; }
+/* Audio-driven: UnitSkin's Bars writes each bar's scaleY from the shared Web
+   Audio analyser. A running keyframe would win over that inline transform, so
+   the loop's own class stands the animation down — it's only present while
+   real spectrum data is landing, and drops the moment the analyser dies
+   (iOS/Safari silence, tune-out) so the keyframes take the meter straight
+   back. */
+.live .bar { animation: none; }
 .bar:nth-child(1) { animation-duration: 1.4s; animation-delay: 0s; }
 .bar:nth-child(2) { animation-duration: 1.9s; animation-delay: 0.2s; }
 .bar:nth-child(3) { animation-duration: 1.1s; animation-delay: 0.5s; }
@@ -333,6 +342,14 @@
 .bar:nth-child(5) { animation-duration: 1.6s; animation-delay: 0.35s; }
 .bar:nth-child(6) { animation-duration: 2s; animation-delay: 0.6s; }
 .bar:nth-child(7) { animation-duration: 1.3s; animation-delay: 0.45s; }
+
+/* Reduced motion freezes the meter at its resting height. The JS meter gates
+   itself on the same query (Bars in UnitSkin.tsx) — this is the keyframe half,
+   so the fallback path can't keep bouncing under a listener who asked for
+   stillness. html.lite gets this for free from the global animation kill. */
+@media (prefers-reduced-motion: reduce) {
+  .bar { animation: none; }
+}
 
 /* ── window chrome ────────────────────────────────────────────────────── */
 

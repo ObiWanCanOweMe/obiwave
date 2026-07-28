@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import ManualPage from './ManualPage';
+import ManualFigure from './ManualFigure';
 import CodeBlock from '@/components/CodeBlock';
 
 const EXAMPLE_THEME = `{
@@ -94,6 +95,22 @@ export default function Themes() {
             </li>
           ))}
         </ul>
+        <div className="bs-manual-figrow">
+          <ManualFigure
+            src="/screenshots/listen.webp"
+            alt="The Classic skin: a masthead across the top, cover art beside the track title and artist, a line from the DJ, a panel rail on the right, and a waveform above the transport bar"
+            caption="Classic — masthead, centre stage, waveform, transport deck."
+            width={2732}
+            height={2048}
+          />
+          <ManualFigure
+            src="/screenshots/listen-unit.webp"
+            alt="The Unit SW-9 skin: a milled-aluminium panel of soft-touch keys and weighted knobs beside a black dot-matrix window showing the track, elapsed time and a level display"
+            caption="Unit SW-9 — the same broadcast as a tabletop receiver, every live fact on one dot-matrix window."
+            width={2732}
+            height={2048}
+          />
+        </div>
         <div className="bs-callout">
           <div className="bs-eyebrow">SAME STATION, DIFFERENT ROOM</div>
           <p>

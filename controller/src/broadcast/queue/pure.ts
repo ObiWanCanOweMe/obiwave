@@ -48,6 +48,34 @@ export const BACKFILL_DEDUP_MAX_GAP_MS = 15 * 60_000;
 // two early — is how real radio tees up a changeover anyway.
 export const PICK_SHOW_LOOKAHEAD_SEC = 120;
 
+// Seconds from NOW until the pick being made will start airing — the lead the
+// show look-ahead adds to the wall clock (see runPickCycle).
+//
+// It must be measured from the on-air track's REMAINING time, never its full
+// duration. The pick cycle doesn't only run at a track start: the pair-drain
+// deadline backstop fires it with an empty queue ~2 min from the end, and boot
+// recovery fires it for a track already part-played. Using the full duration
+// there overstates the lead by everything already elapsed — up to a whole
+// track — which walks `showAt` across the next schedule boundary while the
+// real next track still starts inside the current show. That is what aired a
+// handoff five-plus minutes early, over the middle of a song, with the session
+// flipped to a show `/now-playing` still reported as the old one (#1205).
+//
+//  - `heldSec` null → the pick follows the ON-AIR track: lead = its remaining.
+//  - `heldSec` set  → the deadline path, where the pick follows a HELD track
+//                     queued behind the on-air one: lead = remaining + held.
+//
+// Unknown clock (no start stamp, no duration) or a held track of unknown
+// length → null, i.e. no look-ahead at all, the pre-look-ahead behaviour.
+// Clamped at 0 so a track past its cue-out can't pull `showAt` backwards.
+export function pickLeadSec(remainingSec: number | null, heldSec: number | null = null): number | null {
+  if (typeof remainingSec !== 'number' || !Number.isFinite(remainingSec)) return null;
+  const rem = Math.max(0, remainingSec);
+  if (heldSec == null) return rem;
+  if (!Number.isFinite(heldSec) || heldSec <= 0) return null;
+  return rem + heldSec;
+}
+
 // Has this events-log play already been recorded by recordPlay? The old dedup
 // keyed on `${endedAt}|${title}` — an EXACT timestamp match — but recordPlay's
 // end-stamp never equals the event's start `t`, so it never fired and every

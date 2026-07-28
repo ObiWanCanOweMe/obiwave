@@ -544,10 +544,36 @@ export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'openai-compatible']
 // and keyless, returns useful results only for entity / definition queries, and
 // silence otherwise (which the segment director already treats as a valid
 // outcome). `tavily` is the paid option for operators who want richer web
-// results; `brave` is Brave's Search API (metered, $5/mo free credits) — both
-// read their key from SEARCH_API_KEY. `searxng` is keyless self-hosted
-// meta-search via settings.search.baseUrl.
-export const SEARCH_PROVIDERS = ['duckduckgo', 'tavily', 'brave', 'searxng'] as const;
+// results; `brave` is Brave's Search API (metered, $5/mo free credits), and
+// `kagi` provides its own paid API. `searxng` is keyless self-hosted meta-search
+// via settings.search.baseUrl.
+export const SEARCH_PROVIDERS =
+  ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'] as const;
+export const SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi'] as const;
+export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
+
+const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
+  tavily: '',
+  brave: '',
+  kagi: '',
+});
+
+export function normalizeSearchApiKeys(raw: unknown): Record<SearchKeyProvider, string> {
+  const search = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const mapped = search.apiKeys && typeof search.apiKeys === 'object'
+    ? search.apiKeys as Record<string, unknown>
+    : {};
+  const out = emptySearchApiKeys();
+  for (const provider of SEARCH_KEY_PROVIDERS) {
+    if (typeof mapped[provider] === 'string') out[provider] = mapped[provider].trim();
+  }
+  const owner = search.provider;
+  const legacy = typeof search.apiKey === 'string' ? search.apiKey.trim() : '';
+  if (legacy && (owner === 'tavily' || owner === 'brave') && !out[owner]) {
+    out[owner] = legacy;
+  }
+  return out;
+}
 
 // Canonical mood vocabulary + each mood's CLAP sound-prompt. This is the SEED:
 // the operator edits the live list from /admin/moods (settings.moods), and every
@@ -722,8 +748,28 @@ export const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]+$/;
 // The worker builds an espeak.EspeakG2P for the chosen language (see _phonemize
 // in kokoro_worker.py). Empty string = auto-detect from the voice-code prefix.
 // Synced with the prefix→lang mapping in controller/scripts/kokoro_worker.py.
-export const KOKORO_LANGS = ['en-gb', 'en-us', 'es', 'it', 'fr', 'hi', 'pt-br', 'ja', 'cmn'];
+//
+// Every entry must be an EXACT match for a row in espeak-ng's own voice table
+// (`espeak-ng --voices`, Language column) — phonemizer's EspeakBackend validates
+// against that list verbatim and throws for anything else. espeak-ng's CLI does
+// resolve bare aliases like `fr` to a regional voice, which is what makes a wrong
+// entry here look plausible, but the backend never gets that far. Hence `fr-fr`
+// and not `fr` (#1213): espeak-ng ships fr-fr/fr-be/fr-ch and no bare `fr`.
+export const KOKORO_LANGS = ['en-gb', 'en-us', 'es', 'it', 'fr-fr', 'hi', 'pt-br', 'ja', 'cmn'];
 export const KOKORO_LANG_RE = new RegExp(`^(${KOKORO_LANGS.join('|')})$`);
+
+// Codes that were offered before they were checked against espeak-ng, kept
+// accepted so a stored settings.json (or an old API client) is rewritten to the
+// working equivalent instead of silently reverting to auto-detect. Mirrored by
+// `lang_aliases` in controller/scripts/kokoro_worker.py, which covers the same
+// value arriving through the KOKORO_LANG env var.
+export const KOKORO_LANG_ALIASES: Record<string, string> = { fr: 'fr-fr' };
+
+/** Canonicalise a Kokoro phonemizer language; unknown values pass through for
+ *  the caller's own validation to reject. */
+export function canonicalKokoroLang(lang: string): string {
+  return KOKORO_LANG_ALIASES[lang] || lang;
+}
 
 // PocketTTS built-in voices — the curated set the admin UI offers. Issue #213
 // also surfaced zero-shot cloning, so `tts.voice` for pocket-tts may now be

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import ManualPage from './ManualPage';
+import ManualFigure from './ManualFigure';
 import CodeBlock from '@/components/CodeBlock';
 
 export default function AcousticAnalysis() {
@@ -28,6 +29,13 @@ export default function AcousticAnalysis() {
           Silicon). Coverage climbs on the <Link href="/admin/library">Library</Link> page
           under <strong>Acoustic analysis · bpm / key</strong>.
         </p>
+        <ManualFigure
+          src="/screenshots/admin-library.webp"
+          alt="The admin Library page, with a one-line acoustic-analysis strip reading bpm/key 99 percent, sounds-like 99 percent, vocal off, beneath the mood-and-energy tagging bar"
+          caption="Coverage lives on the Library page — one line under the tagging bar, a percentage per dimension. Expand it to start a pass or watch one run."
+          width={2732}
+          height={2048}
+        />
         <div className="bs-callout">
           <div className="bs-eyebrow">&ldquo;ENGINE OFF&rdquo;?</div>
           <p>

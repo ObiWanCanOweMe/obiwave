@@ -272,8 +272,11 @@ export const config = {
     maxItems: parseInt(process.env.NEWS_MAX_ITEMS || '10', 10),
   },
   search: {
-    // Tavily API key for the web-search skill. Blank → the skill stays inert.
-    apiKey: process.env.SEARCH_API_KEY || '',
+    apiKeys: {
+      tavily: process.env.SEARCH_API_KEY || '',
+      brave: process.env.SEARCH_API_KEY || '',
+      kagi: process.env.KAGI_API_KEY || '',
+    },
   },
   // Community catalog (skills / personas / shows / stations) fetched live from
   // the `community` repo — see community/registry.ts. Default is raw GitHub

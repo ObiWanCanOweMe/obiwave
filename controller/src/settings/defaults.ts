@@ -175,7 +175,15 @@ export const DEFAULTS = {
   // auth). Toggling listenerAuth re-renders icecast.xml, so it needs a mixer
   // restart; password changes apply live (the controller validates every
   // connect). Either lock being on requires a password — see update().
-  privacy: { privatePlayer: false, listenerAuth: false, password: '' },
+  // `publishPersonaSouls` is NOT a lock and takes no part in the password rule
+  // above — it governs DISCLOSURE on the roster-wide public reads (/schedule's
+  // persona index, GET /personas). A soul is the persona's system prompt, not a
+  // bio: operators write it assuming it stays backstage, so publishing every
+  // one of them is opt-in and OFF by default (an upgrade changes nothing).
+  // GET /dj is deliberately unaffected — it has always published the ON-AIR
+  // persona's soul, one at a time, and removing that would break existing
+  // public clients. This toggle is about handing over the whole roster at once.
+  privacy: { privatePlayer: false, listenerAuth: false, password: '', publishPersonaSouls: false },
   // Global DJ prompt template. '' means "use DEFAULT_DJ_PROMPT_TEMPLATE".
   // Always the RESOLVED text of the active djPrompts entry — kept so
   // renderDjPrompt() (and an older controller sharing the same settings.json)
@@ -501,12 +509,11 @@ export const DEFAULTS = {
     },
   },
   // Web-search backend for the segment director's web-search capability.
-  // Default `duckduckgo` works out of the box with no key; `tavily` and
-  // `brave` read their key from SEARCH_API_KEY (or the optional override
-  // below). `apiKey` is only meaningful for the keyed providers.
+  // Default `duckduckgo` works out of the box with no key. Keys belong to the
+  // provider that consumes them, so changing providers never reuses a key.
   search: {
     provider: 'duckduckgo',
-    apiKey: '',
+    apiKeys: { tavily: '', brave: '', kagi: '' },
     baseUrl: '',
   },
   skills: {

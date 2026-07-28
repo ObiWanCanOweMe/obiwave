@@ -4,7 +4,7 @@ Loaded when working under `web/`. Station-wide architecture lives in the root `C
 
 ### Web UI (`web/`)
 
-Next.js 16 App Router + React 19 + Tailwind. Routes:
+Next.js 15 App Router + Tailwind. Routes:
 
 - `/` — `PlayerApp` or `Landing`, chosen at request time by `SUBWAVE_HOMEPAGE` (`player` default).
 - `/listen` (always player), `/landing` (always broadsheet), `/setup` (docs), `/onboarding` (first-run wizard, the in-browser counterpart to `npm run setup`).
@@ -18,6 +18,13 @@ Stream URL + API base default to same-origin (`/api`, `/stream.mp3`) for the pro
 
 ### Fork contracts
 
-- **Authenticated four-format playback**: `AudioFormat` is exactly `'mp3' | 'opus' | 'aac' | 'flac'`. Intersect station-advertised mounts with browser support, restore the preference under the station-scoped key, and fall back permanently to MP3 when an optional mount fails. Every tune, format switch, and watchdog reconnect assigns a URL through `withStreamAuth(apiUrl, ...)`. Audio-node detach/remount must remove listeners, pause, clear the private URL, and reset playback state before binding the replacement node.
+- **Player interface**: retain `const { audioElementRef } = usePlayerAudio()` and pass it to the shell's `<audio>` element. `StationPasswordGate` requires `auth.required`, `auth.phase`, and `auth.unlock`; skins render inside the shell's `Suspense` boundary.
+- **Authenticated four-format playback**: `AudioFormat` is exactly `'mp3' | 'opus' | 'aac' | 'flac'`. Intersect station-advertised mounts with browser support, restore the preference under the station-scoped key, and fall back permanently to MP3 when an optional mount fails. Every tune, format switch, and watchdog reconnect assigns a URL through `withStreamAuth(apiUrl, ...)`.
 - **Listener timing**: `usePlayer` exposes `getListenerLagMs(): number | null`. While playing, measured lag (`buffered.end - currentTime`) wins. Otherwise `useStationFeed` uses the active format's `stream.bufferSecondsByFormat` entry, with legacy `stream.bufferSeconds` fallback, and delays the listener-facing track switch; admin/operator surfaces remain at the live edge.
-- **Provider forms**: settings and onboarding preserve provider-scoped URLs and inline keys for the active primary/fallback/embedding/TTS provider. Provider, URL, model, or typed-key changes invalidate prior discovery/probe generations, and stale async results must never overwrite the current provider's form state.
+
+**Landing "Press Run" gallery.** The landing page's skin/theme interlude
+(`components/what/PressRun.tsx`) renders the 8 curated skin×theme screenshots
+in `public/screenshots/gallery/`, defined in `lib/press-run-plates.ts` (every
+skin at least once, every built-in theme exactly once). When a skin's look
+changes, re-capture against a running station:
+`cd web && npm i --no-save playwright sharp && npx tsx scripts/capture-gallery.mjs`.

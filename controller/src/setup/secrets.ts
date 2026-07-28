@@ -26,6 +26,7 @@ export const SECRET_ENV_KEYS = [
   'AI_GATEWAY_API_KEY',
   'ELEVENLABS_API_KEY',
   'SEARCH_API_KEY',
+  'KAGI_API_KEY',
   // Embeddings. Only needed when the embedding provider uses a different key
   // than chat (e.g. OpenRouter for embeddings, a local proxy for chat) — see
   // embedding.ts embeddingCfg(). Blank → embeddings inherit settings.llm.apiKey.

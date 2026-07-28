@@ -636,9 +636,17 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     // only such capability today, and only when a keyed provider is active.
     let hint = '';
     const searchProvider = settings.get().search?.provider;
-    if (cap.kind === 'web-search' && (searchProvider === 'tavily' || searchProvider === 'brave')) {
-      const name = searchProvider === 'brave' ? 'Brave Search' : 'Tavily';
-      hint = ` — set SEARCH_API_KEY or paste a ${name} key into the admin UI`;
+    if (
+      cap.kind === 'web-search'
+      && (searchProvider === 'tavily' || searchProvider === 'brave' || searchProvider === 'kagi')
+    ) {
+      const envVar = searchProvider === 'kagi' ? 'KAGI_API_KEY' : 'SEARCH_API_KEY';
+      const name = searchProvider === 'brave'
+        ? 'Brave Search'
+        : searchProvider === 'kagi'
+          ? 'Kagi'
+          : 'Tavily';
+      hint = ` — set ${envVar} or paste a ${name} key into the admin UI`;
     } else if (cap.requiresKey) {
       hint = ` — set ${cap.requiresKey}`;
     }
@@ -732,7 +740,8 @@ export function skillCatalog() {
   const searchProvider = s.search?.provider || 'duckduckgo';
   return allCapabilities().map(c => {
     // web-search's key requirement depends on the active search provider:
-    // Tavily/Brave need SEARCH_API_KEY, DuckDuckGo needs nothing. Other
+    // Tavily/Brave need SEARCH_API_KEY, Kagi needs KAGI_API_KEY, and
+    // DuckDuckGo needs nothing. Other
     // capabilities carry their requiresKey/keyUrl statically in CAPABILITIES
     // (none today).
     let requiresKey = c.requiresKey || null;
@@ -745,6 +754,9 @@ export function skillCatalog() {
       } else if (searchProvider === 'brave') {
         requiresKey = 'SEARCH_API_KEY';
         keyUrl = 'https://api-dashboard.search.brave.com/app/keys';
+      } else if (searchProvider === 'kagi') {
+        requiresKey = 'KAGI_API_KEY';
+        keyUrl = 'https://kagi.com/settings?p=api';
       } else if (searchProvider === 'searxng') {
         requiresKey = null;
         keyUrl = null;
