@@ -15,10 +15,12 @@ import {
 } from './shared';
 import {
   SEARCH_PROVIDER_META,
+  createSearchKeyTestOwnership,
   searchKeyDirty,
   searchKeyInputValue,
   searchKeyPatch,
   searchKeySource,
+  type SearchKeyDraft,
 } from './search-provider-state';
 
 const searchProviderLabel = (id: string | undefined): string =>
@@ -32,6 +34,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
   const [keyTesting, setKeyTesting] = useState(false);
   const [testingSearxng, setTestingSearxng] = useState(false);
   const [searxngTestResult, setSearxngTestResult] = useState<{ ok: boolean; results?: number; error?: string } | null>(null);
+  const [keyTestOwnership] = useState(() => createSearchKeyTestOwnership());
 
   const savedSearch = data.values?.search || {};
   const providers = data.search?.providers || ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'];
@@ -53,6 +56,23 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
     || (provider === 'searxng'
         && (form.search.baseUrl ?? '') !== (savedSearch.baseUrl || ''));
 
+  const invalidateKeyTest = () => {
+    keyTestOwnership.invalidate();
+    setKeyTest(null);
+    setKeyTesting(false);
+  };
+
+  const setActiveKeyDraft = (value: SearchKeyDraft) => {
+    invalidateKeyTest();
+    setForm(f => ({
+      ...f,
+      search: {
+        ...f.search,
+        apiKeys: { ...f.search.apiKeys, [provider]: value },
+      },
+    }));
+  };
+
   const handleTestSearxng = async () => {
     setTestingSearxng(true);
     setSearxngTestResult(null);
@@ -73,6 +93,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
 
   const testApiKey = async () => {
     if (!keyed || (!searchKeyInputValue(draft).trim() && keySource === 'missing')) return;
+    const request = keyTestOwnership.begin();
     setKeyTesting(true);
     setKeyTest(null);
     try {
@@ -86,11 +107,13 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
         }),
       });
       const j = await r.json() as { ok: boolean; message: string; latencyMs: number };
-      setKeyTest(j);
+      keyTestOwnership.publishIfCurrent(request, () => setKeyTest(j));
     } catch (e) {
-      setKeyTest({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      keyTestOwnership.publishIfCurrent(request, () => {
+        setKeyTest({ ok: false, message: errorMessage(e), latencyMs: 0 });
+      });
     } finally {
-      setKeyTesting(false);
+      keyTestOwnership.publishIfCurrent(request, () => setKeyTesting(false));
     }
   };
 
@@ -132,7 +155,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
             <Select
               value={provider}
               onValueChange={v => {
-                setKeyTest(null);
+                invalidateKeyTest();
                 setSearxngTestResult(null);
                 setForm(f => ({ ...f, search: { ...f.search, provider: v } }));
               }}
@@ -170,14 +193,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                     value={searchKeyInputValue(draft)}
                     placeholder={savedKey === 'set' ? '•••••• (key on file)' : keyed.placeholder}
                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({
-                        ...f,
-                        search: {
-                          ...f.search,
-                          apiKeys: { ...f.search.apiKeys, [provider]: e.target.value },
-                        },
-                      }))
-                    }
+                      setActiveKeyDraft(e.target.value)}
                     className="max-w-[360px]"
                   />
                   <Btn
@@ -189,13 +205,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                   {savedKey === 'set' && draft !== null && (
                     <Btn
                       tone="danger"
-                      onClick={() => setForm(f => ({
-                        ...f,
-                        search: {
-                          ...f.search,
-                          apiKeys: { ...f.search.apiKeys, [provider]: null },
-                        },
-                      }))}
+                      onClick={() => setActiveKeyDraft(null)}
                     >
                       Clear saved key
                     </Btn>

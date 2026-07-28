@@ -26,6 +26,31 @@ export const SEARCH_PROVIDER_META = {
 
 export type SearchKeyDraft = string | null;
 
+export interface SearchKeyTestOwnership {
+  begin: () => number;
+  invalidate: () => void;
+  publishIfCurrent: (request: number, publish: () => void) => boolean;
+}
+
+export function createSearchKeyTestOwnership(): SearchKeyTestOwnership {
+  let currentRequest = 0;
+
+  return {
+    begin: () => {
+      currentRequest += 1;
+      return currentRequest;
+    },
+    invalidate: () => {
+      currentRequest += 1;
+    },
+    publishIfCurrent: (request, publish) => {
+      if (request !== currentRequest) return false;
+      publish();
+      return true;
+    },
+  };
+}
+
 export const searchKeyInputValue = (
   value: SearchKeyDraft | undefined,
 ): string => (value === 'set' || value == null ? '' : value);
