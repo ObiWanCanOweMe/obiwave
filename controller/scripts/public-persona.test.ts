@@ -156,6 +156,23 @@ try {
   );
 
   // ── The toggle round-trips through settings.update() and applies live ─────
+  // The update boundary is security-sensitive: truthy strings and numbers
+  // must be rejected, not coerced into publishing every persona's soul.
+  for (const invalid of ['false', 'true', 0, 1, null, [], {}]) {
+    await assert.rejects(
+      () => settings.update({
+        privacy: { publishPersonaSouls: invalid },
+      } as never),
+      /privacy\.publishPersonaSouls must be a boolean/,
+      `update() must reject ${JSON.stringify(invalid)}`,
+    );
+    assert.equal(
+      soulsArePublic(settings.get()),
+      false,
+      `${JSON.stringify(invalid)} must not enable disclosure`,
+    );
+  }
+
   await settings.update({ privacy: { publishPersonaSouls: true } });
   assert.equal(soulsArePublic(settings.get()), true, 'update() turns disclosure on');
 

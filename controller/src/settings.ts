@@ -1923,7 +1923,10 @@ export async function update(patch) {
     // "a lock needs a password" invariant below, needs no mixer restart, and
     // applies live on the next public read.
     if (pv.publishPersonaSouls !== undefined) {
-      next.privacy.publishPersonaSouls = !!pv.publishPersonaSouls;
+      if (typeof pv.publishPersonaSouls !== 'boolean') {
+        throw new Error('privacy.publishPersonaSouls must be a boolean');
+      }
+      next.privacy.publishPersonaSouls = pv.publishPersonaSouls;
     }
     // 'set' is the redaction sentinel from getRedacted() — ignore it so a
     // round-tripped form doesn't overwrite the stored secret.

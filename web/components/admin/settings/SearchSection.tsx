@@ -35,6 +35,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
   const [testingSearxng, setTestingSearxng] = useState(false);
   const [searxngTestResult, setSearxngTestResult] = useState<{ ok: boolean; results?: number; error?: string } | null>(null);
   const [keyTestOwnership] = useState(() => createSearchKeyTestOwnership());
+  const [searxngTestOwnership] = useState(() => createSearchKeyTestOwnership());
 
   const savedSearch = data.values?.search || {};
   const providers = data.search?.providers || ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'];
@@ -73,7 +74,14 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
     }));
   };
 
+  const invalidateSearxngTest = () => {
+    searxngTestOwnership.invalidate();
+    setSearxngTestResult(null);
+    setTestingSearxng(false);
+  };
+
   const handleTestSearxng = async () => {
+    const request = searxngTestOwnership.begin();
     setTestingSearxng(true);
     setSearxngTestResult(null);
     try {
@@ -83,11 +91,16 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
         body: JSON.stringify({ baseUrl: form.search.baseUrl }),
       });
       const j = await res.json();
-      setSearxngTestResult(j);
+      searxngTestOwnership.publishIfCurrent(request, () => setSearxngTestResult(j));
     } catch (err: unknown) {
-      setSearxngTestResult({ ok: false, error: err instanceof Error ? err.message : 'request failed' });
+      searxngTestOwnership.publishIfCurrent(request, () => {
+        setSearxngTestResult({
+          ok: false,
+          error: err instanceof Error ? err.message : 'request failed',
+        });
+      });
     } finally {
-      setTestingSearxng(false);
+      searxngTestOwnership.publishIfCurrent(request, () => setTestingSearxng(false));
     }
   };
 
@@ -156,7 +169,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
               value={provider}
               onValueChange={v => {
                 invalidateKeyTest();
-                setSearxngTestResult(null);
+                invalidateSearxngTest();
                 setForm(f => ({ ...f, search: { ...f.search, provider: v } }));
               }}
             >
@@ -232,9 +245,13 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                     type="url"
                     placeholder="http://192.168.0.112:8888"
                     value={form.search.baseUrl ?? ''}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({ ...f, search: { ...f.search, baseUrl: e.target.value } }))
-                    }
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      invalidateSearxngTest();
+                      setForm(f => ({
+                        ...f,
+                        search: { ...f.search, baseUrl: e.target.value },
+                      }));
+                    }}
                     className="max-w-[360px]"
                   />
                   <Btn onClick={handleTestSearxng} disabled={!form.search?.baseUrl || testingSearxng}>
