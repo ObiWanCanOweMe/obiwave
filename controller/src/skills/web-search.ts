@@ -2,23 +2,24 @@
 // segment-tools.js). There is no standalone "web-search skill" object — the
 // segment-director agent (skills/_agent.js) decides when artist news airs.
 //
-// Four backends, chosen via settings.search.provider:
+// Five backends, chosen via settings.search.provider:
 //   - duckduckgo (default) — DuckDuckGo's Instant Answer API. Free, no key,
 //     officially documented. Returns useful results only for entity / definition
 //     queries; for most artist queries it returns nothing, which the segment
 //     director already treats as a valid (silent) outcome.
-//   - tavily — paid API for richer web results. Reads its key from
-//     settings.search.apiKey, falling back to config.search.apiKey
-//     (SEARCH_API_KEY env var) for back-compat with earlier installs.
+//   - tavily — paid API for richer web results. Its provider-owned saved key
+//     falls back to SEARCH_API_KEY.
 //   - brave — Brave Search API. Real web results for artist-name queries
-//     (issue #623). Same key resolution as Tavily; metered billing with $5/mo
-//     of free credits (~1,000 queries), so the 30-min memo matters here too.
+//     (issue #623). Its provider-owned saved key also falls back to
+//     SEARCH_API_KEY; metered billing makes the 30-min memo matter here too.
 //   - searxng — self-hosted meta-search, keyless, needs settings.search.baseUrl.
+//   - kagi — paid privacy-oriented web search, with a dedicated saved key or
+//     KAGI_API_KEY fallback.
 //
 // All backends return the same shape — { answer, results: [{ title, content }] }
 // — so callers don't have to branch. searchWeb() wraps every call in a 30-min
 // memo to keep the homelab polite under DDG's unofficial fair-use limits and
-// to avoid burning Tavily/Brave credits on duplicate ticks.
+// to avoid burning metered-provider credits on duplicate ticks.
 
 import * as settings from '../settings.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
@@ -26,11 +27,13 @@ import { fetchWithTimeout } from '../util/fetch-timeout.js';
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const DDG_ENDPOINT = 'https://api.duckduckgo.com/';
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
+const KAGI_ENDPOINT = 'https://kagi.com/api/v1/search';
 
 type SearchResult = { title: string; content: string };
 type SearchResponse = { answer: string; results: SearchResult[] };
+type Recency = 'day' | 'week' | 'month';
 
-// 30-min TTL cache keyed by `${provider}:${query}`. Same shape as music/picker.js
+// 30-min TTL cache keyed by provider, recency, and query. Same shape as music/picker.js
 // — Map + { val, at }, no LRU eviction (search queries are bounded by the
 // artists actually on rotation, so the Map stays small).
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -133,7 +136,7 @@ export async function duckduckgoSearch(query: string): Promise<SearchResponse> {
 // passes 'week' to bias toward fresh content).
 export async function searxngSearch(
   query: string,
-  recency?: 'day' | 'week' | 'month',
+  recency?: Recency,
 ): Promise<SearchResponse> {
   const baseUrl = (settings.get().search?.baseUrl || '').trim();
   if (!baseUrl) throw new Error('SearXNG baseUrl not configured');
@@ -186,14 +189,14 @@ export function parseSearxngResponse(data: unknown): SearchResponse {
   return { answer, results };
 }
 
-// Brave Search API backend (issue #623). Keyed like Tavily — the key lives in
-// settings.search.apiKey with SEARCH_API_KEY as the env fallback. Threads
+// Brave Search API backend (issue #623). Its provider-owned key falls back to
+// SEARCH_API_KEY. Threads
 // optional recency through Brave's `freshness` param (pd/pw/pm), and asks for
 // undecorated snippets (text_decorations=0) so descriptions arrive as plain
 // text instead of <strong>-highlighted HTML.
 export async function braveSearch(
   query: string,
-  recency?: 'day' | 'week' | 'month',
+  recency?: Recency,
 ): Promise<SearchResponse> {
   const apiKey = settings.searchKeyFor('brave');
   if (!apiKey) throw new Error('Brave Search API key not configured');
@@ -239,6 +242,30 @@ function braveText(raw: unknown): string {
     .trim();
 }
 
+// Kagi may include source markup and named HTML entities even when its JSON
+// search response is otherwise plain text. Decode before stripping tags so
+// encoded tags cannot leak into the segment tool's prompt.
+function kagiText(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/&#(x?)([0-9a-fA-F]+);/g, (whole, x: string, digits: string) => {
+      const code = parseInt(digits, x ? 16 : 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole;
+    })
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&hellip;/gi, '…')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Pure parser for Brave's web-search JSON. Maps the Brave shape (web.results[],
 // news.results[], infobox) onto SubWave's SearchResponse contract. News results
 // lead — the artist-news callsite is the whole point of this provider — then
@@ -275,35 +302,128 @@ export function parseBraveResponse(data: unknown): SearchResponse {
   return { answer, results };
 }
 
+export function kagiAfterDate(
+  recency: Recency | undefined,
+  now = new Date(),
+): string | undefined {
+  if (!recency) return undefined;
+  const days = { day: 1, week: 7, month: 30 }[recency];
+  return new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+// Pure parser for Kagi's Search API JSON. Ordinary searches favor web
+// results, while freshness-oriented searches favor news. Direct-answer,
+// infobox, and interesting-find blocks are intentionally excluded because
+// they are not source results for the segment tool.
+export function parseKagiResponse(data: unknown, recency?: Recency): SearchResponse {
+  if (!data || typeof data !== 'object') return { answer: '', results: [] };
+  const root = data as Record<string, unknown>;
+  if (!root.data || typeof root.data !== 'object' || Array.isArray(root.data)) {
+    return { answer: '', results: [] };
+  }
+
+  const buckets = root.data as Record<string, unknown>;
+  const order = recency
+    ? ['news', 'interesting_news', 'search']
+    : ['search', 'news', 'interesting_news'];
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+
+  for (const bucket of order) {
+    const rawResults = buckets[bucket];
+    if (!Array.isArray(rawResults)) continue;
+    for (const raw of rawResults) {
+      if (!raw || typeof raw !== 'object' || results.length >= 10) continue;
+      const result = raw as Record<string, unknown>;
+      const title = kagiText(result.title);
+      const content = kagiText(result.snippet).slice(0, 300);
+      if (!title || !content) continue;
+
+      const url = typeof result.url === 'string' ? result.url.trim().toLowerCase() : '';
+      const dedupKey = url || `${title.toLowerCase()}\n${content.toLowerCase()}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      results.push({ title, content });
+    }
+  }
+
+  return { answer: '', results };
+}
+
+export async function kagiSearch(
+  query: string,
+  recency?: Recency,
+  options: { apiKey?: string; now?: Date } = {},
+): Promise<SearchResponse> {
+  const apiKey = options.apiKey || settings.searchKeyFor('kagi');
+  if (!apiKey) throw new Error('Kagi Search API key not configured');
+  const after = kagiAfterDate(recency, options.now);
+  const response = await fetchWithTimeout(KAGI_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      query,
+      workflow: 'search',
+      format: 'json',
+      limit: 10,
+      safe_search: true,
+      ...(after ? { filters: { after } } : {}),
+    }),
+    timeoutMs: 30_000,
+  });
+  if (!response.ok) throw new Error(`Kagi Search HTTP ${response.status}`);
+  const data = await response.json();
+  if (!data || typeof data !== 'object'
+      || !(data as Record<string, unknown>).data
+      || typeof (data as Record<string, unknown>).data !== 'object'
+      || Array.isArray((data as Record<string, unknown>).data)) {
+    throw new Error('Kagi Search returned an unsupported response');
+  }
+  return parseKagiResponse(data, recency);
+}
+
+export const searchCacheKey = (
+  provider: string,
+  query: string,
+  recency?: Recency,
+): string => `${provider}:${recency || ''}:${query.toLowerCase()}`;
+
 // Provider dispatcher — reads the active provider from live settings on every
 // call so admin-UI changes take effect immediately. Wraps the backend in a
 // 30-min memo. Cache key includes recency so two callsites with different
 // recency hints don't share results.
 export async function searchWeb(
   query: string,
-  opts?: { recency?: 'day' | 'week' | 'month' },
+  opts?: { recency?: Recency },
 ): Promise<SearchResponse> {
   const provider = settings.get().search?.provider || 'duckduckgo';
   const recency = opts?.recency;
-  const key = `${provider}:${recency || ''}:${query.toLowerCase()}`;
+  const key = searchCacheKey(provider, query, recency);
   return memo(key, CACHE_TTL_MS, () => {
     if (provider === 'searxng') return searxngSearch(query, recency);
     if (provider === 'tavily') return tavilySearch(query);
     if (provider === 'brave') return braveSearch(query, recency);
+    if (provider === 'kagi') return kagiSearch(query, recency);
     return duckduckgoSearch(query);
   });
 }
 
 // True when the active search provider is usable right now.
 //   duckduckgo:   always ready (no key, no URL)
-//   tavily/brave: needs settings.search.apiKey, or SEARCH_API_KEY env
+//   tavily/brave: needs a provider-owned saved key, or SEARCH_API_KEY env
+//   kagi:        needs a provider-owned saved key, or KAGI_API_KEY env
 //   searxng:      needs settings.search.baseUrl (no env fallback by design)
 export function searchReady(): boolean {
   const s = settings.get().search;
   const provider = s?.provider || 'duckduckgo';
   if (provider === 'duckduckgo') return true;
   if (provider === 'searxng') return !!(s?.baseUrl && s.baseUrl.trim());
-  if (provider === 'tavily') return !!settings.searchKeyFor('tavily');
-  if (provider === 'brave') return !!settings.searchKeyFor('brave');
+  if (provider === 'tavily' || provider === 'brave' || provider === 'kagi') {
+    return !!settings.searchKeyFor(provider);
+  }
   return false;
 }

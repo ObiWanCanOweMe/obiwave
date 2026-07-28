@@ -1,0 +1,42 @@
+{
+  "meta": { "trace": "fixture-trace" },
+  "data": {
+    "search": [
+      {
+        "url": "https://example.test/artist",
+        "title": "Artist profile",
+        "snippet": "A &amp; B <strong>profile</strong>."
+      },
+      {
+        "url": "https://example.test/duplicate",
+        "title": "Duplicate",
+        "snippet": "same snippet"
+      }
+    ],
+    "news": [
+      {
+        "url": "https://news.example.test/tour",
+        "title": "Artist announces world tour",
+        "snippet": "The artist&#39;s tour starts this autumn."
+      },
+      {
+        "url": "https://example.test/duplicate",
+        "title": "Duplicate from news",
+        "snippet": "same snippet"
+      }
+    ],
+    "interesting_news": [
+      {
+        "url": "https://news.example.test/interview",
+        "title": "A new interview",
+        "snippet": "A long-form interview."
+      }
+    ],
+    "direct_answer": [
+      { "url": "https://answer.test", "title": "Answer", "snippet": "Do not promote me." }
+    ],
+    "infobox": [
+      { "url": "https://box.test", "title": "Infobox", "snippet": "Do not promote me either." }
+    ]
+  }
+}
