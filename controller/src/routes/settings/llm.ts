@@ -19,6 +19,7 @@ import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { fetchWithTimeout } from '../../util/fetch-timeout.js';
 import { effectiveLiteLlmApiKey, effectiveLiteLlmBaseUrl } from '../../litellm-config.js';
+import { kagiSearch } from '../../skills/web-search.js';
 import {
   discoverModels,
   type ChatLeg,
@@ -58,11 +59,10 @@ function briefLlmError(err: unknown): string {
   return sentence.slice(0, 80) || 'Request failed';
 }
 
-// `hint` disambiguates keys shared by several providers — SEARCH_API_KEY holds
-// a Tavily OR a Brave key depending on the selected search provider, and the
-// admin UI tests the key before saving, so the saved setting can't be trusted
-// mid-edit. The UI passes the provider it's editing; absent a hint we fall
-// back to the saved provider, then Tavily (the original sole owner of the key).
+// `hint` scopes search-key probes to their provider. The admin UI tests the key
+// before saving, so the saved setting can't be trusted mid-edit. The UI passes
+// the provider it's editing; absent a hint we fall back to the saved provider,
+// then Tavily (the original sole owner of SEARCH_API_KEY).
 //
 // Probe budget: OpenAI's Responses API (the default path for
 // createOpenAI()(model)) rejects max_output_tokens below 16 — a smaller test
@@ -165,6 +165,28 @@ async function probeKey(
       }
       return { ok: true, message: '✓ Tavily key valid' };
     }
+    case 'KAGI_API_KEY': {
+      try {
+        await kagiSearch('SUB-WAVE radio diagnostic ping', undefined, { apiKey: value });
+        return { ok: true, message: '✓ Kagi Search key valid' };
+      } catch (error) {
+        const message = String((error as Error)?.message || '');
+        if (/\b(?:401|403)\b/.test(message)) {
+          return { ok: false, message: 'Kagi key is invalid or lacks Search API access' };
+        }
+        if (/\b429\b/.test(message)) {
+          return { ok: false, message: 'Kagi rate limit, quota, or API balance prevented the request' };
+        }
+        if (/timeout|timed out|aborted|fetch failed|ENOTFOUND|ECONNREFUSED/i.test(message)) {
+          return { ok: false, message: 'Kagi could not be reached' };
+        }
+        if (/unsupported response/i.test(message)) {
+          return { ok: false, message: 'Kagi returned an unsupported response' };
+        }
+        const safeMessage = message.replaceAll(value, '[redacted]');
+        return { ok: false, message: safeMessage.slice(0, 80) || 'Kagi Search request failed' };
+      }
+    }
     case 'EMBEDDING_API_KEY': {
       const embCfg = settings.get().embedding || {};
       const r = await probeEmbeddingConfig({
@@ -209,8 +231,8 @@ async function probeKey(
 // ---------------------------------------------------------------------------
 // POST /settings/secrets/test — probe a key against its provider WITHOUT
 // saving. Body: { key: string, value: string, provider?: string } — provider
-// disambiguates shared keys (SEARCH_API_KEY → tavily | brave). Always 200s with
-// { ok, message, latencyMs } — a bad key is a normal, actionable answer.
+// scopes every search probe to its credential owner. Always 200s with { ok,
+// message, latencyMs } — a bad key is a normal, actionable answer.
 // ---------------------------------------------------------------------------
 router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   const { key, value, provider } = req.body || {};
@@ -220,21 +242,40 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   if (!(SECRET_ENV_KEYS as readonly string[]).includes(key)) {
     return res.status(400).json({ ok: false, message: `Unknown key: ${key}`, latencyMs: 0 });
   }
+  const requestedProvider = typeof provider === 'string' ? provider : '';
+  let searchProvider: string | undefined;
+  if (key === 'SEARCH_API_KEY') {
+    const savedProvider = settings.get().search?.provider || '';
+    searchProvider = requestedProvider
+      || (savedProvider === 'tavily' || savedProvider === 'brave' ? savedProvider : 'tavily');
+    if (searchProvider !== 'tavily' && searchProvider !== 'brave') {
+      return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
+    }
+  } else if (key === 'KAGI_API_KEY') {
+    searchProvider = requestedProvider || 'kagi';
+    if (searchProvider !== 'kagi') {
+      return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
+    }
+  }
   let targetValue = typeof value === 'string' ? value.trim() : '';
   if (!targetValue) {
-    // If no value provided, check if key is already set in the environment
-    const envValue = (process.env[key] || '').trim();
-    if (!envValue) {
+    const isSearchProbe = key === 'SEARCH_API_KEY' || key === 'KAGI_API_KEY';
+    if (isSearchProbe && searchProvider) {
+      targetValue = settings.searchKeyFor(searchProvider);
+    }
+    // If no provider-owned value was found, check whether this key is set in
+    // the environment. This preserves all existing non-search probes.
+    if (!targetValue) targetValue = (process.env[key] || '').trim();
+    if (!targetValue) {
       return res.status(400).json({ ok: false, message: 'value is required when key is not set in environment', latencyMs: 0 });
     }
-    targetValue = envValue;
   }
   const t0 = Date.now();
   try {
     const result = await probeKey(
       key as (typeof SECRET_ENV_KEYS)[number],
       targetValue,
-      typeof provider === 'string' ? provider : undefined,
+      searchProvider || requestedProvider || undefined,
     );
     res.json({ ok: result.ok, message: result.message, latencyMs: Date.now() - t0 });
   } catch (err: unknown) {

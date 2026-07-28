@@ -16,20 +16,16 @@ import { fmtTokens, isSchemaFailure } from './util.js';
 export async function checkCapabilities(s: StationSettings | null): Promise<Finding[]> {
   const out: Finding[] = [];
 
-  // Web search — backs the DJ's artist-news segments. DuckDuckGo is keyless;
-  // Tavily needs a key. Report config readiness, then do a short live probe so
-  // "is it actually working?" is answered, not just "is it configured?".
+  // Web search — backs the DJ's artist-news segments. DuckDuckGo and SearXNG
+  // are keyless; keyed providers own their API keys. Report config readiness,
+  // then do a short live probe so "is it actually working?" is answered, not
+  // just "is it configured?".
   const provider = s?.search?.provider || 'duckduckgo';
   let ready = true;
   try { ready = searchReady(); } catch { ready = true; }
 
   if (!ready) {
-    out.push({
-      label: 'web search',
-      status: 'warn',
-      detail: `${provider} selected but no API key`,
-      hint: 'Artist-news segments can\'t fetch. Add a Tavily key (SEARCH_API_KEY) or switch to DuckDuckGo (keyless) in Settings → Search.',
-    });
+    out.push(webSearchNotReadyFinding(provider));
     return out;
   }
 
@@ -54,6 +50,24 @@ export async function checkCapabilities(s: StationSettings | null): Promise<Find
   });
 
   return out;
+}
+
+export function webSearchNotReadyFinding(provider: string): Finding {
+  if (provider === 'searxng') {
+    return {
+      label: 'web search',
+      status: 'warn',
+      detail: 'searxng selected but no base URL',
+      hint: 'Artist-news segments can\'t fetch. Configure the SearXNG base URL in Settings → Search, or select DuckDuckGo (keyless).',
+    };
+  }
+  const envVar = provider === 'kagi' ? 'KAGI_API_KEY' : 'SEARCH_API_KEY';
+  return {
+    label: 'web search',
+    status: 'warn',
+    detail: `${provider} selected but no API key`,
+    hint: `Artist-news segments can't fetch. Add the ${provider} key (${envVar}), save it in Admin → Search, or select DuckDuckGo/SearXNG (keyless).`,
+  };
 }
 
 export async function checkResources(): Promise<Finding[]> {
