@@ -245,6 +245,22 @@ function braveText(raw: unknown): string {
 // Kagi may include source markup and named HTML entities even when its JSON
 // search response is otherwise plain text. Decode before stripping tags so
 // encoded tags cannot leak into the segment tool's prompt.
+const KAGI_NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  hellip: '…',
+  ldquo: '“',
+  lsquo: '‘',
+  lt: '<',
+  mdash: '—',
+  nbsp: ' ',
+  ndash: '–',
+  quot: '"',
+  rdquo: '”',
+  rsquo: '’',
+};
+
 function kagiText(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw
@@ -254,13 +270,8 @@ function kagiText(raw: unknown): string {
         ? String.fromCodePoint(code)
         : whole;
     })
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&hellip;/gi, '…')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&([a-z][a-z0-9]+);/gi, (whole, name: string) =>
+      KAGI_NAMED_ENTITIES[name.toLowerCase()] ?? whole)
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim();

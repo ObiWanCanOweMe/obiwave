@@ -82,6 +82,20 @@ await test('parses Kagi buckets with expected ordering and safety limits', () =>
     content: 'One & two… safe',
   }]);
 
+  const namedEntities = parseKagiResponse({
+    data: {
+      search: [{
+        url: 'https://example.test/named-entities',
+        title: '&ldquo;Artist&rdquo; &mdash; &lsquo;news&rsquo;',
+        snippet: 'Spring &ndash; summer &mdash; &ldquo;headline&rdquo;',
+      }],
+    },
+  });
+  assert.deepEqual(namedEntities.results, [{
+    title: '“Artist” — ‘news’',
+    content: 'Spring – summer — “headline”',
+  }]);
+
   const capped = parseKagiResponse({
     data: {
       search: Array.from({ length: 12 }, (_, i) => ({
