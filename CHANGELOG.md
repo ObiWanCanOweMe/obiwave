@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.1.1](https://github.com/perminder-klair/subwave/compare/v1.1.0...v1.1.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **aio:** copy Node 22 from the official image instead of NodeSource ([#1225](https://github.com/perminder-klair/subwave/issues/1225)) ([4c6a7ea](https://github.com/perminder-klair/subwave/commit/4c6a7eaf772c6e11c1f390232b912c899318dc3a))
+
+## [1.1.0](https://github.com/perminder-klair/subwave/compare/v1.0.0...v1.1.0) (2026-07-27)
+
+
+### Features
+
+* **admin:** fit the Rundown board, brush the shelf, resize runs by their edges ([#1207](https://github.com/perminder-klair/subwave/issues/1207)) ([6f4dd3e](https://github.com/perminder-klair/subwave/commit/6f4dd3e9fafd1ca4f166a2035a7a3c2d9a0039cb))
+* **admin:** move the show takeover from the Rundown to the dash ([#1218](https://github.com/perminder-klair/subwave/issues/1218)) ([8bb249c](https://github.com/perminder-klair/subwave/commit/8bb249c32a2609ebe5f33a2526fb1e8434632b63))
+* **api:** expose taglines + guests on public reads, add GET /personas ([#1206](https://github.com/perminder-klair/subwave/issues/1206)) ([ad95246](https://github.com/perminder-klair/subwave/commit/ad952460a7471d4c5a982e955ae26ac74a874cca))
+* **web:** drive the SW-9 meter from the real stream spectrum ([#1219](https://github.com/perminder-klair/subwave/issues/1219)) ([49fae79](https://github.com/perminder-klair/subwave/commit/49fae79e836dad65c8aef0891a34468180a0d78f))
+* **web:** landing Press Run — every skin and theme on the front page ([#1217](https://github.com/perminder-klair/subwave/issues/1217)) ([e9c9ae1](https://github.com/perminder-klair/subwave/commit/e9c9ae1137bd37231efc02c70c98a86fe15f27df))
+
+
+### Bug Fixes
+
+* **admin:** give the stem cache budget its own save button ([#1212](https://github.com/perminder-klair/subwave/issues/1212)) ([038e0b5](https://github.com/perminder-klair/subwave/commit/038e0b5c2cc56afa4d9a9d7ea2d509c0f2104198))
+* **admin:** wrap the Rundown shelf instead of scrolling it sideways ([#1223](https://github.com/perminder-klair/subwave/issues/1223)) ([612ceea](https://github.com/perminder-klair/subwave/commit/612ceea946c8fb9c0e6a8a290351182c5568ce6f))
+* **aio:** stop a symlink cycle on the liquidsoap log path taking the station off air ([#1211](https://github.com/perminder-klair/subwave/issues/1211)) ([798f3f3](https://github.com/perminder-klair/subwave/commit/798f3f3818e5857fc230b2377c904f8dba3cd0d6))
+* **broadcast:** show real listener IPs behind a reverse proxy ([#1208](https://github.com/perminder-klair/subwave/issues/1208)) ([455ca6a](https://github.com/perminder-klair/subwave/commit/455ca6a98cbe88208b80371cb446ef9c78fea1f7))
+* **handoff:** base the show look-ahead on remaining track time ([#1205](https://github.com/perminder-klair/subwave/issues/1205)) ([976e7b4](https://github.com/perminder-klair/subwave/commit/976e7b468b09a8bd6d0b062cd6574d5e10b65ec9))
+* **llm:** count failed calls against the daily token cap ([#1209](https://github.com/perminder-klair/subwave/issues/1209)) ([a855949](https://github.com/perminder-klair/subwave/commit/a85594987623cce69d425a2f039fbe17c4e1f5ca)), closes [#1195](https://github.com/perminder-klair/subwave/issues/1195)
+* **tts:** use fr-fr for Kokoro French, espeak-ng has no bare fr ([#1214](https://github.com/perminder-klair/subwave/issues/1214)) ([c9fef94](https://github.com/perminder-klair/subwave/commit/c9fef94acaf369f7aa5f866038cbb314456ad9d8)), closes [#1213](https://github.com/perminder-klair/subwave/issues/1213)
+* **web:** keep the landing page from going blank on a station tab swap ([#1216](https://github.com/perminder-klair/subwave/issues/1216)) ([dcbb86f](https://github.com/perminder-klair/subwave/commit/dcbb86f39be8ef7b61dfb5991c8e82bed9d9008e))
+
+
+### Documentation
+
+* **news:** dispatch for the 1.0.0 release ([#1202](https://github.com/perminder-klair/subwave/issues/1202)) ([2010cba](https://github.com/perminder-klair/subwave/commit/2010cbadd7428654e6ffd4c398a089c4426ad946))
+* refresh screenshots, add Schedule and UNIT skin shots ([#1203](https://github.com/perminder-klair/subwave/issues/1203)) ([46b7a47](https://github.com/perminder-klair/subwave/commit/46b7a472330c40c31a4c21e13cbe4555467d7e1f))
+* **web:** illustrate the manual and dispatches with screenshots ([#1215](https://github.com/perminder-klair/subwave/issues/1215)) ([719a00b](https://github.com/perminder-klair/subwave/commit/719a00b5968923fb1514ec42366e3922342955cf))
+
 ## [1.0.0](https://github.com/perminder-klair/subwave/compare/v0.48.0...v1.0.0) (2026-07-27)
 
 

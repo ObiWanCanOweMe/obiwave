@@ -52,6 +52,7 @@ import StationHeader, { type HealthMetrics } from './StationHeader';
 import { cn } from '../../lib/cn';
 import { LikesCard } from './dash/LikesCard';
 import { RequestsCard } from './dash/RequestsCard';
+import { TakeoverCard } from './dash/TakeoverCard';
 import { BoothTurnText, SegmentButton, SortableTh, ToggleRow, classTone } from './dash/bits';
 import type {
   ActResponse,
@@ -677,6 +678,10 @@ export default function DashPanel() {
               })}
             </div>
           </Card>
+
+          {/* Live show control sits with the other on-air actions — the pads
+              above fire a segment now, this puts a whole show on now. */}
+          <TakeoverCard tz={tz} locale={locale} />
 
           <Card title="Broadcast">
             <div className="grid gap-2.5">

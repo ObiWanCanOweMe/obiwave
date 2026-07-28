@@ -722,8 +722,28 @@ export const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]+$/;
 // The worker builds an espeak.EspeakG2P for the chosen language (see _phonemize
 // in kokoro_worker.py). Empty string = auto-detect from the voice-code prefix.
 // Synced with the prefix→lang mapping in controller/scripts/kokoro_worker.py.
-export const KOKORO_LANGS = ['en-gb', 'en-us', 'es', 'it', 'fr', 'hi', 'pt-br', 'ja', 'cmn'];
+//
+// Every entry must be an EXACT match for a row in espeak-ng's own voice table
+// (`espeak-ng --voices`, Language column) — phonemizer's EspeakBackend validates
+// against that list verbatim and throws for anything else. espeak-ng's CLI does
+// resolve bare aliases like `fr` to a regional voice, which is what makes a wrong
+// entry here look plausible, but the backend never gets that far. Hence `fr-fr`
+// and not `fr` (#1213): espeak-ng ships fr-fr/fr-be/fr-ch and no bare `fr`.
+export const KOKORO_LANGS = ['en-gb', 'en-us', 'es', 'it', 'fr-fr', 'hi', 'pt-br', 'ja', 'cmn'];
 export const KOKORO_LANG_RE = new RegExp(`^(${KOKORO_LANGS.join('|')})$`);
+
+// Codes that were offered before they were checked against espeak-ng, kept
+// accepted so a stored settings.json (or an old API client) is rewritten to the
+// working equivalent instead of silently reverting to auto-detect. Mirrored by
+// `lang_aliases` in controller/scripts/kokoro_worker.py, which covers the same
+// value arriving through the KOKORO_LANG env var.
+export const KOKORO_LANG_ALIASES: Record<string, string> = { fr: 'fr-fr' };
+
+/** Canonicalise a Kokoro phonemizer language; unknown values pass through for
+ *  the caller's own validation to reject. */
+export function canonicalKokoroLang(lang: string): string {
+  return KOKORO_LANG_ALIASES[lang] || lang;
+}
 
 // PocketTTS built-in voices — the curated set the admin UI offers. Issue #213
 // also surfaced zero-shot cloning, so `tts.voice` for pocket-tts may now be

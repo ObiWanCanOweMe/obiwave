@@ -57,6 +57,7 @@ import {
   PICK_SHOW_LOOKAHEAD_SEC,
   formatAgo,
   knownDurationSec,
+  pickLeadSec,
   pickLinkInterval,
   playAlreadyRecorded,
   shouldDropStaleLink,
@@ -1717,10 +1718,17 @@ class Queue {
         // opener). Probe a little past the pick's expected start so a pick
         // that begins just shy of the boundary — and plays mostly inside the
         // new show — also counts as the new show's. Without a held
-        // predecessor the pick follows the on-air track (its full duration
-        // from now); with one (deadline path) it follows the HELD track, so
-        // the lead is on-air remaining + the held track's length. Unknown
-        // clock → no look-ahead, today's behaviour.
+        // predecessor the pick follows the on-air track, so the lead is what
+        // REMAINS of it (never its full duration — this cycle also runs from
+        // the deadline backstop and from boot recovery, part-way through a
+        // track, and the elapsed part would push `showAt` over the next
+        // boundary early, #1205); with one (deadline path) it follows the
+        // HELD track, so the lead is on-air remaining + the held track's
+        // length (knownDurationSec — the same library fallback every other
+        // duration read uses). Unknown clock → no look-ahead — rarer than it
+        // was pre-#1205: untracked auto plays carry a start stamp and
+        // usually a library duration, so remainingSecOnAir now gives them a
+        // real lead where the old duration-only read never could.
         //
         // This ONE date then drives the whole boundary sequence below — roll,
         // episode plan, mic-pass, episode hook — not just the pick. It used
@@ -1732,15 +1740,10 @@ class Queue {
         // both off `showAt` makes the mic-pass land in front of that track,
         // and makes it structurally impossible for the pick's brief and the
         // on-air persona to disagree: there is no second date to disagree with.
-        let leadSec: number | null = null;
-        if (predecessorItem) {
-          const rem = this.remainingSecOnAir();
-          const heldDur = Number(predecessorItem.track?.duration) || 0;
-          if (rem != null && heldDur > 0) leadSec = rem + heldDur;
-        } else {
-          const durSec = Number(this.current?.track?.duration);
-          if (Number.isFinite(durSec) && durSec > 0) leadSec = durSec;
-        }
+        const leadSec = pickLeadSec(
+          this.remainingSecOnAir(),
+          predecessorItem ? knownDurationSec(predecessorItem.track) : null,
+        );
         let showAt: Date | null = null;
         if (leadSec != null) {
           showAt = new Date(Date.now() + (leadSec + PICK_SHOW_LOOKAHEAD_SEC) * 1000);

@@ -148,6 +148,7 @@ export ICECAST_HOST=localhost
 ICECAST_STATE_DIR="$STATE_DIR" \
 ICECAST_TEMPLATE="$TEMPLATE" \
 ICECAST_RENDERED="$RENDERED" \
+ICECAST_TRUSTED_PROXY_HOSTS="${ICECAST_TRUSTED_PROXY_HOSTS:-caddy}" \
 LISTENER_AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}" \
     /usr/local/bin/icecast-render
 chown icecast2 "$RENDERED" 2>/dev/null || true

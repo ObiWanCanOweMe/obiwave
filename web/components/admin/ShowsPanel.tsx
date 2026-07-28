@@ -10,8 +10,9 @@
 // show list) — the personas pattern: click a show to open it, edit it in place.
 // The weekly plan itself lives on its own full-screen page now — The Rundown
 // at /admin/shows/schedule (components/admin/schedule/) — which owns the
-// board, the on-air listing, takeovers, and PUT /schedule. This page still
-// loads the schedule read-only for the per-show hours-a-week counts.
+// board, the on-air listing, and PUT /schedule. This page still loads the
+// schedule read-only for the per-show hours-a-week counts. Putting a show on
+// the air RIGHT NOW is a takeover, and that lives on the dash.
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Users, Share2 } from 'lucide-react';
@@ -366,8 +367,8 @@ export default function ShowsPanel() {
             </div>
             <div className="mt-1 max-w-[62ch] text-[11px] leading-[1.6] text-muted">
               This page is the roster — each show&apos;s name, host, brief, and
-              sound. The Rundown is the week itself: the board, the on-air
-              listing, and takeovers, hour by hour.
+              sound. The Rundown is the week itself: the board and the on-air
+              listing, hour by hour.
             </div>
           </div>
           <div className="flex flex-none flex-col items-start gap-2.5 sm:items-end">

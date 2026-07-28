@@ -11,7 +11,9 @@
 // the chassis (UnitWindows.tsx). Mobile stacks status strip → wordmark →
 // display → knob rail → grille → key rows; the play-log pads stay desktop-only
 // (history lives behind TIMELINE there). Everything that moves is a co-located
-// keyframe (Unit.module.css), so playback churn never re-renders React.
+// keyframe (Unit.module.css) — the one exception is the display's level meter,
+// which follows the real stream spectrum and writes each bar's scaleY straight
+// to the DOM (see Bars). Either way playback churn never re-renders React.
 
 import {
   useEffect,
@@ -19,6 +21,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from 'react';
 import styles from './Unit.module.css';
 import {
@@ -44,32 +47,205 @@ import {
   trackMeta,
   turnClock,
 } from '../shared';
+import { useAnalyser } from '@/lib/hooks';
+import { useLiteMode } from '@/hooks/useLiteMode';
 import { useRequestSlip, useTrackLike, useVolumeNudge } from '../sharedHooks';
 import type { SkinProps } from '../types';
 import { BoothWindow, RequestWindow, TimelineWindow, type UnitModal } from './UnitWindows';
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-/** Animated level bars inside the display glass. Pure CSS — the keyframes idle
- *  at `paused` until `playing`, and html.lite's global kill freezes them at
- *  their low resting height. */
+// ── meter tuning ────────────────────────────────────────────────────────
+// Resting bar height — the same scaleY the `unit-bar` keyframe idles at, so
+// the audio-driven meter and the CSS fallback sit at an identical floor and
+// swapping between them is invisible.
+const BAR_REST = 0.28;
+
+// The band the meter sweeps, logarithmically: equal width per octave, like
+// hardware. A linear bin split would hand four of seven bars to >8 kHz, where
+// music carries almost no energy, and the right half would never move.
+const BAR_FREQ_LO = 50;
+const BAR_FREQ_HI = 16000;
+
+// Minimum ms between style writes. rAF fires at display refresh (120 Hz+ on
+// ProMotion); the analyser's own smoothing makes frames ~33 ms apart visually
+// identical at a third of the cost.
+const BAR_FRAME_MS = 30;
+
+// How long every bin may read zero before the meter gives up on the analyser
+// and hands the bars back to the CSS keyframes. Desktop Safari wires the graph
+// up and then returns silence on a live MP3 mount (issues #298/#302) in ways
+// the hook's one-shot probe can miss. Long enough that a genuinely quiet
+// passage can't trip it — the stream never carries seconds of digital silence.
+const BAR_DEAD_MS = 2000;
+
+// Asymmetric follower: snap up on a transient, fall back slowly. A symmetric
+// lerp reads as mush on a seven-segment meter — the kick has to punch.
+const BAR_ATTACK = 0.55;
+const BAR_RELEASE = 0.16;
+
+/** Per-bar [start, end) analyser-bin spans for the log sweep. With only 6–7
+ *  bars every span is many bins wide, so there's no need for the fractional
+ *  interpolation the classic skin's 120-bar strip does. */
+function barBinRanges(count: number, binCount: number, sampleRate: number): Array<[number, number]> {
+  const nyquist = sampleRate / 2;
+  const hi = Math.min(BAR_FREQ_HI, nyquist);
+  const ranges: Array<[number, number]> = [];
+  for (let i = 0; i < count; i++) {
+    const f0 = BAR_FREQ_LO * Math.pow(hi / BAR_FREQ_LO, i / count);
+    const f1 = BAR_FREQ_LO * Math.pow(hi / BAR_FREQ_LO, (i + 1) / count);
+    const b0 = Math.min(binCount - 1, Math.max(0, Math.floor((f0 / nyquist) * binCount)));
+    const b1 = Math.min(binCount, Math.max(b0 + 1, Math.ceil((f1 / nyquist) * binCount)));
+    ranges.push([b0, b1]);
+  }
+  return ranges;
+}
+
+/** Level bars inside the display glass — the station's actual spectrum.
+ *
+ *  Real frequency data via the shared Web Audio analyser (the graph is cached
+ *  per <audio> element, so arriving from another skin's visualiser reuses it),
+ *  written straight to each bar's `scaleY` so playback churn still never
+ *  re-renders React. Where the analyser can't deliver — iOS, CORS, a browser
+ *  with no Web Audio, or a graph that goes silent mid-stream — the bars fall
+ *  back to the co-located `unit-bar` keyframes, which is what the meter always
+ *  did. Both paths idle at BAR_REST, so the handover doesn't show.
+ *
+ *  Motion gates: html.lite's global keyframe kill can't reach a rAF loop and
+ *  neither can prefers-reduced-motion, so both are checked here (the CSS
+ *  freezes the keyframe path in lockstep) and the bars simply stand still. */
 function Bars({
   count,
   playing,
   mobile,
   className,
+  audioRef,
 }: {
   count: number;
   playing: boolean;
   mobile?: boolean;
   className?: string;
+  /** The shared stream element. Omitted for decorative meters (the mount
+   *  window's inert preview), which stay on the CSS keyframes. */
+  audioRef?: RefObject<HTMLAudioElement | null>;
 }) {
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+  const { lite } = useLiteMode();
+
+  // Reduced motion is a media query, so it has to be read here rather than
+  // left to CSS — the loop below is JS motion and sails straight through both
+  // the query and lite's `animation: none`.
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduced(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  const calm = lite || reduced;
+  const canDrive = !!audioRef && playing && !calm;
+  const { ready, read, sampleRate } = useAnalyser(audioRef ?? null, canDrive);
+
+  // Whether the bars are currently audio-driven. Only flips when the analyser
+  // arrives or dies, so it re-renders a handful of times per session — the
+  // per-frame heights never touch React.
+  const [driven, setDriven] = useState(false);
+  const drivenRef = useRef(false);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const clear = () => {
+      drivenRef.current = false;
+      setDriven(false);
+      for (const el of Array.from(root?.children ?? []) as HTMLElement[]) {
+        el.style.transform = '';
+      }
+    };
+    if (!canDrive || !ready || !root) {
+      clear();
+      return;
+    }
+    const bars = Array.from(root.children) as HTMLElement[];
+    const levels = new Float32Array(count);
+    let ranges: Array<[number, number]> | null = null;
+    let rangeKey = '';
+    let raf = 0;
+    let last = 0;
+    let deadSince: number | null = null;
+
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      if (now - last < BAR_FRAME_MS) return;
+      last = now;
+      const bins = read();
+      if (!bins) return;
+
+      // Silence watchdog — hand the bars back to the keyframes rather than
+      // freeze them at rest, then keep reading so real data can reclaim them.
+      let alive = false;
+      for (let b = 0; b < bins.length; b++) {
+        if (bins[b]) { alive = true; break; }
+      }
+      if (alive) {
+        deadSince = null;
+      } else {
+        if (deadSince == null) deadSince = now;
+        if (now - deadSince >= BAR_DEAD_MS) {
+          if (drivenRef.current) clear();
+          return;
+        }
+        if (!drivenRef.current) return;
+      }
+      if (!drivenRef.current) {
+        drivenRef.current = true;
+        setDriven(true);
+      }
+
+      const key = `${bins.length}:${sampleRate ?? 0}`;
+      if (rangeKey !== key || !ranges) {
+        rangeKey = key;
+        ranges = barBinRanges(count, bins.length, sampleRate ?? 48000);
+      }
+      for (let i = 0; i < count; i++) {
+        const [b0, b1] = ranges[i] ?? [0, 1];
+        let sum = 0;
+        let peak = 0;
+        for (let b = b0; b < b1; b++) {
+          const v = bins[b] ?? 0;
+          sum += v;
+          if (v > peak) peak = v;
+        }
+        // Half mean, half peak. A pure mean over a band this wide is dragged
+        // down by the quiet top of the band and barely twitches; a pure peak
+        // jitters on narrowband content.
+        const raw = (sum / (b1 - b0) / 255) * 0.5 + (peak / 255) * 0.5;
+        // Mild lift toward the top of the sweep — recorded music sheds energy
+        // with frequency, so without it the last two bars sit near the floor.
+        const target = clamp01(Math.pow(clamp01(raw * (1 + 0.45 * (i / Math.max(1, count - 1)))), 0.62));
+        const cur = levels[i] ?? 0;
+        const next = cur + (target - cur) * (target > cur ? BAR_ATTACK : BAR_RELEASE);
+        levels[i] = next;
+        const bar = bars[i];
+        if (bar) bar.style.transform = `scaleY(${(BAR_REST + next * (1 - BAR_REST)).toFixed(3)})`;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      clear();
+    };
+  }, [canDrive, ready, read, sampleRate, count]);
+
   return (
     <span
+      ref={rootRef}
       className={cn(
         styles.bars,
         mobile && styles.barsM,
         playing && styles.playing,
+        driven && styles.live,
         'flex items-end',
         className,
       )}
@@ -210,7 +386,7 @@ export default function UnitSkin(_props: SkinProps) {
     nowPlaying, context, dj, activeShow, listeners, state,
     trackStartedAt, timezone, locale,
   } = usePlayerFeed();
-  const { tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
+  const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showOverlay, showTuneIn, tuneInFromOverlay, handleTune } = useTuneInGate();
   const client = useStationClient();
@@ -622,7 +798,12 @@ export default function UnitSkin(_props: SkinProps) {
               />
             </div>
             <div className="mt-auto flex min-h-[96px] flex-1 items-end">
-              <Bars count={7} playing={playing} className="h-full max-h-[300px] flex-1 gap-[9px]" />
+              <Bars
+                count={7}
+                playing={playing}
+                audioRef={audioRef}
+                className="h-full max-h-[300px] flex-1 gap-[9px]"
+              />
             </div>
             <div
               className={cn(
@@ -691,7 +872,13 @@ export default function UnitSkin(_props: SkinProps) {
             <span className="truncate text-[var(--accent)] uppercase">{trackLine}</span>
           </div>
           <div className="flex items-end">
-            <Bars count={6} playing={playing} mobile className="h-[74px] flex-1 gap-[5px]" />
+            <Bars
+              count={6}
+              playing={playing}
+              mobile
+              audioRef={audioRef}
+              className="h-[74px] flex-1 gap-[5px]"
+            />
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className={cn(styles.doto, 'truncate text-[13px] text-[#8a8478] uppercase')}>

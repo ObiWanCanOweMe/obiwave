@@ -10,7 +10,7 @@ import { useRef } from 'react';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
 import { cn } from '../../../lib/cn';
 import { Button } from '../../ui/button';
-import { DayPills, Mu, SlotMenu } from './bits';
+import { DayPills, DayPresets, Mu, SlotMenu } from './bits';
 import type { ScheduleShow } from './lib';
 import { HOURS, dayName, hhmm } from './lib';
 
@@ -50,6 +50,8 @@ export interface LineEditorProps {
   onLineChange: (patch: Partial<EditorLine>) => void;
   onLineShow: (id: string) => void;
   onToggleLineDay: (day: number) => void;
+  /** Replace the day set outright — the weekday/weekend/every-day presets. */
+  onSetLineDays: (days: number[]) => void;
   onAir: () => void;
   onQuiet: () => void;
   orderNo: number;
@@ -60,18 +62,23 @@ export interface LineEditorProps {
  *  the tool for finer ranges, other shows, and multi-day writes. */
 export function LineEditor({
   shows, line, lineShowId, lineDays, currentName, colorOf,
-  onLineChange, onLineShow, onToggleLineDay, onAir, onQuiet, orderNo,
+  onLineChange, onLineShow, onToggleLineDay, onSetLineDays, onAir, onQuiet, orderNo,
 }: LineEditorProps) {
   const lineShow = shows.find(s => s.id === lineShowId) ?? null;
   return (
     <div className="min-w-0">
       <div className="mb-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="eyebrow flex-none whitespace-nowrap text-ink">Write an order</span>
+        {/* The instruction half is the part that truncates on a phone, and the
+            sentence below it is self-evidently a sentence to fill in. What the
+            operator cannot get anywhere else is what those hours run right
+            now, so that half stays at every width. */}
         <Mu className="min-w-0 flex-1 truncate tracking-[0.08em]">
-          Fill in the sentence, then add it to the schedule · {dayName(line.day)} {hhmm(line.start)} → {hhmm(line.end)}{' '}
+          <span className="hidden sm:inline">Fill in the sentence, then add it to the schedule · </span>
+          {dayName(line.day)} {hhmm(line.start)} → {hhmm(line.end)}{' '}
           {currentName ? `is currently ${currentName}` : 'is currently silent'}
         </Mu>
-        <Mu className="ml-auto flex-none text-[8.5px] whitespace-nowrap">Becomes order №{orderNo}</Mu>
+        <Mu className="ml-auto hidden flex-none text-[8.5px] whitespace-nowrap sm:block">Becomes order №{orderNo}</Mu>
       </div>
       <div className="mt-2 border border-ink bg-[var(--page-bg)] p-[15px]">
         <div className="flex flex-wrap items-center gap-2 text-[14.5px] text-ink">
@@ -114,6 +121,7 @@ export function LineEditor({
             onSelect={k => onLineChange({ end: Number(k) })}
           />
           <span className="mx-1 hidden h-5 w-px bg-separator-strong sm:block" />
+          <DayPresets selected={lineDays} onSelect={onSetLineDays} />
           <DayPills selected={lineDays} onToggle={onToggleLineDay} />
           {/* Its own full-width line on a phone — the sentence above already
               fills several rows, and the buttons need a real tap target. */}

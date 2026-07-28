@@ -209,6 +209,9 @@ export interface PrivacyForm {
   /** Round-trips the 'set' redaction sentinel when saved and untouched.
    *  One shared secret behind both locks above. */
   password: string;
+  /** Disclosure, not a lock: publish every persona's soul on the roster-wide
+   *  public reads (/schedule, /personas). Takes no part in the password rule. */
+  publishPersonaSouls: boolean;
 }
 
 export interface FormState {
@@ -307,7 +310,12 @@ export interface SettingsData {
     sfx?: { enabled?: boolean };
     beds?: { enabled?: boolean; thresholdSec?: number; crossSec?: number };
     ui?: { boothBuddy?: boolean; skin?: string; tuneInOverlay?: boolean };
-    privacy?: { privatePlayer?: boolean; listenerAuth?: boolean; password?: string };
+    privacy?: {
+      privatePlayer?: boolean;
+      listenerAuth?: boolean;
+      password?: string;
+      publishPersonaSouls?: boolean;
+    };
     scrobble?: {
       lastfm?: Partial<ScrobbleLastfmForm>;
       listenbrainz?: Partial<ScrobbleListenbrainzForm>;

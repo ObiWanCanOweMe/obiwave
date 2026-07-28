@@ -38,15 +38,15 @@ https://github.com/user-attachments/assets/0a2ba78a-eda3-44c1-adce-bfa78ae992cd
 
 <p>
   <a href="web/public/screenshots/listen.webp"><img src="web/public/screenshots/listen.webp" alt="Player — the listener player on /listen" width="400"></a>
-  <a href="web/public/screenshots/player-request-song.webp"><img src="web/public/screenshots/player-request-song.webp" alt="Player — request a song" width="128"></a>
+  <a href="web/public/screenshots/listen-unit.webp"><img src="web/public/screenshots/listen-unit.webp" alt="Player — the UNIT SW-9 skin" width="400"></a>
 </p>
 
 **The admin console.** Where the operator runs the station.
 
 | | | |
 |---|---|---|
-| <a href="web/public/screenshots/admin-dash.webp"><img src="web/public/screenshots/admin-dash.webp" alt="Admin — Dash: live status, queue, booth log" width="100%"></a> | <a href="web/public/screenshots/admin-personas.webp"><img src="web/public/screenshots/admin-personas.webp" alt="Admin — Personas: the DJ roster" width="100%"></a> | <a href="web/public/screenshots/admin-shows.webp"><img src="web/public/screenshots/admin-shows.webp" alt="Admin — Weekly schedule grid" width="100%"></a> |
-| **Dash** — live status, the queue, the booth log | **Personas** — the DJ roster, each with its own voice | **Shows** — a 24×7 schedule you paint |
+| <a href="web/public/screenshots/admin-dash.webp"><img src="web/public/screenshots/admin-dash.webp" alt="Admin — Dash: live status, queue, booth log" width="100%"></a> | <a href="web/public/screenshots/admin-personas.webp"><img src="web/public/screenshots/admin-personas.webp" alt="Admin — Personas: the DJ roster" width="100%"></a> | <a href="web/public/screenshots/admin-schedule.webp"><img src="web/public/screenshots/admin-schedule.webp" alt="Admin — Schedule: the weekly rundown" width="100%"></a> |
+| **Dash** — live status, the queue, the booth log | **Personas** — the DJ roster, each with its own voice | **Schedule** — programme the week, an hour at a time |
 | <a href="web/public/screenshots/admin-skills.webp"><img src="web/public/screenshots/admin-skills.webp" alt="Admin — Skills: what the DJ does between tracks" width="100%"></a> | <a href="web/public/screenshots/admin-stats.webp"><img src="web/public/screenshots/admin-stats.webp" alt="Admin — Stats: LLM and TTS usage" width="100%"></a> | <a href="web/public/screenshots/admin-debug.webp"><img src="web/public/screenshots/admin-debug.webp" alt="Admin — Debug: health, logs, LLM calls" width="100%"></a> |
 | **Skills** — what the DJ does between tracks | **Stats** — LLM and TTS usage at a glance | **Debug** — health, logs, recent LLM calls |
 

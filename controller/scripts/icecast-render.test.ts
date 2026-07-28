@@ -23,6 +23,7 @@ const run = spawnSync(resolve(root, 'docker/icecast-render.sh'), [], {
     ICECAST_SOURCE_PASSWORD: 'source-secret',
     ICECAST_ADMIN_PASSWORD: 'admin-secret',
     ICECAST_RELAY_PASSWORD: 'relay-secret',
+    ICECAST_TRUSTED_PROXY_IPS: '127.0.0.1,::1',
     LISTENER_AUTH_URL: 'http://controller:7701/listener-auth',
   },
   encoding: 'utf8',
@@ -30,6 +31,9 @@ const run = spawnSync(resolve(root, 'docker/icecast-render.sh'), [], {
 assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
 
 const xml = readFileSync(rendered, 'utf8');
+assert.match(xml, /<x-forwarded-for>127\.0\.0\.1<\/x-forwarded-for>/);
+assert.match(xml, /<x-forwarded-for>::1<\/x-forwarded-for>/);
+assert.doesNotMatch(xml, /@TRUSTED_PROXIES@/);
 const mountBlocks = xml.match(/<mount type="normal">[\s\S]*?<\/mount>/g) ?? [];
 const mountBlock = (mount: string) => {
   const block = mountBlocks.find(candidate => candidate.includes(`<mount-name>${mount}</mount-name>`));

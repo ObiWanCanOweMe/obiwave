@@ -2,8 +2,7 @@
 
 // Small shared atoms for the schedule page — the design-system patterns the
 // Rundown repeats everywhere: colour chips, the underlined "slot" dropdown
-// (an inline editable value in a sentence), segmented text buttons, and the
-// M T W T F S S day pills.
+// (an inline editable value in a sentence), and the M T W T F S S day pills.
 
 import type { ReactNode } from 'react';
 import { useRef } from 'react';
@@ -94,37 +93,6 @@ export function SlotMenu({
   );
 }
 
-/** Segmented text button (the spSeg pattern) — mono caps, ink fill when on. */
-export function SegBtn({
-  on,
-  onClick,
-  children,
-  title,
-}: {
-  on?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-pressed={on}
-      className={cn(
-        // min-h on the phone only — the desktop metric is the padding.
-        'min-h-9 cursor-pointer border px-2.5 py-[5px] font-mono text-[10px] font-bold tracking-[0.2em] uppercase sm:min-h-0',
-        on
-          ? 'border-ink bg-ink text-bg'
-          : 'border-separator-strong bg-transparent text-muted hover:border-ink hover:text-ink',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 /** The seven M T W T F S S day toggles. `selected` holds storage day keys. */
 export function DayPills({
   selected,
@@ -155,6 +123,51 @@ export function DayPills({
             )}
           >
             {d.label[0]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Weekday / weekend / whole-week presets for the sentence editor's day set.
+ *  The pills below already write several days at once — this names the three
+ *  sets an operator actually reaches for, so the bulk path stops reading as
+ *  seven separate toggles. `selected` is compared as a set, so the matching
+ *  preset lights up however the days were chosen. */
+export function DayPresets({
+  selected,
+  onSelect,
+}: {
+  selected: number[];
+  onSelect: (days: number[]) => void;
+}) {
+  const sets: { label: string; title: string; days: number[] }[] = [
+    { label: 'Weekdays', title: 'Monday through Friday', days: [1, 2, 3, 4, 5] },
+    { label: 'Weekend', title: 'Saturday and Sunday', days: [6, 0] },
+    { label: 'Every day', title: 'All seven days', days: [1, 2, 3, 4, 5, 6, 0] },
+  ];
+  const same = (a: number[], b: number[]) =>
+    a.length === b.length && a.every(d => b.includes(d));
+  return (
+    <div className="flex gap-1.5">
+      {sets.map(s => {
+        const on = same(selected, s.days);
+        return (
+          <button
+            key={s.label}
+            type="button"
+            aria-pressed={on}
+            title={s.title}
+            onClick={() => onSelect(s.days)}
+            className={cn(
+              'flex min-h-8 cursor-pointer items-center border px-2 font-mono text-[8px] font-bold tracking-[0.14em] uppercase sm:min-h-[17px]',
+              on
+                ? 'border-ink bg-ink text-bg'
+                : 'border-separator-strong bg-transparent text-muted hover:border-ink hover:text-ink',
+            )}
+          >
+            {s.label}
           </button>
         );
       })}

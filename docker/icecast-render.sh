@@ -6,6 +6,7 @@ STATE_DIR="${ICECAST_STATE_DIR:-/var/sub-wave}"
 TEMPLATE="${ICECAST_TEMPLATE:-/etc/icecast2/icecast.xml.template}"
 RENDERED="${ICECAST_RENDERED:-/etc/icecast2/icecast.xml}"
 MOUNTS_XML="${RENDERED}.mounts"
+TRUSTED_XML="${RENDERED}.proxies"
 
 read_state_num() {
     local value
@@ -52,6 +53,22 @@ fi
 AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}"
 
 : > "$MOUNTS_XML"
+: > "$TRUSTED_XML"
+TRUSTED_LIST=""
+if [ -n "${ICECAST_TRUSTED_PROXY_IPS:-}" ]; then
+    TRUSTED_LIST=$(echo "$ICECAST_TRUSTED_PROXY_IPS" | tr ',' ' ')
+else
+    for host in $(echo "${ICECAST_TRUSTED_PROXY_HOSTS:-caddy}" | tr ',' ' '); do
+        found=$(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u || true)
+        [ -n "$found" ] && TRUSTED_LIST="$TRUSTED_LIST $found"
+    done
+fi
+for ip in $TRUSTED_LIST; do
+    case "$ip" in
+        ''|*[!0-9a-fA-F.:]*) continue ;;
+    esac
+    echo "        <x-forwarded-for>$ip</x-forwarded-for>" >> "$TRUSTED_XML"
+done
 render_mount() {
     local mount=$1 bitrate=$2 burst queue
     burst=$(( BUFFER_SECONDS * bitrate * 125 ))
@@ -90,6 +107,8 @@ sed \
     -e "s|\${ICECAST_QUEUE_SIZE}|$ICECAST_QUEUE_SIZE|g" \
     -e "/<!--@STREAM_MOUNTS@-->/r $MOUNTS_XML" \
     -e "/<!--@STREAM_MOUNTS@-->/d" \
+    -e "/<!--@TRUSTED_PROXIES@-->/r $TRUSTED_XML" \
+    -e "/<!--@TRUSTED_PROXIES@-->/d" \
     "$TEMPLATE" > "$RENDERED"
 
 echo "icecast-render: ${BUFFER_SECONDS}s bursts: mp3=${MP3_BURST_SIZE}B opus=${OPUS_BURST_SIZE}B aac=${AAC_BURST_SIZE}B flac~=${FLAC_BURST_SIZE}B; queue=${ICECAST_QUEUE_SIZE}B; auth=${AUTH_ENABLED}" >&2

@@ -32,7 +32,7 @@ const KOKORO_LANG_LABELS: Record<string, string> = {
   'en-gb': 'English (UK)',
   'en-us': 'English (US)',
   cmn: 'Chinese (Mandarin)',
-  fr: 'French',
+  'fr-fr': 'French',
   hi: 'Hindi',
   it: 'Italian',
   ja: 'Japanese',

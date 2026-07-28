@@ -146,6 +146,7 @@ export default function SettingsPanel() {
         listenerAuth: v.privacy?.listenerAuth ?? false,
         // Arrives as the 'set' sentinel ('' when unset) — never the secret.
         password: v.privacy?.password ?? '',
+        publishPersonaSouls: v.privacy?.publishPersonaSouls ?? false,
       },
       kokoroLang: v.tts?.kokoro?.lang ?? '',
       weather: {
@@ -830,6 +831,21 @@ export default function SettingsPanel() {
                         ).toLocaleString('en-GB')}{' '}
                         tracks
                       </span>
+                      {/* Every editable field on this page carries its own save button;
+                          without one here operators edit the number, miss the card-level
+                          "Save transitions" two fields below, and the change silently
+                          reverts on the next visit. */}
+                      <Btn
+                        sm
+                        onClick={() =>
+                          saveSettings({
+                            audio: { stemCacheGb: Number(form.transitions.stemCacheGb) },
+                          })
+                        }
+                        disabled={busy}
+                      >
+                        Save budget
+                      </Btn>
                     </div>
                     <div className="field-hint">
                       How much disk the stem cache may use before the oldest entries are evicted
