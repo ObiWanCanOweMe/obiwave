@@ -30,6 +30,7 @@ import {
 import { TtsSection } from './settings/TtsSection';
 import { LlmSection } from './settings/LlmSection';
 import { SearchSection } from './settings/SearchSection';
+import { reconcileSearchKeyDraftsAfterSave } from './settings/search-provider-state';
 import { LibrarySection } from './settings/LibrarySection';
 import { StationSection } from './settings/StationSection';
 import { ThemeSection } from './settings/ThemeSection';
@@ -250,9 +251,7 @@ export default function SettingsPanel() {
       },
       search: {
         provider: v.search?.provider ?? 'duckduckgo',
-        // GET /settings returns the apiKey redacted to 'set' | '' — that
-        // round-trips through POST harmlessly (settings.update ignores 'set').
-        apiKey: v.search?.apiKey ?? '',
+        apiKeys: { ...(v.search?.apiKeys || {}) },
         baseUrl: v.search?.baseUrl ?? '',
       },
       embedding: {
@@ -325,6 +324,22 @@ export default function SettingsPanel() {
       });
       const j = (await r.json().catch(() => ({}))) as { error?: string; requiresRestart?: boolean };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const searchPatch = patch.search;
+      if (searchPatch && typeof searchPatch === 'object' && !Array.isArray(searchPatch)) {
+        const apiKeys = (searchPatch as { apiKeys?: unknown }).apiKeys;
+        if (apiKeys && typeof apiKeys === 'object' && !Array.isArray(apiKeys)) {
+          setForm(prev => prev ? {
+            ...prev,
+            search: {
+              ...prev.search,
+              apiKeys: reconcileSearchKeyDraftsAfterSave(
+                prev.search.apiKeys,
+                apiKeys as Record<string, string | null>,
+              ),
+            },
+          } : prev);
+        }
+      }
       if (j.requiresRestart) setPendingRestart(true);
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();

@@ -116,7 +116,7 @@ export interface LlmForm {
 
 export interface SearchForm {
   provider: string;
-  apiKey: string;
+  apiKeys: Record<string, string | null>;
   baseUrl: string;
 }
 
@@ -495,9 +495,10 @@ export function SaveBar({ note, busy, onSave, saveLabel, extra }: SaveBarProps) 
 interface KeyStatusProps {
   envVar: string;
   present: boolean;
+  source?: 'saved' | 'environment' | 'missing';
 }
 
-export function KeyStatus({ envVar, present }: KeyStatusProps) {
+export function KeyStatus({ envVar, present, source }: KeyStatusProps) {
   const toneClass = present
     ? 'border-[var(--accent)] text-[color:var(--accent)]'
     : 'border-[var(--danger)] text-[var(--danger)]';
@@ -516,10 +517,18 @@ export function KeyStatus({ envVar, present }: KeyStatusProps) {
       />
       <div className="grid gap-0.5">
         <span className={cn('text-[11px] font-bold tracking-[0.12em] uppercase', toneClass)}>
-          {present ? 'API key found in environment' : 'API key missing'}
+          {source === 'saved'
+            ? 'API key saved for this station'
+            : source === 'environment'
+            ? 'API key found in environment'
+            : source === 'missing'
+            ? 'API key missing'
+            : present ? 'API key found in environment' : 'API key missing'}
         </span>
         <span className="text-[14px] leading-[1.5] text-muted">
-          {present ? (
+          {source === 'saved' ? (
+            <>This station has a saved <code>{envVar}</code> key, so this provider is ready to use.</>
+          ) : present ? (
             <>The controller has <code>{envVar}</code> set, so this provider is ready to use.</>
           ) : (
             <>
