@@ -16,6 +16,14 @@ import {
   bufferSecondsForFormat,
 } from '../lib/audioFormat.ts';
 
+const audioFormatModule: any = await import('../lib/audioFormat.ts');
+const listenerLeadMsForFormat = audioFormatModule.listenerLeadMsForFormat;
+assert.equal(
+  typeof listenerLeadMsForFormat,
+  'function',
+  'selected-format listener timing must expose a behavioral seam',
+);
+
 const formatBuffers = {
   bufferSeconds: 22,
   bufferSecondsByFormat: { mp3: 22, opus: 0, aac: 22, flac: 0 },
@@ -30,6 +38,12 @@ assert.equal(bufferSecondsForFormat({
 }, 'flac'), 22);
 assert.equal(bufferSecondsForFormat({ bufferSeconds: 17 }, 'opus'), 17, 'legacy API fallback');
 assert.equal(bufferSecondsForFormat({ bufferSeconds: Number.NaN }, 'mp3'), null, 'invalid delay');
+assert.equal(listenerLeadMsForFormat(formatBuffers, 'aac', 5000), 22_000);
+assert.equal(listenerLeadMsForFormat(formatBuffers, 'opus', 5000), 0);
+assert.equal(
+  listenerLeadMsForFormat({ bufferSeconds: Number.NaN }, 'mp3', 5000),
+  5000,
+);
 
 const codecs = { mp3: 'probably', opus: 'probably', aac: 'maybe', flac: '' } as const;
 assert.deepEqual(browserSupportFor(codecs, { ios: false, firefox: false }), {

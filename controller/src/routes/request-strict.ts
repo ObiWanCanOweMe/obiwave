@@ -4,6 +4,11 @@ export interface StrictRequestTarget {
   specific: boolean;
 }
 
+export interface StrictRequestPlan {
+  target: StrictRequestTarget | null;
+  allowAgent: boolean;
+}
+
 const clean = (value: unknown): string =>
   String(value ?? '')
     .normalize('NFKD')
@@ -54,6 +59,12 @@ export function strictRequestTarget(matched: any): StrictRequestTarget {
     .find((term: string) => clean(term) !== artistKey) || null;
 
   return { title, artist, specific: !!(title || artist) };
+}
+
+export function strictRequestPlan(enabled: boolean, matched: any): StrictRequestPlan {
+  if (!enabled) return { target: null, allowAgent: true };
+  const target = strictRequestTarget(matched);
+  return { target, allowAgent: !target.specific };
 }
 
 export function strictRequestSatisfied(target: StrictRequestTarget | null, track: any): boolean {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0](https://github.com/perminder-klair/subwave/compare/v1.1.1...v1.2.0) (2026-07-29)
+
+
+### Features
+
+* **admin:** show the booth log newest-first ([#1237](https://github.com/perminder-klair/subwave/issues/1237)) ([438de3d](https://github.com/perminder-klair/subwave/commit/438de3d374ef36a1ae72aeed4ec1650d961a25b7))
+* **controller:** harden listener requests against injection raids ([#1233](https://github.com/perminder-klair/subwave/issues/1233)) ([004d442](https://github.com/perminder-klair/subwave/commit/004d442a179642c3a4d5bf3e501589babf526862))
+
+
+### Bug Fixes
+
+* **broadcast:** keep atomic marker writes atomic and stem clips level-matched ([#1241](https://github.com/perminder-klair/subwave/issues/1241)) ([227aad1](https://github.com/perminder-klair/subwave/commit/227aad1b93d7fb53825f26f0c1f65873ee21c03c))
+* security + robustness fixes found by a deepsec scan ([#1235](https://github.com/perminder-klair/subwave/issues/1235)) ([62a9675](https://github.com/perminder-klair/subwave/commit/62a9675fdc2c60a6d05a7516720d39fa003beda2))
+* **web:** re-attach media listeners when the &lt;audio&gt; element remounts ([#1234](https://github.com/perminder-klair/subwave/issues/1234)) ([37e8222](https://github.com/perminder-klair/subwave/commit/37e822214f2d8230edba2ff27c0ccb8b96ec5782))
+* **web:** stop flipping the title ~20s early for tuned-in listeners ([#1238](https://github.com/perminder-klair/subwave/issues/1238)) ([e541634](https://github.com/perminder-klair/subwave/commit/e5416340023c9d9bec37aded76e57f72d8e4edb8))
+
 ## [1.1.1](https://github.com/perminder-klair/subwave/compare/v1.1.0...v1.1.1) (2026-07-27)
 
 

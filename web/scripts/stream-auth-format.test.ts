@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import * as stationAuth from '../lib/stationAuth.ts';
 
 const { clearStationAuthToken, setStationAuthToken, withStreamAuth } = stationAuth;
@@ -100,8 +99,17 @@ let teardownDetachedPlayerAudio: undefined | ((
   element: { pause: () => void; src: string },
   resetPlayback: () => void,
 ) => void);
+let bindPlayerAudioEvents: any;
+let playerAudioIsAdvancing: any;
+let playerStatusAfterAudioEvent: any;
 try {
-  ({ replacePlayerAudioElement, teardownDetachedPlayerAudio } = await import('../lib/playerAudioBinding.ts'));
+  ({
+    bindPlayerAudioEvents,
+    playerAudioIsAdvancing,
+    playerStatusAfterAudioEvent,
+    replacePlayerAudioElement,
+    teardownDetachedPlayerAudio,
+  } = await import('../lib/playerAudioBinding.ts'));
 } catch {
   // The assertion below records the intended RED before the binding seam exists.
 }
@@ -145,81 +153,94 @@ assert.equal(detachedAudio.src, '');
 assert.equal(tunedIn, false);
 assert.equal(status, 'idle');
 
-const source = readFileSync(new URL('../hooks/usePlayer.ts', import.meta.url), 'utf8');
-const coreSource = readFileSync(new URL('../components/player/PlayerCore.tsx', import.meta.url), 'utf8');
-const feedSource = readFileSync(new URL('../hooks/useStationFeed.ts', import.meta.url), 'utf8');
-const shellSource = readFileSync(new URL('../components/player/PlayerShell.tsx', import.meta.url), 'utf8');
-const assignmentPattern = /\b(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*\.src\s*=\s*([^;]+);/g;
-
 assert.equal(
-  [...'playerNode.src = unauthenticatedUrl;'.matchAll(assignmentPattern)].length,
-  1,
-  'playback assignment scanner must catch arbitrary audio-element aliases',
+  typeof bindPlayerAudioEvents,
+  'function',
+  'player media listeners must expose a behavioral binding seam',
+);
+assert.equal(
+  typeof playerAudioIsAdvancing,
+  'function',
+  'player liveness must be derived from media progress',
+);
+assert.equal(
+  typeof playerStatusAfterAudioEvent,
+  'function',
+  'player status transitions must expose a behavioral policy',
 );
 
-assert.match(
-  source,
-  /audioElementRef:\s*RefCallback<HTMLAudioElement>/,
-  'player must expose a callback ref so a post-unlock audio mount binds listeners',
+const movingAudio = { paused: false, readyState: 3, currentTime: 12 };
+assert.equal(playerAudioIsAdvancing(movingAudio, 11), true);
+assert.equal(playerAudioIsAdvancing({ ...movingAudio, paused: true }, 11), false);
+assert.equal(playerAudioIsAdvancing({ ...movingAudio, readyState: 2 }, 11), false);
+assert.equal(playerAudioIsAdvancing(movingAudio, 12), false);
+
+assert.equal(playerStatusAfterAudioEvent('connecting', 'playing', movingAudio), 'playing');
+assert.equal(playerStatusAfterAudioEvent('playing', 'waiting', movingAudio), 'connecting');
+assert.equal(playerStatusAfterAudioEvent('playing', 'stalled', movingAudio), 'playing');
+assert.equal(playerStatusAfterAudioEvent('connecting', 'timeupdate', movingAudio), 'playing');
+assert.equal(
+  playerStatusAfterAudioEvent('connecting', 'timeupdate', { ...movingAudio, readyState: 2 }),
+  'connecting',
 );
-assert.match(
-  shellSource,
-  /<audio\s+ref=\{audioElementRef\}/,
-  'shell must attach the callback ref to each mounted audio element',
-);
-assert.match(
-  source,
-  /replacePlayerAudioElement\(audioRef,\s*audioListenerCleanupRef,\s*el,/,
-  'each callback-ref attachment must detach the prior audio element before rebinding',
-);
-assert.match(
-  source,
-  /teardownDetachedPlayerAudio\(boundEl,[\s\S]*setTunedIn\(false\);[\s\S]*setStatus\('idle'\);/,
-  'audio detach must reset the hook playback state before unlock remounts a fresh node',
-);
-for (const event of ['playing', 'waiting', 'stalled', 'error']) {
-  assert.match(source, new RegExp(`addEventListener\\('${event}'`), `missing ${event} listener`);
-  assert.match(source, new RegExp(`removeEventListener\\('${event}'`), `missing ${event} cleanup`);
+assert.equal(playerStatusAfterAudioEvent('playing', 'error', movingAudio), 'idle');
+
+class FakeAudioEventTarget {
+  readonly listeners = new Map<string, Set<EventListener>>();
+  readonly id: string;
+
+  constructor(id: string) {
+    this.id = id;
+  }
+
+  addEventListener(name: string, listener: EventListener): void {
+    const listeners = this.listeners.get(name) ?? new Set<EventListener>();
+    listeners.add(listener);
+    this.listeners.set(name, listeners);
+  }
+
+  removeEventListener(name: string, listener: EventListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener(new Event(name));
+    }
+  }
 }
 
-const assignments = [...source.matchAll(assignmentPattern)]
-  .map((match) => match[1])
-  .filter((expression): expression is string =>
-    typeof expression === 'string' && expression.trim() !== "''"
-  );
-assert.equal(assignments.length, 3, 'expected exactly tune, switch, and reconnect playback assignments');
-for (const expression of assignments) {
-  assert.match(
-    expression,
-    /withStreamAuth\(apiUrl,/,
-    `playback assignment is not scoped to the active station: ${expression}`,
-  );
-}
-
-assert.match(
-  source,
-  /getListenerLagMs:\s*\(\)\s*=>\s*number\s*\|\s*null;/,
-  'player must export the measured listener-lag interface',
-);
-assert.match(
-  source,
-  /const getListenerLagMs = useCallback\(\(\): number \| null => \{/,
-  'player must expose a stable measured listener-lag callback',
-);
-assert.match(
-  coreSource,
-  /const getListenerLagMs = useCallback\(\(\) => listenerLagGetterRef\.current\(\), \[\]\);/,
-  'player core must bridge measured lag through a stable callback',
-);
-assert.match(
-  coreSource,
-  /useStationFeed\(\{\s*activeFormat: activeFormatRef,\s*getListenerLagMs\s*\}\)/,
-  'player core must pass active format and measured lag to the feed',
-);
-assert.match(
-  feedSource,
-  /const measuredLagMs = getListenerLagMs\?\.\(\) \?\? null;\s*const leadMs = measuredLagMs \?\? leadMsRef\.current;/,
-  'station feed must prefer measured lag before the per-format fallback',
-);
+const eventRef = { current: null as FakeAudioEventTarget | null };
+const eventCleanupRef = { current: null as (() => void) | null };
+const eventLifecycle: string[] = [];
+const bindEvents = (element: FakeAudioEventTarget) => {
+  const unbind = bindPlayerAudioEvents(element, {
+    playing: () => eventLifecycle.push(`${element.id}:playing`),
+    waiting: () => eventLifecycle.push(`${element.id}:waiting`),
+    stalled: () => eventLifecycle.push(`${element.id}:stalled`),
+    timeupdate: () => eventLifecycle.push(`${element.id}:timeupdate`),
+    error: () => eventLifecycle.push(`${element.id}:error`),
+  });
+  return () => {
+    unbind();
+    eventLifecycle.push(`${element.id}:cleanup`);
+  };
+};
+const firstAudio = new FakeAudioEventTarget('a');
+const secondAudio = new FakeAudioEventTarget('b');
+replacePlayerAudioElement!(eventRef, eventCleanupRef, firstAudio, bindEvents);
+firstAudio.dispatch('playing');
+replacePlayerAudioElement!(eventRef, eventCleanupRef, secondAudio, bindEvents);
+firstAudio.dispatch('error');
+secondAudio.dispatch('stalled');
+secondAudio.dispatch('timeupdate');
+replacePlayerAudioElement!(eventRef, eventCleanupRef, null, bindEvents);
+assert.deepEqual(eventLifecycle, [
+  'a:playing',
+  'a:cleanup',
+  'b:stalled',
+  'b:timeupdate',
+  'b:cleanup',
+]);
 
 console.log('stream-auth-format: all assertions passed');

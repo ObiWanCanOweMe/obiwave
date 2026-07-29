@@ -20,7 +20,6 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useMemo,
   useRef,
@@ -101,11 +100,9 @@ export function usePlayerActions(): PlayerActions {
 export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
   // Break the feed/player dependency cycle without duplicating format state:
-  // the poll reads the latest player-owned selection and measured lag.
+  // the poll reads the latest player-owned selection.
   const activeFormatRef = useRef<AudioFormat>('mp3');
-  const listenerLagGetterRef = useRef<() => number | null>(() => null);
-  const getListenerLagMs = useCallback(() => listenerLagGetterRef.current(), []);
-  const feed = useStationFeed({ activeFormat: activeFormatRef, getListenerLagMs });
+  const feed = useStationFeed({ activeFormat: activeFormatRef });
   const {
     audioRef,
     audioElementRef,
@@ -122,10 +119,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     availability,
     selectFormat,
     formatFailure,
-    getListenerLagMs: measureListenerLagMs,
   } = usePlayer({ streamEnablement: streamEnablementFor(feed.stream) });
   activeFormatRef.current = format;
-  listenerLagGetterRef.current = measureListenerLagMs;
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;

@@ -43,6 +43,15 @@ export function bufferSecondsForFormat(
     : null;
 }
 
+export function listenerLeadMsForFormat(
+  stream: Parameters<typeof bufferSecondsForFormat>[0],
+  format: AudioFormat,
+  previousMs = 0,
+): number {
+  const seconds = bufferSecondsForFormat(stream, format);
+  return seconds === null ? previousMs : seconds * 1000;
+}
+
 /** Translate the public station metadata into the playback engine's format
  * switches. MP3 is the universal floor even before the first feed poll. */
 export function streamEnablementFor(stream: {

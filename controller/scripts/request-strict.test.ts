@@ -8,6 +8,9 @@ import {
   strictRequestSatisfied,
 } from '../src/routes/request-strict.js';
 
+const strictModule: any = await import('../src/routes/request-strict.js');
+const strictRequestPlan = strictModule.strictRequestPlan;
+
 let failures = 0;
 function test(name: string, fn: () => void) {
   try {
@@ -119,6 +122,37 @@ test('an explicitly requested edition still matches that exact edition', () => {
   assert.equal(
     strictRequestSatisfied(target, { title: 'Midnight City [Live]', artist: 'M83' }),
     true,
+  );
+});
+
+test('specific strict requests bypass the conversational agent', () => {
+  assert.equal(typeof strictRequestPlan, 'function');
+  assert.deepEqual(
+    strictRequestPlan(true, {
+      artist: 'M83',
+      search_terms: ['Midnight City', 'M83'],
+    }),
+    {
+      target: { title: 'Midnight City', artist: 'M83', specific: true },
+      allowAgent: false,
+    },
+  );
+});
+
+test('vibe and non-strict requests may use the conversational agent', () => {
+  assert.deepEqual(
+    strictRequestPlan(true, { artist: null, search_terms: [], mood: 'rainy' }),
+    {
+      target: { title: null, artist: null, specific: false },
+      allowAgent: true,
+    },
+  );
+  assert.deepEqual(
+    strictRequestPlan(false, {
+      artist: 'M83',
+      search_terms: ['Midnight City', 'M83'],
+    }),
+    { target: null, allowAgent: true },
   );
 });
 

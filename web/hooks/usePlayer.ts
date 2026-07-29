@@ -25,7 +25,13 @@ import {
   type StreamEnablement,
 } from '@/lib/audioFormat';
 import { isIOSDevice } from '@/lib/platform';
-import { replacePlayerAudioElement, teardownDetachedPlayerAudio } from '@/lib/playerAudioBinding';
+import {
+  bindPlayerAudioEvents,
+  playerAudioIsAdvancing,
+  playerStatusAfterAudioEvent,
+  replacePlayerAudioElement,
+  teardownDetachedPlayerAudio,
+} from '@/lib/playerAudioBinding';
 import { useStationOrigin } from '@/lib/stationOrigin';
 import { withStreamAuth } from '@/lib/stationAuth';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
@@ -77,7 +83,6 @@ export interface Player {
   availability: FormatAvailability;
   selectFormat: (format: AudioFormat) => void;
   formatFailure: AudioFormat | null;
-  getListenerLagMs: () => number | null;
 }
 
 export interface UsePlayerOptions {
@@ -138,6 +143,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   const activeFormatRef = useRef<AudioFormat>('mp3');
   const volumeRef = useRef(volume);
   const watchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchdogArmedAt = useRef(0);
   // Consecutive failed reconnects since the last successful 'playing' —
   // drives the exponential backoff in onError.
   const retryCount = useRef(0);
@@ -261,7 +267,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   // seconds of silence around a track transition that only a page refresh
   // recovers from, because nothing in here was forcing the dead element back
   // onto the live mount). 'playing' clears the watchdog; 'waiting'/'stalled'
-  // arm a 5s timer that re-sets src if 'playing' hasn't fired by then;
+  // arm a 5s timer that re-sets src only if the media clock has not moved;
   // 'error' reconnects with exponential backoff (500 ms doubling to a 60 s
   // ceiling, reset on the next successful 'playing').
   const audioElementRef = useCallback<RefCallback<HTMLAudioElement>>((el) => {
@@ -270,6 +276,11 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
         clearWatchdog();
         if (!tunedInRef.current || !audioRef.current) return;
         const audio = audioRef.current;
+        if (playerAudioIsAdvancing(audio, watchdogArmedAt.current)) {
+          retryCount.current = 0;
+          setStatus('playing');
+          return;
+        }
         const myGen = ++gen.current;
         audio.src = withStreamAuth(apiUrl, `${streamUrlRef.current}?t=${Date.now()}`);
         audio.volume = volumeRef.current;
@@ -287,20 +298,28 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
       const armWatchdog = (delay: number) => {
         if (!tunedInRef.current) return;
         clearWatchdog();
+        watchdogArmedAt.current = boundEl.currentTime;
         watchdogTimer.current = setTimeout(reconnect, delay);
       };
 
       const onPlaying = () => {
         clearWatchdog();
         retryCount.current = 0;
-        setStatus('playing');
+        setStatus(current => playerStatusAfterAudioEvent(current, 'playing', boundEl));
       };
       const onWaiting = () => {
-        setStatus(s => (s === 'playing' ? 'connecting' : s));
+        setStatus(current => playerStatusAfterAudioEvent(current, 'waiting', boundEl));
         armWatchdog(5000);
       };
+      const onStalled = () => {
+        setStatus(current => playerStatusAfterAudioEvent(current, 'stalled', boundEl));
+        armWatchdog(5000);
+      };
+      const onTimeUpdate = () => {
+        setStatus(current => playerStatusAfterAudioEvent(current, 'timeupdate', boundEl));
+      };
       const onError = () => {
-        setStatus('idle');
+        setStatus(current => playerStatusAfterAudioEvent(current, 'error', boundEl));
         const { mp3 } = streamsRef.current;
         const failedFormat = activeFormatRef.current;
         if (failedFormat !== 'mp3') {
@@ -315,16 +334,16 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
         retryCount.current += 1;
         armWatchdog(delay);
       };
-      boundEl.addEventListener('playing', onPlaying);
-      boundEl.addEventListener('waiting', onWaiting);
-      boundEl.addEventListener('stalled', onWaiting);
-      boundEl.addEventListener('error', onError);
+      const unbind = bindPlayerAudioEvents(boundEl, {
+        playing: onPlaying,
+        waiting: onWaiting,
+        stalled: onStalled,
+        timeupdate: onTimeUpdate,
+        error: onError,
+      });
       return () => {
+        unbind();
         clearWatchdog();
-        boundEl.removeEventListener('playing', onPlaying);
-        boundEl.removeEventListener('waiting', onWaiting);
-        boundEl.removeEventListener('stalled', onWaiting);
-        boundEl.removeEventListener('error', onError);
         teardownDetachedPlayerAudio(boundEl, () => {
           gen.current += 1;
           tunedInRef.current = false;
@@ -439,23 +458,8 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     }
   };
 
-  const getListenerLagMs = useCallback((): number | null => {
-    const el = audioRef.current;
-    if (!el || !tunedInRef.current || el.paused) return null;
-    try {
-      const n = el.buffered.length;
-      if (n === 0) return null;
-      const lag = el.buffered.end(n - 1) - el.currentTime;
-      if (!Number.isFinite(lag) || lag <= 0) return null;
-      return Math.min(lag, 120) * 1000;
-    } catch {
-      return null;
-    }
-  }, []);
-
   return {
     audioRef, audioElementRef, tunedIn, status, volume, setVolume, tune, stop, toggleMute,
     muted: volume === 0, idleStopped, format, availability, selectFormat, formatFailure,
-    getListenerLagMs,
   };
 }

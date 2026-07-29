@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { pollWhileVisible } from '@/lib/poll';
 import { useStationClient } from '@/lib/stationClient';
-import { bufferSecondsForFormat, type AudioFormat } from '@/lib/audioFormat';
+import { listenerLeadMsForFormat, type AudioFormat } from '@/lib/audioFormat';
 import type {
   ActiveShow,
   DjState,
@@ -62,7 +62,6 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
 
 export interface StationFeedTiming {
   activeFormat?: { readonly current: AudioFormat };
-  getListenerLagMs?: () => number | null;
 }
 
 // 5s polling of /now-playing + /state + /session, paused while the tab is
@@ -70,7 +69,6 @@ export interface StationFeedTiming {
 // "what's on air right now".
 export function useStationFeed({
   activeFormat,
-  getListenerLagMs,
 }: StationFeedTiming = {}): StationFeed {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
@@ -109,8 +107,11 @@ export function useStationFeed({
         // Refresh the buffer depth before it's used below. Clamped to a sane
         // window: a bad value here would either park the clock in the far
         // future or wind it back past the track start.
-        const bufSec = bufferSecondsForFormat(npRes.stream, activeFormat?.current ?? 'mp3');
-        if (bufSec !== null) leadMsRef.current = bufSec * 1000;
+        leadMsRef.current = listenerLeadMsForFormat(
+          npRes.stream,
+          activeFormat?.current ?? 'mp3',
+          leadMsRef.current,
+        );
         const trackKey = np ? `${np.title}\u0000${np.artist}` : null;
         // Prefer the queue's authoritative start time over "first seen by this
         // client": a tab that was hidden at the transition (or a poll that hit
@@ -124,10 +125,9 @@ export function useStationFeed({
           const t = Date.parse(cur.startedAt);
           if (Number.isFinite(t) && t <= Date.now()) serverStart = t;
         }
-        // Shift into listener-time. Prefer this tab's measured playback lag;
-        // fall back to the advertised depth for its active mount.
-        const measuredLagMs = getListenerLagMs?.() ?? null;
-        const leadMs = measuredLagMs ?? leadMsRef.current;
+        // Shift into listener-time using the advertised depth for this
+        // listener's active mount.
+        const leadMs = leadMsRef.current;
         const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMs : Date.now();
 
         if (trackKey !== lastTrackKeyRef.current) {
@@ -196,7 +196,7 @@ export function useStationFeed({
         promoteTimerRef.current = null;
       }
     };
-  }, [activeFormat, client, getListenerLagMs]);
+  }, [activeFormat, client]);
 
   return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale };
 }

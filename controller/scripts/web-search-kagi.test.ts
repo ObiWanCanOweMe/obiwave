@@ -10,6 +10,7 @@ delete process.env.KAGI_API_KEY;
 const settings = await import('../src/settings.js');
 const {
   braveSearch,
+  duckduckgoSearch,
   kagiAfterDate,
   kagiSearch,
   parseKagiResponse,
@@ -242,7 +243,9 @@ await test('dispatches Kagi and keeps all keyed providers credential-isolated', 
     apiKeys: { brave: null, tavily: 'saved-tavily-key' },
   } });
   let tavilyAuthorization = '';
+  let tavilySignal: AbortSignal | null = null;
   globalThis.fetch = async (_input, init) => {
+    tavilySignal = init?.signal instanceof AbortSignal ? init.signal : null;
     tavilyAuthorization = new Headers(init?.headers).get('Authorization') || '';
     return new Response(JSON.stringify({ answer: '', results: [] }), {
       headers: { 'Content-Type': 'application/json' },
@@ -255,12 +258,39 @@ await test('dispatches Kagi and keeps all keyed providers credential-isolated', 
     globalThis.fetch = original;
   }
   assert.equal(tavilyAuthorization, 'Bearer saved-tavily-key');
+  assert.ok(tavilySignal instanceof AbortSignal, 'Tavily fetch must be abortable');
 
   await settings.update({ search: {
     provider: 'brave',
     apiKeys: { brave: null, tavily: 'saved-tavily-key' },
   } });
   assert.equal(searchReady(), false, 'Brave must not consume Tavily credentials');
+});
+
+test('DuckDuckGo requests are abortable', async () => {
+  let duckduckgoSignal: AbortSignal | null = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    duckduckgoSignal = init?.signal instanceof AbortSignal ? init.signal : null;
+    return new Response(JSON.stringify({
+      AbstractText: '',
+      Abstract: '',
+      Heading: '',
+      RelatedTopics: [],
+    }), { headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    assert.deepEqual(await duckduckgoSearch('bounded search proof'), {
+      answer: '',
+      results: [],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.ok(
+    duckduckgoSignal instanceof AbortSignal,
+    'DuckDuckGo fetch must be abortable',
+  );
 });
 
 if (failures > 0) {
