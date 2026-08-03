@@ -250,6 +250,8 @@ services:
     mem_limit: ${ANALYZER_MEM_LIMIT:-6g}
     environment:
       ANALYZE_DEVICE: cuda
+      ANALYZE_IDLE_UNLOAD_S: ${ANALYZE_IDLE_UNLOAD_S:-}
+      ANALYZE_RECYCLE_IDLE_S: ${ANALYZE_RECYCLE_IDLE_S:-}
       # Force CLAP / Demucs on for the whole pass. Usually unnecessary — the
       # admin toggles drive these per request.
       ANALYZE_AUDIO_EMBEDDING: ${ANALYZE_AUDIO_EMBEDDING:-}
