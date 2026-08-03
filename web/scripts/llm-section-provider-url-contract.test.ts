@@ -158,7 +158,10 @@ assert.doesNotMatch(source, /form\.llm(\.fallback)?\.baseUrl/);
 
 assert.match(ttsSource, /const \[compatKeyInput, setCompatKeyInput\] = useState\(''\);/);
 assert.match(ttsSource, /\.\.\.\(isCompat && compatKeyInput\.trim\(\) \? \{ apiKey: compatKeyInput\.trim\(\) \} : \{\}\)/);
-assert.match(ttsSource, /placeholder=\{savedCloud\.apiKey === 'set' \? '•••••• \(on file\)' : 'Optional'\}/);
+assert.match(ttsSource, /compatApiKey\?: string;/);
+assert.match(ttsSource, /placeholder=\{savedCloud\.compatApiKey === 'set' \? '•••••• \(on file\)' : 'Optional'\}/);
+assert.match(ttsSource, /const hasStoredCompatKey = data\.values\?\.tts\?\.cloud\?\.compatApiKey === 'set';/);
+assert.match(ttsSource, /settingsSaved && clearInlineCloudKey && hadStoredInlineKey && !hasStoredCompatKey/);
 assert.match(ttsSource, /if \(!isCompat && cloudKeyInput\.trim\(\)\)/);
 assert.match(
   ttsSource,

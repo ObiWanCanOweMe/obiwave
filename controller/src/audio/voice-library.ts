@@ -15,7 +15,8 @@
 // moment someone used the old route. Durations are memoised on size+mtime
 // instead, which covers hand-dropped files too.
 
-import { readdir, stat, unlink, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, stat, unlink, writeFile, mkdir, rename } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
 import { slugify } from '../util/slug.js';
@@ -83,6 +84,9 @@ async function scanDir(dir: string, legacy: boolean): Promise<VoiceFile[]> {
   }
   const out: VoiceFile[] = [];
   for (const file of entries) {
+    // Imports transcode through a hidden sibling and atomically rename it on
+    // success. Never expose that in-progress file to the voice catalog.
+    if (file.startsWith('.')) continue;
     if (!file.toLowerCase().endsWith('.wav')) continue;
     const p = path.join(dir, file);
     try {
@@ -194,21 +198,28 @@ export async function importVoice(
   const dir = config.voices.dir;
   await mkdir(dir, { recursive: true });
   const outPath = path.join(dir, file);
+  const tempPath = path.join(dir, `.${file}.${randomUUID()}.tmp.wav`);
 
-  if (await hasFfmpeg()) {
-    await transcodeAudio(buffer, {
-      outPath,
-      format: 'wav',
-      sampleRate: TARGET_SAMPLE_RATE,
-      channels: TARGET_CHANNELS,
-    });
-  } else if (extOf(originalName) === 'wav') {
-    await writeFile(outPath, buffer);
-  } else {
-    throw new Error(
-      'ffmpeg is not installed on this host, so only .wav uploads can be accepted'
-      + ' — convert the file first, or run the Docker image (it ships ffmpeg)',
-    );
+  try {
+    if (await hasFfmpeg()) {
+      await transcodeAudio(buffer, {
+        outPath: tempPath,
+        format: 'wav',
+        sampleRate: TARGET_SAMPLE_RATE,
+        channels: TARGET_CHANNELS,
+      });
+    } else if (extOf(originalName) === 'wav') {
+      await writeFile(tempPath, buffer);
+    } else {
+      throw new Error(
+        'ffmpeg is not installed on this host, so only .wav uploads can be accepted'
+        + ' — convert the file first, or run the Docker image (it ships ffmpeg)',
+      );
+    }
+    await rename(tempPath, outPath);
+  } catch (err) {
+    await unlink(tempPath).catch(() => {});
+    throw err;
   }
 
   // Length is advisory: measure it, report it, never act on it.

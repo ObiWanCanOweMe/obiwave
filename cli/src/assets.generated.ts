@@ -1065,14 +1065,13 @@ SITE_URL=
 # install, import failure, unavailable CUDA device, broken driver, NVIDIA
 # Container Toolkit, or Docker GPU runtime keeps the analyzer in a visible
 # restart loop instead of letting work fall back to CPU.
-# ANALYZE_IDLE_UNLOAD_S=  # seconds idle before models leave VRAM (default 300)
-#
 # Outside Ark's Portainer mirror contract: non-Portainer deployments can use
 # the upstream GPU overlay:
 #   docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 # AIO GPU packaging is upstream-owned and is not published by ObiWave.
-# (AIO one-click users: no overlay — pull subwave-aio-cuda and pass the GPU to
-# the container. See docs/unraid.md.)
+# (AIO one-click users: no overlay — pull
+# ghcr.io/perminder-klair/subwave-aio-cuda:<upstream-version> and pass the GPU
+# to the container. See docs/unraid.md.)
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
 # ANALYZE_IDLE_UNLOAD_S=  # seconds of no CLAP/Demucs use before the models are

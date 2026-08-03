@@ -24,6 +24,11 @@ router.get('/archives', requireAdmin, async (req, res) => {
 router.delete('/archives', requireAdmin, async (_req, res) => {
   try {
     const result = await clearAll();
+    if (result.failedDirs.length) {
+      const error = `failed to remove ${result.failedDirs.length} archive day director${result.failedDirs.length === 1 ? 'y' : 'ies'}`;
+      queue.log('error', `${error}: ${result.failedDirs.join(', ')}`);
+      return res.status(500).json({ ok: false, error, ...result });
+    }
     queue.log('scheduler', `archive cleared — ${result.removed} hour(s), ${result.bytes} bytes freed`);
     res.json({ ok: true, ...result });
   } catch (err: any) {

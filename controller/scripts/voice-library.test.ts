@@ -18,7 +18,9 @@
 // style as scripts/voice-policy.test.ts.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, unlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,6 +39,36 @@ mkdirSync(VOICES, { recursive: true });
 mkdirSync(LEGACY, { recursive: true });
 
 const lib = await import('../src/audio/voice-library.js');
+
+const fakeBin = join(root, 'bin');
+const fakeFfmpeg = join(fakeBin, 'ffmpeg');
+const ffmpegReady = join(root, 'ffmpeg-ready');
+const ffmpegRelease = join(root, 'ffmpeg-release');
+mkdirSync(fakeBin, { recursive: true });
+writeFileSync(fakeFfmpeg, `#!/bin/sh
+if [ "$1" = "-version" ]; then exit 0; fi
+for output_path do :; done
+printf partial > "$output_path"
+: > "$VOICE_FFMPEG_READY"
+while [ ! -e "$VOICE_FFMPEG_RELEASE" ]; do sleep 0.01; done
+if [ "$VOICE_FFMPEG_FAIL" = "1" ]; then
+  echo "simulated transcode failure" >&2
+  exit 7
+fi
+printf complete > "$output_path"
+`);
+chmodSync(fakeFfmpeg, 0o755);
+process.env.PATH = `${fakeBin}:${process.env.PATH || ''}`;
+process.env.VOICE_FFMPEG_READY = ffmpegReady;
+process.env.VOICE_FFMPEG_RELEASE = ffmpegRelease;
+
+async function waitForFile(file: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(file)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${file}`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
 
 let failures = 0;
 function check(label: string, fn: () => void | Promise<void>) {
@@ -152,6 +184,46 @@ await check('importVoice refuses an empty buffer', async () => {
   await assert.rejects(
     lib.importVoice(Buffer.alloc(0), { name: 'empty', originalName: 'empty.wav' }),
     /empty/i,
+  );
+});
+await check('importVoice removes a failed transcode without publishing a partial voice', async () => {
+  process.env.VOICE_FFMPEG_FAIL = '1';
+  writeFileSync(ffmpegRelease, 'go');
+  await assert.rejects(
+    lib.importVoice(Buffer.from('not-real-audio'), { name: 'broken', originalName: 'broken.mp3' }),
+    /ffmpeg failed/i,
+  );
+  assert.equal(await lib.resolve('broken.wav'), null, 'failed import must not become a selectable voice');
+  assert.equal(existsSync(join(VOICES, 'broken.wav')), false, 'failed import must not leave the canonical file');
+  assert.deepEqual(
+    readdirSync(VOICES).filter(file => file.includes('broken.wav')),
+    [],
+    'failed import must remove its temporary sibling',
+  );
+});
+await check('importVoice publishes the canonical filename only after transcode succeeds', async () => {
+  process.env.VOICE_FFMPEG_FAIL = '0';
+  if (existsSync(ffmpegReady)) unlinkSync(ffmpegReady);
+  if (existsSync(ffmpegRelease)) unlinkSync(ffmpegRelease);
+
+  const pending = lib.importVoice(
+    Buffer.from('not-real-audio'),
+    { name: 'atomic', originalName: 'atomic.mp3' },
+  );
+  await waitForFile(ffmpegReady);
+  const visibleDuringTranscode = await lib.resolve('atomic.wav');
+  const catalogDuringTranscode = (await lib.scan()).map(entry => entry.file);
+  writeFileSync(ffmpegRelease, 'go');
+  const imported = await pending;
+
+  assert.equal(visibleDuringTranscode, null, 'canonical voice must stay hidden until promotion');
+  assert.ok(!catalogDuringTranscode.some(file => file.includes('atomic')), 'temporary voice must stay out of the catalog');
+  assert.equal(imported.file, 'atomic.wav');
+  assert.equal(existsSync(join(VOICES, 'atomic.wav')), true);
+  assert.deepEqual(
+    readdirSync(VOICES).filter(file => file.startsWith('.atomic.wav.')),
+    [],
+    'successful import must leave no temporary sibling',
   );
 });
 

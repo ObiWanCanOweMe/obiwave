@@ -508,6 +508,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       || (!!savedCloudProvider && savedCloudProvider !== form.tts.cloud.provider);
     // Redacted sentinel: 'set' means an inline key is on file in settings.json.
     const hadStoredInlineKey = data.values?.tts?.cloud?.apiKey === 'set';
+    const hasStoredCompatKey = data.values?.tts?.cloud?.compatApiKey === 'set';
     const settingsSaved = await saveSettings({
       tts: {
         enabled: form.tts.enabled,
@@ -555,7 +556,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     }
     // Clearing the legacy inline key is deliberate (keys are provider-scoped
     // now), but it must never be silent: the operator may have relied on it.
-    if (settingsSaved && clearInlineCloudKey && hadStoredInlineKey) {
+    if (settingsSaved && clearInlineCloudKey && hadStoredInlineKey && !hasStoredCompatKey) {
       notify.info(`The API key stored in settings for ${cloudProviderLabel(savedCloudProvider)} was cleared — keys are provider-scoped. Re-enter it in Settings (or set its env key) if you switch back.`);
     }
   };
@@ -588,6 +589,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     model?: string;
     baseUrl?: string;
     apiKey?: string; // redacted by GET /settings: 'set' when on file, '' otherwise
+    compatApiKey?: string; // dedicated compatibility-server key, redacted the same way
     voiceStability?: number;
     voiceStyle?: number;
     voiceSimilarityBoost?: number;
@@ -1197,7 +1199,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                   type="password"
                   autoComplete="off"
                   value={compatKeyInput}
-                  placeholder={savedCloud.apiKey === 'set' ? '•••••• (on file)' : 'Optional'}
+                  placeholder={savedCloud.compatApiKey === 'set' ? '•••••• (on file)' : 'Optional'}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setCompatKeyInput(e.target.value)}
                   className="max-w-[360px]"
                 />

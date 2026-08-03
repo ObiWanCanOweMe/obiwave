@@ -770,14 +770,19 @@ async function cleanup() {
     queue.log('error', `Event log prune failed: ${err.message}`);
   }
   // Archive retention — delete hourly recordings older than the operator's
-  // window. 0 (the default) keeps everything, matching prior behaviour.
+  // window. Fresh installs default to 30 days; an explicit 0, or a legacy
+  // archive-enabled install with no stored value, keeps everything.
   try {
     const days = settings.get().archive?.retentionDays || 0;
     if (days > 0) {
-      const { removed, bytes } = await archives.pruneOlderThan(days);
+      const { removed, bytes, failedDirs } = await archives.pruneOlderThan(days);
       if (removed) {
         queue.log('scheduler',
           `Archive retention: removed ${removed} recording(s) older than ${days}d (${Math.round(bytes / 1_000_000)} MB freed)`);
+      }
+      if (failedDirs.length) {
+        queue.log('error',
+          `Archive retention: failed to remove ${failedDirs.length} day director${failedDirs.length === 1 ? 'y' : 'ies'} (${failedDirs.join(', ')}); check archive ownership and permissions`);
       }
     }
   } catch (err) {
