@@ -18,6 +18,21 @@
   will-change: transform;
 }
 
+/* Dark themes: the washes mix over near-black and read as a bruise of colour
+   rather than weather — lift saturation + brightness on the layer (a static
+   filter, so the 20s --sw-drift-c transition mechanics are untouched).
+   Both routes to a dark palette need the lift: the explicit pin, and a dark OS
+   with no pin at all (that listener has no [data-theme], so the attribute
+   selector alone would leave them on the un-lifted wash). */
+:global([data-theme='dark']) .wash {
+  filter: saturate(1.35) brightness(1.2);
+}
+@media (prefers-color-scheme: dark) {
+  :global(:root:not([data-theme='light'])) .wash {
+    filter: saturate(1.35) brightness(1.2);
+  }
+}
+
 /* Lite mode (html.lite, globals.css) drops the looping drift keyframes via
    its global animation kill, but transitions are exempted there ("only fire
    on interaction") — this one is a 20-second full-viewport gradient repaint

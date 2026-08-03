@@ -19,10 +19,65 @@ import type { LibraryStats } from './types.js';
 let statsCache: { at: number; value: LibraryStats } | null = null;
 const STATS_TTL_MS = 5000;
 
+// How many EMBEDDED tracks carry no musical signal in their vector at all —
+// the whole text is the `artist — title · album (year) [genre]` head line
+// (#1246). Those vectors can only be compared on label text, so the similarity
+// tools rank them by how close their artist/album strings are while presenting
+// themselves to the picker as mood similarity: a prolific artist self-clusters,
+// and "Nick Drake" lands next to "Drake".
+//
+// Counted over track_vectors, not tracks: a track with no vector isn't in the
+// KNN space and isn't the problem. The five signals mirror what feeds
+// formatTrackText's optional lines (Last.fm tags, lyric excerpt, and the Sound
+// line's audio moods, tempo and key mode) — keep them in step, or the advisory
+// stops describing the text. The key predicate is a non-empty check rather
+// than full Camelot validation (SQL has no cheap regex); the analyzer only
+// ever writes Camelot codes there, so the approximation only matters for
+// hand-edited rows, and then it undercounts — the safe direction for an
+// advisory.
+//
+// vocal_ranges (the 'instrumental' marker) is deliberately NOT predicated
+// here: it's only ever written by an analysis pass that also writes bpm, so
+// the bpm check subsumes it. And the Era: line never counts as musical signal
+// at all — it's derived from the year LABEL, i.e. exactly the kind of text
+// this count exists to flag.
+//
+// Deliberately a raw count with no threshold or verdict attached: what counts
+// as "too high" depends on library size and on which enrichment the operator
+// has deliberately turned off, so the judgement belongs at the surface that
+// shows it, not here.
+// Memoised on the same reasoning (and the same TTL) as stats() below: this is
+// a full scan of `tracks` with no index to help the predicate, and it rides the
+// coverage payload the admin Library panel polls every 30s from every open tab.
+let labelOnlyCache: { at: number; value: number } | null = null;
+
+export function labelOnlyVectorCount(): number {
+  const now = Date.now();
+  if (labelOnlyCache && now - labelOnlyCache.at < STATS_TTL_MS) return labelOnlyCache.value;
+  const value = computeLabelOnlyVectorCount();
+  labelOnlyCache = { at: Date.now(), value };
+  return value;
+}
+
+function computeLabelOnlyVectorCount(): number {
+  return (requireDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM track_vectors v
+         JOIN tracks t ON t.id = v.id
+        WHERE (t.lastfm_tags   IS NULL OR t.lastfm_tags   = '' OR t.lastfm_tags   = '[]')
+          AND (t.lyric_excerpt IS NULL OR t.lyric_excerpt = '')
+          AND (t.audio_moods   IS NULL OR t.audio_moods   = '' OR t.audio_moods   = '[]')
+          AND (t.bpm IS NULL OR t.bpm <= 0)
+          AND (t.musical_key   IS NULL OR t.musical_key   = '')`,
+    )
+    .get() as { n: number }).n;
+}
+
 // Drop the memoised stats() result — call when the DB handle is swapped
 // (reset/reload) so a fresh library never briefly serves the old one's tallies.
 export function invalidateStats(): void {
   statsCache = null;
+  labelOnlyCache = null;
 }
 
 export function stats(): LibraryStats {

@@ -14,9 +14,9 @@ export interface V3AlertProps {
 export function V3Alert({ tone = 'info', title, children }: V3AlertProps) {
   const toneClass =
     tone === 'error'
-      ? 'border-[#c5302a] text-[#c5302a]'
+      ? 'border-destructive text-destructive'
       : 'border-ink text-ink';
-  const titleBorderClass = tone === 'error' ? 'border-[#c5302a]' : 'border-ink';
+  const titleBorderClass = tone === 'error' ? 'border-destructive' : 'border-ink';
   return (
     <div role="alert" className={`border ${toneClass}`}>
       {title && (

@@ -2,9 +2,13 @@
 // in broadcast/webhooks.ts and reads its config from settings on each fire.
 //
 // Event payloads emitted by the fan-out:
-//   track.play       { event, t, title, artist, album?, source, requestedBy?, listeners? }
+//   track.play       { event, t, title, artist, album?, sourceTrackId?, source,
+//                      requestedBy?, listeners? }
 //                    (when webhooksPolicy.trackPlayListenerGated is on, only POSTs
 //                     when listener count > 0 — fail-closed; `listeners` included)
+//                    `sourceTrackId` is the music backend's own id (Subsonic/
+//                    Navidrome), null when unknown; `source` is how the track got
+//                    queued (auto | ai | request) — two different things.
 //   dj.say           { event, t, text, kind }      // kind is the original `announce` kind
 //   dj.link          { event, t, text }
 //   request.received { event, t, requestedBy, text }   // text is the listener's raw ask

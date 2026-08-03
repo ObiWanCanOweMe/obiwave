@@ -8,6 +8,7 @@ import cron from 'node-cron';
 import { config } from '../config.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
 import { shuffle } from '../util/shuffle.js';
+import { mapPool } from '../util/async-pool.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import * as library from '../music/library.js';
@@ -50,6 +51,10 @@ const SHOW_GENRE_STRICT_WEIGHT = 24; // strict: this source carries most of the 
 const SHOW_PLAYLIST_WEIGHT = 14;        // dedicated show-playlist source (soft)
 const SHOW_PLAYLIST_STRICT_WEIGHT = 24; // strict: this source carries the pool
 const SHOW_NARROW_FACTOR = 0.5;      // shrink mood/playlist/recent/etc. for shows
+// In-flight Navidrome queries when the show-genre source fans out across a
+// multi-genre show (up to SHOW_FILTER_VALUES_MAX values x 2 fetches each).
+// Matches music/picker.ts — small on purpose, Navidrome is usually a home server.
+const SHOW_GENRE_FETCH_CONCURRENCY = 4;
 
 async function tracksFromAlbums(albums: any[], perAlbum: number, max: number) {
   const out: any[] = [];
@@ -185,11 +190,17 @@ async function refreshAutoPlaylistInner() {
       // envelope (eraSpan); the genre-tagged sets post-filter to the exact
       // window union (inYearRange).
       const span = eraSpan(eras);
-      const collected: any[] = [];
       const randomSize = strict ? 60 : 40;
       const genreSetSize = strict ? 100 : 60;
-      for (const genreName of genreNames.length ? genreNames : [undefined]) {
-        collected.push(...await subsonic.getRandomSongs({
+      // Two fetches per genre, fanned out with bounded concurrency rather than
+      // awaited in sequence — a show may pin up to SHOW_FILTER_VALUES_MAX (15)
+      // genres, and the size budgets divide so the collected TOTAL is flat
+      // while the round-trip count is not. Mirrors the identical fan-out in
+      // music/picker.ts (§1e); keep the two in step.
+      const targets: (string | undefined)[] = genreNames.length ? genreNames : [undefined];
+      const perGenre = await mapPool(targets, SHOW_GENRE_FETCH_CONCURRENCY, async (genreName) => {
+        const got: any[] = [];
+        got.push(...await subsonic.getRandomSongs({
           size: Math.ceil(randomSize / Math.max(1, genreNames.length)),
           genre: genreName,
           fromYear: span.fromYear ?? undefined,
@@ -198,9 +209,11 @@ async function refreshAutoPlaylistInner() {
         if (genreName) {
           const g = await subsonic.getSongsByGenre(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
           const ranged = inYearRange(g, eras);
-          collected.push(...(ranged.length ? ranged : g));
+          got.push(...(ranged.length ? ranged : g));
         }
-      }
+        return got;
+      });
+      const collected: any[] = perGenre.flat();
       // The random fetch used the coarse era envelope — tighten to the exact
       // union (never-starve to the envelope set when the union comes up empty).
       const exact = hasEraBound(eras) ? inYearRange(collected, eras) : collected;
@@ -774,10 +787,21 @@ async function cleanup() {
   // operator's byte budget (feature: stem-blend transitions). The analysis
   // pass sweeps after itself too; this catches lazily-added dirs.
   try {
-    const { removed, freedBytes } = await stemCacheStore.sweep();
+    const { removed, freedBytes, failedDirs, overBudgetBytes } = await stemCacheStore.sweep();
     if (removed) {
       queue.log('scheduler',
         `Stem cache: evicted ${removed} track dir(s) (${Math.round(freedBytes / 1_000_000)} MB freed)`);
+    }
+    // A sweep that couldn't reach the budget is an operator problem, not a
+    // no-op (#1257) — say so every hour it persists rather than sitting
+    // silently 170 GB over. The usual cause is the controller container
+    // being unable to delete what the analyzer wrote (ownership/permissions
+    // on state/stems, e.g. a relocated stems mount).
+    if (overBudgetBytes > 0) {
+      const budgetGb = settings.get()?.audio?.stemCacheGb ?? 15;
+      queue.log('error',
+        `Stem cache: still ${(overBudgetBytes / 1024 ** 3).toFixed(1)} GB over its ${budgetGb} GB budget after the sweep` +
+        (failedDirs ? ` — ${failedDirs} dir delete(s) failed; check ownership/permissions on state/stems` : ''));
     }
   } catch (err) {
     queue.log('error', `Stem cache sweep failed: ${err.message}`);

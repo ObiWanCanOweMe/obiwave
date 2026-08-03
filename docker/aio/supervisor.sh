@@ -1,34 +1,25 @@
 #!/usr/bin/env bash
-# SUB/WAVE all-in-one supervisor.
-#
-# Runs the whole stack — icecast2 + liquidsoap (the broadcast pair), the
-# controller, the Next.js web UI, and Caddy — inside ONE container for the
-# Unraid Community Applications one-click image (docker/Dockerfile.aio).
-#
-# The split-stack deployment runs these as five compose services wired over an
-# internal network; here they all share localhost and the /var/sub-wave volume,
-# so the file-based IPC (next.txt / say.txt / now-playing.json …) works exactly
-# as before with no code changes — only a handful of *_HOST/*_URL env overrides
-# repoint the controller at loopback.
+# SUB/WAVE all-in-one supervisor — runs icecast2 + liquidsoap (the broadcast
+# pair), the controller, the web UI, and Caddy in ONE container
+# (docker/Dockerfile.aio). Everything shares localhost + /var/sub-wave, so the
+# file-based IPC works unchanged; only *_HOST/*_URL overrides repoint loopback.
 #
 # Each service runs in its own restart loop, so a web or controller crash does
-# NOT take the station off the air. The icecast+liquidsoap pair is launched as a
-# unit (mirroring docker/broadcast-entrypoint.sh): if either dies the pair is
-# bounced together, because liquidsoap is useless without its icecast sink.
+# NOT take the station off the air. The broadcast pair is launched as a unit
+# (mirroring docker/broadcast-entrypoint.sh): if either dies both are bounced.
 #
-# Bash (not /bin/sh) for `wait -n`; the savonet/liquidsoap base ships bash.
+# Bash (not /bin/sh) for `wait -n`.
 set -u
 
 SECRETS=/var/sub-wave/icecast-secrets.env
 TEMPLATE=/etc/icecast2/icecast.xml.template
 RENDERED=/etc/icecast2/icecast.xml
 
-# Multi-station pointer (see docker/broadcast-entrypoint.sh — kept in lockstep).
+# Multi-station pointer (kept in lockstep with docker/broadcast-entrypoint.sh).
 # Called at the top of run_broadcast so every mixer relaunch re-resolves.
 #
 # Both paths are env-overridable so scripts/aio-log-link.test.ts can drive
-# link_liquidsoap_log() against a scratch dir. Neither var is set in the image,
-# so the container resolves the same literals it always did.
+# link_liquidsoap_log() against a scratch dir; neither var is set in the image.
 STATE_ROOT="${SUBWAVE_STATE_ROOT:-/var/sub-wave}"
 LIQ_LOG_DIR="${SUBWAVE_LIQ_LOG_DIR:-/var/log/liquidsoap}"
 STATE_DIR="$STATE_ROOT"
@@ -50,10 +41,8 @@ resolve_state_dir() {
 log() { echo "[subwave-aio] $*" >&2; }
 
 # ---------------------------------------------------------------------------
-# One-time state bootstrap — shared dirs, watch-mode m3u stubs, archive ignore.
-# Same responsibilities as docker/broadcast-entrypoint.sh, minus launching the
-# audio processes (the supervisor does that in a restart loop below). Mode 777
-# because the services run under different uids (icecast2 / liquidsoap / root).
+# One-time state bootstrap. Mode 777 because the services run under different
+# uids (icecast2 / liquidsoap / root).
 # ---------------------------------------------------------------------------
 init_state() {
 	mkdir -p /var/sub-wave \
@@ -77,21 +66,16 @@ init_state() {
 	touch /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
 	chmod 666 /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
 
-	# Keep a co-located Navidrome from scanning the station's own hourly
-	# archive mixdowns as junk "HH-00" tracks (issue #273).
+	# Keep a co-located Navidrome from scanning the hourly archive mixdowns
+	# in as junk "HH-00" tracks (issue #273).
 	touch /var/sub-wave/archive/.ndignore
 
 	link_liquidsoap_log
 
-	# Rotate radio.log on boot once it passes 50MB — same policy (and same
-	# container-side path) as docker/broadcast-entrypoint.sh. Now that the
-	# log persists in state, it would otherwise append forever; boot is the
-	# one safe moment to move it since liquidsoap isn't holding the fd yet.
-	# One .old generation caps disk at ~2x the threshold. Rotating via
-	# $LIQ_LOG_DIR (not $STATE_ROOT/logs) matters: after
-	# link_liquidsoap_log it resolves to wherever radio.log actually lands —
-	# state logs, an operator's own disk, a bind mount, or the local
-	# fallback — while the state path misses the last two branches.
+	# Rotate radio.log on boot once it passes 50MB (liquidsoap appends
+	# forever; boot is the one safe moment — fd not yet held). Rotating via
+	# $LIQ_LOG_DIR matters: after link_liquidsoap_log it resolves to wherever
+	# radio.log actually lands, which the state path can miss.
 	RADIO_LOG="$LIQ_LOG_DIR/radio.log"
 	if [ -f "$RADIO_LOG" ] && [ "$(stat -c %s "$RADIO_LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then
 		mv -f "$RADIO_LOG" "$RADIO_LOG.old"
@@ -100,55 +84,36 @@ init_state() {
 }
 
 # ---------------------------------------------------------------------------
-# Point /var/log/liquidsoap at the state ROOT's logs/, but never at the cost of
-# the station.
+# Point /var/log/liquidsoap at the state ROOT's logs/ (#1196: radio.log must
+# survive recreates; routes/debug.ts tails <stateRoot>/logs/radio.log) — but
+# never at the cost of the station: radio.liq opens the log path as its FIRST
+# lifecycle step, so an unopenable path is a fatal startup error, not a
+# degraded log. Every branch below must end in a path liquidsoap can open,
+# verified by probe.
 #
-# radio.liq opens settings.log.file.path during Dtools.Log.init — the FIRST
-# lifecycle step, before the mixer graph, before the telnet port, before the
-# Icecast connection. An unopenable log path is therefore not a degraded log,
-# it is a fatal startup error. That makes this the one bootstrap step that can
-# take the station off the air, so it fails soft: every branch below ends with
-# a path liquidsoap can actually open, verified by probe rather than assumed.
-#
-# The goal is still #1196's — radio.log has to survive container recreates and
-# routes/debug.ts tails <stateRoot>/logs/radio.log, the same install-level
-# location the compose stacks pin via their ${STATE_DIR}/logs bind mount.
-#
-# What #1196 got wrong: it created the symlink unconditionally and guarded
-# re-entry on `[ ! -L /var/log/liquidsoap ]`. If <state>/logs was itself a
-# symlink pointing back at /var/log/liquidsoap — the natural host-side
-# workaround for the pre-#1196 "AIO has no radio.log in the state dir" bug —
-# the two links closed a cycle and every start died with
-#
-#   Fatal error: exception Sys_error("/var/log/liquidsoap/radio.log: Too many
-#   levels of symbolic links")
-#
-# and because the guard only tested -L, it then SKIPPED (never repaired) the
-# bad link on every subsequent boot: an unbreakable 3s crash loop, both Doctor
-# broadcast checks red, and the "Restart mixer" fix button useless because it
-# speaks telnet to a port liquidsoap never got far enough to bind.
+# The original #1196 fix created the link unconditionally and guarded on -L
+# only. If <state>/logs was itself a symlink back at /var/log/liquidsoap (a
+# natural pre-#1196 host-side workaround), the two links closed an ELOOP cycle
+# ("Too many levels of symbolic links") that the guard then never repaired —
+# an unbreakable crash loop the "Restart mixer" button couldn't touch.
 # ---------------------------------------------------------------------------
 link_liquidsoap_log() {
 	local target="$STATE_ROOT/logs"
 
-	# 1. Heal a broken state-side logs link. `-d` is false for a dangling
-	#    symlink AND for a looping one (stat fails with ELOOP), which is
-	#    exactly the set worth replacing with a real directory. A symlink
-	#    that resolves to a real directory elsewhere is an operator parking
-	#    logs on another disk on purpose — left alone.
+	# 1. Heal a broken state-side logs link. `-d` is false for dangling AND
+	#    looping symlinks — exactly the set worth replacing. A link that
+	#    resolves elsewhere is an operator parking logs on another disk on
+	#    purpose — left alone.
 	if [ -L "$target" ] && [ ! -d "$target" ]; then
 		log "WARNING $target is a broken symlink (-> $(readlink "$target" 2>/dev/null || echo '?')) — replacing it with a real directory"
 		rm -f "$target" 2>/dev/null || true
 	fi
 
-	# 1b. A state-side link that RESOLVES INTO the container log path is the
-	#     #1196 cycle half wearing a disguise: it only looks healthy while
-	#     the fresh image's plain /var/log/liquidsoap still exists (the
-	#     exact shape the reported operator's install boots into after
-	#     pulling this fix). Linking $LIQ_LOG_DIR at a path that resolves to
-	#     $LIQ_LOG_DIR itself can only re-create the cycle, which the probe
-	#     below would then break — but at the price of dropping persistence.
-	#     Replacing the link with a real directory now keeps it.
+	# 1b. A state-side link that resolves INTO the container log path is the
+	#     #1196 cycle half in disguise — it only looks healthy while the fresh
+	#     image's plain /var/log/liquidsoap still exists. Linking $LIQ_LOG_DIR
+	#     at a path that resolves to itself can only re-create the cycle, so
+	#     replace the link with a real directory now (keeps persistence).
 	if [ -L "$target" ] && [ -d "$target" ] && command -v realpath >/dev/null 2>&1; then
 		local target_real liq_real
 		target_real=$(realpath -m -- "$target" 2>/dev/null || realpath "$target" 2>/dev/null || true)
@@ -163,31 +128,25 @@ link_liquidsoap_log() {
 	chmod 777 "$target" 2>/dev/null || true
 
 	# 2. Point the in-container path at it — unless something is mounted
-	#    there. An operator who bind-mounted a host dir onto
-	#    /var/log/liquidsoap (the split stack's compose mapping, copied into
-	#    an AIO `docker run`) already has a persistent log dir, so it is
-	#    used as-is. The mountpoint test must come BEFORE any `rm -rf`:
-	#    `rm -rf` on a mountpoint can't remove the mountpoint itself but
-	#    DOES delete everything inside it — which would wipe the very log
-	#    history the operator mounted the dir to keep, on every boot.
+	#    there (an operator's bind mount is already persistent; use as-is).
+	#    The mountpoint test must come BEFORE any `rm -rf`: rm on a
+	#    mountpoint can't remove the mountpoint but DOES delete everything
+	#    inside — wiping the log history the mount exists to keep.
 	if [ -d "$target" ]; then
 		if [ -e "$LIQ_LOG_DIR" ] && [ ! -L "$LIQ_LOG_DIR" ] && is_mountpoint "$LIQ_LOG_DIR"; then
 			log "$LIQ_LOG_DIR is a mountpoint — leaving it as-is; radio.log stays there"
 		else
-			# Anything unmounted at the container path — a plain dir
-			# from a pre-#1196 image, a stray file — is replaced by
-			# the link. `ln -s` onto a surviving directory would
-			# silently create the link INSIDE it
-			# (/var/log/liquidsoap/logs), hence the rm first.
+			# rm first: `ln -s` onto a surviving directory would
+			# silently create the link INSIDE it.
 			[ -L "$LIQ_LOG_DIR" ] || rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
 			if [ -e "$LIQ_LOG_DIR" ] && [ ! -L "$LIQ_LOG_DIR" ]; then
 				# Unremovable yet not detected as a mountpoint
 				# (exotic mount setups) — same outcome, use as-is.
 				log "$LIQ_LOG_DIR survived removal (bind mount?) — leaving it; radio.log stays there"
 			else
-				# -f replaces an existing link (including a looping one, which
-				# is removed rather than followed); -n keeps it from being
-				# planted inside a link-to-directory.
+				# -f replaces an existing link (including a looping
+				# one); -n keeps it from being planted inside a
+				# link-to-directory.
 				ln -sfn "$target" "$LIQ_LOG_DIR" 2>/dev/null || true
 			fi
 		fi
@@ -195,17 +154,15 @@ link_liquidsoap_log() {
 		log "WARNING $target is not a usable directory — not linking $LIQ_LOG_DIR at it"
 	fi
 
-	# 3. Prove liquidsoap can open a file there before handing over the path.
-	#    This is the backstop that turns the whole ELOOP class of bug into a
-	#    warning: any shape that fails the probe falls back to a plain
-	#    container-local directory, which costs the Debug tail its history
-	#    across recreates but keeps the station on the air.
+	# 3. Prove liquidsoap can open a file there before handing over the path
+	#    — the backstop that turns the whole ELOOP class into a warning. Any
+	#    failing shape falls back to a container-local dir: no persistence,
+	#    but the station stays on the air.
 	if ! probe_log_dir; then
 		log "WARNING $LIQ_LOG_DIR is unopenable — falling back to a container-local log dir; radio.log will NOT persist in the state dir"
-		# A mountpoint can be neither removed nor replaced, so rebuilding
-		# is pointless there — and `rm -rf` on a mount that somehow fails
-		# the probe would only strip the operator's files while leaving
-		# the path just as unopenable. Rebuild unmounted paths only.
+		# A mountpoint can be neither removed nor replaced — rebuild
+		# unmounted paths only (rm -rf on a failing mount would just strip
+		# the operator's files without fixing the path).
 		if ! is_mountpoint "$LIQ_LOG_DIR"; then
 			rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
 			mkdir -p "$LIQ_LOG_DIR" 2>/dev/null || true
@@ -213,21 +170,16 @@ link_liquidsoap_log() {
 		probe_log_dir || log "ERROR $LIQ_LOG_DIR is still unopenable — liquidsoap will fail to start"
 	fi
 
-	# Both follow the link to whatever directory we settled on. Deliberately
-	# NOT recursive: liquidsoap only needs to create/append radio.log in the
-	# directory itself, and an operator who pointed <state>/logs at their own
-	# disk shouldn't have its existing contents re-owned underneath them.
-	# The directory inode itself IS re-moded/re-owned even when it is the
-	# operator's own — that's the price of liquidsoap being able to create
-	# radio.log inside it; only the contents are left untouched.
+	# Deliberately NOT recursive: liquidsoap only needs to create/append
+	# radio.log in the directory itself, and an operator who pointed
+	# <state>/logs at their own disk shouldn't have its contents re-owned.
 	chmod 777 "$LIQ_LOG_DIR" 2>/dev/null || true
 	chown liquidsoap:liquidsoap "$LIQ_LOG_DIR" 2>/dev/null || true
 }
 
 # Can a file actually be created under $LIQ_LOG_DIR? Runs as root, so it proves
-# the PATH resolves (the ELOOP/dangling class) rather than that the liquidsoap
-# user has write permission — that part is the chmod/chown at the end of
-# link_liquidsoap_log.
+# the PATH resolves (the ELOOP/dangling class), not that the liquidsoap user
+# has write permission — that's the chmod/chown above.
 probe_log_dir() {
 	local probe="$LIQ_LOG_DIR/.write-probe"
 	: > "$probe" 2>/dev/null || return 1
@@ -235,12 +187,9 @@ probe_log_dir() {
 	return 0
 }
 
-# Is $1 a mountpoint? `mountpoint` ships with util-linux on the Debian base;
-# fall back to /proc/self/mountinfo (field 5 is the mount point) so the answer
-# never silently degrades to "not a mount" just because the binary is missing.
-# A symlink is never its own mountpoint, but `mountpoint` resolves it and
-# reports on the target — fine for both call sites, which only ask about
-# non-symlink shapes or paths about to be rebuilt anyway.
+# Is $1 a mountpoint? Falls back to /proc/self/mountinfo (field 5 is the mount
+# point) so the answer never degrades to "not a mount" just because the
+# `mountpoint` binary is missing.
 is_mountpoint() {
 	if command -v mountpoint >/dev/null 2>&1; then
 		mountpoint -q "$1" 2>/dev/null
@@ -250,14 +199,10 @@ is_mountpoint() {
 }
 
 # ---------------------------------------------------------------------------
-# Warn loudly if the state dir isn't a mounted volume. With no host path (or
-# volume) mapped to /var/sub-wave, everything the station writes — settings,
-# library.db with the acoustic analysis, hourly archives, the model cache —
-# lives in the container's throwaway writable layer, and the next image update
-# (which recreates the container) silently wipes it. The Unraid CA template maps
-# this as a required Appdata path; a bare `docker run` that forgets `-v` is the
-# footgun this catches (issue #902). A real bind/volume mount gets its own entry
-# in /proc/mounts at the target path; an un-mapped dir on the overlay fs doesn't.
+# Warn loudly if /var/sub-wave isn't a mounted volume: everything the station
+# writes would live in the container's writable layer and be wiped by the next
+# image update. A bare `docker run` that forgets `-v` is the footgun (#902); a
+# real mount gets its own /proc/mounts entry, an overlay dir doesn't.
 # ---------------------------------------------------------------------------
 warn_if_state_unmounted() {
 	if ! grep -q ' /var/sub-wave ' /proc/mounts 2>/dev/null; then
@@ -274,11 +219,9 @@ warn_if_state_unmounted() {
 }
 
 # ---------------------------------------------------------------------------
-# Resolve the three ICECAST_*_PASSWORD values and render icecast.xml.
-# Precedence (unchanged from broadcast-entrypoint): env override > persisted
-# state/icecast-secrets.env > freshly generated. Resolved values are exported
-# (liquidsoap reads ICECAST_SOURCE_PASSWORD from the environment) and written
-# back to the secrets file for operator visibility + the documented rotate path.
+# Resolve the ICECAST_*_PASSWORD values. Precedence: env override > persisted
+# secrets file > freshly generated. Written back for operator visibility + the
+# documented rotate path; exported for liquidsoap.
 # ---------------------------------------------------------------------------
 init_secrets() {
 	local ENV_SRC="${ICECAST_SOURCE_PASSWORD:-}"
@@ -303,22 +246,19 @@ init_secrets() {
 		ICECAST_ADMIN_PASSWORD=$ICECAST_ADMIN_PASSWORD
 		ICECAST_RELAY_PASSWORD=$ICECAST_RELAY_PASSWORD
 	EOF
-	# 0600: holds the Icecast passwords, read only by root (this supervisor
-	# sources it, and the in-process controller reads it off the state dir —
-	# all root in the AIO's single container). Keep it owner-only.
+	# 0600 — passwords, read only by root (all in-container readers are root).
 	chmod 600 "$SECRETS"
 
 	export ICECAST_SOURCE_PASSWORD ICECAST_ADMIN_PASSWORD ICECAST_RELAY_PASSWORD
-	# Liquidsoap connects to icecast over loopback inside this container;
-	# radio.liq reads ICECAST_HOST (default "icecast").
+	# Liquidsoap connects over loopback; radio.liq reads ICECAST_HOST.
 	export ICECAST_HOST=localhost
 }
 
 # ---------------------------------------------------------------------------
-# Render icecast.xml from the template + resolved secrets. Called on EVERY
-# broadcast pair (re)launch — not just boot — so a restart-mixer picks up a
-# flipped listener-auth flag (or a changed buffer/bitrate setting) the same
-# way the split stack's container restart re-runs its entrypoint.
+# Render icecast.xml. Called on EVERY broadcast pair (re)launch — not just boot
+# — so a restart-mixer picks up a flipped listener-auth flag or a changed
+# buffer/bitrate setting, the same way the split stack's container restart
+# re-runs its entrypoint.
 # ---------------------------------------------------------------------------
 read_state_num() {
 	# $1 = filename under $STATE_DIR, $2 = fallback. Non-numeric/missing → fallback.
@@ -345,18 +285,14 @@ render_icecast() {
 # loop can restart it. Do NOT `exec` — that would replace the loop.
 # ---------------------------------------------------------------------------
 
-# icecast2 + liquidsoap as a unit. Returns when either dies (the loop bounces
-# the pair). icecast runs as the icecast2 user; liquidsoap as the liquidsoap
-# user (uid 10000). `sudo -E` preserves the resolved ICECAST_* env.
+# icecast2 + liquidsoap as a unit; returns when either dies.
 run_broadcast() {
 	# Re-resolve the active station on every pair launch — this is how a
-	# station switch takes effect in the AIO without a container bounce (the
-	# supervise loop re-runs run_broadcast after every mixer restart).
+	# station switch takes effect in the AIO without a container bounce.
 	resolve_state_dir
 
-	# Bootstrap the resolved station dir's subdirs (mirrors init_state, but
-	# scoped to $STATE_DIR — the root case is already covered by init_state at
-	# boot, and a non-root station dir needs its own subdirs created here).
+	# Bootstrap the resolved station dir's subdirs (the root case is covered
+	# by init_state at boot; a non-root station dir needs its own here).
 	mkdir -p "$STATE_DIR" \
 	         "$STATE_DIR/voice" \
 	         "$STATE_DIR/voices" \
@@ -396,12 +332,10 @@ run_broadcast() {
 	done
 
 	log "starting liquidsoap"
-	# TEMPORARY (re-harden later): run liquidsoap as root instead of dropping to
-	# the `liquidsoap` user — same reason as docker/broadcast-entrypoint.sh. The
-	# savonet base bump 2.2.5 -> 2.4.4 changed that user's uid (10000 -> 100), so
-	# state files persisted under /var/sub-wave by the old image became unwritable
-	# to uid 100 and every on_meta write EACCES'd. Root ignores those perms.
-	# Restore the privilege drop once the state files are chowned to the new uid
+	# TEMPORARY (re-harden later): run liquidsoap as root — same reason as
+	# docker/broadcast-entrypoint.sh (savonet base bump changed the liquidsoap
+	# uid 10000 → 100, making persisted state files unwritable). Restore the
+	# privilege drop once state files are chowned to the new uid
 	# (radio.liq's settings.init.allow_root is set for the same reason).
 	liquidsoap /etc/liquidsoap/radio.liq &
 	local lq=$!
@@ -414,12 +348,10 @@ run_broadcast() {
 	return "$code"
 }
 
-# Controller — the AI DJ brain. The *_HOST/*_URL overrides repoint it from the
-# compose service names (broadcast:7702 / 1234) at loopback. DOCKER_HOST and
-# TTS_HEAVY_URL are intentionally unset: the Stats system panel degrades
-# gracefully and TTS falls back to the bundled Piper voice. All other config
-# (Navidrome, LLM, ADMIN_*, SITE_URL, TZ) is inherited from the container env
-# and the first-run wizard's settings.json.
+# Controller. The *_HOST/*_URL overrides repoint the compose service names at
+# loopback. DOCKER_HOST and TTS_HEAVY_URL are intentionally unset — the Stats
+# panel hides and TTS falls back to Piper. Everything else is inherited from
+# the container env + settings.json.
 run_controller() {
 	cd /app || return 1
 	export NODE_ENV=production \
@@ -462,12 +394,9 @@ supervise() {
 }
 
 # ---------------------------------------------------------------------------
-# Boot.
-#
-# Sourcing this file with SUBWAVE_SUPERVISOR_LIB=1 defines the functions
-# WITHOUT booting anything — the seam scripts/aio-log-link.test.ts drives to
-# exercise link_liquidsoap_log() against a scratch dir. The image never sets
-# it, so PID 1 always falls through to the real boot below.
+# Boot. Sourcing with SUBWAVE_SUPERVISOR_LIB=1 defines the functions WITHOUT
+# booting — the seam scripts/aio-log-link.test.ts uses. The image never sets
+# it, so PID 1 always falls through to the real boot.
 # ---------------------------------------------------------------------------
 if [ "${SUBWAVE_SUPERVISOR_LIB:-}" = "1" ]; then
 	return 0 2>/dev/null || exit 0
@@ -478,14 +407,12 @@ init_state
 init_secrets
 
 # On stop, signal the whole process group once, then give the children time to
-# shut down before exiting (reset the trap first so the kill doesn't re-enter
-# this handler). The grace period matters: this script is PID 1, and the
-# instant it exits the container namespace is torn down and everything left
-# gets SIGKILLed — which robbed the controller of its SIGTERM handler and left
-# library.db's WAL sidecar un-checkpointed on every stop (#786). `wait` covers
-# the supervise loops; the sleep covers their children (node etc.), which get
-# reparented to us when the loops die and which bash's wait can't see. Docker's
-# stop timeout (default 10s) still hard-caps the whole thing.
+# shut down (reset the trap first so the kill doesn't re-enter). The grace
+# period matters: this is PID 1, and the instant it exits everything left gets
+# SIGKILLed — which robbed the controller of its SIGTERM handler and left
+# library.db's WAL un-checkpointed on every stop (#786). `wait` covers the
+# supervise loops; the sleep covers their reparented children, which bash's
+# wait can't see. Docker's stop timeout still hard-caps the whole thing.
 trap 'trap "" TERM INT; log "shutting down"; kill -TERM 0 2>/dev/null; wait; sleep 2; exit 0' TERM INT
 
 supervise broadcast  run_broadcast  &

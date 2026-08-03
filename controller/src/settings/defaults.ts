@@ -35,9 +35,12 @@ export const DEFAULTS = {
   // paying for the tape by default (issue #137). Dropping the bitrate (e.g.
   // 128 → 64 mono in a future change) also helps for operators who want it.
   // retentionDays: hourly recordings older than this many days are deleted by
-  // the scheduler's hourly cleanup. 0 = keep forever — the default, because a
-  // retention default would silently delete archives operators already have.
-  archive: { enabled: false, bitrate: 128, retentionDays: 0 },
+  // the scheduler's hourly cleanup. Bounded by default — the old keep-forever
+  // default (0) grew ~1.4 GB/day at 128 kbps until the disk filled, and
+  // operators only noticed at 99 GB. The default must NOT reach installs that
+  // already archive under keep-forever: normalizeArchiveRetentionDays keeps
+  // them at 0 (see settings/normalize.ts), so upgrades never delete tapes.
+  archive: { enabled: false, bitrate: 128, retentionDays: 30 },
   // Secondary Ogg-Opus broadcast mount (/stream.opus). Off by default — only
   // Blink (Chrome/Edge) clients ever select it (web/hooks/usePlayer.ts keeps
   // Safari/iOS/Firefox on MP3), and it adds a continuous Opus encoder + a
@@ -257,8 +260,9 @@ export const DEFAULTS = {
     // pocket-tts but no persona-level voice is set. Built-in voice id.
     pocketTts: { voice: 'alba' },
     // Cloud engine config — used when an engine resolves to 'cloud'. A persona
-    // chooses provider+voice; `model` and `apiKey` stay shared here. `apiKey`
-    // empty means "read the provider's env var" (OPENAI_API_KEY etc.).
+    // chooses provider+voice; `model` stays shared here. Managed credentials
+    // use provider env vars; authenticated compatibility servers use the
+    // dedicated `compatApiKey` slot below.
     // `enabled` is the operator's "Off" switch — when false the cloud engine
     // reports unavailable regardless of key, so the engine pickers grey it out.
     cloud: {
@@ -266,7 +270,13 @@ export const DEFAULTS = {
       provider: 'openai',
       model: 'gpt-4o-mini-tts',
       voice: 'alloy',
+      // Legacy managed-provider inline key. New managed credentials live in
+      // secrets.env; retained for backward compatibility with older settings.
       apiKey: '',
+      // Dedicated bearer for authenticated openai-compatible TTS servers. It
+      // remains provider-scoped even when personas use compat alongside a
+      // different station-wide Cloud provider.
+      compatApiKey: '',
       // Base URL for the openai-compatible provider, including the /v1 suffix
       // (e.g. http://192.168.1.101:5000/v1). Required — and only used — when
       // provider === 'openai-compatible'.
@@ -281,6 +291,12 @@ export const DEFAULTS = {
       voiceStyle: 0,
       voiceSimilarityBoost: 0.75,
       voiceUseSpeakerBoost: true,
+      // Fish Audio S2.1 synthesis controls. Persisted alongside the shared
+      // cloud config so switching providers preserves the operator's tuning,
+      // but sent only when provider === 'fish-audio'.
+      temperature: 0.7,
+      topP: 0.7,
+      latency: 'normal' as 'low' | 'normal' | 'balanced',
     },
     // Remote engine — a user-configured self-hosted TTS endpoint that renders
     // audio over HTTP (POST /speak → audio body, gated on a /health probe).
@@ -556,7 +572,8 @@ export const DEFAULTS = {
     // pass keeps the Demucs stems it already computes (head + tail windows)
     // as FLAC under state/stems/<id>/ so transition renders are a fast mix
     // instead of a fresh separation. Needs the demucs stack like
-    // vocalActivity; ~21-25 MB per track, LRU-swept to stemCacheGb.
+    // vocalActivity; ~13-25 MB per track (field average ~13, #1257),
+    // LRU-swept to stemCacheGb.
     stemCache: false,
     stemCacheGb: 15,
     // Quiet-times gate (#1099): pause the analysis pass while anyone is

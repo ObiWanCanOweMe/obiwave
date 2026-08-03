@@ -53,11 +53,17 @@ export interface VoicePickerGroup {
 export interface VoicePickerPreviewParams {
   engine: string;
   cloudProvider?: string;
+  cloudModel?: string;
   speed?: number;
   lang?: string;
   // Persona's free-text on-air language — the server renders the sample
   // sentence in this language when it recognizes it.
   language?: string;
+  fishSettings?: {
+    temperature: number;
+    topP: number;
+    latency: 'low' | 'normal' | 'balanced';
+  };
   adminFetch: AdminAuth['adminFetch'];
 }
 
@@ -91,11 +97,14 @@ export function VoicePicker({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   // Monotonic token: bumping it invalidates any fetch still in flight.
   const seqRef = useRef(0);
 
   const stopPreview = useCallback(() => {
     seqRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; }
     setPreviewing(null);
@@ -116,15 +125,29 @@ export function VoicePicker({
     stopPreview();
     setPreviewError(null);
     const seq = seqRef.current;
+    const ac = new AbortController();
+    abortRef.current = ac;
     setPreviewing({ voice: voiceValue, phase: 'loading' });
-    const res = await fetchPreviewSample(preview.adminFetch, {
-      engine: preview.engine,
-      voice: voiceValue,
-      cloudProvider: preview.cloudProvider,
-      speed: preview.speed,
-      lang: preview.lang,
-      language: preview.language,
-    });
+    let res: Awaited<ReturnType<typeof fetchPreviewSample>>;
+    try {
+      res = await fetchPreviewSample(preview.adminFetch, {
+        engine: preview.engine,
+        voice: voiceValue,
+        cloudProvider: preview.cloudProvider,
+        cloudModel: preview.cloudModel,
+        speed: preview.speed,
+        lang: preview.lang,
+        language: preview.language,
+        fishSettings: preview.fishSettings,
+      }, ac.signal);
+    } catch (e) {
+      if (ac.signal.aborted || seq !== seqRef.current) return;
+      setPreviewing(null);
+      setPreviewError(e instanceof Error ? e.message : 'Preview failed');
+      return;
+    } finally {
+      if (abortRef.current === ac) abortRef.current = null;
+    }
     // Another row (or a close) superseded this request while it was in flight.
     if (seq !== seqRef.current) return;
     if (!res.ok) { setPreviewing(null); setPreviewError(res.message); return; }

@@ -7,10 +7,42 @@
 // node:assert-via-tsx style, matching scripts/programme.test.ts.
 
 import assert from 'node:assert/strict';
-import { orderedFallbacks } from '../src/audio/tts-fallback.js';
+import { fallbackTextFor, orderedFallbacks } from '../src/audio/tts-fallback.js';
 
 const allUsable = () => true;
 
+// Expressive primaries keep cues for their own render but remove them from the
+// rescue text that Piper/Kokoro/Remote would otherwise read literally.
+assert.equal(
+  fallbackTextFor('cloud', 'fish-s21', '[soft and warm] Back to the music.'),
+  'Back to the music.',
+  'Fish S2.1 rescue strips natural-language cues',
+);
+assert.equal(
+  fallbackTextFor('cloud', 'elevenlabs-v3', 'And now [whispers] the deep cut.'),
+  'And now the deep cut.',
+  'ElevenLabs v3 rescue strips audio tags',
+);
+assert.equal(
+  fallbackTextFor('chatterbox', '', '[laugh] That was inevitable.'),
+  'That was inevitable.',
+  'Chatterbox rescue strips paralinguistic tags',
+);
+assert.equal(
+  fallbackTextFor('cloud', '', 'The [live] version stays labelled.'),
+  'The [live] version stays labelled.',
+  'non-expressive cloud rescue leaves brackets untouched',
+);
+assert.equal(
+  fallbackTextFor('cloud', 'fish-s21', '[whispers]'),
+  '',
+  'cue-only fallback never restores a tag for local speech',
+);
+assert.equal(
+  fallbackTextFor('cloud', 'fish-other', 'The [live] version stays labelled.'),
+  'The [live] version stays labelled.',
+  'non-S2.1 Fish models do not trigger cue stripping',
+);
 // No configured default: Piper floor, then Kokoro.
 assert.deepEqual(
   orderedFallbacks('cloud', undefined, allUsable),

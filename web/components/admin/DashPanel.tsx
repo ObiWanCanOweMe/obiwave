@@ -42,10 +42,9 @@ import { Suggestion, Suggestions } from '../ai-elements/suggestion';
 import { Message, MessageContent } from '../ai-elements/message';
 import type { ChatStatus } from 'ai';
 import { ScrollArea, ScrollBar } from '../ui/scroll-area';
-import { RefreshCw, X } from 'lucide-react';
+import { Blend, RefreshCw, X } from 'lucide-react';
 import StationHeader, { type HealthMetrics } from './StationHeader';
 import { cn } from '../../lib/cn';
-import { LikesCard } from './dash/LikesCard';
 import { RequestsCard } from './dash/RequestsCard';
 import { TakeoverCard } from './dash/TakeoverCard';
 import { BoothTurnText, SegmentButton, SortableTh, ToggleRow, classTone } from './dash/bits';
@@ -54,7 +53,6 @@ import type {
   ConnectionsState,
   DashStatus,
   HealthStats,
-  LikesPayload,
   QueueState,
   RequestEntry,
   SortState,
@@ -93,8 +91,6 @@ export default function DashPanel() {
   const [stats, setStats] = useState<HealthStats | null>(null);
   const [requests, setRequests] = useState<RequestEntry[] | null>(null);
   const [reqErr, setReqErr] = useState<string | null>(null);
-  const [likes, setLikes] = useState<LikesPayload | null>(null);
-  const [likesErr, setLikesErr] = useState<string | null>(null);
   // Longest-connected first by default — the most stable listeners on top.
   const [sort, setSort] = useState<SortState>({ key: 'connectedSeconds', dir: 'desc' });
   const [revealIps, setRevealIps] = useState(false);
@@ -205,30 +201,6 @@ export default function DashPanel() {
     };
     tick();
     const id = setInterval(tick, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [hydrated, needsAuth, adminFetch]);
-
-  // Listener likes (#991) — same review-surface cadence as requests.
-  useEffect(() => {
-    if (!hydrated || needsAuth) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await adminFetch('/likes');
-        const j = (await r.json().catch(() => null)) as (LikesPayload & { error?: string }) | null;
-        if (cancelled) return;
-        if (!r.ok) throw new Error(j?.error || `failed (${r.status})`);
-        setLikes(j);
-        setLikesErr(null);
-      } catch (e) {
-        if (!cancelled) setLikesErr(e instanceof Error ? e.message : String(e));
-      }
-    };
-    tick();
-    const id = setInterval(tick, 15000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -458,6 +430,19 @@ export default function DashPanel() {
                         <QueueItemContent className="text-[12px] text-ink">
                           {t.title} <span className="text-muted">— {t.artist}</span>
                         </QueueItemContent>
+                        {/* Seam-type badge (#1257): stamped only once the seam's
+                            blend clip is actually queued, so no icon = plain
+                            crossfade, icon = stem blend. Definitive, not a
+                            prediction — blends are decided at pair drain. */}
+                        {t.stemSeam ? (
+                          <span
+                            title="Arrives via a stem blend (mixed from cached stems)"
+                            aria-label="Arrives via a stem blend"
+                            className="shrink-0 text-vermilion/70"
+                          >
+                            <Blend className="h-3 w-3" />
+                          </span>
+                        ) : null}
                         <span className="mono-num text-[10px] whitespace-nowrap text-muted">
                           {typeof t.duration === 'number' || typeof t.duration === 'string'
                             ? t.duration
@@ -810,7 +795,6 @@ export default function DashPanel() {
       <RequestsCard requests={requests} err={reqErr} tz={tz} locale={locale} />
 
       {/* ── LIKES ──────────────────────────────────────────────────────── */}
-      <LikesCard likes={likes} err={likesErr} tz={tz} locale={locale} />
 
       {!status && !err && <div className="text-muted italic">connecting…</div>}
 

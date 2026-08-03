@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { generateText, APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
-import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, snapV3Stability, modelTolerant, schemaHint, clipText, soulBrief, SOUL_BRIEF_MAX, renderTerminalPrompt, messageText } from '../src/llm/internal/core/pure.js';
+import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, isFishS21Model, cloudExpressionCueFamily, snapV3Stability, modelTolerant, schemaHint, clipText, soulBrief, SOUL_BRIEF_MAX, renderTerminalPrompt, messageText } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
 import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice } from '../src/llm/internal/provider/capabilities.js';
 import { agentPlan } from '../src/llm/internal/strategy/plan.js';
@@ -22,7 +22,7 @@ import { LLM_PROVIDERS, EMBEDDING_PROVIDERS, personaToneDirectives, normalizeDia
 import { lengthMode, lengthPhrase } from '../src/llm/internal/prompts/system.js';
 import { showMusicLean } from '../src/llm/internal/prompts/picker.js';
 import { planSchema } from '../src/llm/internal/prompts/programme.js';
-import { resolveCloudModel } from '../src/llm/internal/speech/cloud-speech.js';
+import { modelForCloudRequest, resolveCloudModel, resolveCloudProvider, sharedCloudApiKeyForRequest } from '../src/llm/internal/speech/cloud-speech.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -1200,6 +1200,93 @@ async function main() {
   });
   await test('unknown persona engine string fails closed (no hint beats a spoken bracket)', () => {
     assert.equal(resolveCloudModel({ engine: 'bogus' }, { defaultEngine: 'cloud', provider: 'elevenlabs', model: 'eleven_v3' }), '');
+  });
+
+  console.log('resolveCloudProvider (provider-gated Fish cue policy):');
+  await test('explicit Fish persona resolves Fish while keeping local/unknown engines closed', () => {
+    assert.equal(
+      resolveCloudProvider(
+        { engine: 'cloud', cloudProvider: 'fish-audio' },
+        { defaultEngine: 'piper', provider: 'openai' },
+      ),
+      'fish-audio',
+    );
+    assert.equal(resolveCloudProvider({ engine: 'piper' }, { defaultEngine: 'cloud', provider: 'fish-audio' }), '');
+    assert.equal(resolveCloudProvider({ engine: 'bogus' }, { defaultEngine: 'cloud', provider: 'fish-audio' }), '');
+  });
+  await test('station-default cloud provider resolves for personas with no explicit engine', () => {
+    assert.equal(resolveCloudProvider({}, { defaultEngine: 'cloud', provider: 'fish-audio' }), 'fish-audio');
+    assert.equal(resolveCloudProvider(null, { defaultEngine: 'cloud', provider: 'fish-audio' }), 'fish-audio');
+  });
+
+  console.log('modelForCloudRequest (provider defaults + exact preview model):');
+  await test('uses a provider default when a persona changes provider without a model', () => {
+    assert.equal(
+      modelForCloudRequest('openai', 'gpt-4o-mini-tts', { provider: 'fish-audio' }),
+      's2.1-pro',
+    );
+  });
+  await test('an explicit unsaved preview model wins across provider changes', () => {
+    assert.equal(
+      modelForCloudRequest('openai', 'gpt-4o-mini-tts', {
+        provider: 'fish-audio',
+        model: 's2.1-pro-free',
+      }),
+      's2.1-pro-free',
+    );
+    assert.equal(
+      modelForCloudRequest('fish-audio', 's2.1-pro', {
+        provider: 'fish-audio',
+        model: 'custom-fish-model',
+      }),
+      'custom-fish-model',
+    );
+  });
+
+  console.log('sharedCloudApiKeyForRequest (cross-provider credential isolation):');
+  await test('keeps managed inline keys only for their globally selected provider', () => {
+    assert.equal(sharedCloudApiKeyForRequest('openai', 'openai', 'openai-key', ''), 'openai-key');
+    assert.equal(sharedCloudApiKeyForRequest('elevenlabs', 'elevenlabs', 'eleven-key', ''), 'eleven-key');
+  });
+  await test('uses a provider-scoped credential for authenticated compatibility servers', () => {
+    assert.equal(
+      sharedCloudApiKeyForRequest('openai-compatible', 'openai-compatible', 'legacy-compat-key', ''),
+      'legacy-compat-key',
+    );
+    assert.equal(
+      sharedCloudApiKeyForRequest('openai-compatible', 'fish-audio', 'managed-key', 'compat-key'),
+      'compat-key',
+    );
+    assert.equal(
+      sharedCloudApiKeyForRequest('openai-compatible', 'openai', 'openai-key', ''),
+      '',
+    );
+  });
+  await test('drops stale managed-provider inline keys and never forwards one to Fish', () => {
+    assert.equal(sharedCloudApiKeyForRequest('elevenlabs', 'openai', 'openai-key', ''), '');
+    assert.equal(sharedCloudApiKeyForRequest('openai', 'fish-audio', 'legacy-key', ''), '');
+    assert.equal(sharedCloudApiKeyForRequest('fish-audio', 'fish-audio', 'legacy-key', 'compat-key'), '');
+  });
+
+  console.log('isFishS21Model (Fish expression-cue family gate):');
+  await test('matches official S2.1 model ids and common separators', () => {
+    assert.equal(isFishS21Model('s2.1-pro'), true);
+    assert.equal(isFishS21Model('s2.1-pro-free'), true);
+    assert.equal(isFishS21Model('S2_1_CUSTOM'), true);
+    assert.equal(isFishS21Model('s2-1-pro'), true);
+  });
+  await test('rejects Fish models outside S2.1 and unrelated custom ids', () => {
+    assert.equal(isFishS21Model('s1'), false);
+    assert.equal(isFishS21Model('s2-pro'), false);
+    assert.equal(isFishS21Model('custom-voice-model'), false);
+    assert.equal(isFishS21Model(''), false);
+  });
+  await test('cue families require both the matching provider and model family', () => {
+    assert.equal(cloudExpressionCueFamily('fish-audio', 's2.1-pro'), 'fish-s21');
+    assert.equal(cloudExpressionCueFamily('elevenlabs', 'eleven_v3'), 'elevenlabs-v3');
+    assert.equal(cloudExpressionCueFamily('fish-audio', 'eleven_v3_custom'), null);
+    assert.equal(cloudExpressionCueFamily('elevenlabs', 's2.1-pro'), null);
+    assert.equal(cloudExpressionCueFamily('openai', 'eleven_v3'), null);
   });
 
   console.log('isElevenLabsV3 (model-family gate):');

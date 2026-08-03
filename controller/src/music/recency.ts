@@ -62,7 +62,9 @@ export interface CandidateFilterState {
   // ISN'T the on-air artist; a pool that never-starves back to that same artist
   // would answer the question it was called to avoid. Empty on every pick that
   // doesn't go through that rescue, so the ordinary pool is untouched. Keys are
-  // artistKey()-normalised (lowercased, trimmed).
+  // artistRootKey()-normalised (lowercased, trimmed, collapsed onto the lead
+  // artist) and are matched against a candidate's raw AND lead key, so blocking
+  // an artist also blocks the collaborations they front.
   blockedArtists?: Set<string>;
 }
 
@@ -77,6 +79,56 @@ export function durationSeconds(song: CandidateLike): number | null {
 
 export function artistKey(song: CandidateLike): string {
   return (song.artist || '').toLowerCase().trim();
+}
+
+// A "featuring" marker — always a credit on someone else's track, never part of
+// an artist's own name. `(feat.` / `[ft` shapes included: Subsonic servers hand
+// the credit back inside the artist string as often as bare.
+const FEATURE_SPLIT = /\s*[([]?\s*\b(?:feat|ft|featuring)\b\.?\s+/i;
+// A join between two credited acts. Deliberately NOT "with" or "x" — "Sleeping
+// with Sirens" and "Chase x Status"-style names would lose their tail.
+const JOIN_SPLIT = /\s+(?:&|\+|and)\s+/i;
+
+// The LEAD artist of a credit — `artistKey` collapsed onto its primary act, so
+// a collaboration shares a key with the artist who leads it (#1251):
+//
+//   "Marvin Gaye & Tammi Terrell"  → "marvin gaye"
+//   "Kanye West (feat. Jay-Z)"     → "kanye west"
+//   "Sly & the Family Stone"       → "sly & the family stone"   (unchanged)
+//
+// The `the …` exception on the join is what keeps band names whole: "X & the
+// Y" / "X and the Y" is one act, not two credits, and stripping it would key
+// half the Motown and soul bench onto a first name. Everything else after a
+// join is treated as a second credited act — imperfect on "Hall & Oates"-shaped
+// duos (keyed "hall"), but a wrong key here can only over-match, and every
+// caller reads an over-match as "pick someone else", never as a hard drop.
+//
+// Only the LEAD is normalised: "Tammi Terrell" and "Marvin Gaye & Tammi
+// Terrell" still key apart. Matching every credited act would need the same
+// name-vs-credit judgement on the tail that the `the …` exception exists to
+// dodge, and the guard's whole job is the artist a listener just heard fronting
+// a track.
+//
+// NOT a replacement for `artistKey`: that one is an identity key (it feeds
+// `trackKey`, which must stay byte-identical to the `title|artist` keys
+// queue.recentlyPlayed builds from raw tag text). This one is a MATCHING key,
+// for "is this the same act as the one that just played".
+export function artistRootKey(song: CandidateLike | string): string {
+  const raw = typeof song === 'string' ? song : (song?.artist || '');
+  const base = raw.toLowerCase().trim();
+  if (!base) return '';
+
+  let root = base;
+  const featAt = root.search(FEATURE_SPLIT);
+  if (featAt > 0) root = root.slice(0, featAt).trim();
+
+  const join = JOIN_SPLIT.exec(root);
+  if (join && join.index > 0) {
+    const tail = root.slice(join.index + join[0].length).trim();
+    if (tail && !/^the\b/.test(tail)) root = root.slice(0, join.index).trim();
+  }
+
+  return root || base;
 }
 
 export function trackKey(song: CandidateLike): string {
@@ -181,8 +233,11 @@ export function filterPickerCandidates<T extends CandidateLike>(
       const key = artistKey(song);
       // Hard artist block — no mode gate, so it survives every relaxation stage
       // (#1187). An empty set (every caller but the artist-guard rescue) makes
-      // this a no-op.
-      if (key && blockedArtists.has(key)) continue;
+      // this a no-op. Matched on BOTH the raw key and the lead-artist key
+      // (#1251): the rescue is called to avoid the artist on air, and
+      // "Marvin Gaye & Tammi Terrell" answering a block on "Marvin Gaye" is the
+      // repeat it was called to prevent.
+      if (key && (blockedArtists.has(key) || blockedArtists.has(artistRootKey(song)))) continue;
       if (mode.recentArtists && key && recentArtists.has(key)) continue;
       if (key) {
         const count = nextArtistCounts.get(key) || 0;

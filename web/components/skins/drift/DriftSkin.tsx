@@ -178,11 +178,11 @@ export default function DriftSkin(_props: SkinProps) {
       {/* corners — on a phone the clock/context text is dropped so the station
           line and the theme icon can't collide in the middle; it returns from
           sm up where there's room for both halves. */}
-      <div className="absolute top-7 left-8 max-w-[70%] truncate font-mono text-[10px] tracking-[0.24em] text-muted uppercase sm:max-w-[45%]">
+      <div className="absolute top-7 left-8 max-w-[70%] truncate font-mono text-[11px] tracking-[0.24em] text-ink uppercase sm:max-w-[45%]">
         {stationName} — {showName ? `${showName} with ${djName}` : `small hours with ${djName}`}
       </div>
       <div className="absolute top-7 right-8 flex max-w-[45%] items-center gap-3">
-        <span className="hidden min-w-0 truncate font-mono text-[10px] tracking-[0.24em] text-muted uppercase sm:block">
+        <span className="hidden min-w-0 truncate font-mono text-[11px] tracking-[0.24em] text-muted uppercase sm:block">
           {clock
             ? [
                 `${turnClock(clock.getTime(), timezone, stationLocale)} ${stationWeekday(clock, timezone)}`,
@@ -192,10 +192,10 @@ export default function DriftSkin(_props: SkinProps) {
         </span>
         <ThemeSwitcher />
       </div>
-      <div className="absolute bottom-7 left-8 max-w-[38%] truncate font-mono text-[10px] tracking-[0.18em] text-muted uppercase">
+      <div className="absolute bottom-7 left-8 max-w-[38%] truncate font-mono text-[11px] tracking-[0.18em] text-muted uppercase">
         {upNext?.title ? `up next · ${[upNext.title, upNext.artist].filter(Boolean).join(' — ')}` : ''}
       </div>
-      <div className="absolute right-8 bottom-7 flex items-baseline gap-2 font-mono text-[10px] tracking-[0.18em] text-muted uppercase">
+      <div className="absolute right-8 bottom-7 flex items-baseline gap-2 font-mono text-[11px] tracking-[0.18em] text-muted uppercase">
         <span className="hidden items-center gap-1.5 sm:inline-flex">
           {listenerCount != null && (
             <span className="inline-flex items-center gap-1" aria-label={`${listenerCount} listening`}>
@@ -260,7 +260,7 @@ export default function DriftSkin(_props: SkinProps) {
               </AnimatePresence>
             </div>
           )}
-          <div className="mt-2 font-mono text-[9px] tracking-[0.32em] text-muted uppercase">
+          <div className="mt-2 font-mono text-[10px] tracking-[0.28em] text-accent-2 uppercase">
             {offline ? 'off air' : tunedIn ? 'now playing' : 'now playing — tap to listen'}
           </div>
           {!offline && (
@@ -281,7 +281,7 @@ export default function DriftSkin(_props: SkinProps) {
               <m.div
                 key={trackKey}
                 {...typeSwap}
-                className="max-w-full truncate font-mono text-[12px] tracking-[0.2em] text-muted uppercase"
+                className="max-w-full truncate font-mono text-[12px] tracking-[0.2em] text-ink/75 uppercase"
               >
                 {metaLine}
               </m.div>
@@ -289,11 +289,11 @@ export default function DriftSkin(_props: SkinProps) {
           )}
           {!offline && ratio != null && (
             <div className="mt-2 flex items-center gap-3">
-              <span className="font-mono text-[10px] text-muted">{fmtTime(elapsed)}</span>
-              <div className="relative h-0.5 w-[min(260px,50vw)] bg-soft-border">
+              <span className="font-mono text-[11px] text-ink/70">{fmtTime(elapsed)}</span>
+              <div className="relative h-[3px] w-[min(260px,50vw)] bg-[color-mix(in_oklab,var(--ink)_18%,transparent)]">
                 <div ref={fillRef} className="absolute top-0 bottom-0 left-0 bg-[var(--accent)]" />
               </div>
-              <span className="font-mono text-[10px] text-muted">{fmtTime(nowPlaying?.duration)}</span>
+              <span className="font-mono text-[11px] text-ink/70">{fmtTime(nowPlaying?.duration)}</span>
             </div>
           )}
           {voice && (
@@ -384,7 +384,7 @@ export default function DriftSkin(_props: SkinProps) {
         <button
           type="button"
           onClick={tuneInFromOverlay}
-          className="absolute inset-0 z-40 grid w-full cursor-pointer place-items-center border-0 bg-transparent"
+          className="absolute inset-0 z-40 grid w-full cursor-pointer place-items-center border-0 bg-[color-mix(in_srgb,var(--bg)_30%,transparent)]"
         >
           <span className={cn('font-display text-[clamp(28px,4vw,40px)] font-semibold text-ink lowercase', styles.breathe)}>
             listen

@@ -5,7 +5,8 @@
 
 
 export const NAME_MAX = 60;
-export const TOPIC_MAX = 1000;
+// Mirrors the controller's SHOW_TOPIC_MAX (settings/vocab.ts).
+export const TOPIC_MAX = 2000;
 export const SHOWS_MAX = 64;
 // Mirrors the controller's GUESTS_PER_SHOW cap (settings.ts).
 export const GUESTS_MAX = 3;
@@ -107,8 +108,12 @@ export const DECADES: { key: string; label: string; from: number; to: number }[]
 ];
 export const ENERGY_OPTIONS = ['low', 'medium', 'high'];
 export const ANY_SENTINEL = '__any__';
-// Mirrors the controller's SHOW_FILTER_VALUES_MAX cap (settings.ts).
-export const FILTER_VALUES_MAX = 6;
+// Mirrors the controller's SHOW_FILTER_VALUES_MAX cap
+// (controller/src/settings/vocab.ts — read the comment there before changing
+// this number). Drift is caught by controller/scripts/show-filter-cap.test.ts:
+// a UI cap ABOVE the controller's turns a save into a validator 400, one BELOW
+// silently hides entries the operator is allowed to add.
+export const FILTER_VALUES_MAX = 15;
 
 export function sameEra(a: EraWindow, b: { from: number | null; to: number | null } | EraWindow): boolean {
   const bf = 'from' in b ? b.from : b.fromYear;

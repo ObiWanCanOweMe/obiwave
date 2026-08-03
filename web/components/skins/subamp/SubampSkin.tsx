@@ -24,6 +24,8 @@ import {
 } from '@/components/player/PlayerCore';
 import { useTuneInGate } from '@/components/player/useTuneInGate';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useCoverColors } from '@/hooks/useCoverColors';
+import { useDynamicStyle } from '@/hooks/useDynamicStyle';
 import { useElapsed } from '@/hooks/useElapsed';
 import { useClock } from '@/lib/hooks';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
@@ -86,10 +88,10 @@ function Grip() {
 function Window({ title, children, className }: { title: ReactNode; children: ReactNode; className?: string }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className={cn('border border-soft-border bg-bg', className)}>
+    <div className={cn('bg-bg', styles.plate, className)}>
       <div
         onDoubleClick={() => setOpen(o => !o)}
-        className="flex shrink-0 items-center gap-2.5 border-b border-soft-border bg-[var(--field)] px-2.5 py-1 select-none"
+        className={cn('flex shrink-0 items-center gap-2.5 px-2.5 py-1 select-none', styles.titlebar)}
       >
         <Grip />
         <span className="truncate text-[9px] font-bold tracking-[0.24em] uppercase">{title}</span>
@@ -98,11 +100,11 @@ function Window({ title, children, className }: { title: ReactNode; children: Re
           type="button"
           onClick={() => setOpen(o => !o)}
           aria-label={open ? 'Roll window up' : 'Roll window down'}
-          className="v3-focus cursor-pointer border border-soft-border bg-transparent px-1 text-[9px] leading-tight text-muted hover:text-ink"
+          className="v3-focus cursor-pointer border border-[var(--line)] bg-transparent px-1 text-[9px] leading-tight text-muted hover:text-ink"
         >
           {open ? '▁' : '▆'}
         </button>
-        <span className="border border-soft-border px-1 text-[9px] leading-tight text-muted opacity-60" aria-hidden="true">✕</span>
+        <span className="border border-[var(--line)] px-1 text-[9px] leading-tight text-muted opacity-60" aria-hidden="true">✕</span>
       </div>
       {open && children}
     </div>
@@ -132,6 +134,14 @@ export default function SubampSkin(_props: SkinProps) {
 
   const adjustVolume = useVolumeNudge();
   const like = useTrackLike();
+
+  // Art tint on the desk — the same extraction classic uses, painted as a
+  // faint radial under the windows. Null art → transparent → the layer
+  // disappears, so off-air/no-art states degrade to the plain desk.
+  const coverSrc = nowPlaying?.subsonic_id ? client.coverUrl(nowPlaying.subsonic_id) : null;
+  const coverColors = useCoverColors(coverSrc);
+  const deskRef = useRef<HTMLDivElement | null>(null);
+  useDynamicStyle(deskRef, { '--sw-amp-tint': coverColors.vibrant });
 
   // Request line (station log window).
   const slip = useRequestSlip({
@@ -181,7 +191,12 @@ export default function SubampSkin(_props: SkinProps) {
   return (
     <div className={cn('absolute inset-0 overflow-hidden font-mono text-ink lg:overflow-y-auto', styles.shell)}>
       <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_70%_at_50%_42%,color-mix(in_oklab,var(--accent)_5%,transparent),transparent)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_70%_at_50%_42%,color-mix(in_oklab,var(--accent)_12%,transparent),transparent)]"
+        aria-hidden="true"
+      />
+      <div
+        ref={deskRef}
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_60%_at_50%_38%,color-mix(in_oklab,var(--sw-amp-tint,transparent)_18%,transparent),transparent)]"
         aria-hidden="true"
       />
 
@@ -207,10 +222,10 @@ export default function SubampSkin(_props: SkinProps) {
                   {nowPlaying?.duration && !showTuneIn && !offline ? `/ ${fmtTime(nowPlaying.duration)} · ` : ''}LIVE ONLY
                 </div>
               </div>
-              <div className="h-16 min-w-0 flex-1 border border-soft-border px-2 py-1.5">
+              <div className="h-16 min-w-0 flex-1 border border-[var(--line)] px-2 py-1.5">
                 <Analyzer audioRef={audioRef} active={playing} />
               </div>
-              <div className="relative hidden h-16 w-16 flex-none self-center border border-soft-border sm:block">
+              <div className="relative hidden h-16 w-16 flex-none self-center border border-[var(--line)] sm:block">
                 {nowPlaying?.subsonic_id && !offline ? (
                   <AnimatePresence mode="popLayout" initial={false}>
                     <m.img
@@ -234,7 +249,7 @@ export default function SubampSkin(_props: SkinProps) {
               key={marqueeText}
               animate={latch}
               transition={LATCH_TRANSITION}
-              className="overflow-hidden border border-soft-border bg-[var(--field)] px-0 py-1.5"
+              className="overflow-hidden border border-[var(--line)] bg-[var(--field)] px-0 py-1.5"
             >
               <div key={marqueeText} className={styles.marqueeTrack}>
                 <span className="px-2.5 text-[12px] tracking-[0.12em]">{marqueeText}</span>
@@ -244,7 +259,7 @@ export default function SubampSkin(_props: SkinProps) {
 
             <div className="flex flex-wrap items-center gap-2">
               {meta.facts.map(f => (
-                <span key={f} className="border border-soft-border px-1.5 py-0.5 text-[10px] tracking-[0.1em]">{f}</span>
+                <span key={f} className="border border-[var(--line)] px-1.5 py-0.5 text-[10px] tracking-[0.1em]">{f}</span>
               ))}
               {meta.moods.map(m => (
                 <span key={m} className="border border-[var(--accent)] px-1.5 py-0.5 text-[10px] tracking-[0.1em] text-[var(--accent)] uppercase">{m}</span>
@@ -412,7 +427,7 @@ export default function SubampSkin(_props: SkinProps) {
 
           {/* request line — pinned below the scrolling log */}
           <form
-            className="mx-4 mb-3 flex shrink-0 items-baseline gap-2.5 border-t border-soft-border pt-2"
+            className="mx-4 mb-3 flex shrink-0 items-baseline gap-2.5 border-t border-[var(--line)] pt-2"
             onSubmit={e => { e.preventDefault(); void slip.send(); }}
           >
               <span className="flex-none text-[10px] tracking-[0.14em] text-muted select-none">DEAR DJ —</span>
@@ -434,7 +449,7 @@ export default function SubampSkin(_props: SkinProps) {
                     value={slip.text}
                     onChange={e => slip.setText(e.target.value)}
                     placeholder="something with a 303 in it…"
-                    className="v3-focus min-w-0 flex-1 border-0 border-b border-soft-border bg-transparent pb-0.5 font-mono text-[11px] text-ink italic outline-none placeholder:text-muted"
+                    className="v3-focus min-w-0 flex-1 border-0 border-b border-[var(--line)] bg-transparent pb-0.5 font-mono text-[11px] text-ink italic outline-none placeholder:text-muted"
                   />
                   <button
                     type="submit"

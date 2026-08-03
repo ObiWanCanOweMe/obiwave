@@ -17,6 +17,7 @@ import * as analyzer from '../../../music/analyzer.js';
 import { filterPickerCandidates, durationSeconds } from '../../../music/recency.js';
 import { applyStrictLocks } from '../../../music/show-filter.js';
 import { shuffle } from '../../../util/shuffle.js';
+import { SEED_NOT_A_PICK_CLAUSE } from '../../../util/pick-seed.js';
 import { searchWeb, searchReady } from '../../../skills/web-search.js';
 import { identifyTrackFromText } from '../prompts/request.js';
 
@@ -228,14 +229,20 @@ export function buildPickerTools({
   // A strict lock is anything that can drop a candidate the source DID return:
   // the music filters, the playlist intersection, and the blocklist. Any of
   // them makes "matches exist but were filtered" a real cause the note should
-  // name, not just recency (steering the model to switch tools, not retry).
+  // name, not just recency (steering the model to its other results this round
+  // — there is no second discovery step to retry in; see COMMIT_AFTER_STEPS).
   const hasStrictLock = !!(genreLock?.length || eraLock?.length || moodLock?.length || energyLock?.length || playlistLock || excludedIds);
+  // The seed clause rides HERE as well as on the schema field (#1247): this is
+  // the message sitting in the model's context at the exact moment it fails, and
+  // "never invent a song id" is literally satisfied by echoing the on-air id
+  // from the event message — a real id, just not one a tool returned. Shared
+  // wording from util/pick-seed.ts.
   const emptyResult = (matched: number, hint: string) => ({
     tracks: [],
     note: matched > 0
       ? `${matched} matching track(s) exist but were all played recently, already shown this pick${hasStrictLock ? ', or outside this show\'s strict filters' : ''} — ${hint}`
       : hint,
-    rule: 'Never invent a song id — only ids returned by a tool are valid picks.',
+    rule: `Never invent a song id — only ids returned by a tool are valid picks. ${SEED_NOT_A_PICK_CLAUSE}`,
   });
 
   // Snapshot the embedding index counts once at tool-build time (synchronous
@@ -248,6 +255,56 @@ export function buildPickerTools({
   const hasTextEmbeddings  = (_stats.withEmbedding      ?? 0) > 0;
   const hasAudioEmbeddings = (_stats.withAudioEmbedding ?? 0) > 0;
   const hasEmbeddingProvider = embeddings.isAvailable();
+
+  // Seed-similarity with a cross-index rescue (#1247).
+  //
+  // A seed tool that comes back empty is far more expensive than a slow one: the
+  // agent harness allows exactly ONE discovery call (COMMIT_AFTER_STEPS = 1,
+  // llm/internal/strategy/agent.ts) and then pins activeTools to `done`, so an
+  // empty result leaves the model cornered with nothing to commit — and the only
+  // real, well-formed track id anywhere in its context is the on-air seed it was
+  // handed to pass in here. Both salvage stages in pickViaAgent then no-op on an
+  // empty `seen` (nearestId has no keys to match, repickFromSeen returns null on
+  // its first line), so the whole run is discarded to the pool picker.
+  //
+  // Both indexes answer the same question ("tracks like this seed"), and each is
+  // registered on whether it holds ANY vectors — never on whether it covers THIS
+  // seed. Coverage is routinely partial and uneven (CLAP analysis backfills over
+  // days; the text index needs the tagger to have reached the track), so the
+  // seed falling in the other index's gap is ordinary, not exceptional. When the
+  // index the model reached for doesn't cover the seed, answer from the other one
+  // and SAY so, rather than handing back a result that can only end the run.
+  //
+  // Deliberately gated on the primary index returning NOTHING AT ALL (matched
+  // === 0 — the seed has no vector there). A primary that DID match but whose
+  // hits were all filtered by recency keeps today's emptyResult: that note
+  // ("N exist but were all played recently") steers the model correctly and is a
+  // different situation from a dead index.
+  const seedSimilarity = (songId: string, primary: 'audio' | 'text') => {
+    const K = 60;
+    const audioFirst = primary === 'audio';
+    const lookup = (which: 'audio' | 'text') =>
+      which === 'audio' ? library.tracksLikeThisAudio(songId, K) : library.tracksLikeThis(songId, K);
+    const list = lookup(primary);
+    if (list.length) return { tracks: collect(list), matched: list.length, fellBack: false };
+    const other = audioFirst ? 'text' : 'audio';
+    const otherIndexed = audioFirst ? hasTextEmbeddings : hasAudioEmbeddings;
+    if (otherIndexed) {
+      const alt = lookup(other);
+      if (alt.length) {
+        const rescued = collect(alt);
+        // Only report the rescue if something SURVIVED the recency/lock
+        // filters. Reporting the raw alt count with empty tracks would render
+        // emptyResult's matched>0 message — "N exist but were all played
+        // recently" — about hits from an index the model never asked, glued to
+        // a "no embedding yet" hint about the one it did: two contradictory
+        // clauses. Falling through to matched 0 keeps the coherent hint, whose
+        // "try similarSongs / tracksByMood" steer is right here anyway.
+        if (rescued.length) return { tracks: rescued, matched: alt.length, fellBack: true };
+      }
+    }
+    return { tracks: [] as any[], matched: 0, fellBack: false };
+  };
 
   const tools = {
     searchLibrary: tool({
@@ -278,7 +335,7 @@ export function buildPickerTools({
               if (sem.length > 0) return sem;
             }
           }
-          return emptyResult(songs.length, 'this search matches literal titles/artists/genres first and the vibe index found nothing — try songsByGenre with a single genre word, or tracksByMood');
+          return emptyResult(songs.length, 'this search matches literal titles/artists/genres first and the vibe index found nothing — choose from your other tool results this round');
         }
         catch (err) { return { error: err.message }; }
       },
@@ -291,7 +348,7 @@ export function buildPickerTools({
         try {
           const list = await subsonic.getSimilarSongs(songId, { count: 20 });
           const out = collect(list);
-          return out.length ? out : emptyResult(list.length, 'no similarity data for that track — try tracksByMood, songsByGenre, or searchLibrary instead');
+          return out.length ? out : emptyResult(list.length, 'no similarity data for that track — choose from your other tool results this round');
         }
         catch (err) { return { error: err.message }; }
       },
@@ -304,14 +361,14 @@ export function buildPickerTools({
         try {
           const list = await subsonic.getTopSongs(artist, { count: 15 });
           const out = collect(list);
-          return out.length ? out : emptyResult(list.length, 'no top-songs data for that artist — try searchLibrary with the artist name');
+          return out.length ? out : emptyResult(list.length, 'no top-songs data for that artist — choose from your other tool results this round');
         }
         catch (err) { return { error: err.message }; }
       },
     }),
 
     recentByArtist: tool({
-      description: 'A named artist\'s NEWEST releases, latest first — songs from their most recent albums/singles. Use this (not topSongsByArtist) when the listener asks for an artist\'s "latest", "newest", "new", or "most recent" song: topSongsByArtist ranks by popularity, so it cannot answer recency. Returns [] when the artist isn\'t in the library. Note: "latest in the library" — bounded by what has been added, not the artist\'s globally-newest release.',
+      description: 'A named artist\'s NEWEST releases in the library, latest first. Use this (not topSongsByArtist, which ranks by popularity) for "latest"/"newest"/"most recent" asks. Returns [] when the artist isn\'t in the library. Note: "latest in the library" — bounded by what has been added, not the artist\'s globally-newest release, so never present a result on air as their newest song outright.',
       inputSchema: z.object({ artist: z.string() }),
       execute: async ({ artist }) => {
         // Keep the source list tight (newest ~6 tracks): collect() shuffles, so
@@ -320,7 +377,7 @@ export function buildPickerTools({
         try {
           const list = await subsonic.getRecentSongsByArtist(artist, { albums: 2, count: 6 });
           const out = collect(list);
-          return out.length ? out : emptyResult(list.length, 'that artist has no releases in the library — try topSongsByArtist or searchLibrary');
+          return out.length ? out : emptyResult(list.length, 'that artist has no releases in the library — choose from your other tool results this round');
         }
         catch (err) { return { error: err.message }; }
       },
@@ -335,7 +392,7 @@ export function buildPickerTools({
           if (!name) return { error: `no library genre matching "${genre}"` };
           const list = await subsonic.getSongsByGenre(name, { count: 50 });
           const out = collect(list);
-          return out.length ? out : emptyResult(list.length, `the "${name}" genre has nothing fresh right now — try another genre or tracksByMood`);
+          return out.length ? out : emptyResult(list.length, `the "${name}" genre has nothing fresh right now — choose from your other tool results this round`);
         }
         catch (err) { return { error: err.message }; }
       },
@@ -360,11 +417,11 @@ export function buildPickerTools({
           const rows = energy ? moodRows.filter((r: any) => r.energy === energy) : moodRows;
           const out = collect(rows);
           if (out.length) return out;
-          // Empty for three distinct reasons — tell the model which, because
-          // the fixes are different (observed: {mood:"night", energy:"low"} →
-          // bare [] → fabricated id).
+          // Empty for three distinct reasons — tell the model which, so a
+          // tag-coverage gap never reads as an empty library (observed:
+          // {mood:"night", energy:"low"} → bare [] → fabricated id).
           if (energy && moodRows.length > 0 && rows.length === 0) {
-            return emptyResult(0, `${moodRows.length} "${mood}" track(s) exist but none tagged ${energy} energy — call again with energy: null`);
+            return emptyResult(0, `${moodRows.length} "${mood}" track(s) exist but none tagged ${energy} energy — the energy filter is what emptied this; choose from your other tool results this round`);
           }
           if (moodRows.length === 0) {
             const covered = Object.keys(library.stats().byMood || {}).join(', ');
@@ -372,21 +429,21 @@ export function buildPickerTools({
               ? `no tracks tagged "${mood}" — moods with coverage in this library: ${covered}`
               : `no tracks tagged "${mood}"`);
           }
-          return emptyResult(rows.length, 'try another mood, drop the energy filter, or use songsByGenre');
+          return emptyResult(rows.length, 'choose from your other tool results this round');
         }
         catch (err) { return { error: err.message }; }
       },
     }),
 
     tracksByEnergy: tool({
-      description: 'Songs tagged with a specific energy level: low (slow / mellow / ambient), medium (mid-tempo / steady), or high (uptempo / driving). Use for time-of-day or activity-based picks the mood vocab alone can\'t express — e.g. high for a workout, low for a wind-down, medium for a commute.',
+      description: 'Songs tagged with an energy level: low (slow/mellow), medium (mid-tempo), high (uptempo/driving). For time-of-day or activity picks — high for a workout, low for a wind-down.',
       inputSchema: z.object({ energy: z.enum(['low', 'medium', 'high']) }),
       execute: async ({ energy }) => {
         try {
           await library.load();
           const list = library.songsByEnergy(energy);
           const out = collect(list);
-          return out.length ? out : emptyResult(list.length, `no ${energy}-energy tracks available — try tracksByMood or songsByGenre`);
+          return out.length ? out : emptyResult(list.length, `no ${energy}-energy tracks available — choose from your other tool results this round`);
         }
         catch (err) { return { error: err.message }; }
       },
@@ -402,7 +459,7 @@ export function buildPickerTools({
     // off entirely rather than offer an unusable option.
     ...(hasTextEmbeddings ? {
       tracksLikeThis: tool({
-        description: 'Tracks whose mood + lyrics + metadata embed closest to a seed track — the controller\'s own semantic similarity over the actual library. Requires the mood/lyric embedding index to be built. Pass the currently-playing song id (best) OR a track title — a title is resolved to the matching track.',
+        description: 'Tracks whose mood + lyrics + metadata embed closest to a seed track — the library\'s own semantic similarity. Pass the currently-playing song id (best) OR a track title.',
         // No k input: the agent reliably picked a small k (10–20), and the
         // nearest neighbours cluster tightly + many are recently-played, so that
         // left ~1 survivor after recency filtering. Pull a wide fixed KNN (60)
@@ -414,10 +471,18 @@ export function buildPickerTools({
         execute: async ({ songId }) => {
           try {
             await library.load();
-            const list = library.tracksLikeThis(songId, 60);
-            const out = collect(list);
-            return out.length ? out : emptyResult(list.length,
-              `that track has no embedding yet (${_stats.withEmbedding ?? 0} of ${_stats.total} tracks indexed so far) — try similarSongs or tracksByMood`);
+            const { tracks, matched, fellBack } = seedSimilarity(songId, 'text');
+            if (tracks.length) {
+              // Say which index answered. Without this the model reads audio
+              // neighbours as mood/lyric matches and reasons about them on the
+              // wrong axis — the same mislabelling #1246 reports in the other
+              // direction.
+              return fellBack
+                ? { tracks, note: 'that track has no mood/lyric embedding yet, so these come from the SOUND index instead — they match the seed\'s timbre and production, not its tags or words' }
+                : tracks;
+            }
+            return emptyResult(matched,
+              `that track has no embedding yet (${_stats.withEmbedding ?? 0} of ${_stats.total} tracks indexed so far) — choose from your other tool results this round`);
           }
           catch (err) { return { error: err.message }; }
         },
@@ -429,7 +494,7 @@ export function buildPickerTools({
     // gate it off so the model is never offered an option it cannot use.
     ...(hasAudioEmbeddings ? {
       tracksThatSoundLikeThis: tool({
-        description: 'Tracks whose ACTUAL SOUND (timbre, instrumentation, production, energy — a CLAP audio embedding of the waveform) is closest to a seed track. Blind to tags and metadata, so it shines for instrumentals, non-English tracks, or anything with thin Last.fm coverage. Requires the audio embedding index to be built. Pass the currently-playing song id (best) OR a track title.',
+        description: 'Tracks whose ACTUAL SOUND (timbre, instrumentation, production, energy) is closest to a seed track — blind to tags and metadata, so it shines for instrumentals and non-English tracks. Pass the currently-playing song id (best) OR a track title.',
         // No k input: the agent reliably picked a small k (10–20), and audio
         // neighbours cluster tightly + many are recently-played, so that left ~1
         // survivor after recency filtering. Pull a wide fixed KNN (60) internally
@@ -441,10 +506,14 @@ export function buildPickerTools({
         execute: async ({ songId }) => {
           try {
             await library.load();
-            const list = library.tracksLikeThisAudio(songId, 60);
-            const out = collect(list);
-            return out.length ? out : emptyResult(list.length,
-              `the seed track likely has no audio vector yet (audio analysis covers ${_stats.withAudioEmbedding ?? 0} of ${_stats.total} tracks so far) — try tracksLikeThis or similarSongs`);
+            const { tracks, matched, fellBack } = seedSimilarity(songId, 'audio');
+            if (tracks.length) {
+              return fellBack
+                ? { tracks, note: `the seed has no audio fingerprint yet (audio analysis covers ${_stats.withAudioEmbedding ?? 0} of ${_stats.total} tracks so far), so these come from the mood/lyric index instead — they match the seed's tags and words, not its sound` }
+                : tracks;
+            }
+            return emptyResult(matched,
+              `the seed track likely has no audio vector yet (audio analysis covers ${_stats.withAudioEmbedding ?? 0} of ${_stats.total} tracks so far) — choose from your other tool results this round`);
           }
           catch (err) { return { error: err.message }; }
         },
@@ -458,7 +527,7 @@ export function buildPickerTools({
     // uses searchLibrary (lexical) or similarSongs instead.
     ...(hasTextEmbeddings && hasEmbeddingProvider ? {
       searchByLyrics: tool({
-        description: 'Semantic lyric / theme search over the library. Embeds the query and returns tracks whose lyrics + metadata are closest to it. Use for thematic picks the mood vocab can\'t express — e.g. "songs about hometown", "tracks with hopeful lyrics", "feeling stuck". Requires the mood/lyric embedding index and a text-embedding provider.',
+        description: 'Semantic lyric / theme search over the library — for thematic picks the mood vocab can\'t express, e.g. "songs about hometown", "tracks with hopeful lyrics", "feeling stuck".',
         // No k input: the agent reliably picked a small k, and recency filtering
         // then thins it further. Pull a wide fixed KNN (60) internally —
         // collect() still caps to 8 fresh ones. Mirrors the seed-similarity tools.
@@ -473,7 +542,7 @@ export function buildPickerTools({
             if (!vec) return { error: 'embedding query failed' };
             const list = library.tracksByVector(vec, 60);
             const out = collect(list);
-            return out.length ? out : emptyResult(list.length, 'no thematic match — try tracksByMood or songsByGenre');
+            return out.length ? out : emptyResult(list.length, 'no thematic match in the lyric index — choose from your other tool results this round');
           }
           catch (err) { return { error: err.message }; }
         },
@@ -488,7 +557,7 @@ export function buildPickerTools({
     // probed / local venv) keeps the tool on; execute degrades cleanly.
     ...(hasAudioEmbeddings && analyzer.textEmbeddingAvailable() !== false ? {
       searchBySound: tool({
-        description: 'Describe a SOUND in words and get tracks whose actual audio matches — e.g. "dusty late-night jazz with brushed drums", "aggressive distorted synths", "warm acoustic fingerpicking". Embeds the description through the CLAP text tower into the same space as the audio vectors. Use for sonic/texture asks the mood vocab and metadata can\'t express; searchByLyrics matches THEMES/lyrics, this matches TIMBRE/instrumentation/energy.',
+        description: 'Describe a SOUND in words and get tracks whose actual audio matches — e.g. "dusty late-night jazz with brushed drums", "warm acoustic fingerpicking". For timbre/instrumentation/energy asks the mood vocab can\'t express; searchByLyrics matches THEMES instead.',
         // No k input, same rationale as the other similarity tools: wide fixed
         // KNN (60), collect() caps to 8 fresh ones.
         inputSchema: z.object({
@@ -506,7 +575,7 @@ export function buildPickerTools({
             }
             const list = library.tracksByAudioVector(vecs[0], 60);
             const out = collect(list);
-            return out.length ? out : emptyResult(list.length, 'nothing in the library sounds like that — try tracksByMood or songsByGenre');
+            return out.length ? out : emptyResult(list.length, 'nothing in the library sounds like that — choose from your other tool results this round');
           }
           catch (err) { return { error: err.message }; }
         },
@@ -565,7 +634,7 @@ export function buildPickerTools({
             // fabrication trigger; emptyResult carries the "never invent an id"
             // rule and explains WHY (recency vs strict filters).
             if (out.length) return out;
-            return emptyResult(playlistTracks.length, 'the pinned playlist tracks were all filtered out by recency or this show\'s strict music filters — choose from an earlier result, or a later tool call may surface a fresh in-playlist track');
+            return emptyResult(playlistTracks.length, 'the pinned playlist tracks were all filtered out by recency or this show\'s strict music filters — choose from your other tool results this round');
           }
           catch (err) { return { error: err.message }; }
         },
@@ -603,7 +672,7 @@ export function buildPickerTools({
     // web text only steers which library tracks surface, never the id space.
     ...(resolveReferences && searchReady() ? {
       identifyRequestedTrack: tool({
-        description: 'Use when a listener DESCRIBES a track instead of naming it, OR pastes SONG LYRICS. Examples: "the song from the new Dune movie", "the one all over TikTok", or a block of lyrics in any language. Looks the text up on the web, identifies the most likely song, then returns matching tracks FROM THIS LIBRARY (or none if we do not have it). USE THIS (not searchLibrary) when the request looks like lyrics — repeated phrases, verse structure, or text in a non-English language that is not an artist/title. If the listener names an artist or title outright, use searchLibrary instead — not this. searchLibrary matches titles and artists; it cannot identify a song from its lyrics. (Distinct from searchByLyrics, which finds songs ABOUT a theme — this identifies the one specific song whose exact words the listener pasted.) Returns { identified, candidates }: even when candidates is empty, `identified` tells you what the reference meant so you can pivot (e.g. topSongsByArtist) or tell the listener it is not in the library.',
+        description: 'Use when a listener DESCRIBES a track instead of naming it, OR pastes SONG LYRICS — e.g. "the song from the new Dune movie", "the one all over TikTok", or a block of lyrics in any language. Looks the text up on the web, identifies the song, and returns matching tracks FROM THIS LIBRARY. Use this (not searchLibrary) when the request looks like lyrics — repeated phrases, verse structure, non-English text that is not an artist/title; when they name an artist or title outright, use searchLibrary. (searchByLyrics finds songs ABOUT a theme — this identifies the one specific song.) Returns { identified, candidates }: even when candidates is empty, `identified` tells you what the reference meant, so you can own the miss in your ack or choose a fitting stand-in from your other results.',
         inputSchema: z.object({
           reference: z.string().min(3).describe("the listener's description of the track, verbatim"),
         }),

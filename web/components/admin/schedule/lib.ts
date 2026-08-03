@@ -52,10 +52,14 @@ export const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 // Same palette (and the same index-keyed assignment) as ShowsPanel, so a
 // show's colour matches between the definitions page and this one.
+// Each hex is blended 25% toward the theme paper at paint time so the twelve
+// distinguishable hues sit in-palette on every theme (cobalt blueprint,
+// orange flare) instead of clashing raw. Consumers only ever use these as
+// CSS color values (spines, swatches, block fills), so color-mix is safe.
 export const SHOW_COLORS = [
   '#c5302a', '#2f6f4f', '#3a5fa8', '#9a5b1f', '#6b4a8a', '#1f7a7a',
   '#a83a6b', '#4a6b1f', '#8a6a1f', '#3a3a8a', '#7a2f5a', '#2f7a3a',
-];
+].map((hex) => `color-mix(in oklab, ${hex} 75%, var(--bg))`);
 
 export function emptyWeek(): Schedule {
   const w: Schedule = {};

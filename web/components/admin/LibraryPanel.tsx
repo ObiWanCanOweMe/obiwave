@@ -48,9 +48,13 @@ import type {
 import type { PlaylistSummary } from './LibraryPlaylistsTab';
 import type {
   BlockEntry,
+  BlockRef,
   BlockType,
   BrowseResponse,
   Energy,
+  LikeIndex,
+  LikedResponse,
+  LikedSort,
   PlayEntry,
   SearchMode,
   Sort,
@@ -69,6 +73,10 @@ import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
+
+// Per-call cap on POST /library/blocklist/check, matching the controller's.
+// A Search tab paged deep with Load more can hold more rows than that.
+const CHECK_CHUNK = 500;
 
 export default function LibraryPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
@@ -145,6 +153,18 @@ export default function LibraryPanel() {
   const [recent, setRecent] = useState<Track[] | null>(null);
   const [recentLoading, setRecentLoading] = useState(false);
 
+  // likes state (#1253). `likeIndex` decorates rows on EVERY tab, so it's
+  // fetched once on mount rather than per listing — browse, search and
+  // sounds-like results come from three different sources and only this map
+  // covers all of them. `liked` is the Liked mode's own paged listing.
+  const [likeIndex, setLikeIndex] = useState<LikeIndex>({});
+  const [liking, setLiking] = useState<string | null>(null);
+  const [liked, setLiked] = useState<Track[] | null>(null);
+  const [likedTotal, setLikedTotal] = useState(0);
+  const [likedPage, setLikedPage] = useState(0);
+  const [likedSort, setLikedSort] = useState<LikedSort>('recent');
+  const [likedLoading, setLikedLoading] = useState(false);
+
   // playlist state — row selection (any track tab) + the Navidrome playlist
   // list shared by the add-to-playlist bar and the Playlists tab.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -163,6 +183,7 @@ export default function LibraryPanel() {
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blocking, setBlocking] = useState<string | null>(null);
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // -----------------------------------------------------------------------
   // URL state — tab, browse filters, and the search query live in the query
@@ -180,7 +201,9 @@ export default function LibraryPanel() {
     else if (t === 'recent') setTab('tracks');
     else if (t === 'playlists') { window.location.replace('/admin/playlists'); return; }
     else if (t && (TABS as string[]).includes(t)) setTab(t as Tab);
-    if (sp.get('view') === 'needs') { setTab('tracks'); setTrackMode('needs'); }
+    const view = sp.get('view');
+    if (view === 'needs') { setTab('tracks'); setTrackMode('needs'); }
+    else if (view === 'liked') { setTab('tracks'); setTrackMode('liked'); }
     const m = (sp.get('moods') || '').split(',').map(s => s.trim()).filter(Boolean);
     if (m.length) setMoods(m);
     const en = sp.get('energy');
@@ -207,7 +230,7 @@ export default function LibraryPanel() {
     if (!urlRestored) return;
     const sp = new URLSearchParams();
     if (tab !== 'tracks') sp.set('tab', tab);
-    if (tab === 'tracks' && trackMode === 'needs') sp.set('view', 'needs');
+    if (tab === 'tracks' && trackMode !== 'all') sp.set('view', trackMode);
     if (moods.length) sp.set('moods', moods.join(','));
     if (energy !== 'any') sp.set('energy', energy);
     if (vocal !== 'any') sp.set('vocal', vocal);
@@ -490,6 +513,125 @@ export default function LibraryPanel() {
   }, [tab, trackMode, ready, recent, loadRecent]);
 
   // -----------------------------------------------------------------------
+  // likes (#1253) — the shared index plus the Liked mode's own listing
+  // -----------------------------------------------------------------------
+  const loadLikeIndex = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/likes/index');
+      if (!r.ok) throw new Error(`likes failed (${r.status})`);
+      const j = await r.json() as { songs?: LikeIndex };
+      setLikeIndex(j.songs || {});
+    } catch {
+      // A missing index just means no hearts are lit — every other library
+      // view still works, so this must never surface as an error toast.
+      setLikeIndex({});
+    }
+  }, [adminFetch, ready]);
+
+  useEffect(() => { loadLikeIndex(); }, [loadLikeIndex]);
+
+  const loadLiked = useCallback(async () => {
+    if (!ready) return;
+    setLikedLoading(true);
+    try {
+      const sp = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(likedPage * PAGE_SIZE),
+        sort: likedSort,
+      });
+      const r = await adminFetch(`/library/liked?${sp}`);
+      if (!r.ok) throw new Error(`liked failed (${r.status})`);
+      const j = await r.json() as LikedResponse;
+      setLiked(j.rows || []);
+      setLikedTotal(j.total || 0);
+    } catch (err) {
+      notify.err(errorMessage(err));
+      setLiked([]);
+    } finally {
+      setLikedLoading(false);
+    }
+  }, [adminFetch, ready, likedPage, likedSort]);
+
+  useEffect(() => {
+    if (tab !== 'tracks' || trackMode !== 'liked' || !ready) return;
+    loadLiked();
+  }, [tab, trackMode, ready, loadLiked]);
+
+  // Sorting or leaving the mode resets paging, so a page-3 view can't survive
+  // into a shorter list and render empty.
+  useEffect(() => { setLikedPage(0); }, [likedSort]);
+
+  // Patch the index (and any inline row fields) without a refetch — the whole
+  // point of the optimistic toggle is that the heart responds immediately.
+  const patchLike = (id: string, next: { count: number; operator: boolean } | null) => {
+    setLikeIndex(prev => {
+      const out = { ...prev };
+      if (next && next.count > 0) out[id] = next; else delete out[id];
+      return out;
+    });
+    setLiked(prev => prev && prev.map(t => (
+      t.id === id ? { ...t, likeCount: next?.count ?? 0, likedByOperator: !!next?.operator } : t
+    )));
+  };
+
+  const toggleLike = async (track: Track, isLiked: boolean) => {
+    const before = likeIndex[track.id] ?? { count: track.likeCount ?? 0, operator: !!track.likedByOperator };
+    setLiking(track.id);
+    // Optimistic: the operator's own heart is +1/-1 on the total.
+    patchLike(track.id, {
+      count: Math.max(0, before.count + (isLiked ? -1 : 1)),
+      operator: !isLiked,
+    });
+    try {
+      const r = isLiked
+        ? await adminFetch(`/likes/song/${encodeURIComponent(track.id)}/operator`, { method: 'DELETE' })
+        : await adminFetch(`/likes/song/${encodeURIComponent(track.id)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: track.title, artist: track.artist, album: track.album,
+            genre: track.genre, year: track.year, duration: track.duration,
+          }),
+        });
+      const j = await r.json().catch(() => ({})) as { count?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `like failed (${r.status})`);
+      // Settle on the server's count, which also folds in any listener likes
+      // that landed between render and click.
+      patchLike(track.id, { count: j.count ?? 0, operator: !isLiked });
+      // In Liked mode a track nobody likes any more is no longer in the list.
+      if (isLiked && (j.count ?? 0) === 0) {
+        setLiked(prev => prev && prev.filter(t => t.id !== track.id));
+        setLikedTotal(n => Math.max(0, n - 1));
+      }
+    } catch (err) {
+      patchLike(track.id, before);
+      notify.err(errorMessage(err));
+    } finally {
+      setLiking(null);
+    }
+  };
+
+  // Wraps DELETE /likes/song/:id — drops LISTENER likes too, which the heart
+  // deliberately never does.
+  const clearLikes = async (track: Track) => {
+    setLiking(track.id);
+    try {
+      const r = await adminFetch(`/likes/song/${encodeURIComponent(track.id)}`, { method: 'DELETE' });
+      const j = await r.json().catch(() => ({})) as { removed?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `clear failed (${r.status})`);
+      patchLike(track.id, null);
+      setLiked(prev => prev && prev.filter(t => t.id !== track.id));
+      setLikedTotal(n => Math.max(0, n - 1));
+      notify.ok(`Cleared ${j.removed ?? 0} like${j.removed === 1 ? '' : 's'} on “${track.title || track.id}”`);
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setLiking(null);
+    }
+  };
+
+  // -----------------------------------------------------------------------
   // playlists — list fetch, row selection, add-to-playlist
   // -----------------------------------------------------------------------
   const loadPlaylists = useCallback(async () => {
@@ -610,6 +752,59 @@ export default function LibraryPanel() {
     if (tab === 'blocked' && ready) loadBlocked();
   }, [tab, ready, loadBlocked]);
 
+  // Re-mark the rows already on screen after a block or unblock. Refetching the
+  // tab instead would lose pagination and re-hit Navidrome on the Search tab,
+  // and matching client-side would mean a second copy of the normalised-name
+  // rules in music/blocklist.ts, free to drift. The server owns the answer;
+  // this just asks it about the rows we're holding.
+  const recheckBlocked = useCallback(async () => {
+    const pools: Track[][] = [browse?.rows || [], searchResults || [], untagged, recent || []];
+    const byId = new Map<string, Track>();
+    for (const pool of pools) for (const t of pool) if (t?.id && !byId.has(t.id)) byId.set(t.id, t);
+    if (byId.size === 0) return;
+    const rows = [...byId.values()].map(t => ({ id: t.id, artist: t.artist, album: t.album }));
+    try {
+      const map: Record<string, BlockRef | null> = {};
+      // Chunked to stay under the endpoint's per-call cap, which a Search tab
+      // paged deep with Load more can otherwise exceed.
+      for (let i = 0; i < rows.length; i += CHECK_CHUNK) {
+        const r = await adminFetch('/library/blocklist/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tracks: rows.slice(i, i + CHECK_CHUNK) }),
+        });
+        if (!r.ok) return;
+        const j = await r.json() as { blocked?: Record<string, BlockRef | null> };
+        Object.assign(map, j.blocked || {});
+      }
+      const patch = (t: Track): Track => (t.id in map ? { ...t, blockedBy: map[t.id] } : t);
+      setBrowse(prev => (prev ? { ...prev, rows: prev.rows.map(patch) } : prev));
+      setSearchResults(prev => (prev ? prev.map(patch) : prev));
+      setUntagged(prev => prev.map(patch));
+      setRecent(prev => (prev ? prev.map(patch) : prev));
+    } catch {
+      // Enrichment, not the operation — the block itself succeeded. Leave the
+      // last-known marks rather than blaming the operator with a toast.
+    }
+  }, [adminFetch, browse, searchResults, untagged, recent]);
+
+  // Lift one entry. Shared by the Blocked tab's Unblock button, the row-level
+  // unblock, and the Undo action on the block toast, so all three converge on
+  // the same request, the same list update and the same re-mark.
+  const removeEntry = useCallback(async (
+    e: { type: BlockType; id: string; name?: string | null },
+    { quiet = false }: { quiet?: boolean } = {},
+  ) => {
+    const r = await adminFetch(`/library/blocklist/${e.type}/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+    if (!r.ok && r.status !== 404) {
+      const j = await r.json().catch(() => ({})) as { error?: string };
+      throw new Error(j.error || `unblock failed (${r.status})`);
+    }
+    setBlockedEntries(prev => (prev ? prev.filter(x => !(x.type === e.type && x.id === e.id)) : prev));
+    if (!quiet) notify.ok(`“${e.name || e.id}” can play again`);
+    await recheckBlocked();
+  }, [adminFetch, recheckBlocked]);
+
   const blockTrack = async (track: Track, type: BlockType) => {
     setBlocking(track.id);
     try {
@@ -621,8 +816,22 @@ export default function LibraryPanel() {
       const j = await r.json().catch(() => ({})) as { entry?: BlockEntry; purged?: number; error?: string };
       if (!r.ok) throw new Error(j.error || `block failed (${r.status})`);
       const what = type === 'track' ? `“${track.title}”` : type === 'album' ? `album “${track.album}”` : track.artist;
-      notify.ok(`${what} will never air${j.purged ? ` · ${j.purged} dropped from queue` : ''} — manage in the Blocked tab`);
-      setBlockedEntries(prev => (prev && j.entry ? [...prev, j.entry] : prev));
+      const entry = j.entry;
+      // Undo rather than a confirm dialog: a modal would tax every correct
+      // block to guard the occasional misclick, and the row badge means a
+      // wrong scope is visible even after the toast goes.
+      const msg = `${what} will never air${j.purged ? ` · ${j.purged} dropped from queue` : ''}`;
+      if (entry) {
+        notify.undo(msg, () => {
+          removeEntry(entry, { quiet: true })
+            .then(() => notify.ok(`“${entry.name || entry.id}” can play again`))
+            .catch(err => notify.err(errorMessage(err)));
+        });
+      } else {
+        notify.ok(`${msg} — manage in the Blocked tab`);
+      }
+      setBlockedEntries(prev => (prev && entry ? [...prev, entry] : prev));
+      await recheckBlocked();
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
@@ -631,20 +840,52 @@ export default function LibraryPanel() {
   };
 
   const unblockEntry = async (e: BlockEntry) => {
-    const key = `${e.type}:${e.id}`;
-    setUnblocking(key);
+    setUnblocking(`${e.type}:${e.id}`);
     try {
-      const r = await adminFetch(`/library/blocklist/${e.type}/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
-      if (!r.ok && r.status !== 404) {
-        const j = await r.json().catch(() => ({})) as { error?: string };
-        throw new Error(j.error || `unblock failed (${r.status})`);
-      }
-      notify.ok(`“${e.name || e.id}” can play again`);
-      setBlockedEntries(prev => (prev ? prev.filter(x => !(x.type === e.type && x.id === e.id)) : prev));
+      await removeEntry(e);
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
       setUnblocking(null);
+    }
+  };
+
+  // Row-level unblock: lifts whichever entry matched this row, which may be an
+  // album or artist block made from a different row entirely.
+  const unblockRow = async (track: Track, ref: BlockRef) => {
+    setBlocking(track.id);
+    try {
+      await removeEntry(ref);
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setBlocking(null);
+    }
+  };
+
+  // Bulk unblock from the Blocked tab. One request, not N concurrent DELETEs:
+  // the controller rewrites blocklist.json once, so parallel single removes
+  // could persist a stale snapshot.
+  const bulkUnblock = async (batch: BlockEntry[]) => {
+    if (batch.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const r = await adminFetch('/library/blocklist', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: batch.map(e => ({ type: e.type, id: e.id })) }),
+      });
+      const j = await r.json().catch(() => ({})) as { removed?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `unblock failed (${r.status})`);
+      const removed = j.removed ?? 0;
+      const keys = new Set(batch.map(e => `${e.type}:${e.id}`));
+      setBlockedEntries(prev => (prev ? prev.filter(x => !keys.has(`${x.type}:${x.id}`)) : prev));
+      notify.ok(`${removed} entr${removed === 1 ? 'y' : 'ies'} can play again`);
+      await recheckBlocked();
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -1098,17 +1339,25 @@ export default function LibraryPanel() {
   // What the merged Tracks tab actually shows right now — drives the table's
   // rows, empty-state copy, and accent Tag button (TrackTable keys on this).
   const tableVariant: TableVariant =
-    tab === 'tracks' ? (trackMode === 'needs' ? 'untagged' : 'recent') : (tab as TableVariant);
+    tab === 'tracks'
+      ? (trackMode === 'needs' ? 'untagged' : trackMode === 'liked' ? 'liked' : 'recent')
+      : (tab as TableVariant);
   const tableRows: Track[] =
     tableVariant === 'browse' ? (browse?.rows || []) :
     tableVariant === 'search' ? (searchResults || []) :
     tableVariant === 'untagged' ? untagged :
+    tableVariant === 'liked' ? (liked || []) :
     (recent || []);
   const tableLoading =
     tableVariant === 'browse' ? browseLoading :
     tableVariant === 'search' ? searching :
     tableVariant === 'untagged' ? untaggedLoading :
+    tableVariant === 'liked' ? likedLoading :
     recentLoading;
+  // Distinct liked songs — free off the already-fetched index, so the mode
+  // label stays correct after an optimistic toggle with no extra request.
+  const likedCount = Object.keys(likeIndex).length;
+  const likedPages = Math.max(1, Math.ceil(likedTotal / PAGE_SIZE));
 
   return (
     // grid-cols-1: the implicit `auto` track is sized by its items' min-content,
@@ -1301,7 +1550,9 @@ export default function LibraryPanel() {
           entries={blockedEntries}
           loading={blockedLoading}
           unblocking={unblocking}
+          bulkBusy={bulkBusy}
           onUnblock={unblockEntry}
+          onBulkUnblock={bulkUnblock}
           onRefresh={loadBlocked}
         />
       )}
@@ -1325,6 +1576,7 @@ export default function LibraryPanel() {
         title={
           tableVariant === 'browse' ? 'Tracks' :
           tableVariant === 'search' ? 'Search results' :
+          tableVariant === 'liked' ? 'Liked' :
           tableVariant === 'untagged' ? 'Needs tags' :
           'Recently added'
         }
@@ -1332,6 +1584,7 @@ export default function LibraryPanel() {
           tableVariant === 'browse'
             ? (browse ? `${num(browse.total)} match${browse.total === 1 ? '' : 'es'}` : '')
             : tableVariant === 'search' ? (searchResults ? `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}` : 'enter a query')
+            : tableVariant === 'liked' ? `${num(likedTotal)} liked track${likedTotal === 1 ? '' : 's'}`
             : tableVariant === 'untagged' ? `${untagged.length} loaded${remaining != null ? ` · ${num(remaining)} need tags` : ''}`
             : (recent ? `${recent.length} tracks` : '')
         }
@@ -1343,6 +1596,7 @@ export default function LibraryPanel() {
                 options={[
                   { id: 'all', label: 'All' },
                   { id: 'needs', label: `Needs tags${remaining != null ? ` · ${num(remaining)}` : ''}` },
+                  { id: 'liked', label: `Liked${likedCount ? ` · ${num(likedCount)}` : ''}` },
                 ]}
                 onChange={(v: string) => setTrackMode(v as TrackMode)}
               />
@@ -1350,6 +1604,21 @@ export default function LibraryPanel() {
                 <Btn sm tone="accent" onClick={() => startTagger()} disabled={tagger?.running || taggerBusy}>
                   <Sparkles size={11} /> Tag all
                 </Btn>
+              ) : trackMode === 'liked' ? (
+                <>
+                  <Seg
+                    value={likedSort}
+                    options={[
+                      { id: 'recent', label: 'Recent' },
+                      { id: 'count', label: 'Most liked' },
+                      { id: 'artist', label: 'Artist' },
+                    ]}
+                    onChange={(v: string) => setLikedSort(v as LikedSort)}
+                  />
+                  <Btn sm onClick={loadLiked} disabled={likedLoading}>
+                    <RefreshCw size={11} /> {likedLoading ? 'Loading…' : 'Refresh'}
+                  </Btn>
+                </>
               ) : trackMode === 'all' ? (
                 <Btn sm onClick={loadRecent} disabled={recentLoading}>
                   <RefreshCw size={11} /> {recentLoading ? 'Loading…' : 'Refresh'}
@@ -1371,6 +1640,7 @@ export default function LibraryPanel() {
           onRetag={retagTrack}
           blocking={blocking}
           onBlock={blockTrack}
+          onUnblock={unblockRow}
           vocab={vocab}
           editingId={editingId}
           manualBusy={manualBusy}
@@ -1380,6 +1650,10 @@ export default function LibraryPanel() {
           selected={selected}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAllRows}
+          likeIndex={likeIndex}
+          liking={liking}
+          onToggleLike={toggleLike}
+          onClearLikes={clearLikes}
         />
       </Card>
       )}
@@ -1402,6 +1676,21 @@ export default function LibraryPanel() {
           <Btn onClick={loadMoreSearch} disabled={searchingMore}>
             {searchingMore ? 'Loading…' : 'Load more'}
           </Btn>
+        </div>
+      )}
+
+      {/* Offset paging like Browse, not the untagged tab's cursor — the likes
+          store is a bounded in-memory array with a cheap, stable total. */}
+      {tab === 'tracks' && trackMode === 'liked' && likedTotal > PAGE_SIZE && (
+        <div className="flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-muted">
+          <span className="mono-num">
+            {likedPage * PAGE_SIZE + 1}–{Math.min((likedPage + 1) * PAGE_SIZE, likedTotal)} of {num(likedTotal)}
+          </span>
+          <span className="flex items-center gap-2">
+            <Btn sm disabled={likedPage === 0} onClick={() => setLikedPage(p => Math.max(0, p - 1))}>‹ prev</Btn>
+            <span className="mono-num">page {likedPage + 1} of {likedPages}</span>
+            <Btn sm disabled={likedPage + 1 >= likedPages} onClick={() => setLikedPage(p => p + 1)}>next ›</Btn>
+          </span>
         </div>
       )}
 

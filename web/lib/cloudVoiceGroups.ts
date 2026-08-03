@@ -7,9 +7,9 @@
 //   openai-compatible — no curated list exists (ids are server-specific), so
 //     the picker is entirely discovered. With nothing discovered the caller
 //     shows the free-text input instead.
-//   elevenlabs — discovered first under "Your voices" (this is where an
-//     operator's *cloned* voices show up, which a hardcoded list can never
-//     know about), then any curated stock voice the account didn't return.
+//   elevenlabs / fish-audio — discovered first under "Your voices" (this is
+//     where an operator's *cloned* voices show up, which a hardcoded list can
+//     never know about), then any curated stock voice the account didn't return.
 //   openai — never discoverable; the curated list is complete by construction.
 import { CLOUD_VOICES } from './cloudVoices';
 import type { VoicePickerGroup } from '../components/admin/tts/VoicePicker';
@@ -24,7 +24,7 @@ const CUSTOM_ROW = { id: CUSTOM_VOICE_ID, label: 'Custom voice id…', previewVo
 // Providers with a voice-list endpoint. Mirrors listVoices() in
 // controller/src/llm/internal/speech/voice-catalog.ts.
 export function providerSupportsDiscovery(provider: string): boolean {
-  return provider === 'openai-compatible' || provider === 'elevenlabs';
+  return provider === 'openai-compatible' || provider === 'elevenlabs' || provider === 'fish-audio';
 }
 
 function curatedFor(provider: string) {
@@ -64,7 +64,7 @@ export function buildCloudVoiceGroups(provider: string, discovered: DiscoveredVo
     // for the voice, which beats our stock label.
     const rest = curated.filter(v => !discoveredIds.has(v.id));
     groups.push({
-      label: provider === 'elevenlabs' ? 'Your voices' : 'Discovered',
+      label: provider === 'elevenlabs' || provider === 'fish-audio' ? 'Your voices' : 'Discovered',
       voices: discovered.map(v => ({ id: v.id, label: v.label, hint: v.hint })),
     });
     if (rest.length) groups.push({ label: 'Presets', voices: rest.map(v => ({ id: v.id, label: v.label })) });

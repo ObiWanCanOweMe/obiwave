@@ -36,6 +36,7 @@ natural-language "sounds like ..." search and zero-shot mood scoring against
 the stored audio vectors possible.
 """
 
+import ctypes
 import importlib.util
 import json
 import os
@@ -187,30 +188,65 @@ def resolve_device():
     return _DEVICE
 
 
-# --- Idle GPU release (#1099 follow-up) -------------------------------------
-# On the cuda device the resident CLAP + Demucs models hold multiple GB of
-# VRAM even when no analysis is running, starving co-resident GPU work (a
-# local TTS/LLM on the same card OOMed hours after a pass finished). A daemon
-# thread drops the model singletons after ANALYZE_IDLE_UNLOAD_S seconds with
-# no requests (default 300; 0 disables). CUDA-only: on cpu the models stay
-# resident as always — system RAM is cheap and reload latency isn't worth it.
-# The next request lazy-reloads from the on-disk HF cache. NOTE: torch's CUDA
-# context (a few hundred MB) survives until the process exits — stopping the
-# analyzer container is the full release.
-IDLE_UNLOAD_S = float(os.environ.get("ANALYZE_IDLE_UNLOAD_S", "").strip() or "300")
+# --- Idle model release (#1099 follow-up; CPU arming per #1204) -------------
+# The resident CLAP + Demucs models hold multiple GB even when no analysis is
+# running. A daemon thread drops the model singletons after the idle window
+# passes with no HEAVY use (0 disables); the next request lazy-reloads from the
+# on-disk HF / torch-hub cache.
+#
+# On cuda that starves co-resident GPU work (a local TTS/LLM on the same card
+# OOMed hours after a pass finished). On cpu it looked free — "system RAM is
+# cheap" — but #1204 showed otherwise: one admin backfill (or a stem-cache
+# pass, or a single sound search) force-loads both models into the long-lived
+# worker regardless of this process's env defaults, nothing ever releases them,
+# and on a small host the kernel eventually parks ~1.5GB of cold weights in
+# swap indefinitely. So the thread arms on both devices now.
+#
+# The window is device-aware: cuda keeps 300s (VRAM contention is urgent and a
+# GPU reload is fast), cpu defaults longer because a cold CPU reload is seconds
+# of latency that lands on interactive callers (analyzer.embedTexts gives sound
+# search a 20s deadline), and swap pressure is not urgent the way a starved GPU
+# is. ANALYZE_IDLE_UNLOAD_S overrides both. NOTE: torch's imported modules (and
+# on cuda its context) survive until the process exits — a few hundred MB stays
+# resident either way; stopping the analyzer container is the full release.
+IDLE_UNLOAD_CUDA_S = 300.0
+IDLE_UNLOAD_CPU_S = 1800.0
+_IDLE_UNLOAD_ENV = os.environ.get("ANALYZE_IDLE_UNLOAD_S", "").strip()
 
-_last_used = time.time()
+# Heavy-model clock, deliberately NOT a general request clock. A lean
+# bpm/key/loudness request touches no model, so letting it refresh this would
+# pin CLAP + Demucs in memory forever on any station with steady analysis
+# traffic — the release would only ever fire on an idle box (#1204). Only an
+# actual embedder / detector use moves it. `_model_lock` (held across request
+# handling AND unload) is what keeps a release from racing a request in flight.
+_heavy_last_used = time.time()
 _model_lock = threading.Lock()  # held during request handling AND unload
 _idle_thread_started = False
 
 
-def _touch():
-    global _last_used
-    _last_used = time.time()
+def _touch_heavy():
+    """Mark CLAP/Demucs as just used — resets the idle-release countdown."""
+    global _heavy_last_used
+    _heavy_last_used = time.time()
 
 
-def _release_models():
-    """Drop the loaded model singletons and return their VRAM. Leaves the
+def _idle_unload_seconds():
+    """Resolve the idle window. Called only from the arming path, never at
+    import: the default depends on the device, and resolve_device() imports
+    torch — which the lean librosa-only venv doesn't have."""
+    if _IDLE_UNLOAD_ENV:
+        try:
+            return float(_IDLE_UNLOAD_ENV)
+        except ValueError:
+            log(
+                f"ANALYZE_IDLE_UNLOAD_S={_IDLE_UNLOAD_ENV!r} is not a number; "
+                "using the per-device default"
+            )
+    return IDLE_UNLOAD_CUDA_S if resolve_device() == "cuda" else IDLE_UNLOAD_CPU_S
+
+
+def _release_models(idle_s=None):
+    """Drop the loaded model singletons and hand their memory back. Leaves the
     *_failed flags alone, so the next request reloads instead of no-opping."""
     global _embedder, _vocal_detector
     import gc
@@ -225,40 +261,59 @@ def _release_models():
     if not freed:
         return
     gc.collect()
+    where = "system memory"
     try:
         import torch
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            where = "GPU memory"
     except Exception:  # noqa: BLE001 — freeing is best-effort
         pass
+    # Hand the freed tensor heap back to the OS. gc.collect() returns it to
+    # glibc's arenas, which keeps it as cold anonymous pages the kernel then
+    # swaps out — exactly the 1.5GB #1204 measured. malloc_trim releases the
+    # trimmable top of those arenas instead. No-op (and harmless) off glibc.
+    try:
+        ctypes.CDLL(None).malloc_trim(0)
+    except Exception:  # noqa: BLE001 — best-effort, absent on musl/macOS
+        pass
+    idle_note = f"idle {int(idle_s)}s — " if idle_s else ""
+    # The sidecar's /health residency tracking matches this line on the
+    # worker's stderr ("released" + "reloads on next use" — see
+    # docker/analyzer/server.py _pump_stderr); keep the wording in sync.
     log(
-        f"idle {int(IDLE_UNLOAD_S)}s — released {' + '.join(freed)} from GPU memory "
+        f"{idle_note}released {' + '.join(freed)} from {where} "
         "(reloads on next use)"
     )
 
 
-def _idle_release_loop():
+def _idle_release_loop(idle_s):
     while True:
         time.sleep(30)
-        if time.time() - _last_used < IDLE_UNLOAD_S:
+        if time.time() - _heavy_last_used < idle_s:
             continue
         with _model_lock:
             # Re-check under the lock: a request may have landed while we
             # waited to acquire it (a slow track holds the lock for minutes).
-            if time.time() - _last_used >= IDLE_UNLOAD_S:
-                _release_models()
+            if time.time() - _heavy_last_used >= idle_s:
+                _release_models(idle_s)
 
 
 def _maybe_start_idle_release():
-    """Arm the idle-release thread — once, and only where it matters (cuda
-    device, unload enabled). Called after a heavy model actually loads."""
+    """Arm the idle-release thread — once, on either device (unload enabled).
+    Called after a heavy model actually loads."""
     global _idle_thread_started
-    if _idle_thread_started or IDLE_UNLOAD_S <= 0 or resolve_device() != "cuda":
+    if _idle_thread_started:
+        return
+    idle_s = _idle_unload_seconds()
+    if idle_s <= 0:
         return
     _idle_thread_started = True
-    threading.Thread(target=_idle_release_loop, daemon=True, name="idle-release").start()
-    log(f"idle GPU release armed — models unload after {int(IDLE_UNLOAD_S)}s without requests")
+    threading.Thread(
+        target=_idle_release_loop, args=(idle_s,), daemon=True, name="idle-release"
+    ).start()
+    log(f"idle model release armed — models unload after {int(idle_s)}s without heavy use")
 
 
 def _pearson(a, b):
@@ -718,6 +773,9 @@ def get_embedder(force=False):
             log(f"CLAP load failed ({ex}); audio embeddings disabled for this run")
             _embed_failed = True
             return None
+    # On the fresh load AND on every cache hit: continued use keeps the model
+    # warm, so a long backfill never releases mid-pass (#1204).
+    _touch_heavy()
     return _embedder
 
 
@@ -922,6 +980,8 @@ def get_vocal_detector(force=False):
             log(f"Demucs load failed ({ex or type(ex).__name__}); vocal activity disabled for this run")
             _vocal_failed = True
             return None
+    # Fresh load AND cache hit — see get_embedder (#1204).
+    _touch_heavy()
     return _vocal_detector
 
 
@@ -1624,7 +1684,6 @@ def main():
             ):
                 emit({"id": rid, "ok": False, "error": "texts must be 1-64 non-empty strings"})
                 continue
-            _touch()
             with _model_lock:
                 embedder = get_embedder(force=True)
                 if embedder is None:
@@ -1634,7 +1693,9 @@ def main():
                     emit({"id": rid, "ok": True, "text_embeddings": embedder.embed_texts(texts)})
                 except Exception as e:  # noqa: BLE001 — one bad request never kills the worker
                     emit({"id": rid, "ok": False, "error": str(e)})
-            _touch()
+                # Re-stamp on the way out so the clock reads from the END of the
+                # work, not its start. get_embedder() stamped on entry.
+                _touch_heavy()
             continue
         url = req.get("url")
         path = req.get("path")
@@ -1644,17 +1705,23 @@ def main():
         try:
             import librosa
 
-            # _touch() on both edges + the lock keep the idle-release thread
-            # honest: the clock reads fresh after a long track, and an unload
-            # can never race a request that's mid-flight.
-            _touch()
+            # No unconditional clock stamp here: this is the general request
+            # path and a lean bpm/key pass must NOT keep CLAP/Demucs pinned
+            # (#1204). The heavy clock is stamped inside get_embedder /
+            # get_vocal_detector; _model_lock is what keeps an unload from
+            # racing this request.
+            heavy_before = _heavy_last_used
             with _model_lock:
                 result = analyze(
                     librosa, url=url, path=path,
                     embed=req.get("embed"), vocal=req.get("vocal"),
                     complete=req.get("complete"), stems_dir=req.get("stems_dir"),
                 )
-            _touch()
+                # If a getter stamped the clock, this request DID use a model —
+                # re-stamp so the countdown starts from the end of the work, not
+                # its start (Demucs on a long track holds the lock for minutes).
+                if _heavy_last_used != heavy_before:
+                    _touch_heavy()
             emit({"id": rid, "ok": True, **result})
         except Exception as e:
             emit({"id": rid, "ok": False, "error": str(e)})

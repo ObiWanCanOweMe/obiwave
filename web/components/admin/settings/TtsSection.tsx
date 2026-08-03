@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChangeEvent, ReactNode } from 'react';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { AsyncResultGeneration, runManagedKeyProbe } from '../../../lib/managedKeyProbe';
@@ -23,6 +24,7 @@ import { ModelCombobox } from '../llm/ModelCombobox';
 import { cn } from '../../../lib/cn';
 import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult, KEY_HINTS, ELEVENLABS_VS_DEFAULTS,
+  FISH_TTS_DEFAULTS,
   type SectionProps, type FormState, type FormUpdater, type CloudTtsCfg,
 } from './shared';
 
@@ -43,6 +45,19 @@ const KOKORO_LANG_LABELS: Record<string, string> = {
 // Sentinel for the empty-string "use the built-in voice" choice — Radix Select
 // rejects an empty-string SelectItem value.
 const CB_DEFAULT_VOICE = '__cb_default__';
+
+function envKeyForCloudProvider(provider: string): 'OPENAI_API_KEY' | 'ELEVENLABS_API_KEY' | 'FISH_API_KEY' {
+  if (provider === 'elevenlabs') return 'ELEVENLABS_API_KEY';
+  if (provider === 'fish-audio') return 'FISH_API_KEY';
+  return 'OPENAI_API_KEY';
+}
+
+function cloudProviderLabel(provider: string): string {
+  if (provider === 'openai') return 'OpenAI';
+  if (provider === 'elevenlabs') return 'ElevenLabs';
+  if (provider === 'fish-audio') return 'Fish Audio';
+  return 'OpenAI-compatible';
+}
 
 // Voice-level (dB) trim. Engine ids match the server contract exactly — note the
 // hyphen in `pocket-tts`. Range mirrors the server clamp (TTS_GAIN_CLAMP_DB=12).
@@ -243,6 +258,69 @@ function ElevenLabsVoiceSettingsField({
 // setup guide. Chatterbox and PocketTTS both live in the optional `tts-heavy`
 // sidecar, so the recommended path is identical; only the engine label and the
 // legacy build-arg differ.
+function FishAudioSettingsField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: FormUpdater;
+}) {
+  const c = form.tts.cloud;
+  const setCloud = (patch: Partial<CloudTtsCfg>) =>
+    setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, ...patch } } }));
+  const slider = (label: string, hint: ReactNode, key: 'temperature' | 'topP') => (
+    <div className="field mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <Label>{label}</Label>
+        <span className="font-mono text-[12px] text-ink tabular-nums">{c[key].toFixed(2)}</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={c[key]}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => setCloud({ [key]: Number(e.target.value) } as Partial<CloudTtsCfg>)}
+        aria-label={label}
+        className="mt-1.5 w-full max-w-[360px] accent-[var(--accent)]"
+      />
+      <div className="field-hint">{hint}</div>
+    </div>
+  );
+  return (
+    <>
+      {slider(
+        'Temperature',
+        <>Controls variation and expressiveness. Lower is more repeatable; higher is more adventurous. Fish default is <code>0.70</code>.</>,
+        'temperature',
+      )}
+      {slider(
+        'Top P',
+        <>Limits token sampling breadth. Lower values are more focused. Fish default is <code>0.70</code>.</>,
+        'topP',
+      )}
+      <div className="field mt-4">
+        <Label>Latency mode</Label>
+        <Seg
+          value={c.latency}
+          options={[
+            { id: 'low', label: 'Low' },
+            { id: 'normal', label: 'Normal' },
+            { id: 'balanced', label: 'Balanced' },
+          ]}
+          onChange={value => setCloud({ latency: value as CloudTtsCfg['latency'] })}
+        />
+        <div className="field-hint">
+          <code>normal</code> is the quality-first default. Use <code>low</code> for faster responses or <code>balanced</code> as the middle ground.
+        </div>
+      </div>
+      <div className="field-hint mt-4 max-w-[620px]">
+        Fish S2.1 understands sparse performance cues such as <code>[laughing]</code> or <code>[whispers]</code> when they appear in spoken text. Keep them intentional; SUB/WAVE’s existing prompt and cue pipeline is unchanged.
+      </div>
+    </>
+  );
+}
+
 function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'PocketTTS'; buildArg: string }) {
   return (
     <div
@@ -297,7 +375,7 @@ function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'P
 
 interface TtsSectionProps extends SectionProps {
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 }
 
 export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch, refresh }: TtsSectionProps) {
@@ -306,7 +384,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [cloudKeyTesting, setCloudKeyTesting] = useState(false);
   const cloudKeyGeneration = useRef(new AsyncResultGeneration());
   // Compat servers don't use the OPENAI/ELEVENLABS env keys — their optional
-  // bearer lives in settings.tts.cloud.apiKey, so it rides the settings payload.
+  // bearer lives in settings.tts.cloud.compatApiKey, so it rides the settings payload.
   const [compatKeyInput, setCompatKeyInput] = useState('');
 
   useEffect(() => {
@@ -319,13 +397,17 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const isCloudEngine = form.tts.defaultEngine === 'cloud';
   const isCompat = form.tts.cloud.provider === 'openai-compatible';
-  const ttsKeyVar = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
+  const isFish = form.tts.cloud.provider === 'fish-audio';
+  const ttsKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
   const ttsKeySet = !!data.env?.[ttsKeyVar];
 
-  const ttsDiscoveryEnabled = isCloudEngine && (
+  const cloudDiscoveryReady = isCloudEngine && (
     (isCompat && !!form.tts.cloud.baseUrl.trim())
     || (!isCompat && (ttsKeySet || !!cloudKeyInput.trim()))
   );
+  // Fish publishes model ids rather than an account model-list endpoint. Its
+  // two S2.1 suggestions are local UI data; the field still accepts custom ids.
+  const ttsDiscoveryEnabled = cloudDiscoveryReady && !isFish;
 
   const ttsDiscovery = useModelDiscovery({
     owner: 'tts',
@@ -343,7 +425,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     provider: form.tts.cloud.provider,
     baseUrl: form.tts.cloud.baseUrl,
     apiKey: isCompat ? compatKeyInput : cloudKeyInput,
-    enabled: ttsDiscoveryEnabled && providerSupportsDiscovery(form.tts.cloud.provider),
+    enabled: cloudDiscoveryReady && providerSupportsDiscovery(form.tts.cloud.provider),
     adminFetch,
   });
   const discoveredVoices = voiceDiscovery.voices;
@@ -368,7 +450,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     }
   };
   const testCloudKey = async () => {
-    const cloudKeyVar = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
+    const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
     const hasTyped = !!cloudKeyInput.trim();
     if (!hasTyped && !data.env?.[cloudKeyVar]) return;
     await runManagedKeyProbe({
@@ -396,10 +478,37 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   };
   const engines = data.tts?.engines || ['piper'];
   const available = data.tts?.available || {};
+  const providerCloudReady = isCompat
+    ? !!(form.tts.cloud.baseUrl.trim() && form.tts.cloud.model.trim())
+    : available.cloudByProvider?.[form.tts.cloud.provider];
+  const selectorAvailable = providerCloudReady === undefined
+    ? available
+    : { ...available, cloud: providerCloudReady };
   const ENGINE_LABELS: Record<string, string> = { piper: 'Piper', kokoro: 'Kokoro', chatterbox: 'Chatterbox', 'pocket-tts': 'PocketTTS', cloud: 'Cloud', remote: 'Remote' };
 
   const save = async () => {
-    await saveSettings({
+    // Managed-provider keys must land first. Fish voice discovery reads the
+    // saved process secret, and submitting an empty undiscovered Fish voice to
+    // settings would otherwise fail before the key became usable.
+    let managedKeySaved = false;
+    if (!isCompat && cloudKeyInput.trim()) {
+      const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
+      managedKeySaved = await saveKey(cloudKeyVar, cloudKeyInput);
+      if (!managedKeySaved) return;
+      setCloudKeyInput('');
+      if (isFish && !form.tts.cloud.voice.trim()) {
+        await refresh();
+        notify.info('Fish Audio key saved — TTS settings are not saved yet. Pick an account or custom voice, then press Save again.');
+        return;
+      }
+    }
+
+    const savedCloudProvider = String(data.values?.tts?.cloud?.provider || '');
+    const clearInlineCloudKey = isFish
+      || (!!savedCloudProvider && savedCloudProvider !== form.tts.cloud.provider);
+    // Redacted sentinel: 'set' means an inline key is on file in settings.json.
+    const hadStoredInlineKey = data.values?.tts?.cloud?.apiKey === 'set';
+    const settingsSaved = await saveSettings({
       tts: {
         enabled: form.tts.enabled,
         defaultEngine: form.tts.defaultEngine,
@@ -416,9 +525,20 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           voiceStyle: form.tts.cloud.voiceStyle,
           voiceSimilarityBoost: form.tts.cloud.voiceSimilarityBoost,
           voiceUseSpeakerBoost: form.tts.cloud.voiceUseSpeakerBoost,
-          // Only sent when the operator typed one — the controller keeps the
-          // stored key when the field is absent (or the 'set' sentinel).
+          temperature: form.tts.cloud.temperature,
+          topP: form.tts.cloud.topP,
+          latency: form.tts.cloud.latency,
+          // Authenticated compatibility servers use their own scoped slot.
+          // Keep writing the compatibility-owned legacy slot for older
+          // controllers while also populating the dedicated upstream slot.
           ...(isCompat && compatKeyInput.trim() ? { apiKey: compatKeyInput.trim() } : {}),
+          // Clear the legacy slot on Fish or any provider transition; managed
+          // credentials live in secrets.env.
+          ...(isCompat && compatKeyInput.trim()
+            ? { compatApiKey: compatKeyInput.trim() }
+            : clearInlineCloudKey
+              ? { apiKey: '' }
+              : {}),
         },
         remote: { url: form.tts.remote.url },
         // Per-engine voice-level trim. Always sent (server clamps + drops unknown
@@ -429,29 +549,29 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         speed: form.tts.speed,
       },
     });
-    // Save cloud API key if typed -- goes to secrets.env, not settings.json
-    if (!isCompat && cloudKeyInput.trim()) {
-      const cloudKeyVar = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
-      const ok = await saveKey(cloudKeyVar, cloudKeyInput);
-      if (ok) { notify.ok('API key saved'); setCloudKeyInput(''); refresh(); }
+    if (!settingsSaved && managedKeySaved) {
+      await refresh();
+      notify.info('API key saved; TTS settings were not changed.');
+    }
+    // Clearing the legacy inline key is deliberate (keys are provider-scoped
+    // now), but it must never be silent: the operator may have relied on it.
+    if (settingsSaved && clearInlineCloudKey && hadStoredInlineKey) {
+      notify.info(`The API key stored in settings for ${cloudProviderLabel(savedCloudProvider)} was cleared — keys are provider-scoped. Re-enter it in Settings (or set its env key) if you switch back.`);
     }
   };
 
   const selectCloudProvider = (f: FormState, provider: string): FormState => {
     const provVoices = CLOUD_VOICES[provider as keyof typeof CLOUD_VOICES] || [];
-    // Switching provider invalidates the old voice id. openai-compatible has no
-    // curated list, so blank it and let discovery (or the server's own default)
-    // fill in — carrying an OpenAI name like "alloy" over to a local server
-    // would just fail at synthesis time. Matches PersonaVoiceCard.
-    const voice = provider === 'openai-compatible'
-      ? ''
-      : (provVoices.some(pv => pv.id === f.tts.cloud.voice.trim())
-        ? f.tts.cloud.voice
-        : (provVoices[0]?.id || f.tts.cloud.voice));
+    // Switching provider invalidates the old provider-specific ids. Re-entering
+    // the already-selected cloud engine preserves manual/custom values.
+    const sameProvider = provider === f.tts.cloud.provider;
+    const voice = sameProvider
+      ? f.tts.cloud.voice
+      : (provVoices[0]?.id || '');
     const provModels = CLOUD_MODELS[provider as keyof typeof CLOUD_MODELS] || [];
-    const model = provModels.includes(f.tts.cloud.model.trim() as never)
+    const model = sameProvider && f.tts.cloud.model.trim()
       ? f.tts.cloud.model
-      : (provModels[0] || f.tts.cloud.model);
+      : (provModels[0] || '');
     return { ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, enabled: true, provider, voice, model } } };
   };
 
@@ -472,6 +592,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     voiceStyle?: number;
     voiceSimilarityBoost?: number;
     voiceUseSpeakerBoost?: boolean;
+    temperature?: number;
+    topP?: number;
+    latency?: 'low' | 'normal' | 'balanced';
   };
   const savedTts: {
     enabled?: boolean;
@@ -523,6 +646,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || form.tts.cloud.voiceStyle !== (savedCloud.voiceStyle ?? ELEVENLABS_VS_DEFAULTS.voiceStyle)
     || form.tts.cloud.voiceSimilarityBoost !== (savedCloud.voiceSimilarityBoost ?? ELEVENLABS_VS_DEFAULTS.voiceSimilarityBoost)
     || form.tts.cloud.voiceUseSpeakerBoost !== (savedCloud.voiceUseSpeakerBoost ?? ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost)
+    || form.tts.cloud.temperature !== (savedCloud.temperature ?? FISH_TTS_DEFAULTS.temperature)
+    || form.tts.cloud.topP !== (savedCloud.topP ?? FISH_TTS_DEFAULTS.topP)
+    || form.tts.cloud.latency !== (savedCloud.latency ?? FISH_TTS_DEFAULTS.latency)
     || (form.tts.remote.url || '').trim() !== savedRemoteUrl
     || gainDirty
     || speedDirty;
@@ -631,7 +757,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             <EngineSelector
               value={form.tts.defaultEngine}
               engineIds={engines}
-              available={available}
+              available={selectorAvailable}
               onChange={selectEngine}
             />
             <div className="field-hint">
@@ -774,20 +900,18 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                     </SelectContent>
                   </Select>
                   <div className="field-hint">
-                    ~5 seconds of clean speech is enough to clone a voice. Drop WAVs into{' '}
-                    <code>state/voices/</code>
-                    {' '}on the host (the legacy <code>state/chatterbox-voices/</code> is
-                    still read) and they’ll appear here on next reload. Personas can
+                    ~5 seconds of clean speech is enough to clone a voice.{' '}
+                    <Link href="/admin/imaging?tab=voices" className="underline">Import one on the Voices page</Link>
+                    {' '}— or drop WAVs into <code>state/voices/</code> on the host (the legacy{' '}
+                    <code>state/chatterbox-voices/</code> is still read). Personas can
                     override this on the Personas page.
                   </div>
                 </>
               ) : (
                 <div className="field-hint">
-                  No reference voices found in{' '}
-                  <code>state/voices/</code>{' '}
-                  (legacy <code>state/chatterbox-voices/</code> also empty). The engine will
-                  use its built-in default voice. Drop a 5-second WAV into that directory
-                  to enable cloning.
+                  No reference voices yet, so the engine uses its built-in default voice.{' '}
+                  <Link href="/admin/imaging?tab=voices" className="underline">Import a 5-second clip on the Voices page</Link>
+                  {' '}to enable cloning.
                 </div>
               )}
             </div>
@@ -830,10 +954,11 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                   </Select>
                   <div className="field-hint">
                     100M-param CPU-only model from kyutai-labs. Built-in voices speak
-                    English, French, German, Italian, Spanish and Portuguese. Drop a
-                    ~5-second WAV into <code>state/voices/</code> to clone a voice and it
-                    will appear under <em>Custom</em> on next reload. Personas can override
-                    this on the Personas page.
+                    English, French, German, Italian, Spanish and Portuguese. To clone a
+                    voice,{' '}
+                    <Link href="/admin/imaging?tab=voices" className="underline">import a ~5-second clip on the Voices page</Link>
+                    {' '}and it will appear under <em>Custom</em>. Personas can override this
+                    on the Personas page.
                   </div>
                 </>
               ) : (
@@ -853,7 +978,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               <Seg
                 accent
                 value={form.tts.cloud.provider}
-                options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'openai-compatible']).map(p => ({ id: p, label: p }))}
+                options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible']).map(p => ({ id: p, label: cloudProviderLabel(p) }))}
                 onChange={v => {
                   cloudKeyGeneration.current.invalidate();
                   setForm(f => selectCloudProvider(f, v));
@@ -884,7 +1009,23 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               <div className="field">
                 <Label>Model</Label>
                 <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
-                  {ttsDiscovery.models.length > 0 ? (
+                  {isFish ? (
+                    <>
+                      <Input
+                        list="fish-audio-models"
+                        value={form.tts.cloud.model}
+                        maxLength={100}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: e.target.value } } }))
+                        }
+                        placeholder="s2.1-pro"
+                        className="max-w-[360px]"
+                      />
+                      <datalist id="fish-audio-models">
+                        {CLOUD_MODELS['fish-audio'].map(model => <option key={model} value={model} />)}
+                      </datalist>
+                    </>
+                  ) : ttsDiscovery.models.length > 0 ? (
                     <ModelCombobox
                       models={ttsDiscovery.models}
                       value={form.tts.cloud.model}
@@ -913,8 +1054,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                   }
                 </div>
                 <div className="field-hint">
-                  {ttsDiscovery.models.length > 0
-                    ? `${ttsDiscovery.models.length} model${ttsDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
+                  {isFish
+                    ? <>Use <code>s2.1-pro</code> for the full model or <code>s2.1-pro-free</code> for the free tier. You can also type a custom Fish model id.</>
+                    : ttsDiscovery.models.length > 0
+                      ? `${ttsDiscovery.models.length} model${ttsDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
                     : !ttsDiscoveryEnabled
                       ? (isCompat
                           ? 'Set a base URL above to discover available models.'
@@ -969,7 +1112,19 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                       }}
                       groups={buildCloudVoiceGroups(provider, discoveredVoices)}
                       title="Default cloud voice"
-                      preview={{ engine: 'cloud', cloudProvider: provider, adminFetch }}
+                      preview={{
+                        engine: 'cloud',
+                        cloudProvider: provider,
+                        cloudModel: form.tts.cloud.model,
+                        fishSettings: provider === 'fish-audio'
+                          ? {
+                            temperature: form.tts.cloud.temperature,
+                            topP: form.tts.cloud.topP,
+                            latency: form.tts.cloud.latency,
+                          }
+                          : undefined,
+                        adminFetch,
+                      }}
                     />
                     {!isPreset && (
                       <Input
@@ -989,18 +1144,18 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                             on your {isCompat ? 'server' : 'account'}. Or choose <em>Custom voice id…</em> to
                             enter one that isn’t listed.</>
                         : <>Pick a default, or choose <em>Custom voice id…</em> for any other OpenAI voice
-                            name / ElevenLabs voice id.</>}
+                            name, ElevenLabs voice id, or Fish Audio reference id.</>}
                     </div>
                   </div>
                 );
               })()}
             </div>
             {!isCompat && (() => {
-              const cloudKeyVar = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
+              const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
               return (
                 <>
                   <div className="field">
-                    <Label>{form.tts.cloud.provider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI'} API key</Label>
+                    <Label>{cloudProviderLabel(form.tts.cloud.provider)} API key</Label>
                     <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                       <Input
                         type="password"
@@ -1059,8 +1214,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             {form.tts.cloud.provider === 'elevenlabs' && (
               <ElevenLabsVoiceSettingsField form={form} setForm={setForm} />
             )}
+            {isFish && <FishAudioSettingsField form={form} setForm={setForm} />}
             {!isCompat && (() => {
-              const kv = form.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
+              const kv = envKeyForCloudProvider(form.tts.cloud.provider);
               return <KeyStatus envVar={kv} present={!!data.env?.[kv]} />;
             })()}
           </div>
@@ -1120,6 +1276,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                   engine={e}
                   voice={previewVoice}
                   cloudProvider={form.tts.cloud.provider}
+                  cloudModel={e === 'cloud' ? form.tts.cloud.model : undefined}
                   speed={form.tts.speed?.[e] ?? 1}
                   lang={form.kokoroLang || undefined}
                   // Unsaved ElevenLabs sliders ride along so "Play sample"
@@ -1130,6 +1287,13 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                       voiceStyle: form.tts.cloud.voiceStyle,
                       voiceSimilarityBoost: form.tts.cloud.voiceSimilarityBoost,
                       voiceUseSpeakerBoost: form.tts.cloud.voiceUseSpeakerBoost,
+                    }
+                    : undefined}
+                  fishSettings={e === 'cloud' && isFish
+                    ? {
+                      temperature: form.tts.cloud.temperature,
+                      topP: form.tts.cloud.topP,
+                      latency: form.tts.cloud.latency,
                     }
                     : undefined}
                   adminFetch={adminFetch}

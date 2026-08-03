@@ -12,7 +12,7 @@ import * as library from './library.js';
 import * as db from './library-db.js';
 import * as analyzer from './analyzer.js';
 import { vocalActivityWanted, audioEmbeddingWanted } from './analyze.js';
-import { activeModelLabel } from './embeddings.js';
+import { activeModelLabel, EMBED_TEXT_VERSION } from './embeddings.js';
 import { dimensionStatus } from './coverage-status.js';
 
 const STALE_MS = 6 * 60 * 60 * 1000; // 6 h
@@ -127,6 +127,20 @@ export async function get() {
   const embeddingStale = !!(
     embeddedMeta && currentEmbeddingModel && embeddedMeta.model !== currentEmbeddingModel
   );
+  // Embed-text SHAPE, kept strictly separate from `embeddingStale` above
+  // (#1246). A model/dim change makes the stored vectors unusable and BLOCKS
+  // the next tag run; an older text format does not — those vectors still
+  // embed the same head line and still answer KNN. Folding the two together
+  // would fire that panel's red "tagging is blocked" banner over an advisory,
+  // so this gets its own soft signal and its own copy.
+  const embeddingFormatStale = !!(
+    embeddedMeta && (embeddedMeta.textFormat ?? 1) < EMBED_TEXT_VERSION
+  );
+  // How much of the index is label-text only — the measure of the #1246
+  // failure. Zero embedded tracks means no index at all, which the embedding*
+  // fields above already say; report null rather than a misleading 0.
+  const embeddedVectors = db.vectorCount();
+  const labelOnlyVectors = embeddedVectors > 0 ? db.labelOnlyVectorCount() : null;
   // Collapse the four nullable per-dimension signals into one status enum each
   // (see coverage-status.ts). Single source of truth for the "sounds-like" and
   // vocal rows so the panel — and the native app next — render off the enum
@@ -192,6 +206,14 @@ export async function get() {
     embeddedDim: embeddedMeta?.dim ?? null,
     currentEmbeddingModel,
     embeddingStale,
+    // Embed-text shape (#1246) — a SOFT advisory, never a block. `embeddedVectors`
+    // rides along so the panel can express labelOnly as a share without a second
+    // round trip, and so "0 of 0" can be told from "0 of 20,000".
+    embeddingFormatStale,
+    embeddedTextFormat: embeddedMeta?.textFormat ?? null,
+    currentTextFormat: EMBED_TEXT_VERSION,
+    embeddedVectors,
+    labelOnlyVectors,
     // Per-dimension coverage status enums (coverage-status.ts). The panel renders
     // the "sounds-like" and vocal rows from these + the optimistic enable toggle;
     // the raw *AnalysisAvailable / *EmbeddedPercent fields above are retained.

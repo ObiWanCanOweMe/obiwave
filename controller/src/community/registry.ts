@@ -26,6 +26,8 @@ import {
   SCRIPT_LENGTHS,
   SHOW_MOODS,
   SHOW_ENERGY,
+  SHOW_FILTER_VALUES_MAX,
+  SHOW_TOPIC_MAX,
   SOUL_MAX,
   type EraWindow,
 } from '../settings.js';
@@ -223,11 +225,13 @@ function normalizeShow(raw: any): CommunityShow | null {
   return {
     slug,
     name,
-    topic: str(raw?.topic).slice(0, 1000),
-    moods: strList(raw?.moods, 6).filter(m => (SHOW_MOODS as string[]).includes(m)),
-    genres: strList(raw?.genres, 6),
+    topic: str(raw?.topic).slice(0, SHOW_TOPIC_MAX),
+    // Same cap the show validator enforces — a hardcoded 6 here would silently
+    // truncate a catalog show that legitimately pins more (the cap is 15 now).
+    moods: strList(raw?.moods, SHOW_FILTER_VALUES_MAX).filter(m => (SHOW_MOODS as string[]).includes(m)),
+    genres: strList(raw?.genres, SHOW_FILTER_VALUES_MAX),
     eras: normalizeEras(raw?.eras),
-    energies: strList(raw?.energies, 6).filter(e => (SHOW_ENERGY as string[]).includes(e)),
+    energies: strList(raw?.energies, SHOW_FILTER_VALUES_MAX).filter(e => (SHOW_ENERGY as string[]).includes(e)),
     filtersStrict: raw?.filtersStrict === true,
     banter: raw?.banter === true,
     programme: raw?.programme === true,

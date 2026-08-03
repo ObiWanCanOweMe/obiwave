@@ -148,7 +148,14 @@ async function main() {
   const textMode = flags.reseed
     ? embeddings.preferredTextMode()
     : embeddings.resolveIndexTextMode(db.getEmbeddingMeta()?.textMode, db.vectorCount());
-  db.setEmbeddingMeta(embeddings.activeModelLabel(), embeddingDim, textMode);
+  // The embed-text SHAPE the index carries (#1246), resolved on the same
+  // "describe what's actually stored" rule as textMode above: a forward run
+  // leaves older vectors untouched, so the index stays at the older format
+  // until a reseed rebuilds it.
+  const textFormat = embeddings.resolveIndexTextFormat(
+    db.getEmbeddingMeta()?.textFormat, db.vectorCount(), flags.reseed,
+  );
+  db.setEmbeddingMeta(embeddings.activeModelLabel(), embeddingDim, textMode, textFormat);
   if (textMode === 'plain' && embeddings.preferredTextMode() === 'prefixed') {
     logEvent(
       'info',

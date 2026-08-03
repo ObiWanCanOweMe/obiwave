@@ -61,7 +61,7 @@ export function EnergyGraph({ tracks, arc, open, onToggle, onBarClick }: {
           )}
           {open && (
             <span className="flex items-center gap-1">
-              <svg width="14" height="8" aria-hidden><line x1="0" y1="4" x2="14" y2="4" stroke="var(--ink)" strokeWidth="1.5" strokeDasharray="3 2" /></svg>
+              <svg width="14" height="8" aria-hidden><line x1="0" y1="4" x2="14" y2="4" stroke="var(--accent-2)" strokeWidth="1.5" strokeDasharray="3 2" /></svg>
               target · {arcLabel}
             </span>
           )}
@@ -88,14 +88,15 @@ export function EnergyGraph({ tracks, arc, open, onToggle, onBarClick }: {
                 </rect>
               );
             })}
+            {/* Second ink: the target arc is a reference overlay, not data. */}
             <polyline
               points={targetPts}
               fill="none"
-              stroke="var(--ink)"
+              stroke="var(--accent-2)"
               strokeWidth="1.5"
               strokeDasharray="3 2"
               vectorEffect="non-scaling-stroke"
-              className="pointer-events-none opacity-60"
+              className="pointer-events-none opacity-80"
             />
           </svg>
         </div>

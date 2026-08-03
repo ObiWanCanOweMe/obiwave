@@ -316,12 +316,26 @@ export function songGenres(song: { genres?: unknown; genre?: unknown } | null | 
   return out;
 }
 
+let genresCache: { genres: any[]; at: number } | null = null;
+const GENRES_TTL_MS = 5 * 60 * 1000;
+
 // All genre tags present in the library, each with { value, songCount,
 // albumCount }. Used to resolve a listener's free-text genre ("hip hop") to
 // the exact tag the library actually carries ("Hip-Hop").
+//
+// Cached 5 min because resolveGenreName is called ONCE PER VALUE, and a show
+// may now pin up to SHOW_FILTER_VALUES_MAX (15) genres — uncached, building one
+// pool meant 15 identical getGenres round trips in each of the three pool
+// builders (music/picker.ts, broadcast/scheduler.ts, broadcast/dj-agent.ts).
+// The tag set only moves when Navidrome rescans, so the staleness window costs
+// nothing but a brand-new genre being unresolvable for up to 5 minutes.
+// Failures are NOT cached — they propagate, and callers decide (see below).
 export async function getGenres() {
+  if (genresCache && Date.now() - genresCache.at < GENRES_TTL_MS) return genresCache.genres;
   const r = await call('getGenres');
-  return r.genres?.genre || [];
+  const genres = r.genres?.genre || [];
+  genresCache = { genres, at: Date.now() };
+  return genres;
 }
 
 // Fuzzy-match free text ("hip hop", "turkish") against the library's real

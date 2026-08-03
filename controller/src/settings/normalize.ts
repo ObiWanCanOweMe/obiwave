@@ -21,6 +21,7 @@ import {
   POCKET_TTS_VOICE_RE,
   SCRIPT_LENGTHS,
   SHOWS_LIMIT,
+  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -43,9 +44,24 @@ import {
   mintId,
   normalizeDial,
 } from './vocab.js';
-import { coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
+import { DEFAULTS, coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
 
 // ── normalizers (lenient — used by load(), clamp/default rather than throw) ──
+
+// Archive retention with the keep-forever upgrade guard. A stored integer ≥ 0
+// always wins (0 is a legitimate explicit "keep forever"). When nothing is
+// stored, the fallback depends on whether the blob already archives: an
+// install that enabled archiving under the old keep-forever default must stay
+// at 0 — applying the bounded default there would delete existing tapes on
+// upgrade — while everyone else (fresh installs, archive off) gets
+// DEFAULTS.archive.retentionDays so newly enabled archiving is bounded from
+// day one instead of silently filling the disk.
+export function normalizeArchiveRetentionDays(archive: any): number {
+  const v = archive?.retentionDays;
+  if (Number.isInteger(v) && v >= 0) return v;
+  if (archive?.enabled === true) return 0;
+  return DEFAULTS.archive.retentionDays;
+}
 
 // Persona skill assignment. `null` (raw not an array) is the "all skills"
 // sentinel — used by legacy personas and the code default so behaviour is
@@ -258,7 +274,7 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     out.push({
       id,
       name,
-      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, 1000) : '',
+      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, SHOW_TOPIC_MAX) : '',
       personaId: item.personaId,
       guestPersonaIds,
       banter,

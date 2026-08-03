@@ -147,7 +147,9 @@ function buildGauge(
       y1: cy - rTickIn,
       x2: cx,
       y2: cy - rTickOut - 2,
-      stroke: 'var(--accent)',
+      // Second ink: the peak-hold marker is a reference, not the live value —
+      // it reads apart from the accent needle sweep on two-color themes.
+      stroke: 'var(--accent-2)',
       'stroke-width': 2.4,
     });
     svg.appendChild(peak);

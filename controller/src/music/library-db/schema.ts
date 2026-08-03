@@ -344,6 +344,19 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 17');
   }
 
+  if (userVersion < 18) {
+    // Which SHAPE of embed text the stored vectors were built from
+    // (music/embeddings.ts EMBED_TEXT_VERSION) — provenance alongside model,
+    // dim and text_mode, and for the same reason those exist: the KNN space is
+    // only coherent if every vector in it came from the same recipe. A format
+    // change doesn't invalidate the old vectors the way a model/dim change
+    // does (they still embed the same head line), so this is a soft advisory —
+    // library-coverage surfaces it and the operator chooses when to re-embed —
+    // never a hard block. NULL = written before format tracking, i.e. v1.
+    runDdl(d, `ALTER TABLE embedding_meta ADD COLUMN text_format INTEGER;`);
+    d.pragma('user_version = 18');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —

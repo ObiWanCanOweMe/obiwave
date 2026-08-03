@@ -369,7 +369,7 @@ export default function PlatterSkin(_props: SkinProps) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 overflow-hidden p-4 lg:gap-4 lg:overflow-hidden lg:p-6">
           {/* now playing */}
           <div className="flex items-start gap-5">
-            <div className="relative size-[84px] flex-none border border-ink bg-[var(--field)] sm:size-[104px]">
+            <div className="relative size-[104px] flex-none border border-ink bg-[var(--field)] sm:size-[128px]">
               {nowPlaying?.subsonic_id && !offline ? (
                 <AnimatePresence mode="popLayout" initial={false}>
                   <m.img
@@ -423,7 +423,7 @@ export default function PlatterSkin(_props: SkinProps) {
           {/* progress */}
           <div className="flex items-center gap-3">
             <span className="font-mono text-[13px] font-bold tabular-nums">{fmtTime(elapsed)}</span>
-            <div className="relative h-1 flex-1 bg-soft-border">
+            <div className="relative h-[6px] flex-1 bg-[color-mix(in_oklab,var(--ink)_14%,var(--bg))]">
               <div className={cn('absolute inset-y-0 left-0 bg-[var(--accent)]', ratio == null ? 'w-full opacity-40' : styles.progFill)} />
               {ratio != null && <div className={cn('absolute top-[-5px] h-[13px] w-[3px] bg-ink', styles.progHead)} />}
             </div>
@@ -435,8 +435,8 @@ export default function PlatterSkin(_props: SkinProps) {
           <div className="h-px bg-soft-border" />
 
           {/* up next */}
-          <div className="flex flex-col border border-ink bg-[var(--field)]">
-            <div className="border-b border-soft-border px-3.5 py-2.5 font-mono text-[9px] font-bold tracking-[0.22em] text-muted uppercase">
+          <div className="flex flex-col border border-ink bg-surface">
+            <div className="border-b border-[var(--line)] px-3.5 py-2.5 font-mono text-[9px] font-bold tracking-[0.22em] text-muted uppercase">
               next on the platter
             </div>
             {upNext.length > 0 ? (
@@ -449,7 +449,7 @@ export default function PlatterSkin(_props: SkinProps) {
                     i > 0 && 'hidden lg:flex',
                   )}
                 >
-                  <span className={cn('font-mono text-[9px] tracking-[0.18em]', i === 0 ? 'text-[var(--accent)]' : 'text-muted')}>
+                  <span className={cn('font-mono text-[9px] tracking-[0.18em]', i === 0 ? 'text-[var(--accent)]' : 'text-accent-2')}>
                     {i === 0 ? 'CUED' : 'THEN'}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -469,7 +469,7 @@ export default function PlatterSkin(_props: SkinProps) {
               narrow) layout so the deck fits one screen without scrolling; it
               returns in the two-column layout (lg) where the column scrolls. */}
           {voice && (
-            <div className="hidden flex-none flex-col gap-2 border border-ink bg-bg px-4 py-3.5 lg:flex">
+            <div className="hidden flex-none flex-col gap-2 border border-ink bg-surface px-4 py-3.5 lg:flex">
               <span className="flex items-center gap-2 font-mono text-[10px] font-bold tracking-[0.18em] text-[var(--accent)] uppercase">
                 <span className={cn('size-[7px] rounded-full bg-[var(--accent)]', styles.pulse, playing && styles.playing)} />
                 on air — {djName}
@@ -484,8 +484,8 @@ export default function PlatterSkin(_props: SkinProps) {
               takes the leftover height (flex-1) and ONLY its list scrolls (shadcn
               ScrollArea) — the surrounding column never scrolls (lg:overflow-hidden),
               so the deck, transport and request slip stay put. */}
-          <div className="hidden min-h-0 flex-1 flex-col border border-ink bg-[var(--field)] lg:flex">
-            <div className="flex-none border-b border-soft-border px-3.5 py-2.5 font-mono text-[9px] font-bold tracking-[0.22em] text-muted uppercase">
+          <div className="hidden min-h-0 flex-1 flex-col border border-ink bg-surface lg:flex">
+            <div className="flex-none border-b border-[var(--line)] px-3.5 py-2.5 font-mono text-[9px] font-bold tracking-[0.22em] text-muted uppercase">
               recently spun
             </div>
             <ScrollArea type="auto" className="min-h-0 flex-1">
@@ -495,7 +495,7 @@ export default function PlatterSkin(_props: SkinProps) {
                     key={`${entryTime(h) ?? ''}-${h.title ?? i}`}
                     className="flex items-center gap-3 border-b border-soft-border px-3.5 py-2 last:border-b-0"
                   >
-                    <span className="size-1.5 flex-none rounded-full border border-[var(--muted)]" aria-hidden="true" />
+                    <span className="size-1.5 flex-none rounded-full border border-[var(--accent-2)]" aria-hidden="true" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[14px] font-bold">{h.title ?? '—'}</div>
                       {h.artist && <div className="truncate text-[11px] text-muted">{h.artist}</div>}
@@ -515,7 +515,7 @@ export default function PlatterSkin(_props: SkinProps) {
 
           {/* request slip */}
           <form
-            className="border border-ink bg-[var(--field)] px-4 py-3"
+            className="border border-ink bg-surface px-4 py-3"
             onSubmit={e => { e.preventDefault(); void slip.send(); }}
           >
             {slip.ack ? (
