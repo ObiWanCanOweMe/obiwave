@@ -23,7 +23,7 @@ import {
   Activity, Archive, Save, AlertTriangle, Heart, Music2,
 } from 'lucide-react';
 import {
-  SectionHeader, ELEVENLABS_VS_DEFAULTS,
+  SectionHeader, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
   type LoudnessSource, type LlmForm, type LlmFallbackForm,
 } from './settings/shared';
@@ -120,7 +120,7 @@ export default function SettingsPanel() {
       archive: {
         enabled: v.archive?.enabled ?? false,
         bitrate: String(v.archive?.bitrate ?? 128),
-        retentionDays: String(v.archive?.retentionDays ?? 0),
+        retentionDays: String(v.archive?.retentionDays ?? 30),
       },
       stream: {
         opusEnabled: v.stream?.opusEnabled ?? true,
@@ -184,6 +184,13 @@ export default function SettingsPanel() {
           voiceStyle: typeof v.tts?.cloud?.voiceStyle === 'number' ? v.tts.cloud.voiceStyle : ELEVENLABS_VS_DEFAULTS.voiceStyle,
           voiceSimilarityBoost: typeof v.tts?.cloud?.voiceSimilarityBoost === 'number' ? v.tts.cloud.voiceSimilarityBoost : ELEVENLABS_VS_DEFAULTS.voiceSimilarityBoost,
           voiceUseSpeakerBoost: typeof v.tts?.cloud?.voiceUseSpeakerBoost === 'boolean' ? v.tts.cloud.voiceUseSpeakerBoost : ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost,
+          temperature: typeof v.tts?.cloud?.temperature === 'number' ? v.tts.cloud.temperature : FISH_TTS_DEFAULTS.temperature,
+          topP: typeof v.tts?.cloud?.topP === 'number' ? v.tts.cloud.topP : FISH_TTS_DEFAULTS.topP,
+          latency: v.tts?.cloud?.latency === 'low'
+            ? 'low'
+            : v.tts?.cloud?.latency === 'balanced'
+              ? 'balanced'
+              : FISH_TTS_DEFAULTS.latency,
         },
         remote: { url: v.tts?.remote?.url ?? '' },
         // Per-engine voice level (dB). Zero default for all 6 engine ids, then
@@ -352,8 +359,10 @@ export default function SettingsPanel() {
       if (j.requiresRestart) setPendingRestart(true);
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
+      return true;
     } catch (e) {
       notify.err(errorMessage(e));
+      return false;
     } finally { setBusy(false); }
   };
 
@@ -631,10 +640,12 @@ export default function SettingsPanel() {
                       </Btn>
                     </div>
                     <div className="field-hint">
-                      0 = keep forever (the default). With a window set, the hourly cleanup
-                      deletes whole days of recordings once they age past it. At 128 kbps the
-                      archive grows ~1.4 GB per day, so an unbounded archive eventually fills
-                      the disk. Applies live, no restart.
+                      Defaults to 30 days; 0 = keep forever. With a window set, the hourly
+                      cleanup deletes whole days of recordings once they age past it. At
+                      128 kbps the archive grows ~1.4 GB per day, so an unbounded archive
+                      eventually fills the disk. Stations that were already archiving before
+                      the 30-day default keep their keep-forever setting. Applies live, no
+                      restart.
                     </div>
                   </div>
                 </div>
@@ -821,9 +832,9 @@ export default function SettingsPanel() {
                     </div>
                     <div className="field-hint">
                       Keeps the drum/bass/vocal/other stems the heavy analyzer already separates
-                      during analysis (~25&nbsp;MB per track, oldest evicted past the budget).
-                      Needs the heavy analyzer image (Demucs). Turning it on now also backfills:
-                      the analysis pass targets tracks with no cached stems, so an
+                      during analysis (typically 13&ndash;25&nbsp;MB per track, oldest evicted past
+                      the budget). Needs the heavy analyzer image (Demucs). Turning it on now also
+                      backfills: the analysis pass targets tracks with no cached stems, so an
                       already-scanned library fills in over successive runs.
                     </div>
                   </div>
@@ -837,7 +848,7 @@ export default function SettingsPanel() {
                         type="number"
                         step={1}
                         min={1}
-                        max={500}
+                        max={1000}
                         value={form.transitions.stemCacheGb}
                         onChange={(e: ChangeEvent<HTMLInputElement>) =>
                           setForm(f =>
@@ -849,9 +860,15 @@ export default function SettingsPanel() {
                       />
                       <span className="text-sm opacity-70">
                         GB &middot; holds ~
-                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES (~25 MB/track) */}
+                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES ceiling;
+                            /13 the field-measured average (#1257) — the real figure lands
+                            between, and the doctor sizes off the cache's own average. */}
                         {Math.floor(
                           ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 25,
+                        ).toLocaleString('en-GB')}
+                        &ndash;
+                        {Math.floor(
+                          ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 13,
                         ).toLocaleString('en-GB')}{' '}
                         tracks
                       </span>

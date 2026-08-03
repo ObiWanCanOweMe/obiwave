@@ -57,3 +57,19 @@ export type JingleImportResult = {
   failures: JingleImportFailure[];
   aborted: boolean;
 };
+
+export interface VoiceEntry {
+  file: string;
+  size?: number;
+  durationSec?: number | null;
+  legacy?: boolean;
+  warning?: 'short' | 'long' | null;
+}
+
+export interface VoiceData {
+  voices?: VoiceEntry[];
+  dir?: string;
+  legacyDir?: string;
+  ffmpeg?: boolean;
+  advisory?: { minSec: number; maxSec: number };
+}

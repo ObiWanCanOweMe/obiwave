@@ -91,7 +91,7 @@
      halftone square sits in a matching panel instead of on bare metal. */
   background-color: color-mix(
     in oklab,
-    var(--u-tint) 22%,
+    var(--u-tint) 30%,
     color-mix(in oklab, var(--bg) 88%, var(--ink))
   );
   background-image: radial-gradient(
@@ -109,7 +109,7 @@
   background-size: cover;
   background-position: center;
   filter: blur(22px) saturate(1.2);
-  opacity: 0.5;
+  opacity: 0.6;
   -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
   -webkit-mask-size: 9px 9px;
   mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);

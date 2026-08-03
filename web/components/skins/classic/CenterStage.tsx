@@ -221,7 +221,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
             numCircles={6}
             className="-inset-[220px] -z-10"
           />
-          <div className="v3-cover-glitch relative h-full w-full overflow-hidden rounded-sm border border-muted">
+          <div className="v3-cover-glitch relative h-full w-full overflow-hidden rounded-sm border border-line">
             {/* Placeholder sits under the art, so a failed image load (the img
                 hides itself onError) falls back to it too. */}
             <span className="v3-cover-placeholder" aria-hidden="true" />
@@ -313,7 +313,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
                     <div className="v3-caption mt-[10px] text-muted">
                       {metaTokens.join(SEP)}
                       {moodPhrase && (
-                        <span className="text-vermilion">
+                        <span className="text-accent-2">
                           {metaTokens.length > 0 ? SEP : ''}↳ {moodPhrase}
                         </span>
                       )}
@@ -350,7 +350,7 @@ export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens
             exit={{ opacity: 0 }}
             className="v3-caption v3-focus mt-[10px] max-w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-muted"
           >
-            <span className="text-vermilion">↦ up next</span>
+            <span className="text-accent-2">↦ up next</span>
             {' · '}
             <span className="text-ink">{upNext.title}</span>
             {upNext.artist ? ` — ${upNext.artist}` : ''}

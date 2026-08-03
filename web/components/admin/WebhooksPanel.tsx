@@ -65,13 +65,14 @@ interface PayloadDoc {
 const PAYLOADS: PayloadDoc[] = [
   {
     event: 'track.play',
-    blurb: 'A track started. By default always delivered; enable “Gate track.play on listeners” below to skip when nobody is tuned in (fail-closed on unknown count). `source` is "auto" (the playlist), "ai" (picker agent) or "request"; `artist`/`album`/`requestedBy` may be null; `listeners` is included when the gate is on.',
+    blurb: 'A track started. By default always delivered; enable “Gate track.play on listeners” below to skip when nobody is tuned in (fail-closed on unknown count). `sourceTrackId` is the id in your music backend (Subsonic/Navidrome), so a relay can resolve the exact library item without matching on artist+title — null when the track came through without one. `source` is a different thing: how it got queued — "auto" (the playlist), "ai" (picker agent) or "request". `artist`/`album`/`requestedBy` may be null; `listeners` is included when the gate is on.',
     json: `{
   "event": "track.play",
   "t": "2026-06-02T19:04:12.880Z",
   "title": "Teardrop",
   "artist": "Massive Attack",
   "album": "Mezzanine",
+  "sourceTrackId": "4f2c1a9b8e3d",
   "source": "auto",
   "requestedBy": null,
   "listeners": 1

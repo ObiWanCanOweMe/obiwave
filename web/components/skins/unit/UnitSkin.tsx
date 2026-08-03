@@ -999,7 +999,7 @@ export default function UnitSkin(_props: SkinProps) {
               >
                 {stationName}
               </span>
-              <span className={cn(styles.doto, 'truncate text-[15px] text-[var(--accent)] uppercase')}>
+              <span className={cn(styles.doto, 'truncate text-[15px] text-[var(--accent-2,var(--accent))] uppercase')}>
                 {nowPlaying?.title ? `now: ${nowPlaying.title}` : 'one live broadcast'}
               </span>
               <Bars count={7} playing={false} mobile className="h-16 gap-1.5" />

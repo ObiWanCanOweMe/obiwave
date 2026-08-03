@@ -121,26 +121,9 @@ export interface RequestEntry {
   message?: string | null;
 }
 
-// Listener likes (#991), as returned by GET /likes — the heart button's
-// admin review surface.
-interface LikeTopEntry {
-  track?: { id?: string; title?: string; artist?: string } | null;
-  count?: number;
-  lastLikedAt?: string;
-}
-interface LikeRecentEntry {
-  songId?: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  likedAt?: string;
-  listener?: string;
-}
-export interface LikesPayload {
-  totals?: { total?: number; songs?: number };
-  top?: LikeTopEntry[];
-  recent?: LikeRecentEntry[];
-}
+// Listener likes moved off the dash in #1253 — they live on the Library
+// page's Liked mode now, where the operator can also heart and un-heart.
+// GET /likes still serves the totals + top + recent shape for API callers.
 
 // Hide the host portion of an IP so a glance at the screen doesn't expose a
 // listener's full address. IPv4 drops the last octet, IPv6 keeps the first two

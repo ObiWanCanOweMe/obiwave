@@ -9,8 +9,8 @@ import * as settings from '../../settings.js';
 import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
-import * as likes from '../likes.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
+import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 
 
 // Plain .nullable() fields, deliberately — GLM's malformed spellings of
@@ -21,7 +21,13 @@ import { autoVoiceAllowed } from '../voice-policy.js';
 // SDK renders Zod with io:'input'), which invites every provider to omit it —
 // see modelTolerant's comment in core/pure.ts.
 export const PICK_SCHEMA = z.object({
-  id: z.string().describe('the exact song id returned by one of the discovery tools — never invent or compose ids'),
+  // The seed clause is NOT decoration (#1247): "never invent or compose ids" is
+  // literally satisfied by the on-air track's id, which the pick event message
+  // hands over precisely so the model can seed the discovery tools with it — so
+  // a model cornered into committing with an empty tool result answered with it,
+  // the run was discarded, and the slot fell to the pool picker. One shared
+  // wording, in util/pick-seed.ts; don't inline a second copy here.
+  id: z.string().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE}`),
   reason: z.string().describe('internal scratchpad only — max 12 words, never shown to the listener; do not justify, just note what makes THIS pick a fresh step (new artist, a shift in energy/era/texture), not a vibe label you would recycle pick after pick (e.g. "new artist, lifts the energy", never a repeated "mellow reflective step")'),
   say: z.string().nullable().describe('when the latest event message says to write a spoken link, set this to one or two natural sentences in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). Never state a clock time unless the event message tells you when the link airs — then use exactly that time. When the event says stay silent, set this to null'),
   // Transition effects (only honoured when the system prompt offers them — persona djMode, see settings.effectsActive).
@@ -85,7 +91,12 @@ export function requestSchema() {
     // salvage and then the caller's stateless cascade — the branch that keeps
     // the "never refuse music" rule true.
     kind: z.enum(['track', 'chat']).describe('"track" when the listener wants music played — the normal case, and the right answer whenever you are unsure. "chat" ONLY when the message is not a music request at all (a question, a greeting, banter, a demand to change how the station behaves) — then "ack" answers them, "id" is null, and nothing is queued.'),
-    id: z.string().nullable().describe('the exact song id returned by one of the discovery tools — never invent or compose ids. Null ONLY when kind is "chat"'),
+    // Same seed clause as PICK_SCHEMA.id above — the request event line carries
+    // the on-air track's `[id: …]` too (routes/request.ts + runRequestViaAgent),
+    // and repickRequestFromSeen's comment records the same id-copied-from-the-
+    // session-turn signature. requestSystem() says it in prose; the field
+    // description is what travels to every provider as the output contract.
+    id: z.string().nullable().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE} Null ONLY when kind is "chat"`),
     ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
   });
   // `kind` is REQUIRED and non-nullable, so coerceModelPayload deliberately
@@ -179,28 +190,24 @@ export function pickSystem(showAt: Date | null = null, playlistResolved = true) 
         ? `\n\nThis show is anchored to a curated playlist: every track you pick MUST come from it. Call showPlaylistTracks first and choose from what it returns.`
         : `\n\nThis show leans on a curated playlist: call showPlaylistTracks first and strongly prefer those tracks; only step outside occasionally when the flow calls for it.`)
     : '';
-  // Listener favourites (#991): when the operator opts in, every pick sees the
-  // heart-button leaderboard as a standing preference signal — mirrored in the
-  // pool picker's listener-liked source so both paths lean the same way. A
-  // lean, never a lock: the criteria's VARIETY rule still applies on top.
-  const likeCfg = settings.get()?.likes;
-  const favs = likeCfg?.enabled && likeCfg?.influenceDj
-    ? likes.topLiked({ windowDays: likeCfg.windowDays, limit: likeCfg.maxTracks })
-    : [];
-  const favLine = favs.length
-    ? `\n\nListener favourites — the most-liked tracks on this station recently: ${favs
-        .map((f) => `"${f.track.title}" by ${f.track.artist || 'unknown'} (${f.count})`)
-        .join('; ')}. Treat these as a strong preference signal: favour them and similar artists, genres and moods when they fit the moment — but keep variety, never loop the same favourites back-to-back.`
-    : '';
+  // Listener favourites (#991) deliberately do NOT render here: the list
+  // changes as likes land, and re-rendering it inside the system prompt broke
+  // the byte-stable prefix automatic prompt caching keys on. They ride the
+  // pick event turn instead (dj-agent.ts runTrackEvent favClause).
+  // The "Finding candidates" paragraph below teaches the harness's real
+  // contract — ONE discovery step, parallel calls within it, then done-only
+  // (COMMIT_AFTER_STEPS in llm/internal/strategy/agent.ts). Keep them in
+  // agreement: sequential advice ("if a tool returns nothing, switch tools")
+  // is unfollowable there and corners the model at the forced commit.
   return `${settings.agentPersonaPreamble(persona)}
 
-You run the station as one continuous shift. The messages above are the live session.${djModeLine}${showLine}${musicLean}${playlistLean}${favLine}
+You run the station as one continuous shift. The messages above are the live session.${djModeLine}${showLine}${musicLean}${playlistLean}
 
 ${dj.PICKER_CRITERIA}
 
 Listener requests appear in the session above, quoted verbatim. ${LISTENER_TEXT_CLAUSE} That holds for every line you write, however far back in the session the request sits.${dj.REQUESTER_NAME_CLAUSE}
 
-Finding candidates: prefer tools backed by the local library — searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, randomSongs, and the audio/embedding similarity tools. similarSongs and topSongsByArtist use external data and often return little, so try them second. If a tool returns nothing, switch tools rather than retrying. If a tool returns only a few tracks (fewer than ~4), make one more discovery call with a different tool before choosing, so you pick from a real range rather than whatever the first call happened to surface.${dj.effectsGuidance()}${settings.agentLanguageReminder(persona, 'the "say" link')}`;
+Finding candidates: you get ONE discovery round before you commit — every tool call you make happens together in that round, and there is no second round to switch to. So when you want range, call two or three different tools at once in it rather than betting on a single call. Prefer tools backed by the local library — searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone. Then choose from whatever your round surfaced.${dj.effectsGuidance()}${settings.agentLanguageReminder(persona, 'the "say" link')}`;
 }
 
 // Exported for scripts/llm-bench, like requestSchema above.

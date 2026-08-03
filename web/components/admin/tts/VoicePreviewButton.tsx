@@ -31,6 +31,7 @@ interface VoicePreviewButtonProps {
   engine: string;
   voice: string;
   cloudProvider?: string;
+  cloudModel?: string;
   // Final rate multiplier to audition (server clamps to 0.5–2.0×).
   speed?: number;
   // Kokoro phonemizer language override (e.g. "en-gb", "ja").
@@ -48,6 +49,11 @@ interface VoicePreviewButtonProps {
     voiceSimilarityBoost: number;
     voiceUseSpeakerBoost: boolean;
   };
+  fishSettings?: {
+    temperature: number;
+    topP: number;
+    latency: 'low' | 'normal' | 'balanced';
+  };
   adminFetch: AdminAuth['adminFetch'];
   disabled?: boolean;
   className?: string;
@@ -56,7 +62,7 @@ interface VoicePreviewButtonProps {
 type PreviewState = 'idle' | 'loading' | 'error';
 
 export function VoicePreviewButton({
-  engine, voice, cloudProvider, speed, lang, language, voiceSettings, adminFetch, disabled, className,
+  engine, voice, cloudProvider, cloudModel, speed, lang, language, voiceSettings, fishSettings, adminFetch, disabled, className,
 }: VoicePreviewButtonProps) {
   const [state, setState] = useState<PreviewState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +90,7 @@ export function VoicePreviewButton({
     discardSample();
     setState('idle');
     setError(null);
-  }, [engine, voice, cloudProvider, speed, lang, language, discardSample]);
+  }, [engine, voice, cloudProvider, cloudModel, speed, lang, language, fishSettings?.temperature, fishSettings?.topP, fishSettings?.latency, discardSample]);
 
   const onClick = async () => {
     // Re-click while synthesizing cancels the request.
@@ -97,7 +103,7 @@ export function VoicePreviewButton({
     try {
       const res = await fetchPreviewSample(
         adminFetch,
-        { engine, voice, cloudProvider, speed, lang, language, voiceSettings },
+        { engine, voice, cloudProvider, cloudModel, speed, lang, language, voiceSettings, fishSettings },
         ac.signal,
       );
       if (ac.signal.aborted) return;

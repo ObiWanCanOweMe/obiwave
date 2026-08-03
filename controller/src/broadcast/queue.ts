@@ -21,6 +21,7 @@ import * as mix from '../music/mix.js';
 import * as library from '../music/library.js';
 import * as loudness from '../music/loudness.js';
 import * as blocklist from '../music/blocklist.js';
+import { artistRootKey, trackKey } from '../music/recency.js';
 import { speak, voiceGainDb } from '../audio/tts.js';
 import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
@@ -56,6 +57,7 @@ import {
   BACKFILL_DEDUP_MAX_GAP_MS,
   EMPTY_DJ_QUEUE_CLEAR_THRESHOLD,
   PICK_SHOW_LOOKAHEAD_SEC,
+  boundaryCarriesTrackVoice,
   formatAgo,
   knownDurationSec,
   pickLeadSec,
@@ -80,7 +82,7 @@ import {
 } from './queue/voice-io.js';
 
 // Re-exported so every existing `from './queue.js'` import keeps working.
-export { BACKFILL_DEDUP_MAX_GAP_MS, playAlreadyRecorded, shouldDropStaleLink } from './queue/pure.js';
+export { BACKFILL_DEDUP_MAX_GAP_MS, boundaryCarriesTrackVoice, playAlreadyRecorded, shouldDropStaleLink } from './queue/pure.js';
 export { registerSkillKinds } from './queue/kinds.js';
 export type { NowPlaying, QueueItem, Track } from './queue/types.js';
 
@@ -1295,13 +1297,34 @@ class Queue {
     this.log('scheduler', `Dropped pending ${p.kind} — ${reason}`);
   }
 
+  // Index in `upcoming` of the item Liquidsoap is now reporting, or -1. Matched
+  // by subsonic_id first (reliable), falling back to title+artist for older
+  // items that pre-date the id annotation. Extracted from onTrackStarted so
+  // airPendingVoice can look at the SAME incoming item that tick is about to
+  // consume, without a second matcher drifting out of step with this one.
+  matchUpcomingIndex(np: NowPlaying | null): number {
+    if (!np) return -1;
+    let idx = -1;
+    if (np.subsonic_id) {
+      idx = this.upcoming.findIndex(u => u.track.id && u.track.id === np.subsonic_id);
+    }
+    if (idx < 0) {
+      idx = this.upcoming.findIndex(
+        u => u.track.title === np.title && (u.track.artist || '') === (np.artist || '')
+      );
+    }
+    return idx;
+  }
+
   // Air the boundary-deferred segment, if one is pending. Called from
-  // onTrackStarted BEFORE airIntro so the ident lands ahead of the track's own
-  // link in the shared voice chain (ident → link reads as a natural hand-off).
+  // onTrackStarted the moment a new track starts — but NOT at every boundary:
+  // one that already carries the track's own link/intro belongs to that line
+  // alone (#1258), and the ident holds for the next one instead.
   // The prompt context bakes in the local clock, so a clip that waited past
-  // PENDING_VOICE_MAX_AGE_MS (a long mix, a stream stall) is dropped rather
-  // than aired with a stale time reference — the next cron fire replaces it.
-  async airPendingVoice() {
+  // PENDING_VOICE_MAX_AGE_MS (a long mix, a stream stall, a long run of
+  // link-carrying boundaries) is dropped rather than aired with a stale time
+  // reference — the next cron fire replaces it.
+  async airPendingVoice(np: NowPlaying | null = null) {
     // A mic-pass is already pending from an earlier roll (the hourly cron rolls
     // without airing) and will take this boundary. The same-tick case — where
     // the roll happens in onTrackStarted's auto-pick block, AFTER this runs —
@@ -1319,11 +1342,30 @@ class Queue {
     }
     const p = this._pendingVoice;
     if (!p) return;
-    this._pendingVoice = null;
+    // Staleness first: a clip too old to air is dropped outright rather than
+    // held again below, so a busy stretch can't keep re-deferring a dead ident.
     if (Date.now() - p.t > PENDING_VOICE_MAX_AGE_MS) {
-      this.log('scheduler', `Dropped pending ${p.kind} — waited too long for a track boundary`);
+      this.dropPendingVoice('waited too long for a track boundary');
       return;
     }
+    // This boundary already speaks. The track's own line is tied to THIS song
+    // and can't be moved; the ident is generic, so it keeps its slot and takes
+    // the next boundary — with a whole track of music in between, which is the
+    // entire point. Nothing is regenerated: the rendered WAV just waits.
+    // voiceAllowed/wavExists cover airIntro's own drop paths — a boundary whose
+    // line airIntro will drop (voice switch off, WAV reaped with no script) is
+    // silent, so holding for it would trade one voice for none. Both checks are
+    // synchronous, keeping the decision ahead of this function's first await.
+    const incoming = this.upcoming[this.matchUpcomingIndex(np)] || null;
+    if (boundaryCarriesTrackVoice(incoming, this.current?.track || null, {
+      voiceAllowed: autoVoiceAllowed(),
+      wavExists: path => existsSync(path),
+    })) {
+      this.log('scheduler',
+        `Holding ${p.kind} — the track's own ${KIND_LABEL[incoming!.introKind || 'dj-speak'] || 'intro'} takes this boundary`);
+      return;
+    }
+    this._pendingVoice = null;
     if (!existsSync(p.wavPath)) return;
     try {
       await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona));
@@ -1468,10 +1510,13 @@ class Queue {
     this.lastSeenKey = key;
 
     // A fresh track boundary — air any boundary-deferred segment (station
-    // ident) now. Fired BEFORE airIntro below so the shared voice chain plays
-    // ident → link in that order. Fire-and-forget for the same reason as
-    // airIntro: must not stall the watcher tick.
-    void this.airPendingVoice();
+    // ident) now, unless this boundary already carries the incoming track's own
+    // link/intro, in which case the ident holds for the next one (#1258). `np`
+    // is passed so it can see that item while it's still in `upcoming` — the
+    // consume+splice below happens after this, and the decision is made before
+    // this call's first await. Fire-and-forget for the same reason as airIntro:
+    // must not stall the watcher tick.
+    void this.airPendingVoice(np);
 
     // Snapshot the outgoing track BEFORE the history roll mutates `this.current`
     // — scrobble.onTrackEvent below needs the previous play + its start time
@@ -1502,16 +1547,9 @@ class Queue {
     }
 
     // Match upcoming by subsonic_id first (reliable), fall back to title+artist
-    // for older items that pre-date the id annotation.
-    let idx = -1;
-    if (np.subsonic_id) {
-      idx = this.upcoming.findIndex(u => u.track.id && u.track.id === np.subsonic_id);
-    }
-    if (idx < 0) {
-      idx = this.upcoming.findIndex(
-        u => u.track.title === np.title && (u.track.artist || '') === (np.artist || '')
-      );
-    }
+    // for older items that pre-date the id annotation. Same matcher
+    // airPendingVoice used above, so the two always agree on the incoming item.
+    const idx = this.matchUpcomingIndex(np);
 
     if (idx >= 0) {
       // Drop everything ahead of the match too: the queue is strictly FIFO, so
@@ -1604,10 +1642,19 @@ class Queue {
       showName: onAirShow?.name || null,
     });
 
+    // `sourceTrackId` is the id from the music backend (Subsonic/Navidrome, or
+    // whatever a router fronts), so a relay can resolve the exact library item
+    // instead of fuzzy-matching artist+title (#1250). Same id `recordPlay` and
+    // `scrobble` already take below. Null when the annotated URI carried no
+    // `subsonic_id` — untracked auto-playlist plays, mainly — so consumers must
+    // handle its absence. Deliberately NOT folded into `source`: that field
+    // means how the track got queued (auto | ai | request) and existing relays
+    // branch on it.
     const trackPayload = {
       title: this.current.track.title,
       artist: this.current.track.artist || null,
       album: this.current.track.album || null,
+      sourceTrackId: this.current.track.id || null,
       source: this.current.source,
       requestedBy: this.current.requestedBy || null,
     };
@@ -2079,6 +2126,49 @@ class Queue {
       : `"${title}" just spun — give it a rest for a bit.`;
   }
 
+  // The LEAD-artist keys (artistRootKey — collaborations collapse onto the
+  // artist fronting them) of the slots AROUND the next pick: everything queued
+  // and still unaired, the track on air, and the last `n` DISTINCT tracks
+  // played. Count-based and clock-independent, exactly like
+  // recentlyPlayedByCount above and for the same reason: this answers "who has
+  // been in the last few slots", which is a question about slots, not hours.
+  //
+  // The queued side matters because a pick is not always adjacent to the track
+  // on air — with pair-aware drains (and with any request stacked ahead) it
+  // lands behind one or more queued tracks, which have no play row yet. It
+  // takes the TAIL of the queue: a pick appends to the end, so its nearest
+  // neighbours are the last `n` queued, not the first.
+  //
+  // Sole consumer is the agent path's back-to-back artist guard (#1251), whose
+  // re-pick steps around these artists — hence root keys rather than the raw
+  // keys recentArtistsSince returns; that one feeds the pool picker's relaxable
+  // recentArtists filter, which matches raw against raw. Empty set when n <= 0.
+  neighbourArtistRoots(n = 0): Set<string> {
+    const out = new Set<string>();
+    if (!Number.isFinite(n) || n <= 0) return out;
+    const add = (artist: string | null | undefined) => {
+      const key = artistRootKey({ artist });
+      if (key) out.add(key);
+    };
+    for (const item of this.upcoming.slice(-n)) add(item?.track?.artist);
+    add(this.current?.track?.artist);
+    // Distinct TRACKS, not rows — the sidecar can hold two entries for one play
+    // (see recentlyPlayedByCount), and a duplicate row must not burn a slot.
+    const seenIds = new Set<string>();
+    const seenKeys = new Set<string>();
+    let distinct = 0;
+    for (const p of this._recentPlays) {
+      if (distinct >= n) break;
+      const k = trackKey(p);
+      if ((p.id && seenIds.has(p.id)) || (k && seenKeys.has(k))) continue;
+      distinct++;
+      if (p.id) seenIds.add(p.id);
+      if (k) seenKeys.add(k);
+      add(p.artist);
+    }
+    return out;
+  }
+
   // Lowercased artist names heard in the last `hours` hours — used by the
   // picker to block recently-heard artists. 2h is a sane default; raising it
   // narrows the pool fast on a small library.
@@ -2184,6 +2274,11 @@ class Queue {
       endedAt: i.endedAt,
       queuedAt: i.queuedAt,
       sent: i.sent,
+      // The track arrives via a pre-rendered stem blend rather than a plain
+      // crossfade (#1257 — the admin queue badges the seam type). Stamped at
+      // pair drain, cleared if the clip is pulled with a cancel, so it's
+      // definitive, not a prediction; absent = plain crossfade.
+      stemSeam: i.stemSeam || undefined,
     });
     return {
       current: this.current ? mapItem(this.current) : null,

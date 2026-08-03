@@ -12,6 +12,8 @@ export interface PreviewParams {
   engine: string;
   voice: string;
   cloudProvider?: string;
+  // Unsaved model id so the sample uses the exact provider/tier selection.
+  cloudModel?: string;
   // Final rate multiplier to audition (server clamps to 0.5–2.0×).
   speed?: number;
   // Kokoro phonemizer language override (e.g. "en-gb", "ja").
@@ -28,6 +30,12 @@ export interface PreviewParams {
     voiceStyle: number;
     voiceSimilarityBoost: number;
     voiceUseSpeakerBoost: boolean;
+  };
+  // Unsaved Fish Audio controls for an exact before-save audition.
+  fishSettings?: {
+    temperature: number;
+    topP: number;
+    latency: 'low' | 'normal' | 'balanced';
   };
 }
 

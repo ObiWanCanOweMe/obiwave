@@ -24,7 +24,7 @@
 .range::-webkit-slider-runnable-track {
   height: 4px;
   background: var(--field);
-  border: 1px solid var(--soft-border);
+  border: 1px solid var(--line);
 }
 .range::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -38,7 +38,7 @@
 .range::-moz-range-track {
   height: 4px;
   background: var(--field);
-  border: 1px solid var(--soft-border);
+  border: 1px solid var(--line);
 }
 .range::-moz-range-thumb {
   width: 10px;
@@ -50,19 +50,36 @@
 
 /* Recessed "screen" for the scrolling feed/log bodies — an inset panel a shade
    off the window fill so the lists read as a readout rather than text floating
-   on the window. A tint of ink over the base, so it adapts to every theme. */
+   on the window. A tint of ink over the base plus a pressed-in hard inset (the
+   recessed cousin of the print plate), so it adapts to every theme. */
 .screen {
-  background: color-mix(in oklab, var(--ink) 7%, var(--bg));
+  background: color-mix(in oklab, var(--ink) 12%, var(--bg));
+  box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
 }
 
-/* The desktop behind the windows — a shade lighter than the raw theme base so
-   the windows read as panels sitting on a surface, not a flat flood of --bg.
+/* Window frame — crisp line border (the old soft-border was an 8%-opacity
+   whisper); the ink-tinted desk underneath is what makes windows read raised. */
+.plate {
+  border: 1px solid var(--line);
+}
+
+/* 1998 active-titlebar gradient — accent tint into the field fill. Both ends
+   are background-grade tokens on every builtin theme, so ink text stays
+   legible (including flare's orange flood). */
+.titlebar {
+  background: linear-gradient(90deg, var(--accent-soft), var(--field) 70%);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The desktop behind the windows — a real ink-tinted desk under the windows
+   (the old #fff mix lightened on light themes but INVERTED on dark ones and
+   was near-invisible either way). Mixing toward --ink deepens on every theme.
    Also themes every scroll region inside the skin with the app's ink-tinted
    scrollbar (the same one the drawers/modals use) instead of the OS default:
    scrollbar-width/color inherit down to the stick-to-bottom scroller, and the
    webkit rules catch WebKit/Blink. */
 .shell {
-  background: color-mix(in oklab, var(--bg) 88%, #fff);
+  background: color-mix(in oklab, var(--bg) 88%, var(--ink));
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) transparent;
 }

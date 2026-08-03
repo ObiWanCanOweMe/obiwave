@@ -134,21 +134,21 @@ function DriftPreview() {
 // ── Subamp: compact modular rack — deck · booth · log stacked like it's 1998 ──
 function SubampPreview() {
   return (
-    <div className="flex h-full w-full flex-col gap-1 p-2.5">
-      <div className="flex items-center gap-1 border border-ink bg-ink px-1 py-[3px]">
+    <div className="flex h-full w-full flex-col gap-1 bg-[color-mix(in_oklab,var(--bg)_88%,var(--ink))] p-2.5">
+      <div className="flex items-center gap-1 border border-ink bg-linear-to-r from-accent-soft to-field px-1 py-[3px]">
         <span className="size-[3px] bg-vermilion" />
-        <span className="h-px flex-1 bg-bg/60" />
-        <span className="h-[3px] w-1 bg-bg/60" />
+        <span className="h-px flex-1 bg-ink/40" />
+        <span className="h-[3px] w-1 bg-ink/40" />
       </div>
-      <div className="flex items-center gap-1.5 border border-ink px-1.5 py-1">
+      <div className="flex items-center gap-1.5 border border-ink bg-bg px-1.5 py-1">
         <span className="font-mono text-[7px] leading-none font-bold text-vermilion">128</span>
         <EqRow className="h-4 flex-1 justify-end" />
       </div>
-      <div className="flex items-center gap-1.5 border border-ink px-1.5 py-1">
+      <div className="flex items-center gap-1.5 border border-ink bg-bg px-1.5 py-1">
         <span className="size-2 rounded-full border border-ink" />
         <span className="h-px flex-1 bg-muted" />
       </div>
-      <div className="grid flex-1 content-start gap-[3px] border border-ink p-1.5">
+      <div className="grid flex-1 content-start gap-[3px] border border-ink bg-bg p-1.5">
         <span className="h-[3px] w-full bg-ink" />
         <span className="h-[3px] w-4/5 bg-muted" />
         <span className="h-[3px] w-3/5 bg-muted" />
@@ -207,8 +207,8 @@ function PlatterPreview() {
         <span className="absolute top-1 right-1 h-[2px] w-[58%] origin-right -rotate-[28deg] bg-ink" />
         <span className="absolute top-1 right-1 size-[5px] translate-x-1/2 -translate-y-1/2 rounded-full border border-ink bg-field" />
       </div>
-      {/* metadata stub */}
-      <div className="grid flex-1 content-start gap-1.5">
+      {/* metadata stub — a raised surface plate, like the real column */}
+      <div className="grid flex-1 content-start gap-1.5 border border-ink bg-surface p-1.5">
         <span className="h-[3px] w-1/3 bg-vermilion" />
         <span className="h-[4px] w-4/5 bg-ink" />
         <span className="h-[3px] w-1/2 bg-muted" />

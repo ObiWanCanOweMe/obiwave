@@ -415,7 +415,7 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
                       className={cn(
                         'flex min-w-0 grow basis-full items-center gap-3 border p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 sm:basis-0',
                         isActive
-                          ? 'border-vermilion bg-[var(--ink-softer)]'
+                          ? 'border-vermilion bg-accent-soft'
                           : 'border-ink bg-bg hover:bg-[var(--overlay)]',
                       )}
                     >

@@ -18,7 +18,7 @@ export const ENGINES: EngineMeta[] = [
   { id: 'kokoro',     label: 'Kokoro',     blurb: 'More natural · multilingual' },
   { id: 'chatterbox', label: 'Chatterbox', blurb: 'Clone a voice from a clip' },
   { id: 'pocket-tts', label: 'PocketTTS',  blurb: 'Multilingual · CPU-only' },
-  { id: 'cloud',      label: 'Cloud',      blurb: 'OpenAI / ElevenLabs' },
+  { id: 'cloud',      label: 'Cloud',      blurb: 'OpenAI · ElevenLabs · Fish' },
   { id: 'remote',     label: 'Remote',     blurb: 'Self-hosted HTTP endpoint' },
 ];
 

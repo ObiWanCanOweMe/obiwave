@@ -12,7 +12,7 @@
     "--muted": "#3a2e1c",
     "--ink-faint": "#6a5636",
     "--accent": "#171308",
-    "--accent-2": "#ac542e",
+    "--accent-2": "#6b2f12",
     "--accent-soft": "color-mix(in oklab, #171308 12%, #ff7235)",
     "--line": "rgba(23, 19, 8, 0.32)",
     "--soft-border": "rgba(23, 19, 8, 0.14)",

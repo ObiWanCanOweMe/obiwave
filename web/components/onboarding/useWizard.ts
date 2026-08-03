@@ -31,7 +31,7 @@ export interface WizardData {
     // copy-paste docker commands. The CLI setup writes COMPOSE_PROFILES into
     // .env when its equivalent prompt is answered yes.
     heavyEnabled: boolean;
-    cloud: { enabled: boolean; provider: string; apiKey: string };
+    cloud: { enabled: boolean; provider: string; apiKey: string; model: string; voice: string };
   };
 
   dj: {
@@ -69,7 +69,7 @@ export const DEFAULT_DATA: WizardData = {
   tts: {
     defaultEngine: 'piper',
     heavyEnabled: false,
-    cloud: { enabled: false, provider: 'openai', apiKey: '' },
+    cloud: { enabled: false, provider: 'openai', apiKey: '', model: 's2.1-pro', voice: '' },
   },
   dj: {
     stationName: 'SUB/WAVE',
@@ -228,8 +228,21 @@ export function useWizard() {
     if (data.tts.cloud.enabled && data.tts.cloud.apiKey) {
       const k =
         data.tts.cloud.provider === 'openai' ? 'OPENAI_API_KEY' :
-        data.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : '';
+        data.tts.cloud.provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' :
+        data.tts.cloud.provider === 'fish-audio' ? 'FISH_API_KEY' : '';
       if (k) apiKeys[k] = data.tts.cloud.apiKey;
+    }
+    if (data.tts.cloud.enabled && data.tts.cloud.provider === 'fish-audio') {
+      // The key may already be supplied by the root environment; only validate
+      // fields that the wizard itself must persist for a usable Fish request.
+      const model = data.tts.cloud.model.trim();
+      const voice = data.tts.cloud.voice.trim();
+      if (!model || model.length > 100 || /[\r\n]/.test(model)) {
+        return { ok: false, error: 'Fish Audio model id must be 1–100 characters with no line breaks.' };
+      }
+      if (!voice || voice.length > 100 || /[\r\n]/.test(voice)) {
+        return { ok: false, error: 'Fish Audio voice reference id must be 1–100 characters with no line breaks.' };
+      }
     }
 
     const body = {
@@ -247,7 +260,13 @@ export function useWizard() {
         defaultEngine: data.tts.defaultEngine,
         heavyEnabled: data.tts.heavyEnabled,
         cloud: data.tts.cloud.enabled
-          ? { enabled: true, provider: data.tts.cloud.provider }
+          ? {
+            enabled: true,
+            provider: data.tts.cloud.provider,
+            ...(data.tts.cloud.provider === 'fish-audio'
+              ? { model: data.tts.cloud.model.trim(), voice: data.tts.cloud.voice.trim() }
+              : {}),
+          }
           : { enabled: false },
       },
       weather: { locationName: data.dj.locationName, lat: data.dj.lat, lng: data.dj.lng },

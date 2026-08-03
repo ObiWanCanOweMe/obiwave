@@ -59,6 +59,17 @@ export interface Coverage {
   embeddedDim?: number | null;
   currentEmbeddingModel?: string | null;
   embeddingStale?: boolean;
+  // Embed-text SHAPE, separate from the model staleness above (#1246). An older
+  // format still answers KNN and never blocks a tag run — it just means those
+  // vectors were built before tracks carried their measured sound, so this is
+  // an advisory, not the red "tagging is blocked" banner. `labelOnlyVectors` is
+  // how many embedded tracks have NO musical signal at all in their text, so
+  // their similarity is artist/album wording. Absent on old controllers.
+  embeddingFormatStale?: boolean;
+  embeddedTextFormat?: number | null;
+  currentTextFormat?: number | null;
+  embeddedVectors?: number | null;
+  labelOnlyVectors?: number | null;
   // Backend-computed per-dimension status enums (controller/src/music/coverage-
   // status.ts) — the single source of truth for the sounds-like + vocal rows,
   // replacing the frontend's incapable/starved/gap derivations. The panel pairs
@@ -447,6 +458,32 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const embeddingMissing =
     (tagged ?? 0) > 0 && p.libStats != null && p.libStats.withEmbedding === 0;
 
+  // Similarity-signal advisory (#1246): how much of the index can only be
+  // compared on its label text. Shown when it dominates — under half the index
+  // is ordinary (a partly-enriched library still gives the picker plenty to
+  // work with), and a warning that's always up is a warning nobody reads.
+  // Guarded on both fields being present so an older controller (which sends
+  // neither) shows nothing rather than "0 of 0".
+  const labelOnly = p.coverage?.labelOnlyVectors ?? null;
+  const embeddedVectors = p.coverage?.embeddedVectors ?? null;
+  const labelOnlyShare =
+    labelOnly != null && embeddedVectors != null && embeddedVectors > 0
+      ? labelOnly / embeddedVectors
+      : null;
+  const similarityThin = labelOnlyShare != null && labelOnlyShare >= 0.5;
+  // An older text format only matters once there IS something better to embed
+  // (some embedded tracks' rows now carry signal → share < 1). It must NOT be
+  // nested inside similarityThin: labelOnlyVectors counts the rows as they are
+  // TODAY, not what was in the text at embed time, so following the banner's
+  // own advice (run analysis) drops the share below the threshold and would
+  // hide the one remaining step — re-embedding — exactly when it becomes the
+  // step that matters. So it rides inside that banner while both are up, and
+  // stands alone once analysis has thickened the rows.
+  const embeddingFormatStale =
+    p.coverage?.embeddingFormatStale === true &&
+    labelOnlyShare != null &&
+    labelOnlyShare < 1;
+
   // Structured live-run progress from the tagger child — survives page
   // reloads and runs started elsewhere (no client-captured baseline). Null
   // for an old child binary → the running view falls back to generic copy.
@@ -633,6 +670,43 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                   'every vector'
                 )}{' '}
                 at the new model (not just tagged tracks) — your mood tags are kept.
+              </span>
+              <button
+                type="button"
+                className="font-bold text-vermilion underline-offset-2 hover:underline"
+                onClick={() => openModal('reembed')}
+              >
+                Re-embed now →
+              </button>
+            </div>
+          )}
+          {similarityThin && !embeddingStale && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-ink">
+              <span>
+                <b>Similarity is running on labels, not music.</b>{' '}
+                <b className="mono-num">{num(labelOnly ?? 0)}</b> of{' '}
+                <b className="mono-num">{num(embeddedVectors ?? 0)}</b> embedded tracks carry no
+                Last.fm tags, lyrics or measured sound, so all the index has to compare them on is
+                artist and album wording — which makes one artist&rsquo;s catalogue look like its
+                own closest match. Run acoustic analysis (no API key needed), and add a Last.fm API
+                key in Settings for crowd tags.
+                {embeddingFormatStale && (
+                  <>
+                    {' '}
+                    Your vectors also predate the sound descriptors, so re-embed once the analysis
+                    has run to fold them in.
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+          {embeddingFormatStale && !similarityThin && !embeddingStale && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-ink">
+              <span>
+                <b>Your similarity vectors predate the sound descriptors.</b> Tracks now carry
+                measured sound (tempo, key, audio moods) that wasn&rsquo;t part of the text when
+                they were embedded, so similarity is still comparing the old label-heavy text.
+                Re-embed to fold the measured sound in.
               </span>
               <button
                 type="button"

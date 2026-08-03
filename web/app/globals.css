@@ -2,9 +2,35 @@
 @import 'tw-animate-css';
 
 /* Manual dark-mode override — listener can pin light/dark via [data-theme=…];
-   absent or "system" lets the @media block in :root drive it. The variant
-   target mirrors shadcn/ui v4's recipe so `dark:` utilities still resolve. */
-@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+   absent or "system" lets the @media block in :root drive it.
+
+   BOTH routes have to be in the variant. shadcn's stock recipe matches the
+   attribute alone, which is safe there because next-themes always writes one.
+   This app deliberately does not: `clearMode()` and THEME_INIT_SCRIPT REMOVE
+   [data-theme] to hand the document back to prefers-color-scheme
+   (lib/theme.ts). So a listener on a dark OS who never touched the switcher
+   carries no attribute at all — the :root @media block below still flips their
+   tokens, but an attribute-only variant left every `dark:` utility unapplied,
+   i.e. light-tuned raw values (an opacity, a filter, a shiki palette) on a
+   fully dark page. The media arm mirrors that block's condition exactly,
+   :not([data-theme='light']) guard included, so a listener who pinned LIGHT on
+   a dark OS still reads light. Keep the two conditions in step.
+
+   Not the `.dark` class `syncDarkClass` maintains, tempting as it looks: no CSS
+   targets it, and its prefers-color-scheme listener only feeds React state — a
+   live OS flip repaints the tokens (pure CSS) while the class goes stale, which
+   is the same styles-disagree-with-palette bug in a new coat. Staying on the
+   media query keeps this variant true by construction. */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
 
 /* Theme tokens — bridge every :root CSS variable into Tailwind's v4 namespaces
    so utilities (bg-bg, text-ink, border-separator-soft, shadow-drawer, …)
@@ -101,7 +127,7 @@
 :root {
     --bg: #f3efe6;
     --ink: #161412;
-    --muted: #7a736a;
+    --muted: #6d675e; /* ~5.6:1 on the cream — raised from #7a736a (~4.6:1) */
     --accent: oklch(0.62 0.22 25); /* ~ #d94b2a hot vermilion */
     --soft-border: rgba(0, 0, 0, 0.08);
     --separator-soft: rgba(0, 0, 0, 0.08);
@@ -163,7 +189,9 @@
        :root, gets a real value, and so the admin sidebar's mobile drawer
        resolves its fills even though Radix portals it to <body>, outside
        .admin-root. --page-bg deepens slightly in dark mode below. */
-    --card-bg: var(--bg);
+    /* Cards lift off the page on the theme's raised surface tier (was
+       var(--bg), which left card and page in one plane). */
+    --card-bg: var(--surface);
     --page-bg: color-mix(in oklab, var(--bg) 90%, var(--ink));
     /* The sidebar rail sits ~6% darker than the admin page so it reads as its
        own chrome. "Darker" flips direction per theme: toward --ink in light
@@ -190,7 +218,7 @@
     :root:not([data-theme="light"]) {
         --bg: #100e0c;
         --ink: #ece6dc;
-        --muted: #8a8278;
+        --muted: #c1c0bd;
         --soft-border: rgba(255, 255, 255, 0.1);
         --separator-soft: rgba(255, 255, 255, 0.08);
         --separator-strong: rgba(255, 255, 255, 0.12);
@@ -620,6 +648,9 @@ body::after {
     inherits: false;
     initial-value: transparent;
 }
+/* TODO(skins-colocation): the .v3-cover-* block is classic-private and should
+   eventually move to a co-located classic module (shared v3- primitives stay
+   global). Deferred so the contrast retune below isn't tangled with a move. */
 .v3-cover-ambient {
     position: absolute;
     inset: 0;
@@ -627,13 +658,13 @@ body::after {
     opacity: 0;
     background-image:
         radial-gradient(
-            58% 52% at 20% 36%,
-            color-mix(in oklab, var(--cover-tint) 32%, transparent) 0,
+            64% 56% at 20% 36%,
+            color-mix(in oklab, var(--cover-tint) 45%, transparent) 0,
             transparent 70%
         ),
         radial-gradient(
             68% 58% at 82% 76%,
-            color-mix(in oklab, var(--cover-tint-2) 22%, transparent) 0,
+            color-mix(in oklab, var(--cover-tint-2) 32%, transparent) 0,
             transparent 72%
         );
     transition:
@@ -644,22 +675,44 @@ body::after {
 .v3-cover-ambient.v3-cover-ambient-on {
     opacity: 1;
 }
-/* Dark theme leans on the tint a touch more — the colour has to lift charcoal
-   rather than settle onto cream, so a soft-light blend keeps it luminous. The
-   explicit [data-theme="dark"] and the prefers-dark-without-explicit-light
-   media query mirror the same dark-mode pattern used by the paper-grain rules. */
+/* Dark theme leans on the tint harder — soft-light compresses on charcoal, so
+   the pools run richer mixes there to actually lift the base. The explicit
+   [data-theme="dark"] and the prefers-dark-without-explicit-light media query
+   mirror the same dark-mode pattern used by the paper-grain rules. */
 :root[data-theme="dark"] .v3-cover-ambient {
     mix-blend-mode: soft-light;
+    background-image:
+        radial-gradient(
+            64% 56% at 20% 36%,
+            color-mix(in oklab, var(--cover-tint) 58%, transparent) 0,
+            transparent 70%
+        ),
+        radial-gradient(
+            68% 58% at 82% 76%,
+            color-mix(in oklab, var(--cover-tint-2) 42%, transparent) 0,
+            transparent 72%
+        );
 }
 :root[data-theme="dark"] .v3-cover-ambient.v3-cover-ambient-on {
-    opacity: 0.85;
+    opacity: 1;
 }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .v3-cover-ambient {
         mix-blend-mode: soft-light;
+        background-image:
+            radial-gradient(
+                64% 56% at 20% 36%,
+                color-mix(in oklab, var(--cover-tint) 58%, transparent) 0,
+                transparent 70%
+            ),
+            radial-gradient(
+                68% 58% at 82% 76%,
+                color-mix(in oklab, var(--cover-tint-2) 42%, transparent) 0,
+                transparent 72%
+            );
     }
     :root:not([data-theme="light"]) .v3-cover-ambient.v3-cover-ambient-on {
-        opacity: 0.85;
+        opacity: 1;
     }
 }
 
@@ -1012,7 +1065,7 @@ html.lite .sw-ripple-circle {
    smaller than the masthead caption and a lighter, more faded ink. */
 .player-topbar .v3-caption.player-topbar-subline {
     font-size: 10px;
-    color: color-mix(in srgb, var(--muted) 65%, transparent);
+    color: color-mix(in srgb, var(--muted) 85%, transparent);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1023,18 +1076,21 @@ html.lite .sw-ripple-circle {
    Tailwind on the JSX; only the analog part internals (rings, ticks, needle,
    conic knob scale, grille dots) live here where utilities can't reach.
    ───────────────────────────────────────────────────────────────────────── */
+/* TODO(skins-colocation): the .fz-* block is classic-private and should
+   eventually move to a co-located classic module. Deferred so the contrast
+   retune isn't tangled with a move. */
 .fz-deck {
     /* Divider between compartments + the field/border tints, scoped here so
        the JSX can reference them as border-[color:var(--fz-line)] etc. */
-    --fz-line: color-mix(in oklab, var(--ink) 22%, transparent);
-    --fz-dim: color-mix(in oklab, var(--ink) 45%, transparent);
+    --fz-line: color-mix(in oklab, var(--ink) 30%, transparent);
+    --fz-dim: color-mix(in oklab, var(--ink) 55%, transparent);
     /* Top edge of the bar — lighter than full ink so it reads as a soft rule. */
-    --fz-edge: color-mix(in oklab, var(--ink) 55%, transparent);
+    --fz-edge: color-mix(in oklab, var(--ink) 70%, transparent);
     /* Console-shelf fill for the whole deck + the recessed well behind each
        dial, so the bar reads as a control shelf and the instruments sit in
        matching wells on every theme instead of floating on the page colour. */
-    --fz-panel: color-mix(in oklab, var(--ink) 6%, var(--bg));
-    --fz-well: color-mix(in oklab, var(--ink) 12%, var(--bg));
+    --fz-panel: color-mix(in oklab, var(--ink) 10%, var(--bg));
+    --fz-well: color-mix(in oklab, var(--ink) 18%, var(--bg));
 }
 
 /* Power — circular button, open ring + stem (the power glyph). The ring sits
@@ -1045,6 +1101,7 @@ html.lite .sw-ripple-circle {
     border-radius: 50%;
     border: 1px solid var(--ink);
     background: var(--fz-well);
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1053,7 +1110,7 @@ html.lite .sw-ripple-circle {
     transition: background 0.15s;
 }
 .fz-power:hover {
-    background: color-mix(in oklab, var(--ink) 17%, var(--bg));
+    background: color-mix(in oklab, var(--ink) 24%, var(--bg));
 }
 .fz-power:disabled {
     cursor: not-allowed;
@@ -1096,6 +1153,8 @@ html.lite .sw-ripple-circle {
     position: relative;
     border: 1px solid var(--fz-line);
     background: var(--fz-well);
+    /* Pressed-in cousin of the print plate — hard offset, no blur. */
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     overflow: hidden;
     flex: none;
     min-width: 0;
@@ -1129,7 +1188,7 @@ html.lite .sw-ripple-circle {
     padding: 0 4px;
     font-size: 9px;
     letter-spacing: 0.08em;
-    color: color-mix(in oklab, var(--ink) 40%, transparent);
+    color: color-mix(in oklab, var(--ink) 55%, transparent);
 }
 .fz-scale .fz-needle {
     position: absolute;
@@ -1223,6 +1282,7 @@ html.lite .sw-ripple-circle {
 .fz-grille {
     flex: none;
     border: 1px solid var(--fz-line);
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     background-color: transparent;
     background-image: radial-gradient(
         color-mix(in oklab, var(--ink) 18%, transparent) 1.3px,
@@ -1477,7 +1537,7 @@ html.lite .sw-ripple-circle {
     align-items: center;
     gap: 12px;
     color: var(--accent);
-    font-size: 9px;
+    font-size: 10px;
 }
 .bs-masthead-motto::before,
 .bs-masthead-motto::after {
@@ -1488,7 +1548,7 @@ html.lite .sw-ripple-circle {
 }
 .bs-masthead-motto-text {
     color: var(--muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.3em;
     text-transform: uppercase;
@@ -1499,14 +1559,14 @@ html.lite .sw-ripple-circle {
         gap: 8px;
     }
     .bs-masthead-motto-text {
-        font-size: 8px;
+        font-size: 9px;
         letter-spacing: 0.14em;
     }
 }
 
 /* Eyebrow — vermilion small-caps section label, sits above each section. */
 .bs-eyebrow {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     font-weight: 700;
@@ -1750,6 +1810,10 @@ html.lite .sw-ripple-circle {
     background: color-mix(in oklab, var(--bg) 80%, var(--ink));
     border-bottom: 1px solid var(--ink);
     overflow-x: auto;
+    /* overflow-x: auto alone forces overflow-y to auto as well, and the tabs'
+       -1px fuse margin leaves 1px of vertical overflow — enough for the strip
+       to scroll up/down under a trackpad. Sideways scroll only. */
+    overflow-y: hidden;
     scrollbar-width: none;
     position: relative;
     z-index: 2;
@@ -1900,7 +1964,9 @@ html.lite .sw-ripple-circle {
     display: flex;
     flex-direction: column;
     gap: clamp(24px, 4vw, 48px);
-    padding: clamp(6px, 1.2vw, 14px) 0 clamp(8px, 1.5vw, 16px);
+    /* Taller opening beat on top only — the bottom stays tight so the feature
+       strip sits evenly between its own top rule and the rule below it. */
+    padding: clamp(16px, 2.5vw, 32px) 0 clamp(8px, 1.5vw, 16px);
 }
 .bs-hero-head {
     display: flex;
@@ -1951,11 +2017,43 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
+/* ── Section tempo + band modifiers ─────────────────────────────────────────
+   The landing scroll alternates density instead of a uniform march: --tight
+   compresses a quiet section, --band breaks a section out to the full
+   viewport width, --tinted prints it on the accent tint. (An --inverted
+   paper-on-ink variant was tried and cut — the broadsheet stays paper.) */
+.bs-section--tight {
+    padding: clamp(28px, 4vw, 48px) 0;
+}
+/* Full-bleed breakout past .bs-paper's centered column. Percentages resolve
+   against the paper's content box, so the margin pulls the band to the
+   viewport edges and the padding walks the content back to the column.
+   body{overflow-x:clip} absorbs the scrollbar-width overshoot. */
+.bs-section--band {
+    margin-inline: calc(50% - 50vw);
+    padding-inline: calc(50vw - 50%);
+}
+/* A band's edges carry the visual break — the next section's hairline would
+   double it. */
+.bs-section--band + .bs-section {
+    border-top: 0;
+}
+.bs-section--tinted {
+    /* Softened tint — the raw accent-soft read too strong as a full band;
+       walking it 40% back toward the paper keeps the color moment quiet. */
+    background: color-mix(in oklab, var(--accent-soft) 60%, var(--bg));
+    border-block: 1px solid var(--ink);
+    padding-block: clamp(48px, 6vw, 80px);
+}
+
 .bs-whatis-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: clamp(20px, 3vw, 36px);
 }
+/* Unboxed editorial card — a text block under a hairline rule, sitting
+   directly on the paper. Deliberately NOT a bordered/filled box: the
+   broadsheet items read as columns of print, not UI cards. */
 .bs-whatis-card {
     padding: 24px 0 0;
     border-top: 1px solid var(--separator-strong);
@@ -1964,6 +2062,141 @@ html.lite .sw-ripple-circle {
     .bs-whatis-grid {
         grid-template-columns: 1fr;
         gap: 28px;
+    }
+}
+
+/* Seam sheet — Part Three's stack as a hi-fi wiring manual. Each swappable
+   seam opens with a dotted patch leader (contents-page style: mono tag left,
+   leader dots, the seam's name right in the second ink), then the copy at
+   full measure with a vertical FITS rail of compatible engines beside it.
+   Not a card grid; the dotted leader is this section's device. */
+.bs-seam {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 10px clamp(32px, 4vw, 64px);
+    padding: 26px 0 30px;
+}
+.bs-seam-rule {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+}
+.bs-seam-tag,
+.bs-seam-name {
+    font-family: var(--mono-font), monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.bs-seam-tag {
+    color: var(--ink);
+}
+.bs-seam-name {
+    color: var(--accent-2);
+}
+.bs-seam-lead {
+    flex: 1;
+    min-width: 40px;
+    border-bottom: 2px dotted color-mix(in oklab, var(--ink) 35%, transparent);
+    transform: translateY(-4px);
+}
+.bs-seam h3 {
+    margin: 4px 0 10px;
+    font-size: clamp(20px, 2.2vw, 26px);
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.bs-seam-copy p {
+    margin: 0;
+    max-width: 64ch;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+.bs-seam-fits {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 6px;
+    padding-top: 10px;
+}
+.bs-seam-fits-cap {
+    width: 100%;
+    margin: 0 0 2px;
+    font-family: var(--mono-font), monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+@media (max-width: 780px) {
+    .bs-seam {
+        grid-template-columns: 1fr;
+        gap: 10px 0;
+    }
+    .bs-seam-fits {
+        padding-top: 4px;
+    }
+}
+
+/* Console directory — Part Five's ledger. The admin console presented as a
+   numbered index of its real departments (the same names as the console nav),
+   not another headline+blurb card grid: a ghosted mono numeral + second-ink
+   department slug on the left rail, the editorial headline + note beside it,
+   ruled rows under one strong opening rule. */
+.bs-desk-ledger {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: clamp(28px, 4vw, 64px);
+    border-top: 1px solid var(--ink);
+}
+.bs-desk-row {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--separator-strong);
+}
+.bs-desk-no {
+    font-family: var(--mono-font), monospace;
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--ink) 22%, var(--bg));
+}
+.bs-desk-dept {
+    margin-top: 7px;
+    font-family: var(--mono-font), monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+}
+.bs-desk-row h3 {
+    margin: 0 0 6px;
+    font-size: 17px;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.bs-desk-row p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--muted);
+}
+@media (max-width: 860px) {
+    .bs-desk-ledger {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2060,28 +2293,101 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* The DJ's three habits — a broadsheet lead-plus-pair, deliberately NOT an
-   even three-up. The primary habit (picking tracks) runs as a wider lead
-   column; the two supporting habits stack in a narrower right rail, so the
-   row reads as an asymmetric feature rather than a templated feature grid. */
-.bs-dj-habits {
-    display: grid;
-    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
-    gap: clamp(24px, 4vw, 52px);
-    align-items: start;
+/* Air log — Part Two's DJ habits printed as one small hour of broadcast,
+   the way the dash booth log prints it (the screenshot directly above this
+   block shows the real thing): mono timestamp + kind chip on a right-aligned
+   left rail, the habit beside it, one hairline spine running down the hour
+   with a small ink tick per entry. Not a card grid on purpose. */
+.bs-airlog-cap {
+    margin: 0 0 2px;
+    font-family: var(--mono-font), monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
-.bs-dj-habits__rest {
+.bs-airlog-entry {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 0 26px;
+}
+.bs-airlog-when {
     display: flex;
     flex-direction: column;
-    gap: clamp(20px, 2.4vw, 28px);
+    align-items: flex-end;
+    gap: 7px;
+    padding-top: 24px;
+    font-family: var(--mono-font), monospace;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
 }
-@media (max-width: 780px) {
-    .bs-dj-habits {
+.bs-airlog-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid currentColor;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+}
+.bs-airlog-tag[data-kind="pick"] {
+    color: var(--accent);
+}
+.bs-airlog-tag[data-kind="link"] {
+    color: var(--accent-2);
+}
+.bs-airlog-tag[data-kind="handoff"] {
+    color: var(--ink);
+}
+.bs-airlog-body {
+    position: relative;
+    border-left: 1px solid var(--separator-strong);
+    padding: 24px 0 26px 26px;
+}
+.bs-airlog-body::before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 31px;
+    width: 5px;
+    height: 5px;
+    background: var(--ink);
+}
+.bs-airlog-entry:last-child .bs-airlog-body {
+    padding-bottom: 6px;
+}
+.bs-airlog-body h3 {
+    margin: 0 0 8px;
+    font-size: clamp(19px, 2vw, 24px);
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+}
+.bs-airlog-body p {
+    margin: 0;
+    max-width: 62ch;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+@media (max-width: 640px) {
+    .bs-airlog-entry {
         grid-template-columns: 1fr;
-        gap: 28px;
     }
-    .bs-dj-habits__rest {
-        gap: 28px;
+    .bs-airlog-when {
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        padding-top: 22px;
+    }
+    .bs-airlog-body {
+        border-left: 0;
+        padding: 10px 0 8px;
+    }
+    .bs-airlog-body::before {
+        display: none;
     }
 }
 
@@ -3004,8 +3310,8 @@ html.lite .sw-ripple-circle {
        control panel, so labels + help copy need to clear the readable-contrast
        floor (the theme's editorial --muted sits ~3.5:1 on the card). Derived
        from --ink/--bg so it tracks the palette and flips in dark mode. */
-    --muted: color-mix(in oklab, var(--ink) 55%, var(--bg));
-    --muted-2: color-mix(in oklab, var(--muted) 70%, var(--bg));
+    --muted: color-mix(in oklab, var(--ink) 62%, var(--bg));
+    --muted-2: color-mix(in oklab, var(--muted) 75%, var(--bg));
     /* Two-tone surface split (--card-bg / --page-bg) and the shadcn --sidebar-*
        family live at :root now — see the note there. The admin subtree just
        inherits them; only the higher-contrast --muted override stays local. */
@@ -3048,14 +3354,14 @@ html:has(.admin-root.paper) {
 
 /* ── Type ── */
 .admin-root .eyebrow {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     font-weight: 700;
 }
 .admin-root .caption {
-    font-size: 10px;
-    letter-spacing: 0.18em;
+    font-size: 11px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     font-weight: 500;
     color: var(--muted);
@@ -3097,9 +3403,13 @@ html:has(.admin-root.paper) {
 }
 .admin-root .card-body {
     /* Same reason — pre/code content inside expanded <details> needs a
-       width constraint to actually wrap. */
+       width constraint to actually wrap. `clip` rather than `hidden`:
+       hidden makes the body a scroll container (overflow-y computes to
+       auto), so a 1px vertical overflow grows a full scrollbar inside
+       every editor section on desktop-scrollbar platforms. clip clips
+       the same horizontal blowout without creating a scroll container. */
     min-width: 0;
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 .admin-root details {
     min-width: 0;
@@ -3126,7 +3436,7 @@ html:has(.admin-root.paper) {
     font-weight: 700;
 }
 .admin-root .card-head .sub {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     color: var(--muted);
     text-transform: uppercase;
@@ -3370,7 +3680,7 @@ html:has(.admin-root.paper) {
     margin: 0 0 12px 0;
 }
 .admin-root .field-hint {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted);
     line-height: 1.2;
     font-family: var(--font-jetbrains);
@@ -3386,7 +3696,7 @@ html:has(.admin-root.paper) {
     margin: 0;
 }
 .admin-root .kv dt {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--muted);
@@ -3402,7 +3712,7 @@ html:has(.admin-root.paper) {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--muted);
@@ -3431,7 +3741,7 @@ html:has(.admin-root.paper) {
     font-variant-numeric: tabular-nums;
 }
 .admin-root .metric .l {
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--muted);
@@ -4021,8 +4331,14 @@ html:has(.admin-root.paper) {
     /* leading 16px column: the row-selection checkbox (add-to-playlist flow).
        Trailing actions column is FIXED, not auto: header and rows are sibling
        grids, so an auto track resolves to 0 in the (empty-celled) header and
-       ~150px in the rows, skewing every fr column between them. */
-    grid-template-columns: 16px 56px minmax(0, 2fr) minmax(0, 1fr) 150px;
+       ~240px in the rows, skewing every fr column between them.
+       240px is measured, not guessed: five 36px buttons (heart, queue, edit,
+       retag, block) + four 6px gaps = 204px, and the heart carries a like
+       count so it runs to ~63px at its capped "99+" label — 231px worst case.
+       Keep this in step with the button cluster in library/TrackTable.tsx:
+       the cluster is justify-end, so anything that overflows this track spills
+       LEFT over the mood/energy column instead of being clipped. */
+    grid-template-columns: 16px 56px minmax(0, 2fr) minmax(0, 1fr) 240px;
     gap: 14px; align-items: center;
 }
 .admin-root .lib-colhead { padding: 9px 16px; border-bottom: 1px solid var(--ink); }
@@ -4057,6 +4373,18 @@ html:has(.admin-root.paper) {
     border-style: dashed; font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em; font-size: 9px;
 }
+/* never-play marker — rides the TITLE line, not .lib-tags (which the ≤860px
+   query hides). Solid danger fill rather than another outlined chip: it has to
+   read as a stop at a glance when two copies of the same song sit next to each
+   other and only one of them is blocked. */
+.admin-root .lib-btag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; white-space: nowrap;
+    color: var(--danger);
+    border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
+    background: color-mix(in oklab, var(--danger) 12%, transparent);
+}
 /* "needs tags" marker — icon-only chip (tooltip carries the words) */
 .admin-root .lib-needs {
     display: inline-flex; align-items: center;
@@ -4065,8 +4393,13 @@ html:has(.admin-root.paper) {
 }
 
 @media (max-width: 860px) {
+    /* Tags hide here, but the inline buttons don't — they're gated on Tailwind's
+       sm: (640px), so 640-860px still renders the full five-button cluster and
+       needs the same 240px track. Below 640px the row switches to flex
+       (`!flex sm:!grid`) and only the overflow menu shows, so this never
+       applies to phones. */
     .admin-root .lib-row,
-    .admin-root .lib-colhead { grid-template-columns: 16px 48px 1fr 150px; gap: 12px; }
+    .admin-root .lib-colhead { grid-template-columns: 16px 48px 1fr 240px; gap: 12px; }
     .admin-root .lib-row .lib-tags,
     .admin-root .lib-colhead .h-tags { display: none; }
     .admin-root .lib-thumb { width: 48px; height: 48px; }
@@ -4124,27 +4457,28 @@ html:has(.admin-root.paper) {
     padding: 2px 9px;
     border: 1px solid var(--accent);
     color: var(--accent);
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.22em;
     font-weight: 700;
 }
 .bs-news-ver {
     font-variant-numeric: tabular-nums;
-    color: var(--ink);
+    color: var(--accent-2); /* version numbers as second-ink data */
     font-weight: 700;
 }
 .bs-news-read {
     color: var(--muted);
 }
 
-/* Lead story — the newest dispatch, set large across the fold. Whole block
-   is one link. */
+/* Lead story — the newest dispatch, set large across the fold as the page's
+   one boxed card; the archive grid below stays a hairline newspaper run. */
 .bs-news-lead {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: clamp(20px, 3vw, 32px) 0 clamp(28px, 4vw, 44px);
-    border-top: 1px solid var(--ink);
+    padding: clamp(20px, 3vw, 32px);
+    background: var(--surface);
+    border: 1px solid var(--ink);
     color: inherit;
     text-decoration: none;
 }

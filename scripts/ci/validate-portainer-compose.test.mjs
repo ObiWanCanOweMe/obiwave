@@ -157,7 +157,7 @@ function resolvedErrors(model) {
   return validator.validateResolvedPortainerCompose?.(model) ?? [];
 }
 
-function renderCompose(source) {
+function renderCompose(source, env = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'subwave-compose-policy-'));
   const file = join(directory, 'compose.yml');
   try {
@@ -167,6 +167,7 @@ function renderCompose(source) {
       encoding: 'utf8',
       env: {
         ...process.env,
+        ...env,
         SUBWAVE_VERSION: 'v1.0.0-obiwave.1',
         ADMIN_USER: 'ci',
         ADMIN_PASS: 'ci',
@@ -344,6 +345,15 @@ test('resolved analyzer requires the release-tagged CUDA mirror and NVIDIA reser
   const dockerNormalized = structuredClone(validResolved);
   dockerNormalized.services.analyzer.deploy.resources.reservations.devices[0].count = -1;
   assert.deepEqual(resolvedErrors(dockerNormalized), []);
+});
+
+test('Portainer forwards analyzer lifecycle overrides', () => {
+  const analyzer = renderCompose(portainerManifest, {
+    ANALYZE_IDLE_UNLOAD_S: '17',
+    ANALYZE_RECYCLE_IDLE_S: '23',
+  }).services.analyzer;
+  assert.equal(analyzer.environment.ANALYZE_IDLE_UNLOAD_S, '17');
+  assert.equal(analyzer.environment.ANALYZE_RECYCLE_IDLE_S, '23');
 });
 
 test('source and resolved analyzer require the fail-closed CUDA startup gate', () => {

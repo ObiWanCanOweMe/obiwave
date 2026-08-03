@@ -460,10 +460,10 @@ function ListenerChart({ samples }: { samples: ListenerSample[] }) {
           y1={peakY}
           x2={W}
           y2={peakY}
-          stroke="var(--ink)"
+          stroke="var(--accent-2)"
           strokeWidth={1}
           strokeDasharray="2 3"
-          opacity={0.18}
+          opacity={0.55}
           vectorEffect="non-scaling-stroke"
         />
       )}

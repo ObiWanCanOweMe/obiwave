@@ -178,6 +178,12 @@ export interface QueueEntry {
   requestedBy?: string;
   /** ISO timestamp present on history entries. */
   t?: string;
+  /**
+   * The track arrives via a pre-rendered stem blend rather than a plain
+   * crossfade — stamped once the seam's clip is queued (definitive, not a
+   * prediction). Drives the transition badge on the admin queue (#1257).
+   */
+  stemSeam?: boolean;
   [key: string]: unknown;
 }
 
@@ -262,4 +268,4 @@ export interface CloudVoice {
   label: string;
 }
 
-export type CloudProvider = 'openai' | 'elevenlabs' | 'openai-compatible';
+export type CloudProvider = 'openai' | 'elevenlabs' | 'fish-audio' | 'openai-compatible';

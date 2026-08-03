@@ -537,7 +537,7 @@ export function normalizeLlmProviderBaseUrls(
 // any self-hosted OpenAI-compatible speech server (Chatterbox, Qwen3 TTS,
 // VibeVoice, etc.) via the operator-supplied `tts.cloud.baseUrl` — mirrors the
 // LLM provider of the same name.
-export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'openai-compatible'];
+export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
 
 // Web-search backends for the segment director's `web-search` capability.
 // `duckduckgo` is the homelab default — DuckDuckGo's Instant Answer API is free
@@ -821,6 +821,14 @@ export const PERSONA_LIMIT = 48;
 // llm/internal/core/pure.ts.
 export const SOUL_MAX = 2000;
 export const SHOWS_LIMIT = 64;
+// Show `topic` — the standing brief the DJ works from while the show is on air.
+// Injected into the pick prompts (picker.ts / dj-agent schemas) and the
+// programme producer plan, so like SOUL_MAX it is a recurring per-call token
+// cost rather than a structural limit. Matched to SOUL_MAX so a show brief can
+// carry the same amount of detail as a persona sketch. Keep in lockstep with
+// TOPIC_MAX in web/components/admin/shows/types.ts and the AI-fill draft schema
+// in llm/internal/prompts/generate.ts.
+export const SHOW_TOPIC_MAX = 2000;
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
@@ -828,9 +836,24 @@ export const GUESTS_PER_SHOW = 3;
 export const PLAYLISTS_PER_SHOW = 10;
 export const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
 // Values per multi-select music filter (moods / genres / eras). Within one
-// attribute the values OR together at pick time; across attributes they AND —
-// so past a handful the filter stops meaning anything.
-export const SHOW_FILTER_VALUES_MAX = 6;
+// attribute the values OR together at pick time; across attributes they AND.
+// Raised 6 → 15: the AND-across argument for keeping it small never applied
+// WITHIN an attribute, and genre is where it bites — a strict alt/punk show
+// has to name every library tag it wants (Punk Rock, Emo, Pop Punk,
+// Post-Hardcore, Emo Pop, …) because matching only REFINES, never broadens
+// (see trackGenres/genreMatches in music/show-filter.ts), so 6 forced the
+// operator to either drop valid tags or retag the library.
+//
+// What made 6 load-bearing was cost, not meaning: every genre used to cost a
+// getGenres() round trip to resolve (music/subsonic.ts) plus two discovery
+// fetches per genre in each pool builder, all sequential. Both are bounded now
+// — getGenres is TTL-cached and the per-genre fetches run through mapPool — so
+// the wall-clock of a pick no longer scales with this number. The per-genre
+// size budgets already divide a FIXED total (randomSize / genreSetSize in
+// music/picker.ts + broadcast/scheduler.ts), so the pool doesn't grow either.
+// Keep in lockstep with FILTER_VALUES_MAX in
+// web/components/admin/shows/types.ts (pinned by scripts/show-filter-cap.test.ts).
+export const SHOW_FILTER_VALUES_MAX = 15;
 // Must comfortably exceed a realistic skill library: unticking one skill on an
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).

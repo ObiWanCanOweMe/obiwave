@@ -11,6 +11,7 @@ import {
   commitBulkEmbeddingBatch,
   withBulkEmbeddingRateLimit,
 } from '../embedding-bulk.js';
+import { resolveEraYear } from '../show-filter.js';
 import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 
@@ -53,8 +54,24 @@ export async function phaseEmbed(
     const songs = batch.map(id => db.getTrack(id)).filter((t): t is db.TrackRecord => !!t);
     const texts = songs.map(t =>
       embeddings.formatTrackText(
-        { title: t.title, artist: t.artist, album: t.album, year: t.year, genres: t.genres },
+        {
+          title: t.title, artist: t.artist, album: t.album, year: t.year, genres: t.genres,
+          // Era precedence lives in ONE place (show-filter, #842) — never raw
+          // year, whose digits on a compilation are the compilation's date.
+          eraYear: resolveEraYear(t.year, t.originalYear, t.isCompilation),
+        },
         { lastfmTags: t.lastfmTags, lyricExcerpt: t.lyricExcerpt },
+        // Measured acoustics (#1246) — whatever the analyze pass has already
+        // written for this track. Nothing here is decided by the tagger, so
+        // there's no circularity with the mood propagation this phase feeds:
+        // phases 2-4 vote over the KNN graph these vectors form, and a track's
+        // own moods must not be an input to its own vector. A track analysed
+        // AFTER its embed simply carries no Sound line until a re-embed, which
+        // is what embedding_meta.text_format makes visible.
+        {
+          bpm: t.bpm, musicalKey: t.musicalKey, audioMoods: t.audioMoods,
+          vocalRanges: t.vocalRanges,
+        },
       ),
     );
     let vecs: number[][];

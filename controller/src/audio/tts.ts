@@ -12,7 +12,7 @@ import * as pocketTts from './pocketTts.js';
 import { heavyEnabledEngines } from './ttsHeavyClient.js';
 import * as remoteTts from './remoteTts.js';
 import { normalizeForSpeech } from './speech-text.js';
-import { orderedFallbacks } from './tts-fallback.js';
+import { fallbackTextFor, orderedFallbacks } from './tts-fallback.js';
 import { localizedPreviewText } from './preview-text.js';
 import * as cloud from '../llm/speech.js';
 import { stripThinking } from '../llm/sdk.js';
@@ -102,7 +102,7 @@ function personaCloudProvider(personaTts: any): string | null {
   return (personaTts && personaTts.engine === 'cloud') ? (personaTts.cloudProvider ?? null) : null;
 }
 
-function resolveEngine(kind: string, personaTts: any) {
+function resolveEngine(kind: string, personaTts: any): string {
   const tts = settings.get().tts || {};
   let chosen;
   if (personaTts && ENGINES.includes(personaTts.engine)) {
@@ -233,8 +233,9 @@ async function speakWith(engine: string, text: string, opts: any, personaTts: an
     const personaOverride = (personaTts && personaTts.engine === 'cloud')
       ? { provider: personaTts.cloudProvider, voice: personaTts.voice }
       : null;
-    const cloudOverride = (personaOverride || opts.cloudVoiceSettings)
-      ? { ...(personaOverride || {}), ...(opts.cloudVoiceSettings || {}) }
+    const cloudModelOverride = typeof opts.cloudModel === 'string' ? { model: opts.cloudModel } : null;
+    const cloudOverride = (personaOverride || cloudModelOverride || opts.cloudVoiceSettings || opts.fishSettings)
+      ? { ...(personaOverride || {}), ...(cloudModelOverride || {}), ...(opts.cloudVoiceSettings || {}), ...(opts.fishSettings || {}) }
       : null;
     return cloud.speak(text, { ...opts, cloudOverride });
   }
@@ -273,10 +274,12 @@ const PREVIEW_TEXT_MAX = 200;
 const DEFAULT_PREVIEW_TEXT = "You're listening to SUB/WAVE. This is a voice preview.";
 
 export async function synthesizeSample(
-  { engine, voice = '', cloudProvider = 'openai', speed, lang, language, text, voiceSettings }: {
+  { engine, voice = '', cloudProvider = 'openai', cloudModel, speed, lang, language, text, voiceSettings, fishSettings: requestedFishSettings, signal }: {
     engine: string;
     voice?: string;
     cloudProvider?: string;
+    // Unsaved model id so preview validates the exact provider/model choice.
+    cloudModel?: string;
     speed?: number;
     lang?: string;
     // Persona's free-text on-air language ("Turkish", "Türkçe"). When set and
@@ -285,15 +288,21 @@ export async function synthesizeSample(
     // sounds like on air; unrecognized/empty falls back to the English line.
     language?: string;
     text?: string;
-    // Unsaved ElevenLabs voice_settings sliders to audition (issue #696) —
-    // same field names as settings.tts.cloud so they merge straight into the
-    // cloudOverride in speakWith(). Sanitized here, like `speed`.
+    // Unsaved provider controls to audition — same field names as
+    // settings.tts.cloud so they merge straight into cloudOverride in
+    // speakWith(). Sanitized here, like `speed`.
     voiceSettings?: {
       voiceStability?: number;
       voiceStyle?: number;
       voiceSimilarityBoost?: number;
       voiceUseSpeakerBoost?: boolean;
     };
+    fishSettings?: {
+      temperature?: number;
+      topP?: number;
+      latency?: 'low' | 'normal' | 'balanced';
+    };
+    signal?: AbortSignal;
   },
 ): Promise<string> {
   if (!ENGINES.includes(engine)) throw new Error(`Unknown engine: ${engine}`);
@@ -302,6 +311,14 @@ export async function synthesizeSample(
     : (localizedPreviewText(language) ?? DEFAULT_PREVIEW_TEXT);
   const sample = normalizeForSpeech(raw.slice(0, PREVIEW_TEXT_MAX), settings.get().tts?.corrections);
   const scale = settings.clampTtsSpeed(speed);
+  let previewCloudModel: string | undefined;
+  if (engine === 'cloud' && cloudModel !== undefined) {
+    const v = String(cloudModel).trim();
+    if (v.length < 1 || v.length > 100 || /[\r\n]/.test(v)) {
+      throw new Error('Cloud preview model must be 1-100 characters with no line breaks');
+    }
+    previewCloudModel = v;
+  }
   // Clamp the audition voice_settings to ElevenLabs' [0,1] the same way
   // settings.update() does for the saved values, so a hand-crafted preview
   // request can't 400 the provider call.
@@ -324,7 +341,17 @@ export async function synthesizeSample(
   const personaTts = { engine, voice, cloudProvider };
   // No outPath → each engine self-generates a WAV path under config.piper.outDir
   // (reaped by cleanupOldVoices) and returns it.
-  return speakWith(engine, sample, { speedScale: scale, language: '', soul: '', lang, cloudVoiceSettings }, personaTts);
+  let fishSettings: Record<string, number | string> | undefined;
+  if (engine === 'cloud' && requestedFishSettings) {
+    fishSettings = {
+      temperature: clamp01(requestedFishSettings.temperature) ?? settings.get().tts?.cloud?.temperature ?? 0.7,
+      topP: clamp01(requestedFishSettings.topP) ?? settings.get().tts?.cloud?.topP ?? 0.7,
+      latency: ['low', 'normal', 'balanced'].includes(requestedFishSettings.latency || '')
+        ? requestedFishSettings.latency as string
+        : settings.get().tts?.cloud?.latency || 'normal',
+    };
+  }
+  return speakWith(engine, sample, { speedScale: scale, language: '', soul: '', lang, cloudModel: previewCloudModel, cloudVoiceSettings, fishSettings, signal }, personaTts);
 }
 
 // Public entry point. Tries the configured engine; on failure, falls back to
@@ -356,6 +383,15 @@ export async function speak(
   // the OUTGOING persona's requested engine.
   const requested = requestedEngine(kind, personaTts);
   const primary = resolveEngine(kind, personaTts);
+  // Engine-native bracket cues must reach the expressive primary untouched,
+  // but a local/remote rescue would speak them literally. Resolve the exact
+  // provider+model family used by djSystem() and sanitize only that rescue.
+  const speakingPersona = GLOBAL_VOICE_KINDS.has(kind) ? null : personaFor(persona);
+  const cloudCueFamily = requested === 'cloud' && speakingPersona
+    ? cloud.requestedCloudExpressionCueFamilyForPersona(speakingPersona)
+    : '';
+  const rescueText = fallbackTextFor(requested, cloudCueFamily, speakText);
+  const primaryText = requested === primary ? speakText : rescueText;
   // Persona on-air language (e.g. "French") rides along to the cloud engine as a
   // pronunciation hint so a non-English script isn't read with English phonetics
   // (issue #558). DJ-voiced kinds only — never jingles — and '' (ignored) for
@@ -392,7 +428,7 @@ export async function speak(
     persona: GLOBAL_VOICE_KINDS.has(kind) ? null : (personaFor(persona)?.name || null),
   };
   try {
-    const result = await speakWith(primary, speakText, { outPath, speedScale: scale, language, soul }, personaTts);
+    const result = await speakWith(primary, primaryText, { outPath, speedScale: scale, language, soul }, personaTts);
     // Bake 40ms edge fades into the rendered clip so hard file boundaries
     // never reach the broadcast compressor as a click. Render time is the only
     // place the tail can be faded — see audio/wav-edges.ts. Best-effort:
@@ -430,7 +466,7 @@ export async function speak(
         // provider/voice instead of the station default's credentials the
         // chain probe just validated. Null keeps probe and call in agreement.
         // The persona's `language`/`soul` hints still ride via opts.
-        const result = await speakWith(fallback, speakText, { outPath, speedScale: scale, language, soul }, null);
+        const result = await speakWith(fallback, rescueText, { outPath, speedScale: scale, language, soul }, null);
         if (typeof result === 'string') await applyEdgeFades(result);
         recordTts({
           ...callBase, engine: fallback, fellBack: true,
@@ -479,6 +515,7 @@ export function availableEngines() {
     cloudByProvider: {
       openai: cloud.isConfigured('openai'),
       elevenlabs: cloud.isConfigured('elevenlabs'),
+      'fish-audio': cloud.isConfigured('fish-audio'),
     },
   };
 }

@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Music, AudioLines, Waves } from 'lucide-react';
+import { Music, AudioLines, Waves, Mic } from 'lucide-react';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { notify, errorMessage } from '../../../lib/notify';
 import { SectionTabs } from '../SectionTabs';
@@ -24,20 +24,22 @@ import { V3AlertDialog } from '../../ui/alert-dialog';
 import { SkeletonCards } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/error-state';
 import type { SettingsData, SaveSettings } from '../settings/shared';
-import type { SfxData, SfxForm, BedsData, BedsForm, JingleImportFailure, JingleImportResult } from './types';
+import type { SfxData, SfxForm, BedsData, BedsForm, VoiceData, JingleImportFailure, JingleImportResult } from './types';
 import { JinglesSection } from './JinglesSection';
 import { SfxSection } from './SfxSection';
 import { BedsSection } from './BedsSection';
+import { VoicesSection } from './VoicesSection';
 import { MonoLabel, TabMetric, pad2 } from './parts';
 
-type TabId = 'jingles' | 'sfx' | 'beds';
-const TAB_IDS: TabId[] = ['jingles', 'sfx', 'beds'];
+type TabId = 'jingles' | 'sfx' | 'beds' | 'voices';
+const TAB_IDS: TabId[] = ['jingles', 'sfx', 'beds', 'voices'];
 
 export default function ImagingPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [data, setData] = useState<SettingsData | null>(null);
   const [sfxData, setSfxData] = useState<SfxData | null>(null);
   const [bedsData, setBedsData] = useState<BedsData | null>(null);
+  const [voicesData, setVoicesData] = useState<VoiceData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,6 +67,7 @@ export default function ImagingPanel() {
   // Beds
   const [bedsForm, setBedsForm] = useState<BedsForm>({ name: '', description: '', prompt: '', durationSec: '' });
   const [confirmDeleteBed, setConfirmDeleteBed] = useState<string | null>(null);
+  const [confirmDeleteVoice, setConfirmDeleteVoice] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -91,10 +94,18 @@ export default function ImagingPanel() {
     } catch { /* non-fatal */ }
   };
 
+  const refreshVoices = async () => {
+    try {
+      const r = await adminFetch('/voices');
+      if (!r.ok) return;
+      setVoicesData((await r.json()) as VoiceData);
+    } catch { /* non-fatal */ }
+  };
+
   useEffect(() => {
     if (!hydrated || needsAuth) return;
-    refresh(); refreshSfx(); refreshBeds();
-    const id = setInterval(() => { refresh(); refreshSfx(); refreshBeds(); }, 3000);
+    refresh(); refreshSfx(); refreshBeds(); refreshVoices();
+    const id = setInterval(() => { refresh(); refreshSfx(); refreshBeds(); refreshVoices(); }, 3000);
     return () => clearInterval(id);
   }, [hydrated, needsAuth]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -129,8 +140,10 @@ export default function ImagingPanel() {
       // lives in Settings → Danger zone (JinglesSection's hint points there).
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
+      return true;
     } catch (e) {
       notify.err(errorMessage(e));
+      return false;
     } finally { setBusy(false); }
   };
 
@@ -324,6 +337,38 @@ export default function ImagingPanel() {
     finally { setBusy(false); }
   };
 
+  // Import a voice-clone reference clip. Any accepted audio type — the
+  // controller transcodes it to the canonical mono WAV.
+  const uploadVoice = async (file: File, name: string): Promise<boolean> => {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('name', name.trim());
+      const r = await adminFetch('/voices/upload', { method: 'POST', body: fd });
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      await refreshVoices();
+      notify.ok('voice imported');
+      return true;
+    } catch (e) { notify.err(`Voice import failed: ${errorMessage(e)}`); return false; }
+    finally { setBusy(false); }
+  };
+
+  const deleteVoice = async (file: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await adminFetch(`/voices/${encodeURIComponent(file)}`, { method: 'DELETE' });
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      await refreshVoices();
+      notify.ok('voice deleted');
+    } catch (e) { notify.err(`Voice delete failed: ${errorMessage(e)}`); }
+    finally { setBusy(false); }
+  };
+
   // Live counts ride on the tab badges + the masthead metrics. Undefined
   // until each source loads; the badge is simply omitted until then.
   const jingleCount = data?.jingles?.length;
@@ -336,6 +381,7 @@ export default function ImagingPanel() {
     { id: 'jingles' as TabId, label: 'Jingles', count: jingleCount, icon: Music },
     { id: 'sfx' as TabId, label: 'SFX', count: sfxCount, icon: AudioLines },
     { id: 'beds' as TabId, label: 'Beds', count: bedCount, icon: Waves },
+    { id: 'voices' as TabId, label: 'Voices', count: voicesData?.voices?.length, icon: Mic },
   ];
 
   return (
@@ -363,7 +409,9 @@ export default function ImagingPanel() {
               between tracks, <strong className="font-semibold text-ink">SFX</strong> are the little
               stingers under the voice, and{' '}
               <strong className="font-semibold text-ink">beds</strong> are instrumentals to talk
-              over when a link runs long.
+              over when a link runs long, and{' '}
+              <strong className="font-semibold text-ink">voices</strong> are the clips your
+              personas are cloned from.
             </p>
           </div>
           <div className="flex flex-none gap-7">
@@ -415,6 +463,15 @@ export default function ImagingPanel() {
             data={data} saveSettings={saveSettings} adminFetch={adminFetch}
           />
         )}
+
+        {tab === 'voices' && (
+          <VoicesSection
+            voicesData={voicesData} busy={busy}
+            uploadVoice={uploadVoice}
+            onDelete={setConfirmDeleteVoice}
+            adminFetch={adminFetch}
+          />
+        )}
       </div>
 
       <V3AlertDialog
@@ -443,6 +500,15 @@ export default function ImagingPanel() {
         confirmLabel="delete"
         danger
         onConfirm={() => { if (confirmDeleteBed) deleteBed(confirmDeleteBed); setConfirmDeleteBed(null); }}
+      />
+      <V3AlertDialog
+        open={confirmDeleteVoice != null}
+        onOpenChange={(o) => { if (!o) setConfirmDeleteVoice(null); }}
+        title="Delete voice"
+        description={confirmDeleteVoice ? `Delete the reference voice "${confirmDeleteVoice}"? Any persona still set to it falls back to the engine's built-in voice.` : ''}
+        confirmLabel="delete"
+        danger
+        onConfirm={() => { if (confirmDeleteVoice) deleteVoice(confirmDeleteVoice); setConfirmDeleteVoice(null); }}
       />
     </div>
   );

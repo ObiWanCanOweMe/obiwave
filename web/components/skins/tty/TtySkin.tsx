@@ -89,7 +89,7 @@ function Printed({
 
 function Rule({ children }: { children: React.ReactNode }) {
   return (
-    <div className="truncate text-[10px] tracking-[0.22em] text-muted uppercase select-none">
+    <div className="truncate text-[11px] tracking-[0.22em] text-muted uppercase select-none">
       ── {children} ──────────────────
     </div>
   );
@@ -181,7 +181,7 @@ export default function TtySkin(_props: SkinProps) {
 
         {/* header bar — station line truncates; context is desktop-only so
             mobile stays one clean row with the theme icon pinned right */}
-        <div className="flex flex-none items-center justify-between gap-x-4 border border-[var(--line)] px-4 py-2.5">
+        <div className="flex flex-none items-center justify-between gap-x-4 border border-ink px-4 py-2.5">
           <div className="min-w-0 truncate text-[13px] tracking-[0.1em]">
             <span className={cn(offline ? 'text-muted' : 'text-[var(--accent)]')}>●</span>{' '}
             <span className="font-bold">{stationName.toUpperCase()}</span>
@@ -370,7 +370,7 @@ export default function TtySkin(_props: SkinProps) {
           </div>
         ) : (
           /* status line */
-          <div className="flex flex-none flex-wrap items-baseline gap-x-5 gap-y-1 border border-[var(--line)] bg-[var(--field)] px-4 py-2.5 text-[12px] tracking-[0.08em]">
+          <div className="flex flex-none flex-wrap items-baseline gap-x-5 gap-y-1 border border-ink bg-[var(--field)] px-4 py-2.5 text-[12px] tracking-[0.08em]">
             <button
               type="button"
               onClick={handleTune}
@@ -424,7 +424,7 @@ export default function TtySkin(_props: SkinProps) {
             <button
               type="button"
               onClick={() => setLogDeep(d => !d)}
-              className="v3-focus cursor-pointer border-0 bg-transparent p-0 text-muted uppercase hover:text-ink"
+              className="v3-focus cursor-pointer border-0 bg-transparent p-0 font-bold text-accent-2 uppercase hover:text-ink"
             >
               :log {logDeep ? 'SHORT LOG' : 'FULL LOG'}
             </button>

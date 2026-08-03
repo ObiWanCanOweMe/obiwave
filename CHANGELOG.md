@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.3.0](https://github.com/perminder-klair/subwave/compare/v1.2.0...v1.3.0) (2026-08-03)
+
+
+### Features
+
+* **library:** never-play indication in the library browser + one-click undo ([#1273](https://github.com/perminder-klair/subwave/issues/1273)) ([13a106d](https://github.com/perminder-klair/subwave/commit/13a106db49d269ccc70f37da283c5bb67f790a42))
+* **library:** surface liked tracks in the admin library, with an operator heart ([#1272](https://github.com/perminder-klair/subwave/issues/1272)) ([5448092](https://github.com/perminder-klair/subwave/commit/5448092998099242a3eeb83939ec968cb42959bc))
+* **shows:** raise the music filter cap from 6 to 15 values ([#1270](https://github.com/perminder-klair/subwave/issues/1270)) ([499f7f7](https://github.com/perminder-klair/subwave/commit/499f7f72bfe02a8523d252f7a2002cd0e7d671ba))
+* **shows:** raise the show topic brief cap to 2000 chars ([#1269](https://github.com/perminder-klair/subwave/issues/1269)) ([b8afca7](https://github.com/perminder-klair/subwave/commit/b8afca73a708bbed9c1ea87d562cd7f8085f467e))
+* **tts:** add Fish Audio s2.1-pro cloud provider ([#1248](https://github.com/perminder-klair/subwave/issues/1248)) ([f9b7abb](https://github.com/perminder-klair/subwave/commit/f9b7abb99285c4d541679481692e8550c703d3ff))
+* **voices:** import voice clones through the admin UI ([#1274](https://github.com/perminder-klair/subwave/issues/1274)) ([aed4daf](https://github.com/perminder-klair/subwave/commit/aed4dafad3fe84c6e2aa13cb4b25ef9b59a2afe0))
+* **webhooks:** include sourceTrackId in track.play payloads ([#1271](https://github.com/perminder-klair/subwave/issues/1271)) ([f2c927c](https://github.com/perminder-klair/subwave/commit/f2c927c4185da84fd74f8fecce892b3a86b89434)), closes [#1250](https://github.com/perminder-klair/subwave/issues/1250)
+
+
+### Bug Fixes
+
+* **analyzer:** idle worker recycle, cold-embed retry, /health residency ([#1204](https://github.com/perminder-klair/subwave/issues/1204) follow-ups) ([#1264](https://github.com/perminder-klair/subwave/issues/1264)) ([c77548f](https://github.com/perminder-klair/subwave/commit/c77548ff16e80b58d215555ec5622eeacb35a6d4))
+* **analyzer:** release CLAP + Demucs after idle on CPU hosts ([#1204](https://github.com/perminder-klair/subwave/issues/1204)) ([e6a4b1e](https://github.com/perminder-klair/subwave/commit/e6a4b1ebdb941ab93c9bc8391e852bf5a37ff091))
+* **analyzer:** release CLAP + Demucs after idle on CPU hosts ([#1204](https://github.com/perminder-klair/subwave/issues/1204)) ([1c451b9](https://github.com/perminder-klair/subwave/commit/1c451b9ab2013a36695be53ebc61aaf567e3bb2b))
+* **analyzer:** sync remaining idle-unload docs; pin the lean-request clock path ([#1204](https://github.com/perminder-klair/subwave/issues/1204)) ([edf2111](https://github.com/perminder-klair/subwave/commit/edf2111d4da152bcab3f1df795cd66b9c9f5c88d))
+* **app:** force a fresh stream reload on rapid buffering churn ([3670720](https://github.com/perminder-klair/subwave/commit/367072071b9fe036d452da13a3bbcd288a484cb4))
+* **broadcast:** stop a single failed Icecast poll from releasing the idle pause ([#1256](https://github.com/perminder-klair/subwave/issues/1256)) ([#1259](https://github.com/perminder-klair/subwave/issues/1259)) ([69615c6](https://github.com/perminder-klair/subwave/commit/69615c63119ee04aad3739d9687f3608b86cea15))
+* **broadcast:** stop a station ident stacking onto a track's own link ([#1258](https://github.com/perminder-klair/subwave/issues/1258)) ([#1260](https://github.com/perminder-klair/subwave/issues/1260)) ([7fa9198](https://github.com/perminder-klair/subwave/commit/7fa91982c9d9afeeba5152c0c9360564a74622e4))
+* **broadcast:** stop spoken clocks running ahead of air time ([#1282](https://github.com/perminder-klair/subwave/issues/1282)) ([#1283](https://github.com/perminder-klair/subwave/issues/1283)) ([d7f0db0](https://github.com/perminder-klair/subwave/commit/d7f0db079fd92b615144d154b3c7b501a83f8152))
+* **picker:** give similarity real musical signal, not just label text ([#1246](https://github.com/perminder-klair/subwave/issues/1246)) ([#1265](https://github.com/perminder-klair/subwave/issues/1265)) ([954192a](https://github.com/perminder-klair/subwave/commit/954192a819b4f56983dd5192e5b89d904b721ae3))
+* **picker:** give the artist guard's re-pick recency memory and lead-artist keys ([#1251](https://github.com/perminder-klair/subwave/issues/1251)) ([#1261](https://github.com/perminder-klair/subwave/issues/1261)) ([305dabd](https://github.com/perminder-klair/subwave/commit/305dabd8f58b347525a80523ad6474197d32ee63))
+* **picker:** stop losing the pick when a seed tool comes back empty ([#1247](https://github.com/perminder-klair/subwave/issues/1247)) ([#1262](https://github.com/perminder-klair/subwave/issues/1262)) ([ab04e1d](https://github.com/perminder-klair/subwave/commit/ab04e1d6feb448dbfc96bef90d81de39bffd09eb))
+* **prompts:** align coded prompts with the agent harness + trim per-pick token cost ([#1277](https://github.com/perminder-klair/subwave/issues/1277)) ([298ee4a](https://github.com/perminder-klair/subwave/commit/298ee4a8ed718c0ecdf6478158ee8d7c57dbcbf2))
+* **settings:** bounded archive retention default (30 days) with keep-forever upgrade guard ([1c53a05](https://github.com/perminder-klair/subwave/commit/1c53a05a92b9664d6c496b71b702e2a81064049d))
+* **stems:** enforce the cache budget on ride-along writes and surface sweep shortfalls ([#1263](https://github.com/perminder-klair/subwave/issues/1263)) ([8667c4a](https://github.com/perminder-klair/subwave/commit/8667c4a97ae0c19291e53d87a72c6234475a37dc))
+* **web:** stop admin editor sections growing their own scrollbars ([#1267](https://github.com/perminder-klair/subwave/issues/1267)) ([be5c125](https://github.com/perminder-klair/subwave/commit/be5c1252d85c4a571b148b14441e712e2f462aa8))
+
+
+### Documentation
+
+* correct stale ducking figures and studio-bed facts in CLAUDE.md ([#1281](https://github.com/perminder-klair/subwave/issues/1281)) ([84997f5](https://github.com/perminder-klair/subwave/commit/84997f5e873e8cd48457e47bcc131ab9a0b129be))
+
 ## [1.2.0](https://github.com/perminder-klair/subwave/compare/v1.1.1...v1.2.0) (2026-07-29)
 
 

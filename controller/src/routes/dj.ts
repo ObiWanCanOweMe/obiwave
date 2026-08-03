@@ -6,6 +6,7 @@
 import express from 'express';
 import AdmZip from 'adm-zip';
 import { requireAdmin } from '../middleware/auth.js';
+import * as blocklist from '../music/blocklist.js';
 import { zipUpload } from '../middleware/upload.js';
 import { queue } from '../broadcast/queue.js';
 import * as dj from '../llm/dj.js';
@@ -64,6 +65,11 @@ function buildTags(raw: unknown): string[] | undefined {
 // The subset of a Subsonic song toAdminRow reads to build a queue-ready row.
 interface AdminSong {
   id: string;
+  // Only present on raw Subsonic songs; the never-play match prefers these
+  // over the name fallback, so keep them on the way in even though no admin
+  // row renders them.
+  albumId?: string | null;
+  artistId?: string | null;
   title?: string | null;
   artist?: string | null;
   album?: string | null;
@@ -840,6 +846,10 @@ router.delete('/dj/queue/:trackId', requireAdmin, async (req, res) => {
 // carries none).
 function toAdminRow(s: AdminSong) {
   const tag = library.get(s.id);
+  // Matched against the SOURCE song, not the row below: the row drops
+  // albumId/artistId, which would demote an album/artist block to its
+  // normalised-name fallback.
+  const blocked = blocklist.matchOf(s);
   return {
     id: s.id,
     title: s.title,
@@ -866,6 +876,10 @@ function toAdminRow(s: AdminSong) {
     paceMean: tag?.paceMean ?? null,
     // Same derivation as /library/browse: [] = analysed, no vocals detected.
     instrumental: tag?.vocalRanges == null ? null : tag.vocalRanges.length === 0,
+    // Which never-play entry keeps this row off the air, or null. /dj/search
+    // returns blocked rows on purpose (the operator has to be able to find one
+    // to review it) — this is what tells them apart on screen.
+    blockedBy: blocked ? blocklist.refOf(blocked) : null,
   };
 }
 

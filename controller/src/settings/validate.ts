@@ -31,6 +31,7 @@ import {
   SHOW_ENERGY,
   SHOW_FILTER_VALUES_MAX,
   SHOW_MOODS,
+  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -275,7 +276,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     const name = String(item.name ?? '').trim();
     if (name.length < 1 || name.length > 60) throw new Error(`shows[${i}].name must be 1-60 chars`);
     const topic = String(item.topic ?? '').trim();
-    if (topic.length > 1000) throw new Error(`shows[${i}].topic must be 0-1000 chars`);
+    if (topic.length > SHOW_TOPIC_MAX) throw new Error(`shows[${i}].topic must be 0-${SHOW_TOPIC_MAX} chars`);
     if (!personaIds.includes(item.personaId)) {
       throw new Error(`shows[${i}].personaId must reference an existing persona`);
     }

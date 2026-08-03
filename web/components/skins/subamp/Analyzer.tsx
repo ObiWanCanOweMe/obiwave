@@ -21,7 +21,12 @@ function themeColors(): { bar: string; cap: string; idle: string } {
   const cs = getComputedStyle(document.documentElement);
   return {
     bar: cs.getPropertyValue('--ink').trim() || '#ece6dc',
-    cap: cs.getPropertyValue('--accent').trim() || '#d94b2a',
+    // Peak caps ride the second ink — a Winamp-style two-color analyzer on
+    // themes that set a real --accent-2; falls through to accent elsewhere.
+    cap:
+      cs.getPropertyValue('--accent-2').trim() ||
+      cs.getPropertyValue('--accent').trim() ||
+      '#d94b2a',
     idle: cs.getPropertyValue('--muted').trim() || '#8a8278',
   };
 }

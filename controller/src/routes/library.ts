@@ -6,6 +6,7 @@ import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import * as library from '../music/library.js';
 import * as blocklist from '../music/blocklist.js';
+import * as likes from '../broadcast/likes.js';
 import * as db from '../music/library-db.js';
 import * as analyzer from '../music/analyzer.js';
 import * as coverage from '../music/library-coverage.js';
@@ -14,6 +15,7 @@ import * as lastfm from '../music/lastfm.js';
 import * as musicbrainz from '../music/musicbrainz.js';
 import * as settings from '../settings.js';
 import * as embeddings from '../music/embeddings.js';
+import { resolveEraYear } from '../music/show-filter.js';
 import { buildGenreSuggest } from '../music/genre-suggest.js';
 import { tagBatch, taggerBatchSystem } from '../music/tagger-core.js';
 import { promptVocabHash } from '../music/embeddings.js';
@@ -73,7 +75,9 @@ router.get('/library/browse', requireAdmin, async (req, res) => {
     // is clean without requiring a re-tag.
     const cleanRows = result.rows.filter((row) => !subsonic.isStationArchive(row));
     const removed = result.rows.length - cleanRows.length;
-    result.rows = cleanRows;
+    // Blocked rows STAY (the library browser shows the library) — they just
+    // carry the entry that blocks them, so the UI can mark and unblock them.
+    result.rows = blocklist.annotate(cleanRows);
     result.total = Math.max(0, result.total - removed);
     const stats = library.stats();
     res.json({
@@ -105,6 +109,87 @@ router.get('/library/history', requireAdmin, async (req, res) => {
     const offset = Math.max(parseIntSafe(req.query?.offset, 0), 0);
     const { total, rows } = db.listPlays({ limit, offset });
     res.json({ total, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /library/liked — the Liked mode of the admin Library's Tracks tab.
+// Query: limit=50 offset=0 sort=recent|count|artist q=foo
+//
+// Sourced from the likes store rather than library.db, then enriched from the
+// index where a row exists. That order matters: a liked track may never have
+// been walked or tagged (listeners heart whatever is on air), and the Browse
+// tab's tagged-only gate would hide exactly those. The stored snapshot is
+// always present, so every liked track renders either way.
+//
+// It lives here rather than in routes/likes.ts because it does the library-db
+// enrichment and returns the row shape the library table already renders.
+// ---------------------------------------------------------------------------
+router.get('/library/liked', requireAdmin, async (req, res) => {
+  try {
+    await library.load();
+    await likes.load();
+    const limit = Math.min(Math.max(parseIntSafe(req.query?.limit, 50), 1), 200);
+    const offset = Math.max(parseIntSafe(req.query?.offset, 0), 0);
+    const sort = req.query?.sort === 'count' || req.query?.sort === 'artist'
+      ? req.query.sort
+      : 'recent';
+    const q = (typeof req.query?.q === 'string' ? req.query.q : '').trim().toLowerCase();
+
+    const rows = likes.likedSongs().map((entry) => {
+      let rec: any = null;
+      try { rec = db.getTrack(entry.songId); } catch { /* index unavailable */ }
+      const snap = entry.track;
+      return {
+        id: entry.songId,
+        title: rec?.title ?? snap.title ?? null,
+        artist: rec?.artist ?? snap.artist ?? null,
+        album: rec?.album ?? snap.album ?? null,
+        year: rec?.year ?? snap.year ?? null,
+        genre: rec?.genre ?? snap.genre ?? null,
+        // The snapshot names it `duration`, library.db `durationSec`; the table
+        // reads `duration`, so normalise here rather than at the call site.
+        duration: snap.duration ?? rec?.durationSec ?? null,
+        moods: rec?.moods ?? [],
+        energy: rec?.energy ?? null,
+        source: rec?.source ?? null,
+        taggedAt: rec?.taggedAt ?? null,
+        bpm: rec?.bpm ?? null,
+        musicalKey: rec?.musicalKey ?? null,
+        loudnessLufs: rec?.loudnessLufs ?? null,
+        instrumental: rec?.vocalRanges == null ? null : rec.vocalRanges.length === 0,
+        likeCount: entry.count,
+        likedByOperator: entry.operator,
+        lastLikedAt: entry.lastLikedAt,
+      };
+    });
+
+    // Same treatment Browse gives its rows: a blocked track still LISTS (a like
+    // is a like even if the operator has since banned the track), it just
+    // carries the entry that blocks it so the row can show the never-play badge
+    // and offer the one-click lift.
+    const annotated = blocklist.annotate(
+      rows.filter((row) => !subsonic.isStationArchive(row)),
+    );
+
+    const matched = q
+      ? annotated.filter((r) =>
+        `${r.title ?? ''} ${r.artist ?? ''} ${r.album ?? ''}`.toLowerCase().includes(q))
+      : annotated;
+
+    const byName = (r: typeof annotated[number]) =>
+      `${(r.artist ?? '').toLowerCase()} ${(r.album ?? '').toLowerCase()} ${(r.title ?? '').toLowerCase()}`;
+    matched.sort((a, b) => {
+      if (sort === 'artist') return byName(a).localeCompare(byName(b));
+      // Equal counts tie-break on recency so the order is stable rather than
+      // whatever insertion order the store happened to hold.
+      if (sort === 'count' && b.likeCount !== a.likeCount) return b.likeCount - a.likeCount;
+      return b.lastLikedAt.localeCompare(a.lastLikedAt);
+    });
+
+    res.json({ total: matched.length, rows: matched.slice(offset, offset + limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -156,7 +241,7 @@ router.get('/library/search-sound', requireAdmin, async (req, res) => {
         instrumental: t.vocalRanges == null ? null : t.vocalRanges.length === 0,
         similarity: typeof t._similarity === 'number' ? t._similarity : null,
       }));
-    res.json({ results });
+    res.json({ results: blocklist.annotate(results) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -490,7 +575,7 @@ router.get('/library/untagged', requireAdmin, async (req, res) => {
       albumOffset += albums.length;
       songIndex = 0;
     }
-    res.json({ rows, nextCursor });
+    res.json({ rows: blocklist.annotate(rows), nextCursor });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -684,6 +769,11 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
     // 3. Re-embed (best-effort — if embeddings are off or fail, fall through).
     if (embedCfg.enabled !== false && embeddings.isAvailable()) {
       try {
+        // Same acoustics + era inputs as the bulk path (#1246), read back from
+        // the row this route just upserted — a single-track retag must produce
+        // the SAME text as phaseEmbed would, or this one track drifts in the
+        // KNN space exactly like a task-prefix mismatch would.
+        const rec = db.getTrack(id);
         const text = embeddings.formatTrackText(
           {
             title: song.title,
@@ -691,8 +781,17 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
             album: song.album,
             year: song.year ?? null,
             genres: subsonic.songGenres(song),
+            eraYear: resolveEraYear(
+              rec?.year ?? song.year, rec?.originalYear ?? null, rec?.isCompilation ?? null,
+            ),
           },
           { lastfmTags, lyricExcerpt },
+          rec
+            ? {
+                bpm: rec.bpm, musicalKey: rec.musicalKey, audioMoods: rec.audioMoods,
+                vocalRanges: rec.vocalRanges,
+              }
+            : null,
         );
         // Document embed — must match the task-prefix mode the rest of the
         // index was built in, or this one track drifts in the KNN space.
@@ -908,6 +1007,69 @@ router.delete('/library/blocklist/:type/:id', requireAdmin, async (req, res) => 
     queue.log('error', `/library/blocklist delete failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Bulk unblock — body { entries: [{type, id}, …] }. One rewrite and one persist
+// (blocklist.removeMany); firing N single DELETEs concurrently would race on the
+// async write and could land the file in a stale state. Reports how many came
+// off and which were already gone, so a partially-stale selection is honest
+// rather than a 404 for the whole batch.
+const BULK_UNBLOCK_MAX = 500;
+
+router.delete('/library/blocklist', requireAdmin, async (req, res) => {
+  const raw = req.body?.entries;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return res.status(400).json({ error: 'entries must be a non-empty array of { type, id }' });
+  }
+  if (raw.length > BULK_UNBLOCK_MAX) {
+    return res.status(400).json({ error: `at most ${BULK_UNBLOCK_MAX} entries per call` });
+  }
+  const targets: Array<{ type: blocklist.BlockType; id: string }> = [];
+  for (const e of raw) {
+    const type = e?.type;
+    const id = e?.id;
+    if (!['track', 'album', 'artist'].includes(type) || typeof id !== 'string' || !id) {
+      return res.status(400).json({ error: 'each entry needs a valid type and id' });
+    }
+    targets.push({ type, id });
+  }
+  try {
+    const { removed, missing } = await blocklist.removeMany(targets);
+    if (removed) {
+      queue.log('blocked', `${removed} entr${removed === 1 ? 'y' : 'ies'} removed from the never-play blocklist`);
+    }
+    res.json({ removed, missing });
+  } catch (err) {
+    queue.log('error', `/library/blocklist bulk delete failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /library/blocklist/check — body { tracks: [{id, artist?, album?,
+// albumId?, artistId?}, …] } → { blocked: { <id>: BlockRef | null } }.
+//
+// Re-marks rows the admin already has on screen after a block or unblock.
+// Refetching the tab instead would lose pagination and re-hit Navidrome on the
+// Search tab; matching client-side would mean a second copy of the
+// normalised-name rules, free to drift from the one in music/blocklist.ts.
+const BLOCK_CHECK_MAX = 500;
+
+router.post('/library/blocklist/check', requireAdmin, (req, res) => {
+  const rows = req.body?.tracks;
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ error: 'tracks must be an array' });
+  }
+  if (rows.length > BLOCK_CHECK_MAX) {
+    return res.status(400).json({ error: `at most ${BLOCK_CHECK_MAX} tracks per call` });
+  }
+  const blocked: Record<string, blocklist.BlockRef | null> = {};
+  for (const row of rows) {
+    const id = row?.id;
+    if (typeof id !== 'string' || !id) continue;
+    const hit = blocklist.matchOf(row);
+    blocked[id] = hit ? blocklist.refOf(hit) : null;
+  }
+  res.json({ blocked });
 });
 
 // ---------------------------------------------------------------------------

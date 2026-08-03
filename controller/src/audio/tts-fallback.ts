@@ -1,3 +1,13 @@
+// Expressive engines render square-bracket directions; fallback engines speak
+// them literally. Keep the primary text untouched and sanitize only its rescue.
+export function fallbackTextFor(requested: string, cloudCueFamily: string | null, text: string): string {
+  const expressiveRequest = requested === 'chatterbox'
+    || cloudCueFamily === 'fish-s21'
+    || cloudCueFamily === 'elevenlabs-v3';
+  if (!expressiveRequest || !text) return text;
+  return text.replace(/\s*\[[^\]\r\n]{1,80}\]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 // Pure ordering logic for speak()'s runtime rescue chain — extracted from
 // tts.ts so scripts/tts-fallback.test.ts can pin it without dragging in the
 // engine modules (settings reads, venv existsSyncs, live /health probes).

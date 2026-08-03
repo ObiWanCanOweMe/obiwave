@@ -155,12 +155,12 @@ export default function Themes() {
         <ul className="bs-list">
           <li><strong>Classic Light</strong> &mdash; newsprint cream with hot vermilion ink. The default.</li>
           <li><strong>Classic Dark</strong> &mdash; deep charcoal newsprint with the same vermilion accent.</li>
-          <li><strong>Sunset</strong> &mdash; warm dusk: plum paper, peach ink, vermilion-magenta accent.</li>
-          <li><strong>Vinyl</strong> &mdash; sepia &ldquo;warm record sleeve&rdquo; with mustard accent.</li>
-          <li><strong>Cyberpunk</strong> &mdash; near-black paper, cyan ink, hot pink accent.</li>
-          <li><strong>Lab</strong> &mdash; flat off-white paper, white lifted cards, crisp black hairlines, one electric accent, dot-matrix display + grain.</li>
-          <li><strong>Press</strong> &mdash; stark broadsheet: bright white stock, black ink and rules, a red headline accent, Instrument Serif display.</li>
-          <li><strong>Neon</strong> &mdash; after-dark arcade: ink-black base, twin magenta + cyan accents, grotesque display, faint grain.</li>
+          <li><strong>Vinyl</strong> &mdash; warm record sleeve: sepia paper, deep brown ink, mustard accent.</li>
+          <li><strong>Cyberpunk</strong> &mdash; near-black neon: graphite base, cyan ink, hot pink accent.</li>
+          <li><strong>Blueprint</strong> &mdash; drafting-table cobalt: chalk-white linework, a bright azure accent.</li>
+          <li><strong>Flare</strong> &mdash; hazard-orange flood: a full high-vis field, near-black ink, ultra-bold grotesque.</li>
+          <li><strong>Recon</strong> &mdash; field-ops poster: warm khaki stock, a hot-orange grid and accent.</li>
+          <li><strong>Signal</strong> &mdash; concrete monochrome: mid-gray press field, near-black ink. No colour, all signal.</li>
         </ul>
         <p className="text-muted">
           The palette recolours both the player <em>and</em> the admin console,
@@ -213,20 +213,22 @@ export default function Themes() {
 
       <section className="bs-section">
         <p className="bs-eyebrow">THE TOKEN MAP</p>
-        <h2>Seven knobs, no surprises.</h2>
+        <h2>Sixteen knobs, no surprises.</h2>
         <p>
           A theme writes a fixed set of CSS variables onto <code className="bs-code-inline">&lt;html&gt;</code>.
           Any other key in your JSON is silently dropped, so a malformed theme can&rsquo;t
-          inject styles or break out into other parts of the page.
+          inject styles or break out into other parts of the page. Only the first seven
+          are essential &mdash; every token after them derives a sensible fallback from
+          your <code className="bs-code-inline">--bg</code>/<code className="bs-code-inline">--ink</code>/
+          <code className="bs-code-inline">--accent</code> when omitted.
         </p>
         <ul className="bs-list">
-          <li><code className="bs-code-inline">--bg</code> &mdash; page background (&ldquo;paper&rdquo;).</li>
-          <li><code className="bs-code-inline">--ink</code> &mdash; main text colour.</li>
-          <li><code className="bs-code-inline">--muted</code> &mdash; secondary text, captions, dividers.</li>
-          <li><code className="bs-code-inline">--accent</code> &mdash; the station&rsquo;s accent (active states, on-air pill, focus rings).</li>
-          <li><code className="bs-code-inline">--overlay</code> &mdash; translucent wash used for hover and modal scrims.</li>
-          <li><code className="bs-code-inline">--soft-border</code> &mdash; the hairline between sections.</li>
-          <li><code className="bs-code-inline">--field</code> &mdash; input/textarea fill.</li>
+          <li><strong>Surface</strong> &mdash; <code className="bs-code-inline">--bg</code> page background (&ldquo;paper&rdquo;), <code className="bs-code-inline">--surface</code> raised card fill, <code className="bs-code-inline">--surface-border</code> its border, <code className="bs-code-inline">--field</code> input/textarea fill.</li>
+          <li><strong>Text</strong> &mdash; <code className="bs-code-inline">--ink</code> main text, <code className="bs-code-inline">--muted</code> secondary text, <code className="bs-code-inline">--ink-faint</code> the third, faintest rung.</li>
+          <li><strong>Accent</strong> &mdash; <code className="bs-code-inline">--accent</code> the station&rsquo;s accent (active states, on-air pill, focus rings), <code className="bs-code-inline">--accent-2</code> a genuinely different second ink (charts, secondary marks), <code className="bs-code-inline">--accent-soft</code> the accent tinted well into the paper.</li>
+          <li><strong>Structure</strong> &mdash; <code className="bs-code-inline">--line</code> crisp hairline, <code className="bs-code-inline">--soft-border</code> the softer hairline between sections, <code className="bs-code-inline">--overlay</code> translucent wash for hover and modal scrims.</li>
+          <li><strong>Type</strong> &mdash; <code className="bs-code-inline">--display-font</code> / <code className="bs-code-inline">--mono-font</code>, each a curated id (not a free font string).</li>
+          <li><strong>Texture</strong> &mdash; <code className="bs-code-inline">--grain</code>, the paper-grain strength, 0&ndash;1.</li>
         </ul>
         <p>
           Any CSS colour value works: hex, <code className="bs-code-inline">rgb()</code>,{' '}
@@ -235,7 +237,7 @@ export default function Themes() {
           tells the rest of the stylesheet whether to treat the theme as light or dark;
           it controls the paper-grain blend and the few shadcn rules that still key off{' '}
           <code className="bs-code-inline">data-theme</code>. Because skins consume these
-          same seven tokens, a custom theme retints every skin at once.
+          same tokens, a custom theme retints every skin at once.
         </p>
       </section>
 

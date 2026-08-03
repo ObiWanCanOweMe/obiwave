@@ -14,7 +14,8 @@ import { logEvent } from '../observability/events.js';
 import * as settings from '../settings.js';
 import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
-import { artistKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
+import { mapPool } from '../util/async-pool.js';
+import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type YearRange } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import * as likes from '../broadcast/likes.js';
@@ -79,6 +80,10 @@ const CAP_SHOW_GENRE_STRICT = 24;
 const CAP_SHOW_PLAYLIST = 12;
 const CAP_SHOW_PLAYLIST_STRICT = 24;
 const SHOW_NARROW_FACTOR = 0.5;
+// In-flight Navidrome queries when fanning the show-genre source out across a
+// multi-genre show (up to SHOW_FILTER_VALUES_MAX values × 2 fetches each).
+// Small on purpose — see the fan-out below.
+const SHOW_GENRE_FETCH_CONCURRENCY = 4;
 
 // TTL cache for sources that don't change between picks. Without this, every
 // pick would re-fetch playlists, recent/frequent album lists and re-walk their
@@ -342,22 +347,38 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
         }
       }
       const span = eraSpan(showFilter!.eras);
-      const collected: Candidate[] = [];
       const randomSize = strict ? 60 : 40;
       const genreSetSize = strict ? 100 : 60;
-      for (const genreName of genreNames.length ? genreNames : [undefined]) {
-        collected.push(...await subsonic.getRandomSongs({
-          size: Math.ceil(randomSize / Math.max(1, genreNames.length)),
-          genre: genreName,
-          fromYear: span.fromYear ?? undefined,
-          toYear: span.toYear ?? undefined,
-        }));
+      // Two fetches per genre. The size budgets DIVIDE, so the collected total
+      // is the same whether the show pins 1 genre or 15 — but the round trips
+      // don't, which is why they run through mapPool instead of a sequential
+      // for-await (a 15-genre strict show would otherwise serialise 30 calls
+      // into every pick). Bounded concurrency, not Promise.all: Navidrome is
+      // typically a home server and 30 simultaneous queries is a worse
+      // neighbour than four at a time. Each genre catches its OWN failure so
+      // one flaky fetch degrades that genre instead of losing the whole
+      // source — the show's dominant contributor — for this pick.
+      const targets: (string | undefined)[] = genreNames.length ? genreNames : [undefined];
+      const perGenre = await mapPool(targets, SHOW_GENRE_FETCH_CONCURRENCY, async (genreName) => {
+        const got: Candidate[] = [];
+        try {
+          got.push(...await subsonic.getRandomSongs({
+            size: Math.ceil(randomSize / Math.max(1, genreNames.length)),
+            genre: genreName,
+            fromYear: span.fromYear ?? undefined,
+            toYear: span.toYear ?? undefined,
+          }));
+        } catch {}
         if (genreName) {
-          const g = await subsonic.getSongsByGenre(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
-          const ranged = inYearRange(g, showFilter!.eras);
-          collected.push(...(ranged.length ? ranged : g));
+          try {
+            const g = await subsonic.getSongsByGenre(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
+            const ranged = inYearRange(g, showFilter!.eras);
+            got.push(...(ranged.length ? ranged : g));
+          } catch {}
         }
-      }
+        return got;
+      });
+      const collected: Candidate[] = perGenre.flat();
       // The random fetch used the coarse era envelope — tighten to the exact
       // window union here (never-starve: keep the envelope set if the exact
       // union would empty the source).
@@ -659,7 +680,9 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   }
   const blockedArtists = new Set<string>();
   if (opts.avoidArtist) {
-    const key = artistKey({ artist: opts.avoidArtist });
+    // Lead-artist key (#1251): the caller is avoiding the act on air, so a
+    // collaboration they front is the same repeat with a longer name.
+    const key = artistRootKey({ artist: opts.avoidArtist });
     if (key) blockedArtists.add(key);
   }
   const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentArtists, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists);

@@ -223,20 +223,37 @@ export function voiceForSave(engine: string, voice: string): string {
   return voice; // piper ignores voice; cloud carries its own
 }
 
-// For a cloud persona: why (if at all) its cloud voice won't actually play —
-// its provider's API key is missing. Returns a human sentence, or null when
-// the cloud voice is good to go. A persona can look fully configured here yet
-// still fall back silently; this surfaces that gap before it airs.
+// For a cloud persona: why (if at all) its cloud voice won't actually play.
+// Prefer the controller's authoritative provider-aware readiness contract: it
+// includes both credentials and the station-wide Cloud enable switch. Fall
+// back to env presence only against an older controller without that contract.
 export function cloudIssue(persona: Persona | undefined, data: SettingsResponse | null): string | null {
   if (persona?.tts?.engine !== 'cloud') return null;
-  // openai-compatible has no env-key convention — the persona's baseUrl +
-  // model live globally on settings.tts.cloud and are validated there. Trust
-  // that the server is configured if the persona picked this provider.
-  if (persona.tts.cloudProvider === 'openai-compatible') return null;
-  const envKey = persona.tts.cloudProvider === 'elevenlabs'
-    ? 'ELEVENLABS_API_KEY' : 'OPENAI_API_KEY';
+  const provider = persona.tts.cloudProvider;
+  const readiness = data?.tts?.available?.cloudByProvider;
+  if (readiness && provider in readiness) {
+    if (readiness[provider] === false) {
+      const label = provider === 'fish-audio'
+        ? 'Fish Audio'
+        : provider === 'elevenlabs'
+          ? 'ElevenLabs'
+          : provider === 'openai'
+            ? 'OpenAI'
+            : provider;
+      return `${label} is unavailable. Enable Cloud TTS and configure its credentials in Settings.`;
+    }
+    return null;
+  }
+  // openai-compatible has no env-key convention — its URL, model, and optional
+  // bearer live in tts.cloud settings rather than state/secrets.env.
+  if (provider === 'openai-compatible') return null;
+  const envKey = provider === 'elevenlabs'
+    ? 'ELEVENLABS_API_KEY'
+    : provider === 'fish-audio'
+      ? 'FISH_API_KEY'
+      : 'OPENAI_API_KEY';
   if (data?.env && !data.env[envKey]) {
-    return `${envKey} is not set in .env.`;
+    return `${envKey} is not configured in Settings.`;
   }
   return null;
 }

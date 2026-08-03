@@ -8,8 +8,21 @@ import type { RefObject } from 'react';
 import { useEffect, useState } from 'react';
 import { ADMIN_API_URL } from '../../../lib/adminAuth';
 import { cn } from '../../../lib/cn';
+import type { BlockRef, Track } from './types';
 
-import type { Track } from './types';
+// ---------------------------------------------------------------------------
+// never-play wording, shared by the row badge, the row action and its tooltip
+// so the operator reads the same scope word everywhere.
+// ---------------------------------------------------------------------------
+export function blockedByLabel(ref: BlockRef): string {
+  return ref.name ? `${ref.type} "${ref.name}"` : `this ${ref.type}`;
+}
+
+// Spells out the blast radius: unblocking an artist entry lets their whole
+// catalogue back on air, not just the row that was clicked.
+export function unblockLabel(ref: BlockRef): string {
+  return `Unblock ${blockedByLabel(ref)}`;
+}
 
 export function fmtDuration(sec?: number | null): string | null {
   if (sec == null || !Number.isFinite(sec) || sec <= 0) return null;

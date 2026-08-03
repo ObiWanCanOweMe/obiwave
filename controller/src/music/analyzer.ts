@@ -661,6 +661,16 @@ function localEmbedTexts(texts: string[], timeoutMs: number): Promise<number[][]
   });
 }
 
+// A deadline that expired mid-request, as opposed to a refused connection or a
+// capability 404/500 (which fail fast and mean "not available", not "still
+// working"). fetchWithTimeout aborts with a DOMException named 'AbortError';
+// the local stdio path rejects with a "timed out" Error.
+function isTimeoutError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  const message = (err as { message?: unknown } | null)?.message;
+  return name === 'AbortError' || (typeof message === 'string' && message.includes('timed out'));
+}
+
 // Embed a batch of texts through the CLAP TEXT tower — 512-d L2-normalised
 // vectors in the SAME space as the stored track audio vectors, so cosine
 // against them is meaningful (CLAP is contrastive audio–text). Used for
@@ -669,17 +679,28 @@ function localEmbedTexts(texts: string[], timeoutMs: number): Promise<number[][]
 // sidecar without /embed-text, worker without torch) — callers degrade to
 // their non-text behaviour, never throw. `timeoutMs` lets interactive callers
 // (a picker tool mid-pick) use a shorter deadline than a bulk pass.
+//
+// One retry on TIMEOUT only: since the idle model release also runs on CPU
+// (#1204), an interactive call can land on a cold worker whose CLAP reload
+// (seconds on a typical box, longer on the small hosts the release exists
+// for) eats the whole deadline. The backend keeps loading after we stop
+// waiting — the request is already queued behind its single-flight lock — so
+// a second wait usually lands on a warm model instead of failing the search.
+// Non-timeout failures (refused, 404, 500) stay single-shot: they're fast,
+// definitive "not available" signals. Bulk callers whose deadline is already
+// generous pass `coldRetry: false` — a 10-minute timeout means real trouble,
+// not a cold model.
 export async function embedTexts(
   texts: string[],
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; coldRetry?: boolean } = {},
 ): Promise<number[][] | null> {
   if (texts.length === 0) return [];
   const timeoutMs = opts.timeoutMs ?? config.analyzer.requestTimeoutMs;
   const backend = await resolveBackend();
   if (!backend) return null;
-  if (backend === 'sidecar') {
-    if (_sidecarTextCapable === false) return null;
-    try {
+  if (backend === 'sidecar' && _sidecarTextCapable === false) return null;
+  const attempt = async (): Promise<number[][] | null> => {
+    if (backend === 'sidecar') {
       const res = await fetchWithTimeout(`${_sidecarBase}/embed-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -692,15 +713,19 @@ export async function embedTexts(
       if (!res.ok) return null;
       const body = (await res.json()) as { ok?: boolean; embeddings?: unknown };
       return body?.ok ? parseVectors(body.embeddings, texts.length) : null;
+    }
+    if (!ready) await startWorker();
+    return await localEmbedTexts(texts, timeoutMs);
+  };
+  try {
+    return await attempt();
+  } catch (err) {
+    if (opts.coldRetry === false || !isTimeoutError(err)) return null;
+    try {
+      return await attempt();
     } catch {
       return null;
     }
-  }
-  try {
-    if (!ready) await startWorker();
-    return await localEmbedTexts(texts, timeoutMs);
-  } catch {
-    return null;
   }
 }
 
