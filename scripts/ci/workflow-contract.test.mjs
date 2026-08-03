@@ -13,6 +13,10 @@ const verifyCliAssets = await readFile(
   new URL('../../.github/workflows/verify-cli-assets.yml', import.meta.url),
   'utf8',
 );
+const analyzerPythonWrapper = await readFile(
+  new URL('../../controller/scripts/analyzer-python.test.ts', import.meta.url),
+  'utf8',
+);
 const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
 
 test('official JavaScript actions use the Node 24 runtime', async () => {
@@ -40,6 +44,22 @@ test('CI remains unfiltered and reusable while sparing tag runs from cancellatio
 test('consolidated CI verifies the generated theme-token mirror', () => {
   assert.match(ci, /if: matrix\.package == 'controller'[\s\S]*npm run gen:themes/);
   assert.match(ci, /git diff --exit-code \.\.\/web\/lib\/theme-tokens\.generated\.ts/);
+});
+
+test('controller quality provisions the pinned NumPy prerequisite for vocal-gate tests', () => {
+  const dependencyStep = ci.slice(
+    ci.indexOf('      - name: Install analyzer Python test dependencies'),
+    ci.indexOf('      - run: ${{ matrix.command }}'),
+  );
+  assert.ok(dependencyStep, 'missing analyzer Python dependency step before the quality command');
+  assert.match(dependencyStep, /if: matrix\.package == 'controller'/);
+  assert.match(dependencyStep, /python3 -m venv \.venv-analyzer-tests/);
+  assert.match(
+    dependencyStep,
+    /\.venv-analyzer-tests\/bin\/python -m pip install .*numpy==2\.2\.6/,
+  );
+  assert.match(dependencyStep, /\.venv-analyzer-tests\/bin.*GITHUB_PATH/);
+  assert.match(analyzerPythonWrapper, /'vocal_gate_test\.py'/, 'vocal gate must remain in npm test');
 });
 
 test('app quality matrix runs the native stream-buffer contract', () => {

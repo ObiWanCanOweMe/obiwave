@@ -50,6 +50,13 @@ jobs:
           npm run gen:themes
           git diff --exit-code ../web/lib/theme-tokens.generated.ts
 
+      - name: Install analyzer Python test dependencies
+        if: matrix.package == 'controller'
+        run: |
+          python3 -m venv .venv-analyzer-tests
+          .venv-analyzer-tests/bin/python -m pip install --disable-pip-version-check --no-cache-dir numpy==2.2.6
+          echo "$PWD/.venv-analyzer-tests/bin" >> "$GITHUB_PATH"
+
       # mcp-subwave imports shared MCP sources from controller/src/mcp/**.
       # Install their dependencies so TypeScript can resolve those imports.
       - name: Install controller deps (mcp-subwave cross-package import)

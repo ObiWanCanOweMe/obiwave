@@ -1,10 +1,9 @@
-// Shim that folds the pure-stdlib Python suites into `npm test`'s *.test.ts
+// Shim that folds the lightweight Python suites into `npm test`'s *.test.ts
 // auto-discovery, so they actually run with the rest of the suite instead of
-// only when someone remembers `python3 scripts/<file>.py`. Each suite is
-// deliberately dependency-free (no torch / demucs / librosa / audio), so a
-// plain python3 is the only requirement; a box without one skips cleanly
-// (exit 0) rather than failing the suite — CI runs lint only, so this gate is
-// for contributors' own `npm test` runs.
+// only when someone remembers `python3 scripts/<file>.py`. They deliberately
+// avoid torch / demucs / librosa / real audio; vocal_gate_test.py needs NumPy,
+// which the controller-quality CI job provisions in an isolated venv. A box
+// without python3 skips cleanly (exit 0) rather than failing the suite.
 
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
