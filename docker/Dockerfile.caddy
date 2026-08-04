@@ -1,4 +1,20 @@
+FROM golang:1.26.5-alpine AS caddy-build
+
+# Caddy 2.11.4 is the current stable release, but the upstream image was built
+# before fixed Go/x-text/gRPC releases landed. Rebuild the stock command with
+# those scanner-backed versions until the official image catches up.
+WORKDIR /src
+RUN go mod init getsubwave.com/caddy-build \
+ && go get github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+ && go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1 \
+ && CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4" \
+      -o /usr/bin/caddy github.com/caddyserver/caddy/v2/cmd/caddy
+
 FROM caddy:2-alpine
+
+RUN apk upgrade --no-cache
+COPY --from=caddy-build /usr/bin/caddy /usr/bin/caddy
 
 # Baked in so prod compose needs no bind mount or clone. To customise, rebuild
 # from a fork or mount your own file over /etc/caddy/Caddyfile.

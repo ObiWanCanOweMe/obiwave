@@ -2,12 +2,13 @@
 // standalone script (music/tag-library.js) spawned as a child process; this
 // module holds the live state shared between the routes that start it
 // (/tag-library) and the ones that report on it (/settings).
-import { spawn, ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { queue } from './queue.js';
 import * as coverage from '../music/library-coverage.js';
 import { syncAllAfterTag } from '../music/playlist-sync.js';
 import { PROGRESS_PREFIX, EVENT_PREFIX, type TaggerProgress, type TaggerEvent } from '../music/tagger-progress.js';
 import { writePidfile, clearPidfile, readPidfile, isPidAlive, MANAGED_ENV } from '../music/tagger-lock.js';
+import { spawnControllerTsx } from '../util/tsx-child.js';
 
 type TaggerMode = 'tag' | 'analyze' | 'reconcile';
 
@@ -218,19 +219,37 @@ export function startReconcile() {
 function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   const label = mode === 'tag' ? 'tagger' : mode === 'analyze' ? 'analyzer' : 'reconcile';
   // detached:true makes the child a process-GROUP leader, so stopTagger can
-  // signal the whole tree at once (npx → npm → sh → node tsx → loader). Without
-  // it, child.pid is just the npx wrapper — SIGTERM'ing it killed the wrapper
-  // and ORPHANED the real worker, which kept tagging (the broken-Stop bug). We
-  // keep the stdio pipes and never unref(), so capture + exit tracking still work.
+  // signal the whole tsx worker tree at once. We keep the stdio pipes and never
+  // unref(), so capture + exit tracking still work.
   // MANAGED_ENV tells the CLI it was spawned by us so it won't fight over the
-  // pidfile we write below (the file names the wrapper — the CLI's own ancestor).
-  const child = spawn('npx', ['tsx', ...args], {
-    cwd: '/app',
-    detached: true,
-    env: { ...process.env, [MANAGED_ENV]: '1' },
-  });
-  activeChild = child;
+  // pidfile we write below (the file names the CLI's own ancestor).
   const startedAt = new Date().toISOString();
+  const child = spawnControllerTsx(
+    args,
+    {
+      detached: true,
+      env: { ...process.env, [MANAGED_ENV]: '1' },
+    },
+    (error) => {
+      tagger.running = false;
+      tagger.pid = null;
+      if (activeChild === child) activeChild = null;
+      clearPidfile();
+      const message = `${label} could not start: ${error.message}`;
+      tagger.lastLog.push(`[error] ${message}`);
+      tagger.lastRun = {
+        mode,
+        outcome: 'failed',
+        exitCode: null,
+        signal: null,
+        error: message,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      };
+      queue.log('error', `${label} spawn failed: ${error.message}`);
+    },
+  );
+  activeChild = child;
   tagger.running = true;
   tagger.startedAt = startedAt;
   tagger.pid = child.pid ?? null;
@@ -360,12 +379,12 @@ export function stopTagger(): { stopped: boolean } {
   try {
     if (pid) {
       // Negative PID → signal the whole process GROUP (the child is its leader,
-      // detached:true above), so the actual node/tsx worker dies, not just the
-      // npx wrapper. Fall back to the lone process if the group send fails.
+      // detached:true above), so the actual node/tsx worker tree dies. Fall back
+      // to the lone process if the group send fails.
       try { process.kill(-pid, 'SIGTERM'); }
       catch { activeChild.kill('SIGTERM'); }
       // Escalate to SIGKILL on the group if it's still alive after 5s — the
-      // npm/sh wrappers and the tsx loader don't always forward SIGTERM.
+      // The tsx loader doesn't always forward SIGTERM.
       setTimeout(() => {
         if (tagger.running) {
           try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }

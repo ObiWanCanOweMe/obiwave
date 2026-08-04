@@ -15,7 +15,7 @@
 // moment someone used the old route. Durations are memoised on size+mtime
 // instead, which covers hand-dropped files too.
 
-import { readdir, stat, unlink, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readdir, stat, unlink, writeFile, mkdir, link } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -75,6 +75,17 @@ export function voiceFileName(name: string): string {
   return `${slug}.wav`;
 }
 
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string';
+}
+
+function duplicateVoiceError(file: string): NodeJS.ErrnoException {
+  return Object.assign(
+    new Error(`a voice named "${file}" already exists — delete it first`),
+    { code: 'EEXIST' },
+  );
+}
+
 async function scanDir(dir: string, legacy: boolean): Promise<VoiceFile[]> {
   let entries: string[];
   try {
@@ -84,8 +95,8 @@ async function scanDir(dir: string, legacy: boolean): Promise<VoiceFile[]> {
   }
   const out: VoiceFile[] = [];
   for (const file of entries) {
-    // Imports transcode through a hidden sibling and atomically rename it on
-    // success. Never expose that in-progress file to the voice catalog.
+    // Imports transcode through a hidden sibling and atomically claim the
+    // canonical name on success. Never expose the in-progress file.
     if (file.startsWith('.')) continue;
     if (!file.toLowerCase().endsWith('.wav')) continue;
     const p = path.join(dir, file);
@@ -192,7 +203,7 @@ export async function importVoice(
   // Refuse a clash rather than clobber: the filename IS the reference every
   // persona holds, so overwriting would silently swap a persona's voice.
   if (await resolve(file)) {
-    throw new Error(`a voice named "${file}" already exists — delete it first`);
+    throw duplicateVoiceError(file);
   }
 
   const dir = config.voices.dir;
@@ -216,7 +227,13 @@ export async function importVoice(
         + ' — convert the file first, or run the Docker image (it ships ffmpeg)',
       );
     }
-    await rename(tempPath, outPath);
+    try {
+      await link(tempPath, outPath);
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'EEXIST') throw duplicateVoiceError(file);
+      throw error;
+    }
+    await unlink(tempPath);
   } catch (err) {
     await unlink(tempPath).catch(() => {});
     throw err;

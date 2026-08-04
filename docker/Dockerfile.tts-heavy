@@ -22,11 +22,14 @@ FROM python:3.11-slim-bookworm
 # build-essential: chatterbox-tts pulls pkuseg, which has no py≥3.9 wheel and
 # source-builds a Cython extension. Purged after both venvs are built.
 # libsndfile1: soundfile/torchaudio WAV write. curl: operator healthchecks.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     libsndfile1 \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --upgrade \
+      setuptools==83.0.0 wheel==0.47.0
 
 # --- Chatterbox venv -------------------------------------------------------
 # Same CPU-torch index trick as Dockerfile.controller. numpy + Cython are
@@ -60,6 +63,7 @@ RUN python3 -m venv /opt/chatterbox/venv && \
       --index-url ${CHATTERBOX_TORCH_INDEX_URL} \
       --extra-index-url https://pypi.org/simple \
       torch==2.6.0 torchaudio==2.6.0 onnxruntime==1.27.0 chatterbox-tts==0.1.7 && \
+    /opt/chatterbox/venv/bin/pip install --no-cache-dir msgpack==1.2.1 && \
     if [ -n "${CHATTERBOX_TORCH_SPEC}" ]; then \
       echo "Overriding chatterbox torch pin with: ${CHATTERBOX_TORCH_SPEC}" && \
       /opt/chatterbox/venv/bin/pip install --no-cache-dir --force-reinstall \
@@ -69,6 +73,7 @@ RUN python3 -m venv /opt/chatterbox/venv && \
     fi && \
     /opt/chatterbox/venv/bin/python -c \
       "from chatterbox.tts_turbo import ChatterboxTurboTTS" && \
+    /opt/chatterbox/venv/bin/pip check && \
     find /opt/chatterbox/venv -depth -type d -name __pycache__ -exec rm -rf {} + && \
     SP=/opt/chatterbox/venv/lib/python3.11/site-packages && \
     rm -rf "$SP/torch/include" "$SP/torch/test"
@@ -87,8 +92,11 @@ RUN python3 -m venv /opt/pocket-tts/venv && \
       --index-url https://download.pytorch.org/whl/cpu \
       --extra-index-url https://pypi.org/simple \
       torch==2.6.0 scipy==1.17.1 pocket-tts==2.1.0 && \
+    /opt/pocket-tts/venv/bin/pip install --no-cache-dir \
+      setuptools==83.0.0 wheel==0.47.0 msgpack==1.2.1 && \
     /opt/pocket-tts/venv/bin/python -c \
       "from pocket_tts import TTSModel" && \
+    /opt/pocket-tts/venv/bin/pip check && \
     find /opt/pocket-tts/venv -depth -type d -name __pycache__ -exec rm -rf {} + && \
     SP=/opt/pocket-tts/venv/lib/python3.11/site-packages && \
     rm -rf "$SP/torch/include" "$SP/torch/test"
@@ -97,7 +105,9 @@ RUN python3 -m venv /opt/pocket-tts/venv && \
 RUN python3 -m venv /opt/server/venv && \
     /opt/server/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/server/venv/bin/pip install --no-cache-dir \
-      fastapi==0.139.0 "uvicorn[standard]==0.49.0" pydantic==2.13.4
+      fastapi==0.139.0 "uvicorn[standard]==0.49.0" pydantic==2.13.4 \
+      setuptools==83.0.0 wheel==0.47.0 msgpack==1.2.1 && \
+    /opt/server/venv/bin/pip check
 
 # This image is TTS-only — acoustic analysis lives in the standalone
 # subwave-analyzer sidecar (docker/Dockerfile.analyzer).

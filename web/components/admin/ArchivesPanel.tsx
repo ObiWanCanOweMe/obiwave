@@ -13,6 +13,7 @@ import { V3AlertDialog } from '../ui/alert-dialog';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
+import { archiveErrorMessage, type ArchiveApiError } from './archiveState';
 
 interface ArchiveEntry {
   path: string;
@@ -24,6 +25,7 @@ interface ArchiveEntry {
 
 interface ArchivesResponse {
   archives?: ArchiveEntry[];
+  error?: ArchiveApiError;
 }
 
 function hourLabel(h: number): string {
@@ -43,7 +45,10 @@ export default function ArchivesPanel() {
   const load = useCallback(async (): Promise<void> => {
     try {
       const r = await adminFetch('/archives');
-      if (!r.ok) throw new Error(`failed (${r.status})`);
+      if (!r.ok) {
+        const failure = (await r.json().catch(() => ({}))) as { error?: ArchiveApiError };
+        throw new Error(archiveErrorMessage(failure.error, `failed (${r.status})`));
+      }
       const j = (await r.json()) as ArchivesResponse;
       setEntries(Array.isArray(j.archives) ? j.archives : []);
       setErr(null);
@@ -65,8 +70,8 @@ export default function ArchivesPanel() {
     setClearErr(null);
     try {
       const r = await adminFetch('/archives', { method: 'DELETE' });
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = (await r.json().catch(() => ({}))) as { error?: ArchiveApiError };
+      if (!r.ok) throw new Error(archiveErrorMessage(j.error, `failed (${r.status})`));
       await load();
     } catch (e) {
       setClearErr(e instanceof Error ? e.message : String(e));

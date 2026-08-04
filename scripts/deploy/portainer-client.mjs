@@ -16,6 +16,13 @@ export class PortainerRequestTimeoutError extends Error {
   }
 }
 
+export class DeploymentVerificationError extends Error {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = 'DeploymentVerificationError';
+  }
+}
+
 export class DeploymentRolledBackError extends Error {
   constructor({ targetVersion, previousVersion, cause }) {
     super('Target deployment failed; rollback verified', { cause });
@@ -112,6 +119,7 @@ export class PortainerClient {
       this.request(`/stacks/${this.stackId}`),
       this.request(`/stacks/${this.stackId}/file`),
     ]);
+    this.stackName = stack.Name;
     return { Env: stack.Env ?? [], StackFileContent: file.StackFileContent };
   }
 
@@ -122,6 +130,53 @@ export class PortainerClient {
       timeoutMs: this.updateTimeoutMs,
       operation: 'stack update',
     });
+  }
+
+  inspectContainer(containerId) {
+    return this.request(
+      `/endpoints/${this.endpointId}/docker/containers/${encodeURIComponent(containerId)}/json`,
+      { operation: 'analyzer container inspection' },
+    );
+  }
+
+  async verifyAnalyzerDeployment({ releaseTag }) {
+    try {
+      if (typeof releaseTag !== 'string' || releaseTag.length === 0) {
+        throw new DeploymentVerificationError('Analyzer release image tag is missing');
+      }
+      const containers = await this.request(
+        `/endpoints/${this.endpointId}/docker/containers/json?all=true`,
+        { operation: 'analyzer container listing' },
+      );
+      const analyzer = Array.isArray(containers) && containers.find((container) => {
+        const labels = container?.Labels ?? {};
+        if (labels['com.docker.compose.service'] !== 'analyzer') return false;
+        if (this.stackName) return labels['com.docker.compose.project'] === this.stackName;
+        return container?.Names?.includes('/sub-wave-analyzer');
+      });
+      if (!analyzer?.Id) {
+        throw new DeploymentVerificationError('Analyzer container is missing');
+      }
+
+      const container = await this.inspectContainer(analyzer.Id);
+      if (container?.State?.Running !== true) {
+        throw new DeploymentVerificationError('Analyzer container is not running');
+      }
+      if (container?.State?.Health?.Status !== 'healthy') {
+        throw new DeploymentVerificationError('Analyzer container is not healthy');
+      }
+      if (container?.RestartCount !== 0) {
+        throw new DeploymentVerificationError('Analyzer container restart count is not zero');
+      }
+      if (typeof container?.Config?.Image !== 'string'
+        || !container.Config.Image.endsWith(`:${releaseTag}`)) {
+        throw new DeploymentVerificationError('Analyzer container does not use the release image');
+      }
+      return container;
+    } catch (error) {
+      if (error instanceof DeploymentVerificationError) throw error;
+      throw new DeploymentVerificationError('Analyzer deployment verification failed', { cause: error });
+    }
   }
 }
 
@@ -217,10 +272,22 @@ function versionFrom(env) {
   return env.find((entry) => entry.name === 'SUBWAVE_VERSION')?.value ?? null;
 }
 
-async function verifyDeployment({ healthUrl, streamUrl, streamPassword, fetchImpl, ...retryOptions }) {
+async function verifyDeployment({
+  client,
+  releaseTag,
+  healthUrl,
+  streamUrl,
+  streamPassword,
+  fetchImpl,
+  ...retryOptions
+}) {
   const options = { fetchImpl, ...retryOptions };
   await probeHealth(healthUrl, options);
   await probeStream(streamUrl, { ...options, streamPassword });
+  // Compose's analyzer healthcheck is the /health contract gate: ok=true and
+  // an active `analyze` engine. Inspecting healthy here proves that contract
+  // without exposing the analyzer on a public host port.
+  await retry(() => client.verifyAnalyzerDeployment({ releaseTag }), retryOptions);
 }
 
 export async function deployWithRollback({
@@ -244,6 +311,7 @@ export async function deployWithRollback({
     StackFileContent: renderedManifest,
   };
   const verification = {
+    client,
     healthUrl,
     streamUrl,
     streamPassword,
@@ -255,7 +323,7 @@ export async function deployWithRollback({
 
   try {
     await client.updateStack(target);
-    await verifyDeployment(verification);
+    await verifyDeployment({ ...verification, releaseTag: targetVersion });
   } catch (deploymentError) {
     // Portainer's update endpoint is synchronous, but after a client timeout the
     // server may briefly continue work. A bounded grace period reduces overlap;
@@ -267,7 +335,7 @@ export async function deployWithRollback({
     }
     try {
       await client.updateStack(snapshot);
-      await verifyDeployment(verification);
+      await verifyDeployment({ ...verification, releaseTag: previousVersion });
     } catch (rollbackError) {
       throw new RollbackIncidentError({
         targetVersion, previousVersion, deploymentError, rollbackError,

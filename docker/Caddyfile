@@ -64,7 +64,8 @@
 	# Icecast calls the controller directly over the compose network, so the
 	# edge never needs it; exposed through /api/* it is an unthrottled password
 	# oracle for the shared privacy.password that POST /station-auth throttles.
-	handle /api/listener-auth {
+	@listener_auth_internal path /api/listener-auth /api/listener-auth/*
+	handle @listener_auth_internal {
 		respond 404
 	}
 

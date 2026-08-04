@@ -786,7 +786,11 @@ async function cleanup() {
       }
     }
   } catch (err) {
-    queue.log('error', `Archive retention failed: ${err.message}`);
+    if (err instanceof archives.ArchiveRootError) {
+      queue.log('error', `Archive retention failed: could not enumerate archive root (${err.code})`);
+    } else {
+      queue.log('error', `Archive retention failed: ${err.message}`);
+    }
   }
   // Stem cache LRU — keep the per-track Demucs stem windows inside the
   // operator's byte budget (feature: stem-blend transitions). The analysis

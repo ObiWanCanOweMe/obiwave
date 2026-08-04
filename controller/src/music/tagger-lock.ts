@@ -24,9 +24,9 @@ export interface PidfileInfo {
 // Set on a controller-spawned child's env (see broadcast/tagger.ts). Tells a CLI
 // it was launched BY the controller, which already holds the pidfile + the
 // in-memory single-flight — so the CLI must not re-check or clear it. Without
-// this the child would read the pidfile the controller just wrote (naming the
-// still-live npx wrapper, the child's own ancestor) and mistake it for a
-// conflicting run.
+// this the child would read the pidfile the controller just wrote (naming its
+// still-live process-group leader, the child's own ancestor) and mistake it for
+// a conflicting run.
 export const MANAGED_ENV = 'SUBWAVE_TAGGER_MANAGED';
 
 // One canonical location, derived from the same state dir everywhere (container

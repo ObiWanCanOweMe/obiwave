@@ -46,6 +46,10 @@ const KOKORO_LANG_LABELS: Record<string, string> = {
 // rejects an empty-string SelectItem value.
 const CB_DEFAULT_VOICE = '__cb_default__';
 
+export function clearPersistedSecretInput(saved: boolean, value: string): string {
+  return saved ? '' : value;
+}
+
 function envKeyForCloudProvider(provider: string): 'OPENAI_API_KEY' | 'ELEVENLABS_API_KEY' | 'FISH_API_KEY' {
   if (provider === 'elevenlabs') return 'ELEVENLABS_API_KEY';
   if (provider === 'fish-audio') return 'FISH_API_KEY';
@@ -495,7 +499,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
       managedKeySaved = await saveKey(cloudKeyVar, cloudKeyInput);
       if (!managedKeySaved) return;
-      setCloudKeyInput('');
+      setCloudKeyInput(value => clearPersistedSecretInput(managedKeySaved, value));
       if (isFish && !form.tts.cloud.voice.trim()) {
         await refresh();
         notify.info('Fish Audio key saved — TTS settings are not saved yet. Pick an account or custom voice, then press Save again.');
@@ -550,6 +554,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         speed: form.tts.speed,
       },
     });
+    setCompatKeyInput(value => clearPersistedSecretInput(settingsSaved, value));
     if (!settingsSaved && managedKeySaved) {
       await refresh();
       notify.info('API key saved; TTS settings were not changed.');

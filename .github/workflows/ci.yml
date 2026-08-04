@@ -23,7 +23,7 @@ jobs:
           - package: controller
             command: npm run lint && npm test
           - package: web
-            command: npm run lint && npm run test:audio-format && npm run test:stream-auth-format && npm run test:llm-provider && npm run test:onboarding-provider-state && npm run test:async-generation && npm run test:model-discovery-request && npm run test:llm-section-provider-url-contract && npm run build
+            command: npm run lint && npm run test:audio-format && npm run test:stream-auth-format && npm run test:llm-provider && npm run test:mounted-state && npm run test:async-generation && npm run test:model-discovery-request && npm run test:llm-section-provider-url-contract && npm run build
           - package: mcp-subwave
             command: npm run lint
           - package: cli
@@ -124,5 +124,16 @@ jobs:
           platforms: linux/amd64
           build-args: ${{ matrix.build_args }}
           push: false
+          load: true
+          tags: subwave-ci-${{ matrix.image }}:test
           cache-from: type=gha,scope=smoke-${{ matrix.image }}
           cache-to: type=gha,scope=smoke-${{ matrix.image }},mode=max
+
+      - name: Run controller production child command
+        if: matrix.image == 'controller'
+        run: |
+          docker run --rm --entrypoint /bin/sh subwave-ci-controller:test -ceu '
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
+          '

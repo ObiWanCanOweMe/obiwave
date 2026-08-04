@@ -25,7 +25,8 @@
 	# Icecast's URL-auth callback — NOT reachable from the internet (password
 	# oracle otherwise; icecast calls the controller on loopback directly).
 	# Kept in lockstep with docker/Caddyfile.
-	handle /api/listener-auth {
+	@listener_auth_internal path /api/listener-auth /api/listener-auth/*
+	handle @listener_auth_internal {
 		respond 404
 	}
 

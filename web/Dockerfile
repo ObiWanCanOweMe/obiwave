@@ -45,7 +45,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=7700
 ENV HOSTNAME=0.0.0.0
 
-RUN groupadd -r next && useradd -r -g next next
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+ && groupadd -r next \
+ && useradd -r -g next next
 
 # Standalone output bundles only the runtime files Next.js needs.
 COPY --from=build --chown=next:next /app/.next/standalone ./

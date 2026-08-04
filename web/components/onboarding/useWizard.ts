@@ -3,6 +3,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { useAdminAuth } from '@/lib/adminAuth';
 import { AsyncResultGeneration } from '@/lib/asyncResultGeneration';
+import {
+  llmDraftForProviderChange,
+  llmForSubmission,
+  type LlmProvider,
+  type ProviderDrafts,
+} from './providerState';
 
 // Shape of every wizard step in one place — easier to pass around than
 // individual setState callbacks. Each step component reads/writes via the
@@ -112,6 +118,8 @@ export function useWizard() {
   const [data, setData] = useState<WizardData>(DEFAULT_DATA);
   const [stepIdx, setStepIdx] = useState(0);
   const llmTestGeneration = useRef(new AsyncResultGeneration());
+  const llmDiscoveryGeneration = useRef(new AsyncResultGeneration());
+  const providerDrafts = useRef<ProviderDrafts>({});
 
   const step = STEP_ORDER[stepIdx];
   const next = useCallback(() => setStepIdx(i => Math.min(i + 1, STEP_ORDER.length - 1)), []);
@@ -124,7 +132,24 @@ export function useWizard() {
   const patch = useCallback((p: Partial<WizardData> | ((d: WizardData) => Partial<WizardData>)) => {
     setData(d => {
       const incoming = typeof p === 'function' ? p(d) : p;
-      const next = { ...d, ...incoming };
+      let next = { ...d, ...incoming };
+      if (next.llm.provider !== d.llm.provider) {
+        const changed = llmDraftForProviderChange(
+          d.llm,
+          next.llm.provider as LlmProvider,
+          providerDrafts.current,
+        );
+        providerDrafts.current = changed.drafts;
+        next = { ...next, llm: changed.llm };
+      }
+      if (
+        next.llm.provider !== d.llm.provider
+        || next.llm.apiKey !== d.llm.apiKey
+        || next.llm.baseUrl !== d.llm.baseUrl
+        || next.llm.ollamaUrl !== d.llm.ollamaUrl
+      ) {
+        llmDiscoveryGeneration.current.invalidate();
+      }
       if (
         next.llm.provider !== d.llm.provider
         || next.llm.model !== d.llm.model
@@ -192,6 +217,7 @@ export function useWizard() {
   // the model instead of typing it. LiteLLM resolves a blank URL from the
   // controller environment; openai-compatible still requires an explicit URL.
   const discoverCustomModels = useCallback(async () => {
+    const generation = llmDiscoveryGeneration.current.begin();
     const r = await auth.adminFetch('/settings/llm/models', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -208,6 +234,9 @@ export function useWizard() {
       models?: string[];
       error?: string;
     };
+    if (!llmDiscoveryGeneration.current.isCurrent(generation)) {
+      return { reachable: false, models: [], error: undefined };
+    }
     return { reachable: !!j.ok, models: j.models || [], error: j.error };
   }, [auth, data.llm.provider, data.llm.baseUrl, data.llm.apiKey]);
 
@@ -247,15 +276,7 @@ export function useWizard() {
 
     const body = {
       navidrome: data.navidrome,
-      llm: {
-        provider: data.llm.provider,
-        model: data.llm.model,
-        // Native cloud keys go to apiKeys (state/secrets.env). Custom gateway
-        // tokens are provider-scoped inline overrides in settings.json.
-        apiKey: data.llm.provider === 'litellm' ? data.llm.apiKey : '',
-        baseUrl: data.llm.baseUrl,
-        ollamaUrl: data.llm.ollamaUrl,
-      },
+      llm: llmForSubmission(data.llm),
       tts: {
         defaultEngine: data.tts.defaultEngine,
         heavyEnabled: data.tts.heavyEnabled,

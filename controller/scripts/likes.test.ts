@@ -126,6 +126,45 @@ try {
   likes.trimTo(3);
   assert.equal(likes.stats().total, 3, 'the cap must hold even when it can only evict curation');
 
+  // The pure trim ranks curation before crowd signal, then uses the persisted
+  // timestamp (not array position) newest-first inside each actor class. This
+  // catches restores/migrations whose records are not in insertion order.
+  const record = (
+    id: string,
+    likedAt: string,
+    via?: 'operator',
+  ): import('../src/broadcast/likes.js').LikeRecord => ({
+    songId: id,
+    track: track(id),
+    airingKey: `${id}|${via || 'listener'}`,
+    listenerKey: via === 'operator' ? likes.OPERATOR_KEY : `listener-${id}`,
+    likedAt,
+    ...(via ? { via } : {}),
+  });
+  const mixed = [
+    record('listener-new', '2026-08-04T12:00:00.000Z'),
+    record('operator-old', '2026-08-01T12:00:00.000Z', 'operator'),
+    record('listener-old', '2026-08-02T12:00:00.000Z'),
+    record('operator-new', '2026-08-03T12:00:00.000Z', 'operator'),
+  ];
+  assert.deepEqual(
+    likes.trimLikeRecords(mixed, 3).map((r) => r.songId),
+    ['operator-new', 'operator-old', 'listener-new'],
+    'operator records fill the cap before listener records, newest-first within each class',
+  );
+
+  const allOperators = [
+    record('op-middle', '2026-08-03T12:00:00.000Z', 'operator'),
+    record('op-oldest', '2026-08-01T12:00:00.000Z', 'operator'),
+    record('op-newest', '2026-08-04T12:00:00.000Z', 'operator'),
+    record('op-second', '2026-08-02T12:00:00.000Z', 'operator'),
+  ];
+  assert.deepEqual(
+    likes.trimLikeRecords(allOperators, 2).map((r) => r.songId),
+    ['op-newest', 'op-middle'],
+    'when operators exceed the cap, the newest curated records survive in timestamp order',
+  );
+
   console.log('likes.test.ts: all assertions passed');
 } finally {
   rmSync(stateDir, { recursive: true, force: true });

@@ -1,17 +1,7 @@
 name: Scan images
 
-# Weekly Trivy vulnerability scan of the published GHCR images, with results
-# uploaded to GitHub code scanning (repo Security tab).
-#
-# Non-blocking by design: this is the first scan being introduced, so it
-# REPORTS findings rather than failing the job on them (exit-code 0). Once a
-# clean baseline exists, flip exit-code to fail on CRITICAL/HIGH.
-#
-# Scans the lean, multi-arch images that the default install pulls, plus the
-# upstream CUDA analyzer deployed on Ark. The heavy amd64-only images
-# (tts-heavy, aio, aio-heavy) are intentionally skipped to keep the matrix
-# runtime sane — they are opt-in and share the same base layers as their lean
-# counterparts.
+# Scan every published release image. SARIF remains an observability channel;
+# the independent JSON artifacts feed the fail-closed aggregate policy gate.
 
 on:
   workflow_call:
@@ -32,7 +22,7 @@ on:
 permissions:
   contents: read
   packages: read
-  security-events: write   # for github/codeql-action/upload-sarif
+  security-events: write
 
 jobs:
   resolve-tag:
@@ -65,7 +55,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [caddy, broadcast, controller, web, analyzer, analyzer-cuda]
+        image:
+          - subwave-caddy
+          - subwave-broadcast
+          - subwave-controller
+          - subwave-web
+          - subwave-aio
+          - subwave-aio-heavy
+          - subwave-tts-heavy
+          - subwave-analyzer
+          - subwave-analyzer-heavy
+          - subwave-analyzer-cuda
     steps:
       - uses: docker/login-action@v4
         with:
@@ -73,18 +73,101 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Scan ${{ matrix.image }}
+      - name: Exercise production child command in ${{ matrix.image }}
+        if: contains(fromJSON('["subwave-controller","subwave-aio","subwave-aio-heavy"]'), matrix.image)
+        run: |
+          docker run --rm --entrypoint /bin/sh ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }} -ceu '
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
+          '
+
+      - name: Scan ${{ matrix.image }} for policy JSON
+        id: json-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ghcr.io/obiwancanoweme/subwave-${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
+          image-ref: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
+          version: v0.67.2
+          scanners: vuln
+          format: json
+          output: ${{ matrix.image }}.json
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Record JSON scanner status
+        if: always()
+        env:
+          IMAGE: ${{ matrix.image }}
+          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
+          SCAN_OUTCOME: ${{ steps.json-scan.outcome }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+
+          const succeeded = process.env.SCAN_OUTCOME === 'success';
+          const status = {
+            schemaVersion: 1,
+            image: process.env.IMAGE,
+            imageRef: process.env.IMAGE_REF,
+            scanner: 'trivy',
+            scannerVersion: '0.67.2',
+            scanners: ['vuln'],
+            severities: ['CRITICAL', 'HIGH'],
+            outcome: succeeded ? 'success' : 'failure',
+            ...(succeeded ? {} : { error: `Trivy action outcome: ${process.env.SCAN_OUTCOME}` }),
+          };
+          writeFileSync(`${process.env.IMAGE}.status.json`, `${JSON.stringify(status, null, 2)}\n`);
+          NODE
+
+      - name: Upload policy JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-json-${{ matrix.image }}
+          path: |
+            ${{ matrix.image }}.json
+            ${{ matrix.image }}.status.json
+          if-no-files-found: warn
+
+      - name: Scan ${{ matrix.image }} for SARIF
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
+          version: v0.67.2
+          scanners: vuln
           format: sarif
           output: trivy-${{ matrix.image }}.sarif
           severity: CRITICAL,HIGH
-          exit-code: "0"   # report only; never fail the job on vulnerabilities
+          exit-code: "0"
 
       - name: Upload SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@v3
         if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.image }}.sarif
-          category: trivy-${{ matrix.image }}   # keep matrix results distinct
+          category: trivy-${{ matrix.image }}
+
+  vulnerability-policy:
+    needs: [resolve-tag, scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Download all policy reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trivy-json-*
+          path: .tmp/trivy-policy
+          merge-multiple: true
+      - name: Enforce Critical/High vulnerability policy
+        run: >-
+          node scripts/security/trivy-policy.mjs
+          --reports .tmp/trivy-policy
+          --acceptance security/trivy-acceptance.json
+          --tag "${{ needs.resolve-tag.outputs.tag }}"

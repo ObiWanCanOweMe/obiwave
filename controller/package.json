@@ -28,7 +28,7 @@
     "@ai-sdk/openai": "^4.0.27",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/ai-sdk-provider": "^3.0.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "ai": "^7.0.48",
     "ai-sdk-ollama": "^4.1.0",
     "better-sqlite3": "^11.10.0",

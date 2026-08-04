@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 # espeak-ng: Kokoro phonemization. ffmpeg: transcode + level-match imported
 # jingles/SFX (audio/audio-import.ts). iputils-ping: in-container debugging.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl ca-certificates wget tar iputils-ping \
     python3 python3-venv \
     espeak-ng libsndfile1 ffmpeg \
@@ -41,7 +41,9 @@ RUN mkdir -p /opt/piper/voices && \
 RUN python3 -m venv /opt/kokoro/venv && \
     /opt/kokoro/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/kokoro/venv/bin/pip install --no-cache-dir \
-      kokoro-onnx==0.5.0 soundfile==0.12.1 misaki==0.9.4
+      kokoro-onnx==0.5.0 soundfile==0.12.1 misaki==0.9.4 \
+      setuptools==83.0.0 wheel==0.47.0 msgpack==1.2.1 && \
+    /opt/kokoro/venv/bin/pip check
 
 RUN mkdir -p /opt/kokoro/models && \
     wget -q ${WGET_RETRY} -O /opt/kokoro/models/kokoro-v1.0.onnx \
@@ -135,7 +137,10 @@ WORKDIR /app
 # .npmrc carries `legacy-peer-deps=true` (OpenRouter provider still declares a
 # stale `peer ai@^6`); it must land before install or npm hits ERESOLVE.
 COPY controller/package*.json controller/.npmrc ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev \
+ && rm -f package-lock.json \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
 COPY controller/src ./src
 COPY controller/scripts ./scripts
 
