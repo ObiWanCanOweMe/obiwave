@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { createElement, useState } from 'react';
+import { createElement } from 'react';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 
+import LibraryPanel from '../components/admin/LibraryPanel.tsx';
 import {
   acceptLibraryResponse,
   beginLibraryRequest,
   clampLibraryPage,
 } from '../components/admin/libraryState.ts';
-import { TrackTable } from '../components/admin/library/TrackTable.tsx';
+import { V3AlertDialog } from '../components/ui/alert-dialog.tsx';
 import type { Track } from '../components/admin/library/types.ts';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -76,83 +77,268 @@ function textContent(node: ReactTestInstance): string {
   return node.children.map(child => typeof child === 'string' ? child : textContent(child)).join('');
 }
 
-const likedTrack: Track = {
-  id: 'liked-track',
-  title: 'Liked Track',
-  artist: 'The Testers',
-  likeCount: 4,
-  likedByOperator: true,
-};
-
-function ClearActionHarness() {
-  const [pending, setPending] = useState('');
-  return createElement('div', null,
-    createElement(TrackTable, {
-      tab: 'liked',
-      rows: [likedTrack],
-      loading: false,
-      queuing: null,
-      retagging: null,
-      flashId: null,
-      onQueue: () => {},
-      onRetag: () => {},
-      blocking: null,
-      onBlock: () => {},
-      onUnblock: () => {},
-      vocab: [],
-      editingId: null,
-      manualBusy: null,
-      onEdit: () => {},
-      onSaveManual: () => {},
-      onCancelEdit: () => {},
-      selected: new Set<string>(),
-      onToggleSelect: () => {},
-      onToggleAll: () => {},
-      likeIndex: {},
-      liking: null,
-      onToggleLike: () => {},
-      onClearLikes: track => setPending(track.id),
-    }),
-    createElement('output', { 'data-pending': pending }),
-  );
+interface PendingRequest {
+  path: string;
+  init: RequestInit;
+  resolve: (response: Response) => void;
 }
 
-async function verifyDesktopAndMobileClearShareTheMutationPath() {
-  const previousDocument = globalThis.document;
-  Object.defineProperty(globalThis, 'document', {
-    configurable: true,
-    value: {
-      addEventListener: () => {},
-      removeEventListener: () => {},
+const track = (id: string, title: string, likeCount = 4): Track => ({
+  id,
+  title,
+  artist: 'The Testers',
+  album: 'Controlled Responses',
+  genre: 'Test',
+  year: 2026,
+  duration: 180,
+  moods: ['focused'],
+  energy: 'medium',
+  source: 'manual',
+  taggedAt: '2026-08-04T12:00:00.000Z',
+  bpm: 120,
+  musicalKey: 'C',
+  loudnessLufs: -14,
+  paceMean: 0.5,
+  instrumental: false,
+  similarity: null,
+  likeCount,
+  likedByOperator: true,
+  lastLikedAt: '2026-08-04T12:00:00.000Z',
+  blockedBy: null,
+});
+
+const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+  status,
+  headers: { 'content-type': 'application/json' },
+});
+
+async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
+  const saved = {
+    fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
+    window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
+    document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
+    localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+  };
+  const likedRequests: PendingRequest[] = [];
+  const deleteRequests: Array<{ path: string; method: string }> = [];
+  const storage = new Map<string, string>([['subwave_admin_auth', 'test-token']]);
+
+  const controlledFetch = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const path = String(input);
+    const method = init.method || 'GET';
+    if (path.startsWith('/api/library/liked?')) {
+      return new Promise<Response>(resolve => {
+        likedRequests.push({ path, init, resolve });
+      });
+    }
+    if (path.startsWith('/api/likes/song/') && method === 'DELETE') {
+      deleteRequests.push({ path, method });
+      return jsonResponse({ ok: true, removed: 4 });
+    }
+    if (path === '/api/library/coverage') {
+      return jsonResponse({
+        tagged: 0,
+        analysed: 0,
+        audioEmbedded: 0,
+        vocalAnalyzed: 0,
+        total: 0,
+        percent: 0,
+        analysedPercent: 0,
+        audioEmbeddedPercent: 0,
+        vocalAnalyzedPercent: 0,
+        vocalWanted: false,
+        scannedAt: '2026-08-04T12:00:00.000Z',
+        scanning: false,
+        analysisAvailable: false,
+        analysisBackend: null,
+        audioAnalysisAvailable: false,
+        soundSearchAvailable: false,
+        vocalAnalysisAvailable: false,
+        embeddedModel: null,
+        embeddedDim: null,
+        currentEmbeddingModel: null,
+        embeddingStale: false,
+        embeddingFormatStale: false,
+        embeddedTextFormat: null,
+        currentTextFormat: null,
+        embeddedVectors: 0,
+        labelOnlyVectors: 0,
+        audioStatus: 'off',
+        vocalStatus: 'off',
+      });
+    }
+    if (path === '/api/library/tagger') return jsonResponse({ tagger: null });
+    if (path === '/api/library/genres') return jsonResponse({ genres: [] });
+    if (path === '/api/likes/index') {
+      return jsonResponse({
+        songs: Object.fromEntries([
+          'initial', 'count-winner', 'stale-offset', 'fresh-mode', 'stale-mode',
+          'clamped-track', 'mobile-track',
+        ].map(id => [id, { count: 4, operator: true }])),
+      });
+    }
+    if (path === '/api/settings') {
+      return jsonResponse({
+        tagger: null,
+        libraryStats: {
+          total: 0,
+          byMood: {},
+          byEnergy: {},
+          byGenre: {},
+          withEmbedding: 0,
+          updatedAt: null,
+        },
+        values: {
+          audio: {
+            embeddings: false,
+            vocalActivity: false,
+            analyzeQuietOnly: false,
+            analyzeQuietMinutes: 10,
+          },
+          llm: { provider: 'ollama', model: 'test-model' },
+          embedding: {},
+        },
+        budget: { mode: 'normal' },
+      });
+    }
+    if (path === '/api/dj/recent?limit=50') return jsonResponse({ results: [] });
+    throw new Error(`unexpected admin request: ${method} ${path}`);
+  };
+
+  const fakeWindow = {
+    location: {
+      search: '?view=liked',
+      pathname: '/admin/library',
+      hash: '',
+      replace: () => {},
     },
+    history: { replaceState: () => {} },
+    btoa: (value: string) => Buffer.from(value).toString('base64'),
+  };
+  const fakeDocument = {
+    body: { nodeType: 1, style: {} },
+    querySelector: () => null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  const fakeStorage = {
+    getItem: (key: string) => storage.get(key) || null,
+    setItem: (key: string, value: string) => { storage.set(key, value); },
+    removeItem: (key: string) => { storage.delete(key); },
+  };
+
+  Object.defineProperties(globalThis, {
+    fetch: { configurable: true, writable: true, value: controlledFetch },
+    window: { configurable: true, writable: true, value: fakeWindow },
+    document: { configurable: true, writable: true, value: fakeDocument },
+    localStorage: { configurable: true, writable: true, value: fakeStorage },
   });
+
   let renderer!: ReturnType<typeof create>;
+  const flush = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const respond = async (request: PendingRequest, rows: Track[], total: number) => {
+    await act(async () => {
+      request.resolve(jsonResponse({ rows, total }));
+      await flush();
+    });
+  };
+  const rowVisible = (title: string) =>
+    renderer.root.findAllByProps({ 'aria-label': `select ${title}` }).length === 1;
+  const buttonWithText = (label: string) => {
+    const matches = renderer.root.findAllByType('button')
+      .filter(button => textContent(button).trim() === label);
+    assert.equal(matches.length, 1, `expected one “${label}” button`);
+    return matches[0]!;
+  };
+  const radioWithText = (label: string) => {
+    const matches = renderer.root.findAllByType('button')
+      .filter(button => button.props.role === 'radio' && textContent(button).trim().startsWith(label));
+    assert.equal(matches.length, 1, `expected one “${label}” radio button`);
+    assert.equal(typeof matches[0]!.props.onClick, 'function');
+    return matches[0]!;
+  };
+
   try {
-    await act(async () => { renderer = create(createElement(ClearActionHarness)); });
-    const output = () => renderer.root.findByType('output').props['data-pending'];
+    await act(async () => {
+      renderer = create(createElement(LibraryPanel));
+      await flush();
+    });
+    assert.equal(likedRequests.length, 1, 'entering Liked mode starts its first owned request');
+    await respond(likedRequests[0]!, [track('initial', 'Initial Row')], 101);
+    assert.equal(rowVisible('Initial Row'), true);
 
-    const desktopClear = renderer.root.findByProps({ 'aria-label': 'clear all likes for Liked Track' });
-    await act(async () => { desktopClear.props.onClick({}); });
-    assert.equal(output(), likedTrack.id, 'the desktop clear action reaches the shared pending mutation');
+    await act(async () => { buttonWithText('next ›').props.onClick({}); await flush(); });
+    assert.match(likedRequests[1]!.path, /offset=50/);
+    const countSort = radioWithText('Most liked');
+    await act(async () => { countSort.props.onClick({}); await flush(); });
+    assert.match(likedRequests[2]!.path, /offset=0/);
+    assert.match(likedRequests[2]!.path, /sort=count/);
 
-    await act(async () => { renderer.update(createElement(ClearActionHarness, { key: 'mobile' })); });
-    const mobileTrigger = renderer.root.findByProps({ 'aria-label': 'actions for Liked Track' });
+    await respond(likedRequests[2]!, [track('count-winner', 'Count Winner')], 101);
+    assert.equal(rowVisible('Count Winner'), true);
+    await respond(likedRequests[1]!, [track('stale-offset', 'Stale Offset')], 101);
+    assert.equal(rowVisible('Count Winner'), true, 'the newer sort owns the rendered table');
+    assert.equal(rowVisible('Stale Offset'), false, 'an older offset response cannot overwrite it');
+
+    await act(async () => { buttonWithText('Refresh').props.onClick({}); await flush(); });
+    const staleModeRequest = likedRequests[3]!;
+    const allMode = radioWithText('All');
+    await act(async () => { allMode.props.onClick({}); await flush(); });
+    const likedModeControl = radioWithText('Liked');
+    await act(async () => { likedModeControl.props.onClick({}); await flush(); });
+    const currentModeRequest = likedRequests[4]!;
+    await respond(currentModeRequest, [track('fresh-mode', 'Fresh Mode')], 101);
+    await respond(staleModeRequest, [track('stale-mode', 'Stale Mode')], 101);
+    assert.equal(rowVisible('Fresh Mode'), true, 'the re-entered mode owns its response');
+    assert.equal(rowVisible('Stale Mode'), false, 'the prior-mode response stays rejected');
+
+    await act(async () => { buttonWithText('next ›').props.onClick({}); await flush(); });
+    assert.match(likedRequests[5]!.path, /offset=50/);
+    await respond(likedRequests[5]!, [], 21);
+    assert.equal(likedRequests.length, 7, 'an emptied invalid page triggers a clamped refetch');
+    assert.match(likedRequests[6]!.path, /offset=0/);
+    await respond(likedRequests[6]!, [track('clamped-track', 'Clamped Track')], 21);
+    assert.equal(rowVisible('Clamped Track'), true, 'the newest valid page is rendered after clamping');
+
+    const desktopClear = renderer.root.findByProps({ 'aria-label': 'clear all likes for Clamped Track' });
+    await act(async () => { desktopClear.props.onClick({}); await flush(); });
+    let dialog = renderer.root.findByType(V3AlertDialog);
+    assert.equal(dialog.props.open, true, 'desktop clear opens the production confirmation dialog');
+    await act(async () => { dialog.props.onConfirm(); await flush(); });
+    assert.deepEqual(deleteRequests[0], {
+      path: '/api/likes/song/clamped-track',
+      method: 'DELETE',
+    });
+    assert.equal(likedRequests.length, 8, 'confirmed desktop clear refreshes the active liked page');
+    await respond(likedRequests[7]!, [track('mobile-track', 'Mobile Track')], 1);
+
+    const mobileTrigger = renderer.root.findByProps({ 'aria-label': 'actions for Mobile Track' });
     await act(async () => { mobileTrigger.props.onClick({}); });
     const mobileClear = renderer.root.findAllByType('button')
       .find(button => textContent(button).includes('Clear all likes (4)'));
     assert.ok(mobileClear, 'the mobile clear action remains available');
-    await act(async () => { mobileClear.props.onClick({}); });
-    assert.equal(output(), likedTrack.id, 'the mobile clear action reaches the same pending mutation');
+    await act(async () => { mobileClear.props.onClick({}); await flush(); });
+    dialog = renderer.root.findByType(V3AlertDialog);
+    assert.equal(dialog.props.open, true, 'mobile clear opens the same production confirmation dialog');
+    await act(async () => { dialog.props.onConfirm(); await flush(); });
+    assert.deepEqual(deleteRequests[1], {
+      path: '/api/likes/song/mobile-track',
+      method: 'DELETE',
+    }, 'mobile confirmation invokes the same per-song DELETE mutation path');
+    await respond(likedRequests[8]!, [], 0);
   } finally {
     if (renderer) await act(async () => { renderer.unmount(); });
-    Object.defineProperty(globalThis, 'document', {
-      configurable: true,
-      value: previousDocument,
-    });
+    for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete (globalThis as Record<string, unknown>)[key];
+    }
   }
 }
 
-verifyDesktopAndMobileClearShareTheMutationPath()
+verifyLibraryPanelOwnsAsyncResultsAndClearMutations()
   .then(() => console.log('library-liked-state.test.ts: all assertions passed'))
   .catch(error => {
     console.error(error);
