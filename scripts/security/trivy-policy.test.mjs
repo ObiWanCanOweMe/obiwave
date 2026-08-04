@@ -16,13 +16,19 @@ import {
 const execFileAsync = promisify(execFile);
 
 const NOW = new Date('2026-08-04T12:00:00.000Z');
-const TAG = 'v1.3.0-obiwave.1';
+const TAG = 'v1.3.0-obiwave.2';
+const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
+const PINNED_CUDA_IMAGE_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+
+function imageRef(image) {
+  return `${IMAGE_NAMESPACE}/${image}:${TAG}`;
+}
 
 function scanStatus(image, overrides = {}) {
   return {
     schemaVersion: 1,
     image,
-    imageRef: `ghcr.io/perminder-klair/${image}:${TAG}`,
+    imageRef: imageRef(image),
     scanner: 'trivy',
     scannerVersion: '0.67.2',
     scanners: ['vuln'],
@@ -35,8 +41,15 @@ function scanStatus(image, overrides = {}) {
 function trivyReport(image, vulnerabilities = [], overrides = {}) {
   return {
     SchemaVersion: 2,
-    ArtifactName: `ghcr.io/perminder-klair/${image}:${TAG}`,
+    ArtifactName: imageRef(image),
     ArtifactType: 'container_image',
+    Metadata: {
+      ImageID: image === 'subwave-analyzer-cuda'
+        ? PINNED_CUDA_IMAGE_DIGEST
+        : `sha256:${'a'.repeat(64)}`,
+      RepoTags: [imageRef(image)],
+      RepoDigests: [`${IMAGE_NAMESPACE}/${image}@sha256:${'b'.repeat(64)}`],
+    },
     Results: [
       {
         Target: 'debian 12',
@@ -97,7 +110,7 @@ function acceptance(overrides = {}) {
 
 function validationError(options) {
   try {
-    validateReports(options);
+    validateReports({ tag: TAG, ...options });
     assert.fail('expected policy validation to fail');
   } catch (error) {
     assert.ok(error instanceof PolicyValidationError, `unexpected error: ${error}`);
@@ -111,6 +124,7 @@ function violationCodes(error) {
 
 test('clean ten-image matrix returns a deterministic empty summary', () => {
   const summary = validateReports({
+    tag: TAG,
     reports: cleanReports(),
     acceptance: manifest(),
     expectedImages: EXPECTED_IMAGES,
@@ -133,6 +147,7 @@ test('a clean Trivy result may omit the Vulnerabilities property', () => {
   delete reports['subwave-caddy'].report.Results[0].Vulnerabilities;
 
   const summary = validateReports({
+    tag: TAG,
     reports,
     acceptance: manifest(),
     expectedImages: EXPECTED_IMAGES,
@@ -148,6 +163,7 @@ test('a finding is accepted only at its exact image, package, and installed vers
   reports['subwave-controller'] = reportEntry('subwave-controller', [finding()]);
 
   const summary = validateReports({
+    tag: TAG,
     reports,
     acceptance: manifest([acceptance()]),
     expectedImages: EXPECTED_IMAGES,
@@ -268,6 +284,25 @@ test('an acceptance that matches no current finding is rejected as orphaned', ()
   assert.deepEqual(violationCodes(error), ['orphaned-acceptance']);
 });
 
+test('every image scope in a multi-image acceptance must match a current finding', () => {
+  const reports = cleanReports();
+  reports['subwave-controller'] = reportEntry('subwave-controller', [finding()]);
+  reports['subwave-web'] = reportEntry('subwave-web', [finding()]);
+
+  const error = validationError({
+    reports,
+    acceptance: manifest([acceptance({
+      images: ['subwave-controller', 'subwave-web', 'subwave-caddy'],
+    })]),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['orphaned-acceptance']);
+  assert.match(error.message, /subwave-caddy/);
+  assert.equal(error.summary.acceptedCount, 2);
+});
+
 test('every required image must have one report', () => {
   const reports = cleanReports();
   delete reports['subwave-aio-heavy'];
@@ -341,7 +376,7 @@ test('a malformed Trivy result cannot masquerade as a clean scan', () => {
   const reports = cleanReports();
   reports['subwave-tts-heavy'].report = {
     SchemaVersion: 2,
-    ArtifactName: `ghcr.io/perminder-klair/subwave-tts-heavy:${TAG}`,
+    ArtifactName: imageRef('subwave-tts-heavy'),
     ArtifactType: 'container_image',
   };
 
@@ -353,6 +388,116 @@ test('a malformed Trivy result cannot masquerade as a clean scan', () => {
   });
 
   assert.deepEqual(violationCodes(error), ['malformed-report']);
+});
+
+test('a null Trivy Results value cannot masquerade as a clean scan', () => {
+  const reports = cleanReports();
+  reports['subwave-caddy'].report.Results = null;
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['malformed-report']);
+});
+
+test('an empty Trivy Results array cannot masquerade as a clean scan', () => {
+  const reports = cleanReports();
+  reports['subwave-caddy'].report.Results = [];
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['malformed-report']);
+});
+
+test('a vulnerability with missing Severity is rejected as malformed', () => {
+  const reports = cleanReports();
+  const malformedFinding = finding();
+  delete malformedFinding.Severity;
+  reports['subwave-controller'] = reportEntry('subwave-controller', [malformedFinding]);
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['malformed-report']);
+  assert.match(error.message, /Severity/);
+});
+
+test('a vulnerability with non-string Severity is rejected as malformed', () => {
+  const reports = cleanReports();
+  reports['subwave-controller'] = reportEntry('subwave-controller', [
+    finding({ Severity: 7 }),
+  ]);
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['malformed-report']);
+  assert.match(error.message, /Severity/);
+});
+
+test('a foreign registry cannot impersonate the canonical release image', () => {
+  const reports = cleanReports();
+  const foreignRef = `ghcr.io/perminder-klair/subwave-caddy:${TAG}`;
+  reports['subwave-caddy'].status.imageRef = foreignRef;
+  reports['subwave-caddy'].report.ArtifactName = foreignRef;
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.ok(violationCodes(error).includes('malformed-scan-status'));
+  assert.ok(violationCodes(error).includes('malformed-report'));
+  assert.match(error.message, /ghcr\.io\/obiwancanoweme/);
+});
+
+test('scan status identity must equal the report artifact identity', () => {
+  const reports = cleanReports();
+  reports['subwave-caddy'].status.imageRef = `ghcr.io/perminder-klair/subwave-caddy:${TAG}`;
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.ok(violationCodes(error).includes('report-status-identity-mismatch'));
+  assert.match(error.message, /status.*report/i);
+});
+
+test('the CUDA mirror report must carry the policy-pinned image digest', () => {
+  const reports = cleanReports();
+  reports['subwave-analyzer-cuda'].report.Metadata.ImageID = `sha256:${'f'.repeat(64)}`;
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['cuda-digest-mismatch']);
+  assert.match(error.message, new RegExp(PINNED_CUDA_IMAGE_DIGEST));
 });
 
 test('no-fix cannot accept a finding for which the scanner reports a fix', () => {
@@ -422,6 +567,7 @@ test('the report loader requires matching raw JSON and status files for the requ
     tag: TAG,
   });
   const summary = validateReports({
+    tag: TAG,
     reports,
     acceptance: manifest(),
     expectedImages: EXPECTED_IMAGES,
@@ -432,7 +578,7 @@ test('the report loader requires matching raw JSON and status files for the requ
   await writeFile(
     join(directory, 'subwave-caddy.json'),
     JSON.stringify(trivyReport('subwave-caddy', [], {
-      ArtifactName: 'ghcr.io/perminder-klair/subwave-caddy:v1.3.0-obiwave.0',
+      ArtifactName: 'ghcr.io/obiwancanoweme/subwave-caddy:v1.3.0-obiwave.0',
     })),
   );
   const mismatchedReports = await loadReports({
@@ -447,7 +593,10 @@ test('the report loader requires matching raw JSON and status files for the requ
     now: NOW,
   });
   assert.ok(violationCodes(error).includes('unreadable-report'));
-  assert.match(error.message, /requested tag v1\.3\.0-obiwave\.1/);
+  assert.match(
+    error.message,
+    /canonical requested image ghcr\.io\/obiwancanoweme\/subwave-caddy:v1\.3\.0-obiwave\.2/,
+  );
 });
 
 test('the CLI emits a machine-readable summary and exits nonzero on a missing report', async (t) => {

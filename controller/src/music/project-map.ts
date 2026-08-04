@@ -1,6 +1,6 @@
 // Standalone sound-map projection pass (see music/map-projection.ts).
 //
-// Run:  docker exec sub-wave-controller npx tsx src/music/project-map.ts
+// Run:  docker exec sub-wave-controller /app/node_modules/.bin/tsx src/music/project-map.ts
 //
 // Spawned as a child by the live controller (map-projection.ts startProjection)
 // because UMAP's KNN-graph build is minutes of synchronous CPU — running it

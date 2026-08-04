@@ -124,5 +124,16 @@ jobs:
           platforms: linux/amd64
           build-args: ${{ matrix.build_args }}
           push: false
+          load: true
+          tags: subwave-ci-${{ matrix.image }}:test
           cache-from: type=gha,scope=smoke-${{ matrix.image }}
           cache-to: type=gha,scope=smoke-${{ matrix.image }},mode=max
+
+      - name: Run controller production child command
+        if: matrix.image == 'controller'
+        run: |
+          docker run --rm --entrypoint /bin/sh subwave-ci-controller:test -ceu '
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
+          '

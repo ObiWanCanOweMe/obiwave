@@ -78,6 +78,16 @@ test('controller quality provisions the pinned NumPy prerequisite for vocal-gate
   assert.match(analyzerPythonWrapper, /'vocal_gate_test\.py'/, 'vocal gate must remain in npm test');
 });
 
+test('controller image smoke executes the production child command inside the built image', () => {
+  const imageSmoke = ci.slice(ci.indexOf('  image-smoke:'));
+  assert.match(imageSmoke, /tags: subwave-ci-\$\{\{ matrix\.image \}\}:test/);
+  assert.match(imageSmoke, /load: true/);
+  assert.match(
+    imageSmoke,
+    /if: matrix\.image == 'controller'[\s\S]*docker run --rm[\s\S]*test ! -e \/usr\/local\/bin\/npm[\s\S]*test ! -e \/usr\/local\/bin\/npx[\s\S]*\/app\/node_modules\/\.bin\/tsx scripts\/production-command\.test\.ts/,
+  );
+});
+
 test('app quality matrix runs the native stream-buffer contract', () => {
   const appCommand = ci.match(/- package: app\s*\n\s+command: ([^\n]+)/)?.[1];
   assert.ok(appCommand, 'missing app quality-matrix command');
@@ -227,6 +237,21 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
   assert.match(policyJob, /merge-multiple: true/);
   assert.match(policyJob, /node scripts\/security\/trivy-policy\.mjs/);
   assert.match(policyJob, /security\/trivy-acceptance\.json/);
+});
+
+test('release scans exercise production child commands in controller and both AIO images', () => {
+  const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  assert.match(
+    scanJob,
+    /if: contains\(fromJSON\('\["subwave-controller","subwave-aio","subwave-aio-heavy"\]'\), matrix\.image\)/,
+  );
+  assert.match(
+    scanJob,
+    /docker run --rm --entrypoint \/bin\/sh[\s\S]*ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:\$\{\{ needs\.resolve-tag\.outputs\.tag \}\}/,
+  );
+  assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npm/);
+  assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npx/);
+  assert.match(scanJob, /\/app\/node_modules\/\.bin\/tsx scripts\/production-command\.test\.ts/);
 });
 
 test('report-only scanner exit codes are backed by fail-closed aggregate enforcement', () => {

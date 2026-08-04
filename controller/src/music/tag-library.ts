@@ -9,7 +9,7 @@
 //   Phase 3  — PROPAGATE     KNN-vote moods/energy onto every untagged track
 //   Phase 4  — ACTIVE-LEARN  LLM-tag the residual uncertain set; re-propagate
 //
-// Run:  docker exec sub-wave-controller npx tsx src/music/tag-library.ts
+// Run:  docker exec sub-wave-controller /app/node_modules/.bin/tsx src/music/tag-library.ts
 // Flags:
 //   --limit N             cap NEW tracks considered this run (default: all)
 //   --batch N             LLM batch size (default 25)

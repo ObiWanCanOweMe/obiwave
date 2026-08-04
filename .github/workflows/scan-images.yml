@@ -73,6 +73,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Exercise production child command in ${{ matrix.image }}
+        if: contains(fromJSON('["subwave-controller","subwave-aio","subwave-aio-heavy"]'), matrix.image)
+        run: |
+          docker run --rm --entrypoint /bin/sh ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }} -ceu '
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
+          '
+
       - name: Scan ${{ matrix.image }} for policy JSON
         id: json-scan
         continue-on-error: true

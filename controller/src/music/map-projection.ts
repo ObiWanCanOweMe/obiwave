@@ -19,9 +19,10 @@
 // pattern safe alongside the live controller) and its final transaction bumps
 // `data_version`, so the observatory ETag invalidates without any signalling.
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { UMAP } from 'umap-js';
 import * as db from './library-db.js';
+import { spawnControllerTsx } from '../util/tsx-child.js';
 
 const ALGO = 'umap-1';
 const SPACE = 'audio';
@@ -134,10 +135,14 @@ export function projectionStatus(): ProjectionStatus {
 // so a dead child just means "no new map yet", never a half-written one.
 export function startProjection(): boolean {
   if (child) return false;
-  const proc = spawn('npx', ['tsx', 'src/music/project-map.ts'], {
-    cwd: '/app',
-    env: process.env,
-  });
+  const proc = spawnControllerTsx(
+    ['src/music/project-map.ts'],
+    { env: process.env },
+    (err) => {
+      console.error('[map-projection] spawn failed:', err.message);
+      child = null;
+    },
+  );
   child = proc;
   startedAt = new Date().toISOString();
   lastLog = [];
@@ -154,10 +159,6 @@ export function startProjection(): boolean {
   proc.stderr?.on('data', capture);
   proc.on('exit', (code) => {
     console.log(`[map-projection] child exited (code=${code})`);
-    child = null;
-  });
-  proc.on('error', (err) => {
-    console.error('[map-projection] spawn failed:', err.message);
     child = null;
   });
   return true;

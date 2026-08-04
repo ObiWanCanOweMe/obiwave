@@ -19,6 +19,10 @@ export const EXPECTED_IMAGES = Object.freeze([
   'subwave-analyzer-cuda',
 ]);
 
+export const CANONICAL_IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
+export const PINNED_CUDA_IMAGE_DIGEST =
+  'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+
 const POLICY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH']);
 const ACCEPTANCE_FIELDS = Object.freeze([
   'vulnerabilityId',
@@ -53,19 +57,8 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function imageNameFromRef(imageRef) {
-  if (!isNonEmptyString(imageRef)) return null;
-  const finalSegment = imageRef.trim().split('/').at(-1);
-  if (!finalSegment) return null;
-  return finalSegment.split('@')[0].split(':')[0] || null;
-}
-
-function tagFromRef(imageRef) {
-  if (!isNonEmptyString(imageRef)) return null;
-  const finalSegment = imageRef.trim().split('/').at(-1);
-  if (!finalSegment || finalSegment.includes('@')) return null;
-  const separator = finalSegment.lastIndexOf(':');
-  return separator > 0 ? finalSegment.slice(separator + 1) : null;
+function canonicalImageRef(image, tag) {
+  return `${CANONICAL_IMAGE_NAMESPACE}/${image}:${tag}`;
 }
 
 function parseDateOnly(value) {
@@ -104,7 +97,7 @@ function addViolation(violations, code, message) {
   violations.push({ code, message });
 }
 
-function validateScanStatus(image, status, violations) {
+function validateScanStatus(image, status, expectedImageRef, violations) {
   if (status === undefined) {
     addViolation(violations, 'missing-scan-status', `${image}: scan status marker is missing`);
     return;
@@ -118,7 +111,9 @@ function validateScanStatus(image, status, violations) {
   const malformed = [];
   if (status.schemaVersion !== 1) malformed.push('schemaVersion must equal 1');
   if (status.image !== image) malformed.push(`image must equal ${image}`);
-  if (imageNameFromRef(status.imageRef) !== image) malformed.push(`imageRef must name ${image}`);
+  if (status.imageRef !== expectedImageRef) {
+    malformed.push(`imageRef must equal ${expectedImageRef}`);
+  }
   if (status.scanner !== 'trivy') malformed.push('scanner must equal trivy');
   if (status.scannerVersion !== '0.67.2') malformed.push('scannerVersion must equal 0.67.2');
   if (!Array.isArray(status.scanners)) malformed.push('scanners must be an array');
@@ -163,13 +158,13 @@ function validateScanStatus(image, status, violations) {
   }
 }
 
-function normalizeReport(image, entry, violations) {
+function normalizeReport(image, entry, expectedImageRef, violations) {
   if (!isObject(entry)) {
     addViolation(violations, 'malformed-report', `${image}: report entry must be an object`);
     return [];
   }
 
-  validateScanStatus(image, entry.status, violations);
+  validateScanStatus(image, entry.status, expectedImageRef, violations);
 
   if (entry.reportError !== undefined) {
     const detail = isNonEmptyString(entry.reportError) ? entry.reportError.trim() : 'unknown read error';
@@ -186,11 +181,11 @@ function normalizeReport(image, entry, violations) {
   const malformed = [];
   if (report.SchemaVersion !== 2) malformed.push('SchemaVersion must equal 2');
   if (report.ArtifactType !== 'container_image') malformed.push('ArtifactType must equal container_image');
-  if (imageNameFromRef(report.ArtifactName) !== image) {
-    malformed.push(`ArtifactName must name ${image}`);
+  if (report.ArtifactName !== expectedImageRef) {
+    malformed.push(`ArtifactName must equal ${expectedImageRef}`);
   }
-  if (!Object.hasOwn(report, 'Results') || (report.Results !== null && !Array.isArray(report.Results))) {
-    malformed.push('Results must be an array or null');
+  if (!Array.isArray(report.Results) || report.Results.length === 0) {
+    malformed.push('Results must be a non-empty array');
   }
 
   if (malformed.length > 0) {
@@ -200,6 +195,30 @@ function normalizeReport(image, entry, violations) {
       `${image}: malformed Trivy report (${malformed.join('; ')})`,
     );
     return [];
+  }
+
+  if (
+    isObject(entry.status) &&
+    isNonEmptyString(entry.status.imageRef) &&
+    isNonEmptyString(report.ArtifactName) &&
+    entry.status.imageRef !== report.ArtifactName
+  ) {
+    addViolation(
+      violations,
+      'report-status-identity-mismatch',
+      `${image}: scan status imageRef ${entry.status.imageRef} does not equal report ArtifactName ${report.ArtifactName}`,
+    );
+  }
+
+  if (image === 'subwave-analyzer-cuda') {
+    const imageDigest = isObject(report.Metadata) ? report.Metadata.ImageID : undefined;
+    if (imageDigest !== PINNED_CUDA_IMAGE_DIGEST) {
+      addViolation(
+        violations,
+        'cuda-digest-mismatch',
+        `${image}: report Metadata.ImageID must equal pinned digest ${PINNED_CUDA_IMAGE_DIGEST} (received ${String(imageDigest)})`,
+      );
+    }
   }
 
   const findings = [];
@@ -254,8 +273,16 @@ function normalizeReport(image, entry, violations) {
         continue;
       }
 
-      const severity =
-        typeof vulnerability.Severity === 'string' ? vulnerability.Severity.toUpperCase() : '';
+      if (!isNonEmptyString(vulnerability.Severity)) {
+        addViolation(
+          violations,
+          'malformed-report',
+          `${image}: vulnerability ${resultIndex}.${vulnerabilityIndex}.Severity must be a non-empty string`,
+        );
+        continue;
+      }
+
+      const severity = vulnerability.Severity.toUpperCase();
       if (!POLICY_SEVERITIES.includes(severity)) continue;
 
       const fields = [
@@ -483,7 +510,7 @@ function validateAcceptanceManifest(acceptance, expectedImages, now, violations)
   return records;
 }
 
-export function validateReports({ reports, acceptance, expectedImages, now }) {
+export function validateReports({ reports, acceptance, expectedImages, tag, now }) {
   const violations = [];
   const reportMap = isObject(reports) ? reports : {};
   const imageList = Array.isArray(expectedImages) ? [...expectedImages] : [];
@@ -498,6 +525,7 @@ export function validateReports({ reports, acceptance, expectedImages, now }) {
     throw new TypeError('expectedImages must be a non-empty array of unique image names');
   }
   if (Number.isNaN(validationNow.getTime())) throw new TypeError('now must be a valid date');
+  parseForkTag(tag);
   if (!isObject(reports)) {
     addViolation(violations, 'malformed-reports', 'reports must be an object keyed by image');
   }
@@ -514,7 +542,9 @@ export function validateReports({ reports, acceptance, expectedImages, now }) {
       addViolation(violations, 'missing-report', `${image}: required report is missing`);
       continue;
     }
-    findings.push(...normalizeReport(image, reportMap[image], violations));
+    findings.push(
+      ...normalizeReport(image, reportMap[image], canonicalImageRef(image, tag), violations),
+    );
   }
 
   const uniqueFindings = [
@@ -527,13 +557,19 @@ export function validateReports({ reports, acceptance, expectedImages, now }) {
     validationNow,
     violations,
   );
-  const matchedAcceptanceIndexes = new Set();
+  const matchedAcceptanceScopes = new Set();
 
   for (const currentFinding of uniqueFindings) {
     const scopedRecords = acceptanceRecords.filter((record) =>
       record.images.some((image) => acceptanceMatches(record, image, currentFinding)),
     );
-    for (const record of scopedRecords) matchedAcceptanceIndexes.add(record.index);
+    for (const record of scopedRecords) {
+      for (const image of record.images) {
+        if (acceptanceMatches(record, image, currentFinding)) {
+          matchedAcceptanceScopes.add(`${record.index}\u0000${image}`);
+        }
+      }
+    }
 
     const compatibleRecords = scopedRecords.filter((record) => {
       if (!record.eligible) return false;
@@ -559,12 +595,14 @@ export function validateReports({ reports, acceptance, expectedImages, now }) {
   }
 
   for (const record of acceptanceRecords) {
-    if (!matchedAcceptanceIndexes.has(record.index)) {
-      addViolation(
-        violations,
-        'orphaned-acceptance',
-        `acceptances[${record.index}] matches no current finding (${record.vulnerabilityId} ${record.images.join(',')} ${record.package}@${record.installedVersion})`,
-      );
+    for (const image of record.images) {
+      if (!matchedAcceptanceScopes.has(`${record.index}\u0000${image}`)) {
+        addViolation(
+          violations,
+          'orphaned-acceptance',
+          `acceptances[${record.index}] image scope ${image} matches no current finding (${record.vulnerabilityId} ${record.package}@${record.installedVersion})`,
+        );
+      }
     }
   }
 
@@ -611,6 +649,7 @@ export async function loadReports({ reportsDirectory, expectedImages, tag }) {
   const images = [...new Set([...expectedImages, ...discoveredImages])].sort();
   const reports = {};
   for (const image of images) {
+    const expectedImageRef = canonicalImageRef(image, tag);
     const reportPath = resolve(reportsDirectory, `${image}.json`);
     const statusPath = resolve(reportsDirectory, `${image}.status.json`);
     const [reportRead, statusRead] = await Promise.all([
@@ -627,9 +666,9 @@ export async function loadReports({ reportsDirectory, expectedImages, tag }) {
       reportEntry.reportError = `cannot read ${image}.json (${reportRead.error})`;
     } else {
       reportEntry.report = reportRead.value;
-      if (tagFromRef(reportRead.value?.ArtifactName) !== tag) {
+      if (reportRead.value?.ArtifactName !== expectedImageRef) {
         reportEntry.reportError =
-          `${image}.json does not describe requested tag ${tag} ` +
+          `${image}.json does not describe canonical requested image ${expectedImageRef} ` +
           `(ArtifactName: ${String(reportRead.value?.ArtifactName)})`;
       }
     }
@@ -643,12 +682,12 @@ export async function loadReports({ reportsDirectory, expectedImages, tag }) {
         ].filter(Boolean).join('; ');
       } else {
         reportEntry.status = statusRead.value;
-        if (tagFromRef(statusRead.value?.imageRef) !== tag) {
+        if (statusRead.value?.imageRef !== expectedImageRef) {
           reportEntry.status = {
             ...statusRead.value,
             outcome: 'failure',
             error:
-              `${image}.status.json does not describe requested tag ${tag} ` +
+              `${image}.status.json does not describe canonical requested image ${expectedImageRef} ` +
               `(imageRef: ${String(statusRead.value?.imageRef)})`,
           };
         }
@@ -701,6 +740,7 @@ async function runCli(argv) {
     reports,
     acceptance: acceptanceRead.value,
     expectedImages: EXPECTED_IMAGES,
+    tag,
     now: new Date(),
   });
   process.stdout.write(`${JSON.stringify({ result: 'pass', tag, ...summary }, null, 2)}\n`);
