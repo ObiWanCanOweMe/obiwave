@@ -19,7 +19,8 @@
 
 import assert from 'node:assert/strict';
 import {
-  chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, unlinkSync, writeFileSync,
+  chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,15 +48,21 @@ const ffmpegRelease = join(root, 'ffmpeg-release');
 mkdirSync(fakeBin, { recursive: true });
 writeFileSync(fakeFfmpeg, `#!/bin/sh
 if [ "$1" = "-version" ]; then exit 0; fi
-for output_path do :; done
+take_input=0
+for arg do
+  if [ "$take_input" = "1" ]; then input_path="$arg"; take_input=0; fi
+  if [ "$arg" = "-i" ]; then take_input=1; fi
+  output_path="$arg"
+done
 printf partial > "$output_path"
 : > "$VOICE_FFMPEG_READY"
+if [ -n "$VOICE_FFMPEG_READY_DIR" ]; then : > "$VOICE_FFMPEG_READY_DIR/$$"; fi
 while [ ! -e "$VOICE_FFMPEG_RELEASE" ]; do sleep 0.01; done
 if [ "$VOICE_FFMPEG_FAIL" = "1" ]; then
   echo "simulated transcode failure" >&2
   exit 7
 fi
-printf complete > "$output_path"
+cp "$input_path" "$output_path"
 `);
 chmodSync(fakeFfmpeg, 0o755);
 process.env.PATH = `${fakeBin}:${process.env.PATH || ''}`;
@@ -66,6 +73,14 @@ async function waitForFile(file: string): Promise<void> {
   const deadline = Date.now() + 2_000;
   while (!existsSync(file)) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${file}`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+async function waitForReadyCount(dir: string, count: number): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(dir) || readdirSync(dir).length < count) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${count} ffmpeg process(es)`);
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 }
@@ -225,6 +240,78 @@ await check('importVoice publishes the canonical filename only after transcode s
     [],
     'successful import must leave no temporary sibling',
   );
+});
+await check('concurrent same-name imports publish exactly one winner without replacement', async () => {
+  const readyDir = join(root, 'ffmpeg-concurrent-ready');
+  mkdirSync(readyDir);
+  process.env.VOICE_FFMPEG_READY_DIR = readyDir;
+  if (existsSync(ffmpegRelease)) unlinkSync(ffmpegRelease);
+
+  const firstBytes = 'first concurrent voice';
+  const secondBytes = 'second concurrent voice';
+  const attempts = [
+    lib.importVoice(Buffer.from(firstBytes), { name: 'concurrent', originalName: 'first.mp3' })
+      .then(entry => ({ entry, source: firstBytes })),
+    lib.importVoice(Buffer.from(secondBytes), { name: 'concurrent', originalName: 'second.mp3' })
+      .then(entry => ({ entry, source: secondBytes })),
+  ];
+  await waitForReadyCount(readyDir, 2);
+  writeFileSync(ffmpegRelease, 'go');
+  const results = await Promise.allSettled(attempts);
+
+  const fulfilled = results.filter(result => result.status === 'fulfilled');
+  const rejected = results.filter(result => result.status === 'rejected');
+  assert.equal(fulfilled.length, 1, 'exactly one import must claim the canonical filename');
+  assert.equal(rejected.length, 1, 'the losing import must reject as a duplicate');
+  const winner = fulfilled[0] as PromiseFulfilledResult<{ entry: { file: string }; source: string }>;
+  const loser = rejected[0] as PromiseRejectedResult;
+  assert.equal(winner.value.entry.file, 'concurrent.wav');
+  assert.equal(loser.reason.code, 'EEXIST');
+  assert.equal(
+    loser.reason.message,
+    'a voice named "concurrent.wav" already exists — delete it first',
+  );
+  assert.equal(
+    readFileSync(join(VOICES, 'concurrent.wav'), 'utf8'),
+    winner.value.source,
+    'the canonical file must contain the successful importer\'s bytes',
+  );
+  assert.deepEqual(
+    readdirSync(VOICES).filter(file => file.startsWith('.concurrent.wav.')),
+    [],
+    'the race must leave no hidden temporary siblings',
+  );
+  delete process.env.VOICE_FFMPEG_READY_DIR;
+});
+await check('promotion failure preserves the existing voice and removes the temporary sibling', async () => {
+  const readyDir = join(root, 'ffmpeg-promotion-failure-ready');
+  mkdirSync(readyDir);
+  process.env.VOICE_FFMPEG_READY_DIR = readyDir;
+  if (existsSync(ffmpegRelease)) unlinkSync(ffmpegRelease);
+
+  const pending = lib.importVoice(
+    Buffer.from('must not replace canonical'),
+    { name: 'promotion-failure', originalName: 'promotion-failure.mp3' },
+  );
+  await waitForReadyCount(readyDir, 1);
+  writeFileSync(join(VOICES, 'promotion-failure.wav'), 'existing canonical voice');
+  writeFileSync(ffmpegRelease, 'go');
+
+  await assert.rejects(
+    pending,
+    (error: NodeJS.ErrnoException) => error.code === 'EEXIST'
+      && error.message === 'a voice named "promotion-failure.wav" already exists — delete it first',
+  );
+  assert.equal(
+    readFileSync(join(VOICES, 'promotion-failure.wav'), 'utf8'),
+    'existing canonical voice',
+  );
+  assert.deepEqual(
+    readdirSync(VOICES).filter(file => file.startsWith('.promotion-failure.wav.')),
+    [],
+    'failed promotion must remove its temporary sibling',
+  );
+  delete process.env.VOICE_FFMPEG_READY_DIR;
 });
 
 // --- removeVoice -----------------------------------------------------------

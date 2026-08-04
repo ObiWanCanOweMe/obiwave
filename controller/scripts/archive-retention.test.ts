@@ -31,6 +31,10 @@ const archives = await import('../src/broadcast/archives.js');
 
 const SETTINGS_PATH = join(root, 'settings.json');
 
+function fsError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`simulated archive root failure: ${code}`), { code });
+}
+
 async function loadBlob(blob: unknown) {
   writeFileSync(SETTINGS_PATH, JSON.stringify(blob));
   store.setCache(null);
@@ -77,6 +81,28 @@ try {
   await settings.load();
   assert.equal(settings.get().archive.retentionDays, 0, 'explicit keep-forever survives reload');
 
+  // Missing archive storage is the normal pre-recording state. Any other
+  // failure to enumerate the root is failed work, not an empty success.
+  const missingRootFs = {
+    readDir: async () => { throw fsError('ENOENT'); },
+  };
+  const deniedFs = {
+    readDir: async () => { throw fsError('EACCES'); },
+  };
+  await assert.doesNotReject(() => archives.pruneOlderThan(30, missingRootFs));
+  await assert.rejects(
+    () => archives.pruneOlderThan(30, deniedFs),
+    (error: unknown) => error instanceof archives.ArchiveRootError
+      && error.operation === 'prune'
+      && error.code === 'EACCES',
+  );
+  await assert.rejects(
+    () => archives.clearAll(deniedFs),
+    (error: unknown) => error instanceof archives.ArchiveRootError
+      && error.operation === 'clear'
+      && error.code === 'EACCES',
+  );
+
   // A failed directory removal must not be counted as reclaimed space. The
   // failed date rides the result so both the scheduler and admin route can
   // surface a broken archive mount instead of claiming success.
@@ -84,17 +110,29 @@ try {
   const oldDate = '2000-01-01';
   const oldDir = join(archiveRoot, oldDate);
   const oldFile = join(oldDir, '00-00.mp3');
-  const rejectDelete = async () => { throw new Error('simulated archive mount permission failure'); };
+  const successfulDate = '2000-01-02';
+  const successfulDir = join(archiveRoot, successfulDate);
+  const successfulFile = join(successfulDir, '01-00.mp3');
+  const rejectOneDelete = async (dir: string, options: { recursive: true; force: true }) => {
+    if (dir === oldDir) throw new Error('simulated archive mount permission failure');
+    rmSync(dir, options);
+  };
 
   mkdirSync(oldDir, { recursive: true });
   writeFileSync(oldFile, 'tape!');
-  let swept = await archives.pruneOlderThan(1, { removeDir: rejectDelete });
-  assert.deepEqual(swept, { removed: 0, bytes: 0, failedDirs: [oldDate] });
+  mkdirSync(successfulDir, { recursive: true });
+  writeFileSync(successfulFile, 'pruned');
+  let swept = await archives.pruneOlderThan(1, { removeDir: rejectOneDelete });
+  assert.deepEqual(swept, { removed: 1, bytes: 6, failedDirs: [oldDate] });
   assert.equal(existsSync(oldFile), true, 'failed retention delete leaves the recording in place');
+  assert.equal(existsSync(successfulFile), false, 'successful retention delete is still counted and removed');
 
-  swept = await archives.clearAll({ removeDir: rejectDelete });
-  assert.deepEqual(swept, { removed: 0, bytes: 0, failedDirs: [oldDate] });
+  mkdirSync(successfulDir, { recursive: true });
+  writeFileSync(successfulFile, 'cleared');
+  swept = await archives.clearAll({ removeDir: rejectOneDelete });
+  assert.deepEqual(swept, { removed: 1, bytes: 7, failedDirs: [oldDate] });
   assert.equal(existsSync(oldFile), true, 'failed clear-all delete leaves the recording in place');
+  assert.equal(existsSync(successfulFile), false, 'successful clear-all delete is counted beside failures');
 
   console.log('archive-retention: all assertions passed');
 } finally {

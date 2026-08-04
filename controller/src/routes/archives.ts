@@ -4,7 +4,9 @@
 import express from 'express';
 import { statSync } from 'node:fs';
 import { requireAdmin } from '../middleware/auth.js';
-import { list, resolveEntry, openStream, clearAll } from '../broadcast/archives.js';
+import {
+  ArchiveRootError, list, resolveEntry, openStream, clearAll,
+} from '../broadcast/archives.js';
 import { queue } from '../broadcast/queue.js';
 
 export const router = express.Router();
@@ -32,6 +34,13 @@ router.delete('/archives', requireAdmin, async (_req, res) => {
     queue.log('scheduler', `archive cleared — ${result.removed} hour(s), ${result.bytes} bytes freed`);
     res.json({ ok: true, ...result });
   } catch (err: any) {
+    if (err instanceof ArchiveRootError) {
+      queue.log('error', `${err.message} (${err.code})`);
+      return res.status(500).json({
+        ok: false,
+        error: { operation: err.operation, code: err.code },
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });

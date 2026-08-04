@@ -21,7 +21,38 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HOUR_RE = /^(\d{2})-00\.mp3$/;
 
 type RemoveDir = (path: string, options: { recursive: true; force: true }) => Promise<void>;
-type RemovalOptions = { removeDir?: RemoveDir };
+type ReadDir = (path: string) => Promise<string[]>;
+type RemovalOptions = { readDir?: ReadDir; removeDir?: RemoveDir };
+
+export class ArchiveRootError extends Error {
+  constructor(
+    readonly operation: 'prune' | 'clear',
+    readonly code: string,
+    options?: ErrorOptions,
+  ) {
+    super(`Archive ${operation} could not enumerate the archive root`, options);
+    this.name = 'ArchiveRootError';
+  }
+}
+
+function rootErrorCode(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'code' in error
+    && typeof error.code === 'string') return error.code;
+  return 'UNKNOWN';
+}
+
+async function archiveDayDirs(
+  operation: 'prune' | 'clear',
+  readDir: ReadDir,
+): Promise<string[]> {
+  try {
+    return await readDir(ARCHIVE_ROOT);
+  } catch (error) {
+    const code = rootErrorCode(error);
+    if (code === 'ENOENT') return [];
+    throw new ArchiveRootError(operation, code, { cause: error });
+  }
+}
 
 export interface ArchiveRemovalResult {
   removed: number;
@@ -106,17 +137,12 @@ export function openStream(abs: string) {
 // else at the root is untouched, same as clearAll below.
 export async function pruneOlderThan(
   days: number,
-  { removeDir = rm }: RemovalOptions = {},
+  { readDir = readdir, removeDir = rm }: RemovalOptions = {},
 ): Promise<ArchiveRemovalResult> {
   if (!Number.isFinite(days) || days <= 0) return { removed: 0, bytes: 0, failedDirs: [] };
-  if (!existsSync(ARCHIVE_ROOT)) return { removed: 0, bytes: 0, failedDirs: [] };
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  let dayDirs: string[] = [];
-  try {
-    dayDirs = (await readdir(ARCHIVE_ROOT)).filter(d => DATE_RE.test(d) && d < cutoff);
-  } catch {
-    return { removed: 0, bytes: 0, failedDirs: [] };
-  }
+  const dayDirs = (await archiveDayDirs('prune', readDir))
+    .filter(d => DATE_RE.test(d) && d < cutoff);
 
   let removed = 0;
   let bytes = 0;
@@ -155,15 +181,9 @@ export async function pruneOlderThan(
 // open, the unlink just detaches the name — it keeps writing to the now-orphan
 // inode and reopens a fresh file at the next HH:00 (output.file reopen_when).
 export async function clearAll(
-  { removeDir = rm }: RemovalOptions = {},
+  { readDir = readdir, removeDir = rm }: RemovalOptions = {},
 ): Promise<ArchiveRemovalResult> {
-  if (!existsSync(ARCHIVE_ROOT)) return { removed: 0, bytes: 0, failedDirs: [] };
-  let dayDirs: string[] = [];
-  try {
-    dayDirs = (await readdir(ARCHIVE_ROOT)).filter(d => DATE_RE.test(d));
-  } catch {
-    return { removed: 0, bytes: 0, failedDirs: [] };
-  }
+  const dayDirs = (await archiveDayDirs('clear', readDir)).filter(d => DATE_RE.test(d));
 
   let removed = 0;
   let bytes = 0;
