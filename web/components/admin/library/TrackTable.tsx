@@ -240,6 +240,18 @@ export function TrackTable(p: TrackTableProps) {
                   </span>
                 )}
               </Btn>
+              {like.count > 0 && (
+                <Btn
+                  sm
+                  className="hidden sm:inline-flex"
+                  onClick={() => p.onClearLikes(t)}
+                  disabled={p.liking === t.id}
+                  title="Clear operator and listener likes"
+                  aria-label={`clear all likes for ${t.title || 'track'}`}
+                >
+                  <HeartOff size={12} />
+                </Btn>
+              )}
               <Btn sm className="hidden sm:inline-flex" onClick={() => p.onQueue(t)} disabled={!!p.queuing} title="Queue on air">
                 {p.queuing === t.id ? '…' : <ListPlus size={12} />}
               </Btn>

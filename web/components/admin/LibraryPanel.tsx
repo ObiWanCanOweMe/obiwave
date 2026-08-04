@@ -33,6 +33,7 @@ import { Search, Sparkles, RefreshCw, ListMusic, X, Telescope, ArrowRight } from
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '../ui/input-group';
+import { V3AlertDialog } from '../ui/alert-dialog';
 import { Card, Btn, Seg } from './ui';
 import { llmProviderLabel } from './llm/providerMeta';
 import TaggingPanel, { num } from './LibraryTaggingPanel';
@@ -73,6 +74,11 @@ import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
+import {
+  acceptLibraryResponse,
+  beginLibraryRequest,
+  clampLibraryPage,
+} from './libraryState';
 
 // Per-call cap on POST /library/blocklist/check, matching the controller's.
 // A Search tab paged deep with Load more can hold more rows than that.
@@ -85,6 +91,8 @@ export default function LibraryPanel() {
   // shared state
   const [tab, setTab] = useState<Tab>('tracks');
   const [trackMode, setTrackMode] = useState<TrackMode>('all');
+  const trackModeRef = useRef(trackMode);
+  trackModeRef.current = trackMode;
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [tagger, setTagger] = useState<TaggerState | null>(null);
   const [libStats, setLibStats] = useState<LibraryStatsLite | null>(null);
@@ -158,12 +166,15 @@ export default function LibraryPanel() {
   // sounds-like results come from three different sources and only this map
   // covers all of them. `liked` is the Liked mode's own paged listing.
   const [likeIndex, setLikeIndex] = useState<LikeIndex>({});
+  const likeIndexRequestGeneration = useRef(0);
   const [liking, setLiking] = useState<string | null>(null);
   const [liked, setLiked] = useState<Track[] | null>(null);
   const [likedTotal, setLikedTotal] = useState(0);
   const [likedPage, setLikedPage] = useState(0);
   const [likedSort, setLikedSort] = useState<LikedSort>('recent');
   const [likedLoading, setLikedLoading] = useState(false);
+  const likedRequestGeneration = useRef(0);
+  const [pendingClearLikes, setPendingClearLikes] = useState<Track | null>(null);
 
   // playlist state — row selection (any track tab) + the Navidrome playlist
   // list shared by the add-to-playlist bar and the Playlists tab.
@@ -517,12 +528,20 @@ export default function LibraryPanel() {
   // -----------------------------------------------------------------------
   const loadLikeIndex = useCallback(async () => {
     if (!ready) return;
+    const request = beginLibraryRequest({
+      generation: likeIndexRequestGeneration.current,
+      page: 0,
+      pageSize: 1,
+    });
+    likeIndexRequestGeneration.current = request.generation;
     try {
       const r = await adminFetch('/likes/index');
       if (!r.ok) throw new Error(`likes failed (${r.status})`);
       const j = await r.json() as { songs?: LikeIndex };
+      if (!acceptLibraryResponse(likeIndexRequestGeneration.current, request.generation)) return;
       setLikeIndex(j.songs || {});
     } catch {
+      if (!acceptLibraryResponse(likeIndexRequestGeneration.current, request.generation)) return;
       // A missing index just means no hearts are lit — every other library
       // view still works, so this must never surface as an error toast.
       setLikeIndex({});
@@ -533,34 +552,72 @@ export default function LibraryPanel() {
 
   const loadLiked = useCallback(async () => {
     if (!ready) return;
+    const request = beginLibraryRequest({
+      generation: likedRequestGeneration.current,
+      page: likedPage,
+      pageSize: PAGE_SIZE,
+    });
+    likedRequestGeneration.current = request.generation;
+    const requestSort = likedSort;
+    const requestMode = trackMode;
     setLikedLoading(true);
     try {
       const sp = new URLSearchParams({
         limit: String(PAGE_SIZE),
-        offset: String(likedPage * PAGE_SIZE),
-        sort: likedSort,
+        offset: String(request.offset),
+        sort: requestSort,
       });
       const r = await adminFetch(`/library/liked?${sp}`);
       if (!r.ok) throw new Error(`liked failed (${r.status})`);
       const j = await r.json() as LikedResponse;
+      if (!acceptLibraryResponse(likedRequestGeneration.current, request.generation)) return;
+      if (requestMode !== 'liked') return;
+      const total = j.total || 0;
+      const nextPage = clampLibraryPage(likedPage, total, PAGE_SIZE);
+      setLikedTotal(total);
+      if (nextPage !== likedPage) {
+        setLiked(null);
+        setLikedPage(nextPage);
+        return;
+      }
       setLiked(j.rows || []);
-      setLikedTotal(j.total || 0);
     } catch (err) {
+      if (!acceptLibraryResponse(likedRequestGeneration.current, request.generation)) return;
       notify.err(errorMessage(err));
       setLiked([]);
     } finally {
-      setLikedLoading(false);
+      if (acceptLibraryResponse(likedRequestGeneration.current, request.generation)) {
+        setLikedLoading(false);
+      }
     }
-  }, [adminFetch, ready, likedPage, likedSort]);
+  }, [adminFetch, ready, likedPage, likedSort, trackMode]);
 
   useEffect(() => {
     if (tab !== 'tracks' || trackMode !== 'liked' || !ready) return;
     loadLiked();
   }, [tab, trackMode, ready, loadLiked]);
 
-  // Sorting or leaving the mode resets paging, so a page-3 view can't survive
-  // into a shorter list and render empty.
-  useEffect(() => { setLikedPage(0); }, [likedSort]);
+  // Totals shrink after unlike/clear mutations and can invalidate the current
+  // offset. Clamp automatically; the resulting page change triggers a refetch.
+  useEffect(() => {
+    setLikedPage(current => clampLibraryPage(current, likedTotal, PAGE_SIZE));
+  }, [likedTotal]);
+
+  const selectTrackMode = (next: TrackMode) => {
+    likedRequestGeneration.current += 1;
+    setLikedLoading(false);
+    setLikedPage(0);
+    if (next === 'liked') setLiked(null);
+    setTrackMode(next);
+  };
+
+  const selectLikedSort = (next: LikedSort) => {
+    likedRequestGeneration.current += 1;
+    setLikedLoading(false);
+    setLikedPage(0);
+    setLiked(null);
+    setLikedSort(next);
+  };
 
   // Patch the index (and any inline row fields) without a refetch — the whole
   // point of the optimistic toggle is that the heart responds immediately.
@@ -577,6 +634,11 @@ export default function LibraryPanel() {
 
   const toggleLike = async (track: Track, isLiked: boolean) => {
     const before = likeIndex[track.id] ?? { count: track.likeCount ?? 0, operator: !!track.likedByOperator };
+    // A listing response started before this mutation describes the old store.
+    // Revoke its ownership before applying the optimistic state.
+    likedRequestGeneration.current += 1;
+    likeIndexRequestGeneration.current += 1;
+    setLikedLoading(false);
     setLiking(track.id);
     // Optimistic: the operator's own heart is +1/-1 on the total.
     patchLike(track.id, {
@@ -604,6 +666,7 @@ export default function LibraryPanel() {
         setLiked(prev => prev && prev.filter(t => t.id !== track.id));
         setLikedTotal(n => Math.max(0, n - 1));
       }
+      if (trackModeRef.current === 'liked') void loadLiked();
     } catch (err) {
       patchLike(track.id, before);
       notify.err(errorMessage(err));
@@ -615,6 +678,9 @@ export default function LibraryPanel() {
   // Wraps DELETE /likes/song/:id — drops LISTENER likes too, which the heart
   // deliberately never does.
   const clearLikes = async (track: Track) => {
+    likedRequestGeneration.current += 1;
+    likeIndexRequestGeneration.current += 1;
+    setLikedLoading(false);
     setLiking(track.id);
     try {
       const r = await adminFetch(`/likes/song/${encodeURIComponent(track.id)}`, { method: 'DELETE' });
@@ -624,11 +690,21 @@ export default function LibraryPanel() {
       setLiked(prev => prev && prev.filter(t => t.id !== track.id));
       setLikedTotal(n => Math.max(0, n - 1));
       notify.ok(`Cleared ${j.removed ?? 0} like${j.removed === 1 ? '' : 's'} on “${track.title || track.id}”`);
+      if (trackModeRef.current === 'liked') void loadLiked();
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
       setLiking(null);
     }
+  };
+
+  const requestClearLikes = (track: Track) => setPendingClearLikes(track);
+
+  const moveLikedPage = (next: (page: number) => number) => {
+    likedRequestGeneration.current += 1;
+    setLikedLoading(false);
+    setLiked(null);
+    setLikedPage(next);
   };
 
   // -----------------------------------------------------------------------
@@ -758,7 +834,7 @@ export default function LibraryPanel() {
   // rules in music/blocklist.ts, free to drift. The server owns the answer;
   // this just asks it about the rows we're holding.
   const recheckBlocked = useCallback(async () => {
-    const pools: Track[][] = [browse?.rows || [], searchResults || [], untagged, recent || []];
+    const pools: Track[][] = [browse?.rows || [], searchResults || [], untagged, recent || [], liked || []];
     const byId = new Map<string, Track>();
     for (const pool of pools) for (const t of pool) if (t?.id && !byId.has(t.id)) byId.set(t.id, t);
     if (byId.size === 0) return;
@@ -782,11 +858,12 @@ export default function LibraryPanel() {
       setSearchResults(prev => (prev ? prev.map(patch) : prev));
       setUntagged(prev => prev.map(patch));
       setRecent(prev => (prev ? prev.map(patch) : prev));
+      setLiked(prev => (prev ? prev.map(patch) : prev));
     } catch {
       // Enrichment, not the operation — the block itself succeeded. Leave the
       // last-known marks rather than blaming the operator with a toast.
     }
-  }, [adminFetch, browse, searchResults, untagged, recent]);
+  }, [adminFetch, browse, searchResults, untagged, recent, liked]);
 
   // Lift one entry. Shared by the Blocked tab's Unblock button, the row-level
   // unblock, and the Undo action on the block toast, so all three converge on
@@ -1598,7 +1675,7 @@ export default function LibraryPanel() {
                   { id: 'needs', label: `Needs tags${remaining != null ? ` · ${num(remaining)}` : ''}` },
                   { id: 'liked', label: `Liked${likedCount ? ` · ${num(likedCount)}` : ''}` },
                 ]}
-                onChange={(v: string) => setTrackMode(v as TrackMode)}
+                onChange={(v: string) => selectTrackMode(v as TrackMode)}
               />
               {trackMode === 'needs' && untagged.length > 0 ? (
                 <Btn sm tone="accent" onClick={() => startTagger()} disabled={tagger?.running || taggerBusy}>
@@ -1613,7 +1690,7 @@ export default function LibraryPanel() {
                       { id: 'count', label: 'Most liked' },
                       { id: 'artist', label: 'Artist' },
                     ]}
-                    onChange={(v: string) => setLikedSort(v as LikedSort)}
+                    onChange={(v: string) => selectLikedSort(v as LikedSort)}
                   />
                   <Btn sm onClick={loadLiked} disabled={likedLoading}>
                     <RefreshCw size={11} /> {likedLoading ? 'Loading…' : 'Refresh'}
@@ -1653,7 +1730,7 @@ export default function LibraryPanel() {
           likeIndex={likeIndex}
           liking={liking}
           onToggleLike={toggleLike}
-          onClearLikes={clearLikes}
+          onClearLikes={requestClearLikes}
         />
       </Card>
       )}
@@ -1681,15 +1758,15 @@ export default function LibraryPanel() {
 
       {/* Offset paging like Browse, not the untagged tab's cursor — the likes
           store is a bounded in-memory array with a cheap, stable total. */}
-      {tab === 'tracks' && trackMode === 'liked' && likedTotal > PAGE_SIZE && (
+      {tab === 'tracks' && trackMode === 'liked' && (likedPage > 0 || likedTotal > PAGE_SIZE) && (
         <div className="flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-muted">
           <span className="mono-num">
             {likedPage * PAGE_SIZE + 1}–{Math.min((likedPage + 1) * PAGE_SIZE, likedTotal)} of {num(likedTotal)}
           </span>
           <span className="flex items-center gap-2">
-            <Btn sm disabled={likedPage === 0} onClick={() => setLikedPage(p => Math.max(0, p - 1))}>‹ prev</Btn>
+            <Btn sm disabled={likedPage === 0} onClick={() => moveLikedPage(p => Math.max(0, p - 1))}>‹ prev</Btn>
             <span className="mono-num">page {likedPage + 1} of {likedPages}</span>
-            <Btn sm disabled={likedPage + 1 >= likedPages} onClick={() => setLikedPage(p => p + 1)}>next ›</Btn>
+            <Btn sm disabled={likedPage + 1 >= likedPages} onClick={() => moveLikedPage(p => p + 1)}>next ›</Btn>
           </span>
         </div>
       )}
@@ -1701,6 +1778,22 @@ export default function LibraryPanel() {
           </Btn>
         </div>
       )}
+
+      <V3AlertDialog
+        open={pendingClearLikes !== null}
+        onOpenChange={(open) => { if (!open) setPendingClearLikes(null); }}
+        title="Clear all likes?"
+        description={pendingClearLikes
+          ? <>Remove every operator and listener like for <b>“{pendingClearLikes.title || pendingClearLikes.id}”</b>? This cannot be undone.</>
+          : null}
+        confirmLabel="Clear all likes"
+        danger
+        onConfirm={() => {
+          const track = pendingClearLikes;
+          setPendingClearLikes(null);
+          if (track) void clearLikes(track);
+        }}
+      />
     </div>
   );
 }

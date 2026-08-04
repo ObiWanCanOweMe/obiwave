@@ -136,25 +136,30 @@ function countForSong(songId: string): number {
   return n;
 }
 
-// Bound the store, evicting oldest LISTENER records first. An operator like is
-// curation the operator set by hand; letting listener volume evict it would
-// silently undo that. Exported for the unit test, which can't reach 5000 rows.
+// Select records for the bounded store. Curation fills the cap first; listener
+// volume can never evict it. Timestamp order is authoritative because restored
+// or migrated files are not guaranteed to retain their original array order.
+export function trimLikeRecords(input: LikeRecord[], max: number): LikeRecord[] {
+  const limit = Math.max(0, Math.trunc(max) || 0);
+  if (limit === 0) return [];
+  const newestFirst = (items: LikeRecord[]) => items
+    .map((record, index) => ({ record, index }))
+    // The store appends records. Millisecond timestamp ties therefore use the
+    // later array position as the newer record.
+    .sort((a, b) => b.record.likedAt.localeCompare(a.record.likedAt) || b.index - a.index)
+    .map(({ record }) => record);
+  const operators = newestFirst(input.filter(isOperator));
+  const listeners = newestFirst(input.filter((record) => !isOperator(record)));
+  return [...operators, ...listeners].slice(0, limit);
+}
+
+// Bound the store while retaining its established insertion order (recent()
+// reads newest-first from the tail). The selector owns actor priority; filtering
+// the chosen identities back through the store preserves its ordering invariant.
 export function trimTo(max: number): void {
   if (records.length <= max) return;
-  const operators = records.filter(isOperator);
-  // More curation than the cap can hold means the store is far outside its
-  // design envelope — fall back to plain oldest-first so the cap still holds.
-  if (operators.length >= max) {
-    records = records.slice(-max);
-    return;
-  }
-  const keep = new Set<LikeRecord>(operators);
-  const room = max - operators.length;
-  const listeners = records.filter((r) => !isOperator(r));
-  for (const r of listeners.slice(-room)) keep.add(r);
-  // Filter rather than concat, so surviving records stay in insertion order
-  // (recent() reads off the tail and would otherwise report a bogus ordering).
-  records = records.filter((r) => keep.has(r));
+  const selected = new Set(trimLikeRecords(records, max));
+  records = records.filter((record) => selected.has(record));
 }
 
 export interface RecordLikeInput {
