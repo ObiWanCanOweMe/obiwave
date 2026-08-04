@@ -163,6 +163,7 @@ function renderCompose(source, env = {}) {
   try {
     writeFileSync(file, source);
     writeFileSync(join(directory, 'stack.env'), '');
+    writeFileSync(join(directory, '.env'), '');
     const result = spawnSync('docker', ['compose', '--profile', '*', '-f', file, 'config', '--format', 'json'], {
       encoding: 'utf8',
       env: {
@@ -180,6 +181,89 @@ function renderCompose(source, env = {}) {
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+function renderAnalyzerService(file) {
+  const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+  return renderCompose(source).services.analyzer;
+}
+
+function runAnalyzerHealthcheck(healthcheck, body) {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-analyzer-health-'));
+  const curl = join(directory, 'curl');
+  try {
+    writeFileSync(curl, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(body)}'\n`);
+    chmodSync(curl, 0o755);
+    const command = healthcheck.test[1].replace('/opt/analyzer/venv/bin/python', 'python3');
+    return spawnSync('/bin/sh', ['-c', command], {
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+    }).status;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function aioHealthCommand() {
+  const source = readFileSync(new URL('../../docker/Dockerfile.aio', import.meta.url), 'utf8');
+  const match = source.match(/HEALTHCHECK[^\n]*\\\n\s*CMD ([^\n]+)/);
+  assert.ok(match, 'AIO Dockerfile must declare a shell-form health command');
+  return match[1];
+}
+
+test('every sidecar analyzer healthcheck requires ok=true and the analyze engine only', () => {
+  for (const file of [
+    'docker-compose.yml',
+    'docker-compose.byo.yml',
+    'docker-compose.dev.yml',
+    'deploy/portainer/docker-compose.yml',
+  ]) {
+    const healthcheck = renderAnalyzerService(file).healthcheck;
+    assert.ok(healthcheck, `${file} analyzer is missing a healthcheck`);
+    assert.equal(runAnalyzerHealthcheck(healthcheck, { ok: true, engines: ['analyze'] }), 0, file);
+    assert.equal(
+      runAnalyzerHealthcheck(healthcheck, {
+        ok: true,
+        engines: ['analyze'],
+        analyze_audio_capable: false,
+        analyze_vocal_capable: false,
+      }),
+      0,
+      `${file} must not require optional CLAP or Demucs residency`,
+    );
+    for (const body of [
+      { ok: false, engines: ['analyze'] },
+      { ok: true, engines: [] },
+      { ok: true, engines: ['clap', 'demucs'] },
+    ]) {
+      assert.notEqual(runAnalyzerHealthcheck(healthcheck, body), 0, `${file}: ${JSON.stringify(body)}`);
+    }
+  }
+});
+
+test('AIO health fails when ANALYZE_PYTHON is not executable before probing public health', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-aio-health-'));
+  const curl = join(directory, 'curl');
+  const python = join(directory, 'analyze-python');
+  try {
+    writeFileSync(curl, '#!/bin/sh\nexit 0\n');
+    writeFileSync(python, '#!/bin/sh\nexit 0\n');
+    chmodSync(curl, 0o755);
+    const command = aioHealthCommand();
+    const run = (mode) => {
+      chmodSync(python, mode);
+      return spawnSync('/bin/sh', ['-c', command], {
+        env: {
+          ...process.env,
+          ANALYZE_PYTHON: python,
+          PATH: `${directory}:${process.env.PATH}`,
+        },
+      }).status;
+    };
+    assert.notEqual(run(0o644), 0);
+    assert.equal(run(0o755), 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('resolved model rejects a non-Caddy published port', () => {
   const model = structuredClone(validResolved);

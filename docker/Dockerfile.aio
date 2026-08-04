@@ -201,6 +201,6 @@ ENV NODE_ENV=production \
 # which only answers once web + controller are both up.
 EXPOSE 80
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=6 \
-    CMD curl -fsS http://localhost:80/api/health > /dev/null || exit 1
+    CMD test -x "$ANALYZE_PYTHON" && curl -fsS http://localhost:80/api/health > /dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/subwave-supervisor"]

@@ -5,6 +5,7 @@ import { once } from 'node:events';
 
 import {
   DeploymentRolledBackError,
+  DeploymentVerificationError,
   PortainerClient,
   PortainerRequestTimeoutError,
   RollbackIncidentError,
@@ -60,6 +61,140 @@ function clientFor(fetchImpl, options = {}) {
     ...options,
   });
 }
+
+function analyzerSummary(overrides = {}) {
+  return {
+    Id: 'analyzer-container-id',
+    Names: ['/sub-wave-analyzer'],
+    Labels: {
+      'com.docker.compose.project': 'subwave',
+      'com.docker.compose.service': 'analyzer',
+    },
+    ...overrides,
+  };
+}
+
+function analyzerInspection(overrides = {}) {
+  return {
+    Id: 'analyzer-container-id',
+    Config: { Image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v0.42.0-obiwave.1' },
+    State: { Running: true, Health: { Status: 'healthy' } },
+    RestartCount: 0,
+    ...overrides,
+  };
+}
+
+function analyzerFetch({ summary = analyzerSummary(), inspection = analyzerInspection() } = {}) {
+  return async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Name: 'subwave', Env: oldEnv });
+    if (parsed.pathname.endsWith('/docker/containers/json')) {
+      return jsonResponse(summary ? [summary] : []);
+    }
+    if (parsed.pathname.endsWith('/docker/containers/analyzer-container-id/json')) {
+      return jsonResponse(inspection);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+}
+
+function analyzerDockerResponse(url, releaseTag) {
+  const parsed = new URL(url);
+  if (parsed.pathname.endsWith('/docker/containers/json')) {
+    return jsonResponse([analyzerSummary()]);
+  }
+  if (parsed.pathname.endsWith('/docker/containers/analyzer-container-id/json')) {
+    return jsonResponse(analyzerInspection({
+      Config: { Image: `ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${releaseTag}` },
+    }));
+  }
+  return null;
+}
+
+test('Portainer inspects the exact analyzer container through the endpoint Docker proxy', async () => {
+  const calls = [];
+  const client = clientFor(async (url) => {
+    calls.push(url);
+    return analyzerFetch()(url);
+  });
+
+  assert.equal(typeof client.inspectContainer, 'function');
+  const container = await client.inspectContainer('analyzer-container-id');
+
+  assert.equal(container.Id, 'analyzer-container-id');
+  assert.match(calls[0], /\/api\/endpoints\/2\/docker\/containers\/analyzer-container-id\/json$/);
+});
+
+test('Portainer analyzer verification requires the exact running healthy restart-free release container', async () => {
+  const releaseTag = 'v0.42.0-obiwave.1';
+  assert.equal(typeof DeploymentVerificationError, 'function');
+  assert.equal(typeof PortainerClient.prototype.verifyAnalyzerDeployment, 'function');
+  await clientFor(analyzerFetch()).verifyAnalyzerDeployment({ releaseTag });
+
+  const cases = [
+    ['missing', { summary: null }, /missing/],
+    ['wrong tag', {
+      inspection: analyzerInspection({
+        Config: { Image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v0.41.0-obiwave.3' },
+      }),
+    }, /release image/],
+    ['unhealthy', {
+      inspection: analyzerInspection({ State: { Running: true, Health: { Status: 'unhealthy' } } }),
+    }, /healthy/],
+    ['starting', {
+      inspection: analyzerInspection({ State: { Running: true, Health: { Status: 'starting' } } }),
+    }, /healthy/],
+    ['exited', {
+      inspection: analyzerInspection({ State: { Running: false, Health: { Status: 'healthy' } } }),
+    }, /running/],
+    ['restarted', { inspection: analyzerInspection({ RestartCount: 1 }) }, /restart count/],
+  ];
+
+  for (const [name, fixture, expected] of cases) {
+    await assert.rejects(
+      clientFor(analyzerFetch(fixture)).verifyAnalyzerDeployment({ releaseTag }),
+      (error) => {
+        assert.ok(error instanceof DeploymentVerificationError, name);
+        assert.match(error.message, expected, name);
+        return true;
+      },
+    );
+  }
+});
+
+test('analyzer verification failure enters the existing verified rollback path', async () => {
+  assert.equal(typeof DeploymentVerificationError, 'function');
+  const releases = [];
+  let updates = 0;
+  const client = {
+    snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
+    updateStack: async () => { updates += 1; },
+    verifyAnalyzerDeployment: async ({ releaseTag }) => {
+      releases.push(releaseTag);
+      if (updates === 1) throw new DeploymentVerificationError('Analyzer is unhealthy');
+    },
+  };
+  const fetchImpl = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: releaseManifest,
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl,
+    attempts: 1,
+  }), (error) => {
+    assert.ok(error instanceof DeploymentRolledBackError);
+    assert.ok(error.cause instanceof DeploymentVerificationError);
+    return true;
+  });
+
+  assert.equal(updates, 2);
+  assert.deepEqual(releases, ['v0.42.0-obiwave.1', 'v0.41.0-obiwave.3']);
+});
 
 function releaseEnv(overrides = {}) {
   return {
@@ -285,6 +420,7 @@ test('regression: target and rollback stream verification both retain private-mo
   const client = {
     snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
     updateStack: async () => { updates += 1; },
+    verifyAnalyzerDeployment: async () => {},
   };
 
   try {
@@ -387,6 +523,8 @@ test('deploys the rendered checked-in manifest without an upstream analyzer pin'
     }
     if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: unseededEnv });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    const analyzerResponse = analyzerDockerResponse(url, 'v0.42.0-obiwave.1');
+    if (analyzerResponse) return analyzerResponse;
     throw new Error(`Unexpected request: ${url}`);
   };
   const probeFetch = async (url) => url.endsWith('/health')
@@ -429,6 +567,8 @@ test('restores the full snapshot and verifies it after a failed target probe', a
     }
     if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    const analyzerResponse = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
+    if (analyzerResponse) return analyzerResponse;
     throw new Error(`Unexpected request: ${url}`);
   };
   const probeFetch = async (url) => {
@@ -477,6 +617,8 @@ test('a timed-out target update waits for a bounded grace period before rollback
     }
     if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    const analyzerResponse = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
+    if (analyzerResponse) return analyzerResponse;
     throw new Error(`Unexpected request: ${url}`);
   });
   const probeFetch = async (url) => url.endsWith('/health')
@@ -519,6 +661,8 @@ test('an update timeout while reading the response body waits before rollback', 
     }
     if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    const analyzerResponse = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
+    if (analyzerResponse) return analyzerResponse;
     throw new Error(`Unexpected request: ${url}`);
   });
   const probeFetch = async (url) => url.endsWith('/health')
