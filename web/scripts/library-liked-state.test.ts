@@ -107,6 +107,14 @@ const track = (id: string, title: string, likeCount = 4): Track => ({
   blockedBy: null,
 });
 
+const trackWithoutInlineLikes = (id: string, title: string): Track => {
+  const value = track(id, title);
+  delete value.likeCount;
+  delete value.likedByOperator;
+  delete value.lastLikedAt;
+  return value;
+};
+
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { 'content-type': 'application/json' },
@@ -120,6 +128,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
   };
   const likedRequests: PendingRequest[] = [];
+  const likeIndexRequests: PendingRequest[] = [];
+  const operatorMutationRequests: PendingRequest[] = [];
   const deleteRequests: Array<{ path: string; method: string }> = [];
   const storage = new Map<string, string>([['subwave_admin_auth', 'test-token']]);
 
@@ -129,6 +139,11 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     if (path.startsWith('/api/library/liked?')) {
       return new Promise<Response>(resolve => {
         likedRequests.push({ path, init, resolve });
+      });
+    }
+    if (path.endsWith('/operator') && method === 'DELETE') {
+      return new Promise<Response>(resolve => {
+        operatorMutationRequests.push({ path, init, resolve });
       });
     }
     if (path.startsWith('/api/likes/song/') && method === 'DELETE') {
@@ -170,11 +185,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     if (path === '/api/library/tagger') return jsonResponse({ tagger: null });
     if (path === '/api/library/genres') return jsonResponse({ genres: [] });
     if (path === '/api/likes/index') {
-      return jsonResponse({
-        songs: Object.fromEntries([
-          'initial', 'count-winner', 'stale-offset', 'fresh-mode', 'stale-mode',
-          'clamped-track', 'mobile-track',
-        ].map(id => [id, { count: 4, operator: true }])),
+      return new Promise<Response>(resolve => {
+        likeIndexRequests.push({ path, init, resolve });
       });
     }
     if (path === '/api/settings') {
@@ -201,7 +213,9 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
         budget: { mode: 'normal' },
       });
     }
-    if (path === '/api/dj/recent?limit=50') return jsonResponse({ results: [] });
+    if (path === '/api/dj/recent?limit=50') {
+      return jsonResponse({ results: [trackWithoutInlineLikes('untouched-track', 'Untouched Track')] });
+    }
     throw new Error(`unexpected admin request: ${method} ${path}`);
   };
 
@@ -267,6 +281,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       await flush();
     });
     assert.equal(likedRequests.length, 1, 'entering Liked mode starts its first owned request');
+    assert.equal(likeIndexRequests.length, 1, 'mount starts the shared like-index request');
     await respond(likedRequests[0]!, [track('initial', 'Initial Row')], 101);
     assert.equal(rowVisible('Initial Row'), true);
 
@@ -303,6 +318,71 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     await respond(likedRequests[6]!, [track('clamped-track', 'Clamped Track')], 21);
     assert.equal(rowVisible('Clamped Track'), true, 'the newest valid page is rendered after clamping');
 
+    // Hold an unlike while the operator changes sort. Mutation completion must
+    // refresh the latest visible controls, not the render-time loader captured
+    // by the click. The initial shared index is deliberately still pending too:
+    // invalidating it for the mutation must start a replacement request so an
+    // untouched row can recover its heart state.
+    let unlikeMutation!: Promise<void>;
+    await act(async () => {
+      unlikeMutation = renderer.root.findByProps({ 'aria-label': 'unlike Clamped Track' }).props.onClick({});
+      await flush();
+    });
+    assert.equal(operatorMutationRequests.length, 1, 'unlike remains in flight for the control change');
+
+    const recentSort = radioWithText('Recent');
+    await act(async () => { recentSort.props.onClick({}); await flush(); });
+    assert.match(likedRequests[7]!.path, /sort=recent/);
+    await respond(likedRequests[7]!, [track('clamped-track', 'Clamped Track')], 21);
+
+    await act(async () => {
+      operatorMutationRequests[0]!.resolve(jsonResponse({ ok: true, count: 3 }));
+      await unlikeMutation;
+      await flush();
+    });
+    const mutationRefresh = likedRequests[8]!;
+    const mutationRefreshUsesCurrentSort = /sort=recent/.test(mutationRefresh.path);
+
+    await act(async () => {
+      likeIndexRequests[0]!.resolve(jsonResponse({
+        songs: { 'untouched-track': { count: 99, operator: false } },
+      }));
+      await flush();
+    });
+    if (likeIndexRequests[1]) {
+      await act(async () => {
+        likeIndexRequests[1]!.resolve(jsonResponse({
+          songs: { 'untouched-track': { count: 7, operator: true } },
+        }));
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        await flush();
+      });
+    }
+    await respond(mutationRefresh, [track('clamped-track', 'Clamped Track', 3)], 21);
+
+    await act(async () => {
+      radioWithText('All').props.onClick({});
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      await flush();
+    });
+    assert.equal(rowVisible('Untouched Track'), true, 'All mode renders the untouched index-decorated row');
+    const untouchedHeartLabels = renderer.root.findAllByType('button')
+      .map(button => button.props['aria-label'])
+      .filter(label => typeof label === 'string' && label.includes('Untouched Track'));
+    const untouchedHeartRestored = untouchedHeartLabels.includes('unlike Untouched Track');
+    assert.deepEqual({
+      mutationRefreshUsesCurrentSort,
+      replacementIndexRequests: likeIndexRequests.length,
+      untouchedHeartRestored,
+    }, {
+      mutationRefreshUsesCurrentSort: true,
+      replacementIndexRequests: 2,
+      untouchedHeartRestored: true,
+    }, 'mutation completion follows current controls and restores the invalidated shared index');
+
+    await act(async () => { radioWithText('Liked').props.onClick({}); await flush(); });
+    await respond(likedRequests[9]!, [track('clamped-track', 'Clamped Track', 3)], 21);
+
     const desktopClear = renderer.root.findByProps({ 'aria-label': 'clear all likes for Clamped Track' });
     await act(async () => { desktopClear.props.onClick({}); await flush(); });
     let dialog = renderer.root.findByType(V3AlertDialog);
@@ -312,8 +392,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       path: '/api/likes/song/clamped-track',
       method: 'DELETE',
     });
-    assert.equal(likedRequests.length, 8, 'confirmed desktop clear refreshes the active liked page');
-    await respond(likedRequests[7]!, [track('mobile-track', 'Mobile Track')], 1);
+    assert.equal(likedRequests.length, 11, 'confirmed desktop clear refreshes the active liked page');
+    await respond(likedRequests[10]!, [track('mobile-track', 'Mobile Track')], 1);
 
     const mobileTrigger = renderer.root.findByProps({ 'aria-label': 'actions for Mobile Track' });
     await act(async () => { mobileTrigger.props.onClick({}); });
@@ -328,7 +408,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       path: '/api/likes/song/mobile-track',
       method: 'DELETE',
     }, 'mobile confirmation invokes the same per-song DELETE mutation path');
-    await respond(likedRequests[8]!, [], 0);
+    await respond(likedRequests[11]!, [], 0);
   } finally {
     if (renderer) await act(async () => { renderer.unmount(); });
     for (const [key, descriptor] of Object.entries(saved)) {

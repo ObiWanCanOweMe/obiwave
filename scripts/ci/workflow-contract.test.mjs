@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const webPackage = JSON.parse(
+  await readFile(new URL('../../web/package.json', import.meta.url), 'utf8'),
+);
+const webLock = JSON.parse(
+  await readFile(new URL('../../web/package-lock.json', import.meta.url), 'utf8'),
+);
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
 const scan = await readFile(new URL('../../.github/workflows/scan-images.yml', import.meta.url), 'utf8');
 const cutRelease = await readFile(
@@ -92,6 +98,33 @@ test('app quality matrix runs the native stream-buffer contract', () => {
   const appCommand = ci.match(/- package: app\s*\n\s+command: ([^\n]+)/)?.[1];
   assert.ok(appCommand, 'missing app quality-matrix command');
   assert.match(appCommand, /(?:^|&& )npm run test:stream-buffer-format(?: &&|$)/);
+});
+
+test('web quality runs the complete mounted state suite with its locked local runner', () => {
+  const webCommand = ci.match(/- package: web\s*\n\s+command: ([^\n]+)/)?.[1];
+  assert.ok(webCommand, 'missing web quality-matrix command');
+  assert.match(webCommand, /(?:^|&& )npm run test:mounted-state(?: &&|$)/);
+
+  const aggregate = webPackage.scripts?.['test:mounted-state'];
+  assert.equal(typeof aggregate, 'string', 'missing aggregate mounted-state package script');
+  for (const script of [
+    'test:onboarding-provider-state',
+    'test:tts-secret-state',
+    'test:library-liked-state',
+    'test:archive-error-state',
+  ]) {
+    assert.match(aggregate, new RegExp(`(?:^|&& )npm run ${script}(?: &&|$)`), `${script} is outside the aggregate suite`);
+  }
+
+  assert.equal(
+    webPackage.scripts['test:onboarding-provider-state'],
+    'tsx scripts/onboarding-provider-state.test.ts',
+  );
+  assert.equal(webPackage.scripts['test:tts-secret-state'], 'tsx scripts/tts-secret-state.test.ts');
+  assert.equal(webPackage.scripts['test:library-liked-state'], 'tsx scripts/library-liked-state.test.ts');
+  assert.equal(webPackage.scripts['test:archive-error-state'], 'tsx scripts/archive-error-state.test.ts');
+  assert.equal(typeof webPackage.devDependencies?.tsx, 'string', 'tsx must be declared as a web dev dependency');
+  assert.equal(typeof webLock.packages?.['node_modules/tsx']?.version, 'string', 'tsx must be installed in the web lockfile');
 });
 
 test('CUDA analyzer is mirrored, never rebuilt', () => {

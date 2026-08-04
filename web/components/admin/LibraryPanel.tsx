@@ -547,6 +547,8 @@ export default function LibraryPanel() {
       setLikeIndex({});
     }
   }, [adminFetch, ready]);
+  const loadLikeIndexRef = useRef(loadLikeIndex);
+  loadLikeIndexRef.current = loadLikeIndex;
 
   useEffect(() => { loadLikeIndex(); }, [loadLikeIndex]);
 
@@ -591,6 +593,8 @@ export default function LibraryPanel() {
       }
     }
   }, [adminFetch, ready, likedPage, likedSort, trackMode]);
+  const loadLikedRef = useRef(loadLiked);
+  loadLikedRef.current = loadLiked;
 
   useEffect(() => {
     if (tab !== 'tracks' || trackMode !== 'liked' || !ready) return;
@@ -666,12 +670,13 @@ export default function LibraryPanel() {
         setLiked(prev => prev && prev.filter(t => t.id !== track.id));
         setLikedTotal(n => Math.max(0, n - 1));
       }
-      if (trackModeRef.current === 'liked') void loadLiked();
+      if (trackModeRef.current === 'liked') void loadLikedRef.current();
     } catch (err) {
       patchLike(track.id, before);
       notify.err(errorMessage(err));
     } finally {
       setLiking(null);
+      void loadLikeIndexRef.current();
     }
   };
 
@@ -690,11 +695,12 @@ export default function LibraryPanel() {
       setLiked(prev => prev && prev.filter(t => t.id !== track.id));
       setLikedTotal(n => Math.max(0, n - 1));
       notify.ok(`Cleared ${j.removed ?? 0} like${j.removed === 1 ? '' : 's'} on “${track.title || track.id}”`);
-      if (trackModeRef.current === 'liked') void loadLiked();
+      if (trackModeRef.current === 'liked') void loadLikedRef.current();
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
       setLiking(null);
+      void loadLikeIndexRef.current();
     }
   };
 
