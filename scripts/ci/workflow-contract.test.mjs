@@ -17,7 +17,23 @@ const analyzerPythonWrapper = await readFile(
   new URL('../../controller/scripts/analyzer-python.test.ts', import.meta.url),
   'utf8',
 );
+const caddyfiles = await Promise.all(
+  ['../../docker/Caddyfile', '../../docker/aio/Caddyfile'].map((file) =>
+    readFile(new URL(file, import.meta.url), 'utf8'),
+  ),
+);
 const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
+
+test('Caddy owns the listener-auth namespace before the general API proxy', () => {
+  for (const caddyfile of caddyfiles) {
+    const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
+    const listenerMatcherIndex = caddyfile.indexOf(listenerMatcher);
+    const apiProxyIndex = caddyfile.indexOf('handle_path /api/*');
+
+    assert.ok(listenerMatcherIndex >= 0, 'missing listener-auth namespace matcher');
+    assert.ok(apiProxyIndex > listenerMatcherIndex, 'listener-auth matcher must precede the general API proxy');
+  }
+});
 
 test('official JavaScript actions use the Node 24 runtime', async () => {
   const workflowFiles = (await readdir(workflowDirectory, { withFileTypes: true }))
