@@ -18,9 +18,12 @@ FROM python:3.11-slim-bookworm
 
 # ffmpeg + libsndfile1: librosa codec coverage for the Navidrome stream
 # formats. curl: operator healthchecks.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl ca-certificates ffmpeg libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --upgrade \
+      setuptools==83.0.0 wheel==0.47.0
 
 # --- Analyzer venv ----------------------------------------------------------
 # CLAP + Demucs are the heavy tier (~1.5GB each, CPU torch) — OFF by default so
@@ -64,13 +67,18 @@ RUN TORCH_INDEX="https://download.pytorch.org/whl/cpu" && \
       /opt/analyzer/venv/bin/python -c "import torch, demucs, diffq" && \
       apt-get purge -y gcc libc6-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* ; \
     fi && \
+    /opt/analyzer/venv/bin/pip install --no-cache-dir \
+      setuptools==83.0.0 wheel==0.47.0 msgpack==1.2.1 && \
+    /opt/analyzer/venv/bin/pip check && \
     find /opt/analyzer/venv -depth -type d -name __pycache__ -exec rm -rf {} +
 
 # --- Server venv (FastAPI only — spawns the stdio worker, no model loading) --
 RUN python3 -m venv /opt/server/venv && \
     /opt/server/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/server/venv/bin/pip install --no-cache-dir \
-      fastapi==0.139.0 "uvicorn[standard]==0.49.0" pydantic==2.13.4
+      fastapi==0.139.0 "uvicorn[standard]==0.49.0" pydantic==2.13.4 \
+      setuptools==83.0.0 wheel==0.47.0 msgpack==1.2.1 && \
+    /opt/server/venv/bin/pip check
 
 ENV PATH=/opt/server/venv/bin:$PATH \
     ANALYZE_PYTHON=/opt/analyzer/venv/bin/python \

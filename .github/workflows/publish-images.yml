@@ -234,7 +234,7 @@ jobs:
           echo '- Tag: `${{ github.ref_name }}`' >> "$GITHUB_STEP_SUMMARY"
           echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
 
-  scan-images:
+  vulnerability-policy:
     needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer]
     uses: ./.github/workflows/scan-images.yml
     with:
@@ -245,7 +245,7 @@ jobs:
       security-events: write
 
   deploy-production:
-    needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images]
+    needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy]
     runs-on: ubuntu-latest
     environment: production
     concurrency:

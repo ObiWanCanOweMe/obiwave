@@ -110,9 +110,9 @@ test('reusable CI deployment gate runs the CUDA mirror helper contract', () => {
 
 test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
   assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
-  assert.match(publish, /scan-images:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
-  assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images\]/);
-  assert.match(scan, /matrix:\s*\n\s+image: \[[^\]]*analyzer-cuda/);
+  assert.match(publish, /vulnerability-policy:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
+  assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
+  assert.match(scan, /matrix:[\s\S]*- subwave-analyzer-cuda/);
 });
 
 test('CLI asset drift watches the analyzer GPU overlay', () => {
@@ -122,8 +122,8 @@ test('CLI asset drift watches the analyzer GPU overlay', () => {
 test('release publication waits for the reusable CI gate', () => {
   assert.match(publish, /release-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
   assert.match(publish, /build:\s*\n\s+needs: \[validate, release-gate, tag-preflight\]/);
-  assert.match(publish, /scan-images:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
-  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, scan-images\]/);
+  assert.match(publish, /vulnerability-policy:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
+  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
 });
 
 test('publication grants package access only to jobs that need it', () => {
@@ -141,7 +141,7 @@ test('publication grants package access only to jobs that need it', () => {
   );
   const build = publish.slice(
     publish.indexOf('  build:'),
-    publish.indexOf('  scan-images:'),
+    publish.indexOf('  vulnerability-policy:'),
   );
 
   assert.match(workflowPermissions, /^\npermissions:\n  contents: read\n$/);
@@ -157,7 +157,7 @@ test('release tag concurrency never cancels an in-flight publication', () => {
 test('all ten exact tags pass a complete preflight before any build starts', () => {
   const preflightStart = publish.indexOf('  tag-preflight:');
   const buildStart = publish.indexOf('  build:');
-  const scanStart = publish.indexOf('  scan-images:');
+  const scanStart = publish.indexOf('  vulnerability-policy:');
   assert.ok(preflightStart >= 0 && buildStart > preflightStart && scanStart > buildStart);
 
   const preflight = publish.slice(preflightStart, buildStart);
@@ -182,7 +182,7 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
 });
 
 test('private image scans authenticate with package read permission', () => {
-  assert.match(publish, /scan-images:[\s\S]*?permissions:[\s\S]*?packages: read/);
+  assert.match(publish, /vulnerability-policy:[\s\S]*?permissions:[\s\S]*?packages: read/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
   assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
 });
@@ -193,6 +193,47 @@ test('image scans pin Trivy to the reviewed immutable release commit', () => {
     scan,
     /uses: aquasecurity\/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0\.36\.0/,
   );
+  assert.match(scan, /version: v0\.67\.2/);
+});
+
+test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
+  const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  const matrix = scanJob.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
+  assert.ok(matrix, 'missing scan image matrix');
+  const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
+  assert.deepEqual(images, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+    'subwave-analyzer-cuda',
+  ]);
+
+  assert.match(scanJob, /format: json/);
+  assert.match(scanJob, /output: \$\{\{ matrix\.image \}\}\.json/);
+  assert.match(scanJob, /name: trivy-json-\$\{\{ matrix\.image \}\}/);
+  assert.match(scanJob, /format: sarif/);
+  assert.match(scanJob, /Upload SARIF[\s\S]*if: always\(\)/);
+
+  const policyJob = scan.slice(scan.indexOf('  vulnerability-policy:'));
+  assert.match(policyJob, /needs: \[resolve-tag, scan\]/);
+  assert.match(policyJob, /if: always\(\)/);
+  assert.match(policyJob, /pattern: trivy-json-\*/);
+  assert.match(policyJob, /merge-multiple: true/);
+  assert.match(policyJob, /node scripts\/security\/trivy-policy\.mjs/);
+  assert.match(policyJob, /security\/trivy-acceptance\.json/);
+});
+
+test('report-only scanner exit codes are backed by fail-closed aggregate enforcement', () => {
+  assert.match(scan, /exit-code: "0"/);
+  assert.match(scan, /steps\.json-scan\.outcome/);
+  assert.match(scan, /outcome: succeeded \? 'success' : 'failure'/);
+  assert.match(scan, /vulnerability-policy:[\s\S]*node scripts\/security\/trivy-policy\.mjs/);
 });
 
 test('production timeout covers bounded target and rollback operations', () => {

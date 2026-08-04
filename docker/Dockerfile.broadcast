@@ -16,6 +16,7 @@ USER root
 # generation. curl: liquidsoap's HTTPS Subsonic fetch + the entrypoint's
 # "icecast up yet" probe.
 RUN apt-get update -qq \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends \
         icecast2 \
         sudo \
