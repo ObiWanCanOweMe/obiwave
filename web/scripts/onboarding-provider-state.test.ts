@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { createElement, useState } from 'react';
+import { act, create } from 'react-test-renderer';
 import * as providerState from '../components/onboarding/providerState.ts';
+import { useWizard, type WizardController } from '../components/onboarding/useWizard.ts';
 
 const {
-  isCurrentDiscoveryRequest,
   llmDraftForProviderChange,
 } = providerState;
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const compatible = {
   provider: 'openai-compatible',
@@ -70,13 +74,83 @@ assert.deepEqual(llmForSubmission?.(backToLiteLlm.llm), {
   baseUrl: 'https://litellm.example/v1',
 });
 
-let activeDraft = backToLiteLlm.llm;
-const compatibleRequestGeneration = 1;
-const activeGeneration = 2;
-if (isCurrentDiscoveryRequest(compatibleRequestGeneration, activeGeneration)) {
-  activeDraft = { ...activeDraft, model: 'stale-compatible-model' };
+interface DeferredResponse {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
 }
-assert.equal(activeDraft.model, 'anthropic/claude-sonnet');
-assert.equal(isCurrentDiscoveryRequest(activeGeneration, activeGeneration), true);
 
-console.log('onboarding-provider-state.test.ts: provider drafts, serialization, and discovery ownership stay isolated');
+function deferredResponse(): DeferredResponse {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function verifyStaleDiscoveryCannotReachActiveDraft() {
+  const previousFetch = globalThis.fetch;
+  const pendingResponse = deferredResponse();
+  globalThis.fetch = async () => pendingResponse.promise;
+
+  let wizard: WizardController | undefined;
+  let refresh: (() => Promise<void>) | undefined;
+  function Harness() {
+    wizard = useWizard();
+    const [models, setModels] = useState<string[]>([]);
+    refresh = async () => {
+      const result = await wizard!.discoverCustomModels();
+      setModels(result.models);
+    };
+    return createElement('output', {
+      'data-provider': wizard.data.llm.provider,
+      'data-model': wizard.data.llm.model,
+      'data-discovered-models': models.join(','),
+    });
+  }
+
+  let renderer!: ReturnType<typeof create>;
+  try {
+    await act(async () => { renderer = create(createElement(Harness)); });
+    await act(async () => {
+      wizard!.patch(current => ({
+        llm: {
+          ...current.llm,
+          provider: 'openai-compatible',
+          model: 'active-compatible-model',
+          apiKey: 'compatible-secret',
+          baseUrl: 'https://compatible.example/v1',
+        },
+      }));
+    });
+
+    const staleRequest = refresh!();
+    await act(async () => {
+      wizard!.patch(current => ({
+        llm: llmDraftForProviderChange(current.llm, 'litellm'),
+      }));
+    });
+    assert.equal(wizard!.data.llm.provider, 'litellm');
+    assert.equal(wizard!.data.llm.model, '');
+
+    pendingResponse.resolve(new Response(JSON.stringify({
+      ok: true,
+      models: ['stale-compatible-model'],
+    }), { headers: { 'content-type': 'application/json' } }));
+    await act(async () => { await staleRequest; });
+
+    assert.equal(wizard!.data.llm.provider, 'litellm');
+    assert.equal(wizard!.data.llm.model, '');
+    const output = renderer.root.findByType('output');
+    assert.equal(output.props['data-provider'], 'litellm');
+    assert.equal(output.props['data-model'], '');
+    assert.equal(output.props['data-discovered-models'], '');
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (renderer) await act(async () => { renderer.unmount(); });
+  }
+}
+
+verifyStaleDiscoveryCannotReachActiveDraft()
+  .then(() => console.log('onboarding-provider-state.test.ts: provider drafts, serialization, and real discovery ownership stay isolated'))
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });
