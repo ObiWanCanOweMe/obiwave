@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Start from ObiWave `origin/develop` commit `0bb2aecc5a6d4fefe65fe67410887d57df700bbe` plus design commit `56d1d9affc599709d7e69d0406abe41204bf4317`.
+- Start from ObiWave `origin/develop` commit `0bb2aecc5a6d4fefe65fe67410887d57df700bbe` plus design commit `56d1d9affc599709d7e69d0406abe41204bf4317` and this committed execution plan.
 - Upstream `v1.4.0` must resolve to `01663b547feaf0987fd8bad8c1c8c374b8781c76`.
 - Upstream `v1.5.0` must resolve to `8c01e979ebeea5c5ed6cac6658b5da14322b9d6d`.
 - `v1.4.0` must remain an ancestor of `v1.5.0`.
@@ -46,7 +46,8 @@ git_dir=$(cd "$(git rev-parse --git-dir)" && pwd -P)
 git_common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
 test "$git_dir" != "$git_common"
 test "$(git branch --show-current)" = integrate/upstream-v1.5.0
-test "$(git rev-parse HEAD)" = 56d1d9affc599709d7e69d0406abe41204bf4317
+test "$(git rev-parse HEAD^)" = 0f281f9d554b57c8bd9da2de57659c4a42f60dba
+test "$(git log -1 --format=%s)" = "docs: correct integration plan starting head"
 git status --short
 ```
 
