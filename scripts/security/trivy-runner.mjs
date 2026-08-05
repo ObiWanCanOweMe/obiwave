@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -87,8 +88,44 @@ function validateOptions({ scanner, image, format, output, cacheDirectory, run }
   if (typeof run !== 'function') throw new Error('Trivy command runner is required');
 }
 
-function hostWorkspacePath(workspacePath) {
-  return resolve(process.cwd(), `.${workspacePath.slice('/workspace'.length)}`);
+function insideWorkspace(workspace, candidate) {
+  const path = relative(workspace, candidate);
+  return path === '' || (!path.startsWith('..') && !isAbsolute(path));
+}
+
+function resolveApprovedDirectory(workspace, directory, label) {
+  let existing = directory;
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error(`Trivy ${label} must resolve inside the workspace`);
+    existing = parent;
+  }
+  if (!insideWorkspace(workspace, realpathSync(existing))) {
+    throw new Error(`Trivy ${label} must resolve inside the workspace`);
+  }
+  mkdirSync(directory, { recursive: true });
+  const resolved = realpathSync(directory);
+  if (!insideWorkspace(workspace, resolved)) throw new Error(`Trivy ${label} must resolve inside the workspace`);
+  return resolved;
+}
+
+function resolveWorkspaceBindings(output, cacheDirectory) {
+  const workspace = realpathSync(process.cwd());
+  const outputHost = resolve(workspace, `.${output.slice('/workspace'.length)}`);
+  const cacheHost = resolve(workspace, `.${cacheDirectory.slice('/workspace'.length)}`);
+  if (!insideWorkspace(workspace, outputHost) || !insideWorkspace(workspace, cacheHost)) {
+    throw new Error('Trivy workspace path is invalid');
+  }
+  resolveApprovedDirectory(workspace, dirname(outputHost), 'output directory');
+  if (existsSync(outputHost)) {
+    if (lstatSync(outputHost).isSymbolicLink() || !insideWorkspace(workspace, realpathSync(outputHost))) {
+      throw new Error('Trivy output must resolve inside the workspace');
+    }
+  }
+  return {
+    workspace,
+    cacheHost: resolveApprovedDirectory(workspace, cacheHost, 'cache directory'),
+  };
 }
 
 function verifyRecovery({ recovery, scanner, image, run }) {
@@ -108,21 +145,24 @@ function verifyRecovery({ recovery, scanner, image, run }) {
 
 export function runTrivyScan({ scanner, image, format, output, cacheDirectory, recovery, run = commandRunner }) {
   validateOptions({ scanner, image, format, output, cacheDirectory, run });
+  const bindings = resolveWorkspaceBindings(output, cacheDirectory);
   let target = image;
   if (recovery !== undefined) {
     target = verifyRecovery({ recovery, scanner, image, run });
     checkedRun(run, 'docker', ['pull', target.pullRef], 'pull');
     checkedRun(run, 'docker', ['tag', target.pullRef, target.tagRef], 'tag');
     checkedRun(run, 'docker', ['image', 'inspect', target.tagRef], 'local image inspection');
+  } else {
+    checkedRun(run, 'docker', ['pull', target.tagRef], 'pull');
   }
 
   checkedRun(run, 'docker', [
     'run', '--rm',
     '--volume', '/var/run/docker.sock:/var/run/docker.sock',
-    '--volume', `${process.cwd()}:/workspace`,
-    '--volume', `${hostWorkspacePath(cacheDirectory)}:/root/.cache/trivy`,
+    '--volume', `${bindings.workspace}:/workspace`,
+    '--volume', `${bindings.cacheHost}:/root/.cache/trivy`,
     scanner.imageRef,
-    'image', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+    'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
     '--format', format, '--output', output, target.tagRef,
   ], 'scanner');
 
@@ -155,16 +195,32 @@ function parseCli(argv) {
   return values;
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+async function loadScannerConfig(scannerPath) {
+  try {
+    return JSON.parse(await readFile(scannerPath, 'utf8'));
+  } catch {
+    throw new Error('Trivy scanner configuration could not be loaded');
+  }
+}
+
+async function loadCliRecoveryManifest(manifestPath, scannerPath) {
+  try {
+    return await loadRecoveryManifest({ manifestPath, scannerPath });
+  } catch {
+    throw new Error('Recovery manifest could not be loaded');
+  }
+}
+
+export async function runCli(argv = process.argv.slice(2), { run = commandRunner } = {}) {
   const values = parseCli(argv);
-  const scanner = JSON.parse(await readFile(values.scanner, 'utf8'));
+  const scanner = await loadScannerConfig(values.scanner);
   const image = {
     image: values['image-name'],
     tagRef: values['tag-ref'],
     ...(values['pull-ref'] ? { pullRef: values['pull-ref'], digest: values['pull-ref'].slice(values['pull-ref'].lastIndexOf('@') + 1) } : {}),
   };
   const recovery = values['recovery-manifest']
-    ? await loadRecoveryManifest({ manifestPath: values['recovery-manifest'], scannerPath: values.scanner })
+    ? await loadCliRecoveryManifest(values['recovery-manifest'], values.scanner)
     : undefined;
   const result = runTrivyScan({
     scanner,
@@ -173,8 +229,10 @@ export async function runCli(argv = process.argv.slice(2)) {
     output: `/workspace/${values.output}`,
     cacheDirectory: `/workspace/${values['cache-directory']}`,
     recovery,
+    run,
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  return result;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

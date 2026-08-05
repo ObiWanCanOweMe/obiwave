@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { runTrivyScan } from './trivy-runner.mjs';
+import { runCli, runTrivyScan } from './trivy-runner.mjs';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const otherDigest = `sha256:${'b'.repeat(64)}`;
@@ -65,6 +68,15 @@ function thrown(callback) {
   assert.fail('expected callback to throw');
 }
 
+async function rejected(callback) {
+  try {
+    await callback();
+  } catch (error) {
+    return error;
+  }
+  assert.fail('expected callback to reject');
+}
+
 function scanCall(format, output, cacheDirectory) {
   return ['docker', [
     'run', '--rm',
@@ -72,7 +84,7 @@ function scanCall(format, output, cacheDirectory) {
     '--volume', `${workspace}:/workspace`,
     '--volume', `${workspace}${cacheDirectory.slice('/workspace'.length)}:/root/.cache/trivy`,
     scannerConfig.imageRef,
-    'image', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+    'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
     '--format', format, '--output', output, recoveryImage.tagRef,
   ]];
 }
@@ -135,7 +147,7 @@ test('uses the same pinned scanner command for SARIF output', () => {
 
 test('scans a normal canonical tag without recovery pull or local retagging', () => {
   const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' });
-  const command = runner(success());
+  const command = runner(success(), success());
 
   const result = runTrivyScan({
     scanner: scannerConfig,
@@ -147,17 +159,20 @@ test('scans a normal canonical tag without recovery pull or local retagging', ()
   });
 
   assert.deepEqual(result, { image: image.tagRef, format: 'json', output: '/workspace/subwave-web.json' });
-  assert.deepEqual(command.calls, [[
+  assert.deepEqual(command.calls, [
+    ['docker', ['pull', image.tagRef]],
+    [
     'docker', [
       'run', '--rm',
       '--volume', '/var/run/docker.sock:/var/run/docker.sock',
       '--volume', `${workspace}:/workspace`,
       '--volume', `${workspace}/.tmp/trivy-cache:/root/.cache/trivy`,
       scannerConfig.imageRef,
-      'image', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+      'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
       '--format', 'json', '--output', '/workspace/subwave-web.json', image.tagRef,
     ],
-  ]]);
+    ],
+  ]);
 });
 
 test('fails before scanning when recovery digest verification fails', () => {
@@ -165,6 +180,31 @@ test('fails before scanning when recovery digest verification fails', () => {
 
   assert.throws(() => runTrivyScan(recoveryOptions(command.run)), /digest verification failed/i);
   assert.deepEqual(command.calls, recoveryCalls().slice(0, 1));
+});
+
+test('fails before pulling when a successful recovery pre-verifier reports the wrong digest', () => {
+  const command = runner(success(JSON.stringify(otherDigest)));
+
+  assert.throws(() => runTrivyScan(recoveryOptions(command.run)), /digest verification failed/i);
+  assert.deepEqual(command.calls, recoveryCalls().slice(0, 1));
+});
+
+test('fails closed without scanning when a normal image pull fails', () => {
+  const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' });
+  const command = runner(failure('private pull secret'));
+
+  const error = thrown(() => runTrivyScan({
+    scanner: scannerConfig,
+    image,
+    format: 'json',
+    output: '/workspace/subwave-web.json',
+    cacheDirectory: '/workspace/.tmp/trivy-cache',
+    run: command.run,
+  }));
+
+  assert.match(error.message, /pull command failed/i);
+  assert.doesNotMatch(error.message, /secret/i);
+  assert.deepEqual(command.calls, [['docker', ['pull', image.tagRef]]]);
 });
 
 test('fails closed on pull, local tag, local inspection, scanner, and post-scan digest failures', () => {
@@ -215,6 +255,100 @@ test('rejects a normal scan image outside the canonical registry namespace', () 
     run: command.run,
   }), /image/i);
   assert.deepEqual(command.calls, []);
+});
+
+test('rejects cache and output paths that resolve through a workspace symlink', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-runner-'));
+  const originalDirectory = process.cwd();
+  try {
+    await symlink(tmpdir(), join(directory, 'cache-link'));
+    await symlink(tmpdir(), join(directory, 'output-link'));
+    process.chdir(directory);
+
+    for (const [label, overrides] of [
+      ['cache', { cacheDirectory: '/workspace/cache-link' }],
+      ['output', { output: '/workspace/output-link/report.json' }],
+    ]) {
+      const command = runner();
+      assert.throws(() => runTrivyScan({
+        scanner: scannerConfig,
+        image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' },
+        format: 'json',
+        output: '/workspace/report.json',
+        cacheDirectory: '/workspace/cache',
+        run: command.run,
+        ...overrides,
+      }), new RegExp(`${label}.*workspace`, 'i'));
+      assert.deepEqual(command.calls, []);
+    }
+  } finally {
+    process.chdir(originalDirectory);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('runCli translates real recovery arguments and loads the checked-in scanner and manifest', async () => {
+  const imageDigest = 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f';
+  const command = runner(
+    success(JSON.stringify(imageDigest)), success(), success(), success(), success(), success(JSON.stringify(imageDigest)),
+  );
+
+  const result = await runCli([
+    '--scanner', 'security/trivy-scanner.json',
+    '--image-name', 'subwave-web',
+    '--tag-ref', 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2',
+    '--pull-ref', `ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@${imageDigest}`,
+    '--format', 'json',
+    '--output', 'trivy-runner-cli.json',
+    '--cache-directory', '.tmp/trivy-runner-cli-cache',
+    '--recovery-manifest', 'security/releases/v1.3.0-obiwave.2.json',
+  ], { run: command.run });
+
+  assert.deepEqual(result, {
+    image: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2',
+    format: 'json',
+    output: '/workspace/trivy-runner-cli.json',
+  });
+  assert.deepEqual(command.calls.map(([name, args]) => [name, args.slice(0, 3)]), [
+    ['docker', ['buildx', 'imagetools', 'inspect']],
+    ['docker', ['pull', `ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@${imageDigest}`]],
+    ['docker', ['tag', `ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@${imageDigest}`, 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2']],
+    ['docker', ['image', 'inspect', 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2']],
+    ['docker', ['run', '--rm', '--volume']],
+    ['docker', ['buildx', 'imagetools', 'inspect']],
+  ]);
+});
+
+test('runCli sanitizes missing and malformed scanner and recovery files', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-config-secret-'));
+  const malformedScanner = join(directory, 'scanner-content-secret.json');
+  const malformedRecovery = 'security/releases/v1.3.0-obiwave.2-malformed-secret.json';
+  await writeFile(malformedScanner, '{scanner-content-secret');
+  await writeFile(malformedRecovery, '{recovery-content-secret');
+  const base = [
+    '--image-name', 'subwave-web',
+    '--tag-ref', 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2',
+    '--format', 'json', '--output', 'report.json', '--cache-directory', '.tmp/cache',
+  ];
+  try {
+    for (const args of [
+      ['--scanner', join(directory, 'missing-config-secret.json'), ...base],
+      ['--scanner', malformedScanner, ...base],
+      ['--scanner', 'security/trivy-scanner.json', ...base,
+        '--pull-ref', `ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@${digest}`,
+        '--recovery-manifest', 'security/releases/missing-recovery-secret.json'],
+      ['--scanner', 'security/trivy-scanner.json', ...base,
+        '--pull-ref', `ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@${digest}`,
+        '--recovery-manifest', malformedRecovery],
+    ]) {
+      const error = await rejected(() => runCli(args));
+      assert.doesNotMatch(error.message, /secret/i);
+      assert.match(error.message, /configuration|recovery manifest/i);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(malformedRecovery, { force: true });
+  }
 });
 
 test('rejects recovery references that differ from the immutable manifest identity', () => {

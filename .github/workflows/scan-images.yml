@@ -54,6 +54,7 @@ jobs:
         id: resolve
         env:
           REQUESTED_TAG: ${{ inputs.release_tag }}
+          RECOVERY_MANIFEST: ${{ inputs.recovery_manifest }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             RELEASE_TAG="$(git tag --list 'v*-obiwave.*' --sort=-version:refname | head -1)"
@@ -61,7 +62,6 @@ jobs:
             RELEASE_TAG="$REQUESTED_TAG"
           fi
           RELEASE_TAG="$RELEASE_TAG" node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
-          RECOVERY_MANIFEST="${{ inputs.recovery_manifest }}"
           if [[ -n "$RECOVERY_MANIFEST" ]]; then
             [[ "$RECOVERY_MANIFEST" =~ ^security/releases/[A-Za-z0-9._-]+\.json$ ]] || {
               echo 'recovery_manifest must be repository-relative below security/releases/' >&2
@@ -138,15 +138,6 @@ jobs:
             echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Exercise production child command in ${{ matrix.image }}
-        if: contains(fromJSON('["subwave-controller","subwave-aio","subwave-aio-heavy"]'), matrix.image)
-        run: |
-          docker run --rm --entrypoint /bin/sh ${{ steps.refs.outputs.tag_ref }} -ceu '
-            test ! -e /usr/local/bin/npm
-            test ! -e /usr/local/bin/npx
-            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
-          '
-
       - name: Scan ${{ matrix.image }} for policy JSON
         id: json-scan
         continue-on-error: true
@@ -165,6 +156,15 @@ jobs:
             --output "${{ matrix.image }}.json" \
             --cache-directory .tmp/trivy-cache \
             "${recovery_args[@]}"
+
+      - name: Exercise production child command in ${{ matrix.image }}
+        if: always() && contains(fromJSON('["subwave-controller","subwave-aio","subwave-aio-heavy"]'), matrix.image) && steps.json-scan.outcome == 'success'
+        run: |
+          docker run --rm --entrypoint /bin/sh ${{ steps.refs.outputs.tag_ref }} -ceu '
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
+          '
 
       - name: Record JSON scanner status
         if: always()

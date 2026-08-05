@@ -237,6 +237,12 @@ test('image scans invoke the local pinned scanner runner for JSON and SARIF', ()
   assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format sarif/);
 });
 
+test('recovery input is transferred through the environment, never interpolated into Bash', () => {
+  const resolveJob = scan.slice(scan.indexOf('  resolve-tag:'), scan.indexOf('  scan:'));
+  assert.match(resolveJob, /env:\s*\n\s+REQUESTED_TAG: \$\{\{ inputs\.release_tag \}\}\s*\n\s+RECOVERY_MANIFEST: \$\{\{ inputs\.recovery_manifest \}\}/);
+  assert.doesNotMatch(resolveJob, /RECOVERY_MANIFEST="\$\{\{ inputs\.recovery_manifest \}\}"/);
+});
+
 test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
   const matrix = scanJob.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
@@ -271,9 +277,12 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
 
 test('release scans exercise production child commands in controller and both AIO images', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  const jsonRunnerIndex = scanJob.indexOf('      - name: Scan ${{ matrix.image }} for policy JSON');
+  const productionProbeIndex = scanJob.indexOf('      - name: Exercise production child command');
+  assert.ok(jsonRunnerIndex >= 0 && productionProbeIndex > jsonRunnerIndex, 'production probe must follow the JSON runner');
   assert.match(
     scanJob,
-    /if: contains\(fromJSON\('\["subwave-controller","subwave-aio","subwave-aio-heavy"\]'\), matrix\.image\)/,
+    /if: always\(\) && contains\(fromJSON\('\["subwave-controller","subwave-aio","subwave-aio-heavy"\]'\), matrix\.image\) && steps\.json-scan\.outcome == 'success'/,
   );
   assert.match(
     scanJob,
