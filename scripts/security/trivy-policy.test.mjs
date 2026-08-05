@@ -19,6 +19,7 @@ const NOW = new Date('2026-08-04T12:00:00.000Z');
 const TAG = 'v1.3.0-obiwave.2';
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const PINNED_CUDA_IMAGE_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
 
 function imageRef(image) {
   return `${IMAGE_NAMESPACE}/${image}:${TAG}`;
@@ -45,10 +46,14 @@ function trivyReport(image, vulnerabilities = [], overrides = {}) {
     ArtifactType: 'container_image',
     Metadata: {
       ImageID: image === 'subwave-analyzer-cuda'
-        ? PINNED_CUDA_IMAGE_DIGEST
+        ? CUDA_PLATFORM_IMAGE_ID
         : `sha256:${'a'.repeat(64)}`,
       RepoTags: [imageRef(image)],
-      RepoDigests: [`${IMAGE_NAMESPACE}/${image}@sha256:${'b'.repeat(64)}`],
+      RepoDigests: [
+        `${IMAGE_NAMESPACE}/${image}@${image === 'subwave-analyzer-cuda'
+          ? PINNED_CUDA_IMAGE_DIGEST
+          : `sha256:${'b'.repeat(64)}`}`,
+      ],
     },
     Results: [
       {
@@ -485,9 +490,11 @@ test('scan status identity must equal the report artifact identity', () => {
   assert.match(error.message, /status.*report/i);
 });
 
-test('the CUDA mirror report must carry the policy-pinned image digest', () => {
+test('the CUDA mirror report must carry the policy-pinned repository digest', () => {
   const reports = cleanReports();
-  reports['subwave-analyzer-cuda'].report.Metadata.ImageID = `sha256:${'f'.repeat(64)}`;
+  reports['subwave-analyzer-cuda'].report.Metadata.RepoDigests = [
+    `${IMAGE_NAMESPACE}/subwave-analyzer-cuda@sha256:${'f'.repeat(64)}`,
+  ];
 
   const error = validationError({
     reports,
@@ -498,6 +505,22 @@ test('the CUDA mirror report must carry the policy-pinned image digest', () => {
 
   assert.deepEqual(violationCodes(error), ['cuda-digest-mismatch']);
   assert.match(error.message, new RegExp(PINNED_CUDA_IMAGE_DIGEST));
+});
+
+test('a CUDA platform image ID cannot substitute for the pinned repository digest', () => {
+  const reports = cleanReports();
+  reports['subwave-analyzer-cuda'].report.Metadata.ImageID = PINNED_CUDA_IMAGE_DIGEST;
+  reports['subwave-analyzer-cuda'].report.Metadata.RepoDigests = [];
+
+  const error = validationError({
+    reports,
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+
+  assert.deepEqual(violationCodes(error), ['cuda-digest-mismatch']);
+  assert.match(error.message, /repository digest/);
 });
 
 test('no-fix cannot accept a finding for which the scanner reports a fix', () => {

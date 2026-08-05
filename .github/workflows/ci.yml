@@ -77,7 +77,7 @@ jobs:
           node-version: '22'
 
       - name: Run deployment contract tests
-        run: node --test scripts/release/fork-tag.test.mjs scripts/release/mirror-cuda-analyzer.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs
+        run: node --test scripts/release/fork-tag.test.mjs scripts/release/mirror-cuda-analyzer.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs scripts/security/trivy-policy.test.mjs
 
       - name: Validate Portainer manifest policy
         run: |

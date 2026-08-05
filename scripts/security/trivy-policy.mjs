@@ -211,12 +211,13 @@ function normalizeReport(image, entry, expectedImageRef, violations) {
   }
 
   if (image === 'subwave-analyzer-cuda') {
-    const imageDigest = isObject(report.Metadata) ? report.Metadata.ImageID : undefined;
-    if (imageDigest !== PINNED_CUDA_IMAGE_DIGEST) {
+    const expectedRepoDigest = `${CANONICAL_IMAGE_NAMESPACE}/${image}@${PINNED_CUDA_IMAGE_DIGEST}`;
+    const repoDigests = isObject(report.Metadata) ? report.Metadata.RepoDigests : undefined;
+    if (!Array.isArray(repoDigests) || !repoDigests.includes(expectedRepoDigest)) {
       addViolation(
         violations,
         'cuda-digest-mismatch',
-        `${image}: report Metadata.ImageID must equal pinned digest ${PINNED_CUDA_IMAGE_DIGEST} (received ${String(imageDigest)})`,
+        `${image}: report Metadata.RepoDigests must include pinned repository digest ${expectedRepoDigest}`,
       );
     }
   }
