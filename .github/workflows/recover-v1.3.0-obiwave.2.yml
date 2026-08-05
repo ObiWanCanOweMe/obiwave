@@ -59,19 +59,19 @@ jobs:
       group: subwave-production
       cancel-in-progress: false
     timeout-minutes: 30
-    env:
-      PORTAINER_URL: ${{ vars.PORTAINER_URL }}
-      PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
-      PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
-      PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
-      SUBWAVE_RELEASE_TAG: v1.3.0-obiwave.2
-      SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
-      SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
-      SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - name: Deploy immutable release through Portainer
+        env:
+          PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
+          PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
+          SUBWAVE_RELEASE_TAG: v1.3.0-obiwave.2
+          SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
+          SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
+          SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
         run: node scripts/deploy/portainer-release.mjs

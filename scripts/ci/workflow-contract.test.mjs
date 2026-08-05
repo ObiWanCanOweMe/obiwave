@@ -56,9 +56,25 @@ function jobScalar(job, key) {
 
 function jobEnv(job) {
   const match = job.match(/^    env:\n((?:      [^\n]+\n?)*)/m);
-  assert.ok(match, 'missing job environment');
+  if (!match) return {};
   return Object.fromEntries(
     [...match[1].matchAll(/^      ([A-Z0-9_]+): ([^\n]+)$/gm)].map(([, key, value]) => [key, value]),
+  );
+}
+
+function stepBlock(job, stepName) {
+  const match = job.match(
+    new RegExp(`^      - name: ${stepName}\\n([\\s\\S]*?)(?=^      - |(?![\\s\\S]))`, 'm'),
+  );
+  assert.ok(match, `missing ${stepName} step`);
+  return match[1];
+}
+
+function stepEnv(step) {
+  const match = step.match(/^        env:\n((?:          [^\n]+\n?)*)/m);
+  assert.ok(match, 'missing step environment');
+  return Object.fromEntries(
+    [...match[1].matchAll(/^          ([A-Z0-9_]+): ([^\n]+)$/gm)].map(([, key, value]) => [key, value]),
   );
 }
 
@@ -80,9 +96,9 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
   const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
   assert.ok(defaultPermissions, 'missing default workflow permissions');
   assert.match(defaultPermissions, /^  contents: read$/m);
-  assert.doesNotMatch(
-    recovery,
-    /^\s+(?:contents|packages|actions|checks|deployments|id-token|issues|pull-requests|statuses): write$/m,
+  assert.deepEqual(
+    [...recovery.matchAll(/^\s+([a-z-]+): write$/gm)].map(([, permission]) => permission),
+    ['security-events'],
   );
 
   const validate = jobBlock(recovery, 'validate');
@@ -101,7 +117,27 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
   );
   assert.deepEqual(jobNeeds(deploy), ['validate', 'vulnerability-policy']);
   assert.equal(jobScalar(deploy, 'environment'), 'production');
-  assert.equal(jobEnv(deploy).SUBWAVE_RELEASE_TAG, 'v1.3.0-obiwave.2');
+  assert.match(
+    deploy,
+    /^    concurrency:\n      group: subwave-production\n      cancel-in-progress: false$/m,
+  );
+  assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
+  assert.deepEqual(jobEnv(deploy), {});
+  const deployStep = stepBlock(deploy, 'Deploy immutable release through Portainer');
+  assert.deepEqual(stepEnv(deployStep), {
+    PORTAINER_URL: '${{ vars.PORTAINER_URL }}',
+    PORTAINER_API_KEY: '${{ secrets.PORTAINER_API_KEY }}',
+    PORTAINER_STACK_ID: '${{ vars.PORTAINER_STACK_ID }}',
+    PORTAINER_ENDPOINT_ID: '${{ vars.PORTAINER_ENDPOINT_ID }}',
+    SUBWAVE_RELEASE_TAG: 'v1.3.0-obiwave.2',
+    SUBWAVE_HEALTH_URL: '${{ vars.SUBWAVE_HEALTH_URL }}',
+    SUBWAVE_STREAM_URL: '${{ vars.SUBWAVE_STREAM_URL }}',
+    SUBWAVE_STREAM_PASSWORD: '${{ secrets.SUBWAVE_STREAM_PASSWORD }}',
+  });
+  assert.deepEqual(
+    [...deploy.matchAll(/^\s+run: ([^\n]+)$/gm)].map(([, command]) => command),
+    ['node scripts/deploy/portainer-release.mjs'],
+  );
   assert.doesNotMatch(recovery, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
 });
 
