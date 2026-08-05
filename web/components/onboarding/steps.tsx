@@ -12,13 +12,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { V3Alert } from '@/components/ui/alert';
 
-// Tiny presentation primitives kept local to the wizard — avoids dragging the
-// full admin UI library into a screen most operators see exactly once. Labels,
-// fills and borders all ride the theme tokens (the eyebrow voice, bg-field,
-// border-input) so the wizard reads as part of the same broadsheet.
+// Presentation primitives kept local to the wizard, so a screen most operators
+// see once doesn't drag in the full admin UI library. Labels, fills and borders
+// ride the theme tokens.
 
-// The uppercase mono label voice, shared by <Field> and the inline label rows
-// (provider / model / location) that can't wrap their control in a <label>.
+// Shared by <Field> and the inline label rows that can't wrap their control in
+// a <label>.
 const WIZARD_LABEL_CLASS =
   'font-mono text-[11px] font-bold tracking-[0.18em] text-ink uppercase';
 
@@ -83,14 +82,13 @@ function TestPill({ result }: { result: { ok: boolean | null; msg?: string } }) 
   );
 }
 
-// ─── NAVIDROME ─────────────────────────────────────────────────────────────
+// NAVIDROME
 export function NavidromeStep({ w }: { w: WizardController }) {
   const [busy, setBusy] = useState(false);
   const onTest = async () => {
     setBusy(true);
-    // testNavidrome never throws — it catches its own errors into the pill —
-    // but the finally is the backstop so the button can never get wedged on
-    // "Testing…" if anything unexpected slips through (issue #682).
+    // testNavidrome catches its own errors into the pill; the finally is the
+    // backstop so the button can't wedge on "Testing…" (issue #682).
     try {
       await w.testNavidrome();
     } finally {
@@ -160,10 +158,8 @@ export function NavidromeStep({ w }: { w: WizardController }) {
   );
 }
 
-// ─── LLM ───────────────────────────────────────────────────────────────────
-// Provider list, labels and blurbs come from the shared admin/llm/providerMeta
-// module (PROVIDER_IDS + the ProviderSelector card grid) so onboarding and the
-// admin Settings tab never drift.
+// LLM. Provider list, labels and blurbs come from admin/llm/providerMeta so
+// onboarding and the admin Settings tab never drift.
 
 export function LlmStep({ w }: { w: WizardController }) {
   const [busy, setBusy] = useState(false);
@@ -239,8 +235,8 @@ export function LlmStep({ w }: { w: WizardController }) {
         blurb="The DJ talks between tracks. Ollama running on the host is the homelab default — no API key needed."
       />
       <div className="grid gap-3">
-        {/* Not wrapped in <Field> — that renders a <label>, and a label around a
-            radiogroup of buttons hijacks clicks. Inline the same label styling. */}
+        {/* Not <Field>: it renders a <label>, and a label around a radiogroup of
+            buttons hijacks clicks. */}
         <div className="flex flex-col gap-1">
           <span className={WIZARD_LABEL_CLASS}>Provider</span>
           <ProviderSelector
@@ -315,9 +311,8 @@ export function LlmStep({ w }: { w: WizardController }) {
             />
           </Field>
         )}
-        {/* Model — inlined label (not <Field>): the discovery combobox trigger is
-            a <button>, and a <label> wrapping it would hijack the click. Same
-            unified picker + free-type fallback as the admin Settings tab. */}
+        {/* Not <Field>: the combobox trigger is a <button>, and a wrapping
+            <label> would hijack the click. */}
         <div className="flex flex-col gap-1">
           <span className={WIZARD_LABEL_CLASS}>Model</span>
           <div className="flex items-stretch gap-2">
@@ -372,7 +367,7 @@ export function LlmStep({ w }: { w: WizardController }) {
   );
 }
 
-// ─── TTS ───────────────────────────────────────────────────────────────────
+// TTS
 export function TtsStep({ w }: { w: WizardController }) {
   const engine = w.data.tts.defaultEngine;
   const heavyPicked = engine === 'chatterbox' || engine === 'pocket-tts';
@@ -459,9 +454,8 @@ export function TtsStep({ w }: { w: WizardController }) {
                       cloud: {
                         ...d.tts.cloud,
                         provider,
-                        // Credentials are provider-specific. Never carry a
-                        // previously typed OpenAI/ElevenLabs key into Fish (or
-                        // vice versa) when the selector changes.
+                        // Credentials are provider-specific: never carry a
+                        // typed key across a selector change.
                         apiKey: '',
                         ...(provider === 'fish-audio' ? { model: 's2.1-pro', voice: '' } : {}),
                       },
@@ -524,7 +518,7 @@ export function TtsStep({ w }: { w: WizardController }) {
   );
 }
 
-// ─── DJ persona ────────────────────────────────────────────────────────────
+// DJ persona
 export function DjStep({ w }: { w: WizardController }) {
   return (
     <div>
@@ -539,8 +533,8 @@ export function DjStep({ w }: { w: WizardController }) {
             onChange={e => w.patch(d => ({ dj: { ...d.dj, stationName: e.target.value } }))}
           />
         </Field>
-        {/* Not a <Field>/<label> — the picker is a composite (combobox + buttons)
-            and shouldn't live inside a single <label>. */}
+        {/* Not <Field>: the picker is a composite and can't live inside one
+            <label>. */}
         <div className="flex flex-col gap-1">
           <span className={WIZARD_LABEL_CLASS}>Location</span>
           <LocationPicker
@@ -571,7 +565,7 @@ export function DjStep({ w }: { w: WizardController }) {
   );
 }
 
-// ─── REVIEW + SAVE ─────────────────────────────────────────────────────────
+// REVIEW + SAVE
 export function ReviewStep({
   w,
   onDone,

@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.0](https://github.com/perminder-klair/subwave/compare/v1.3.0...v1.4.0) (2026-08-04)
+
+
+### Features
+
+* **admin:** clearer Cloud TTS provider picker on Settings and Personas ([#1293](https://github.com/perminder-klair/subwave/issues/1293)) ([32611a2](https://github.com/perminder-klair/subwave/commit/32611a2c73539cd45de5e5ebf015287f2adb3810))
+* **seo:** point self-hosted installs' shared-page canonicals at getsubwave.com ([#1292](https://github.com/perminder-klair/subwave/issues/1292)) ([4998826](https://github.com/perminder-klair/subwave/commit/4998826ff79db5afbd1681bceee36cf61eb7867c))
+* **tts:** operator-configurable fallback voice ([#1288](https://github.com/perminder-klair/subwave/issues/1288)) ([e6015ef](https://github.com/perminder-klair/subwave/commit/e6015ef33e5f8a8b0f636f35e0ebae664e7f3205))
+* **web:** community apps directory at /apps ([#1289](https://github.com/perminder-klair/subwave/issues/1289)) ([d345b49](https://github.com/perminder-klair/subwave/commit/d345b4931f482eb20ea22e380641d58b9398a2f2))
+
+
+### Bug Fixes
+
+* **admin:** cap the dash Listeners table with a scrollbar and sticky header ([#1290](https://github.com/perminder-klair/subwave/issues/1290)) ([385d637](https://github.com/perminder-klair/subwave/commit/385d637adf655ddfc2a8ef0be213eba93375a41e))
+
+
+### Refactors
+
+* **web:** two-column Appearance modal, drop the light/dark pin ([#1287](https://github.com/perminder-klair/subwave/issues/1287)) ([42d53c7](https://github.com/perminder-klair/subwave/commit/42d53c7c8d223238590e760a3855c3521ab3c746))
+
 ## [1.3.0](https://github.com/perminder-klair/subwave/compare/v1.2.0...v1.3.0) (2026-08-03)
 
 

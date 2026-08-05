@@ -1,8 +1,7 @@
 'use client';
 
-// Webhooks — /admin/webhooks. Outbound HTTP POSTs to operator-configured
-// endpoints on station events. See controller/src/broadcast/webhooks.ts
-// for the fan-out + the documented payload shapes.
+// Webhooks. See controller/src/broadcast/webhooks.ts for the fan-out and the
+// documented payload shapes.
 
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -51,10 +50,8 @@ function valid(h: Webhook): boolean {
   return true;
 }
 
-// ── Reference examples ──────────────────────────────────────────────────────
 // Every payload below mirrors what broadcast/webhooks.ts actually POSTs. All
-// carry `event` + `t` (ISO timestamp); the rest is event-specific. Kept inline
-// so an operator can wire a relay without reading the controller source.
+// carry `event` + `t` (ISO timestamp); the rest is event-specific.
 
 interface PayloadDoc {
   event: string;
@@ -263,10 +260,9 @@ export default function WebhooksPanel() {
     }
   };
 
-  // The gate persists on its own the moment it's flipped (like the skills
-  // toggles) — it must not ride the hooks Save button, which an invalid
-  // draft row would disable. Doesn't touch `hooks`, so unsaved row edits
-  // survive a toggle.
+  // The gate persists the moment it's flipped: it must not ride the hooks Save
+  // button, which an invalid draft row would disable. Doesn't touch `hooks`, so
+  // unsaved row edits survive a toggle.
   const saveGate = async (next: boolean) => {
     setBusy(true);
     try {
@@ -393,9 +389,8 @@ export default function WebhooksPanel() {
         return (
           <Card
             key={h.id}
-            /* A webhook URL is one long unbreakable token; `.card-head` is a
-               flex row with no wrapping of its own, so let the title break
-               inside instead of pushing the head past the card. */
+            /* A webhook URL is one long unbreakable token and `.card-head` is a
+               flex row that doesn't wrap, so break inside the title instead. */
             title={
               h.url
                 ? <span className="break-all">{h.url}</span>
@@ -445,8 +440,8 @@ export default function WebhooksPanel() {
                         tone={on ? 'accent' : 'default'}
                         dot={on}
                         onClick={() => toggleEvent(ev)}
-                        // These pills are the event picker, not decoration —
-                        // give them a thumb-sized target on a phone.
+                        // These pills are the event picker, so they need a
+                        // thumb-sized target on a phone.
                         className="min-h-9 cursor-pointer sm:min-h-0"
                       >
                         {ev}

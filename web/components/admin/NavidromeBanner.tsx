@@ -10,11 +10,8 @@ interface NavidromeStatus {
   url?: string;
 }
 
-// Always-on connectivity banner. Polls the live-config Navidrome ping (cached
-// server-side) every 30s and, when it fails, warns on every admin page that the
-// DJ has no music source. Uses the same ping the DJ Doc reads, so the two never
-// disagree. Renders nothing until the first failing result arrives — a healthy
-// or not-yet-known station shows no chrome.
+// Polls the same Navidrome ping the DJ Doc reads, so the two never disagree.
+// Renders nothing until a failing result arrives.
 export default function NavidromeBanner({
   adminFetch,
 }: {

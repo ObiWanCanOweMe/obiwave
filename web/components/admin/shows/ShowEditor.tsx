@@ -1,12 +1,9 @@
 'use client';
 
-// The inline show editor - the former modal body, lifted to an in-page editor
-// (the personas pattern). Edits write straight through `update` onto form
-// state; nothing is saved here, the page's "Save schedule" persists shows and
-// schedule together. Keyed by show id at the call site so switching shows
-// remounts it (which resets the AiFill box).
-//
-// Part of the shows/ split - see ../ShowsPanel.tsx.
+// The inline show editor. Edits write straight through `update` onto form state;
+// nothing is saved here — the page's "Save schedule" persists shows and schedule
+// together. Keyed by show id at the call site, so switching shows remounts it
+// (which resets the AiFill box).
 
 import type { ChangeEvent, RefObject } from 'react';
 import { useMemo, useState } from 'react';
@@ -43,11 +40,6 @@ import type { Persona, Show, SkillOption, ThemeOption } from './types';
 import { hasAnyMusicFilter, showValid } from './lib';
 import { ChipRow } from './ChipRow';
 
-// ── inline show editor ─────────────────────────────────────────────────────
-// The former modal body, lifted to an in-page editor (the personas pattern).
-// Edits are written straight through `update` onto form state; nothing is saved
-// here — the page's "Save schedule" persists shows + schedule together. Keyed by
-// show id at the call site so switching shows remounts it (resets the AiFill box).
 interface ShowEditorProps {
   show: Show;
   editorRef: RefObject<HTMLDivElement | null>;
@@ -76,8 +68,7 @@ export function ShowEditor({
 }: ShowEditorProps) {
   // Save show gates on THIS show only — other unsaved shows don't block it.
   const valid = showValid(show);
-  // Free-text genre being typed before it's added as a chip. The editor is
-  // remounted per show (keyed at the call site), so this resets on switch.
+  // The editor is remounted per show, so this resets on switch.
   const [genreDraft, setGenreDraft] = useState('');
   const addGenre = (g: string) => {
     const v = g.trim().slice(0, 64);
@@ -86,14 +77,11 @@ export function ShowEditor({
     update({ genres: [...show.genres, v] });
     setGenreDraft('');
   };
-  // Genres this show asks for that no track actually carries. The controller
-  // resolves a free-text genre onto the nearest library tag, which silently
-  // broadens the show ("Pop Punk" → "Pop") or drops the filter altogether when
-  // nothing is close — invisible on air unless we say it here, at the moment
-  // the operator is looking at the field. Mirrors show-filter.normGenre so the
-  // UI and the station agree on what counts as "the same tag". Only meaningful
-  // once the library list has loaded (empty = not fetched yet, or the endpoint
-  // failed — never warn on a fetch failure).
+  // Genres no track carries. The controller resolves free text onto the nearest
+  // library tag, silently broadening the show ("Pop Punk" → "Pop") or dropping the
+  // filter — invisible on air unless said here. Mirrors show-filter.normGenre so UI
+  // and station agree on "the same tag". An empty library list means not fetched or
+  // the endpoint failed — never warn on a fetch failure.
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const knownGenres = useMemo(() => new Set(genres.map(norm)), [genres]);
   const unknownGenres = genres.length

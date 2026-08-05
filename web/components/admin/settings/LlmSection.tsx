@@ -21,9 +21,8 @@ import {
   type SectionProps,
 } from './shared';
 
-// LLM provider descriptors, the cloud-key env-var map and the badge logic live
-// in ./llm/providerMeta (imported above) — shared with the ProviderSelector card
-// grid and, later, the onboarding wizard. Don't redefine them here.
+// Provider descriptors, the cloud-key env-var map and the badge logic live in
+// ./llm/providerMeta — don't redefine them here.
 
 // Providers whose bearer token is typed inline (routed into settings.llm.keys
 // per provider, not secrets.env) and whose server URL lives in
@@ -96,13 +95,10 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     setCompatFallbackKeyTesting(false);
   }, [fallbackProvider, fallbackBaseUrl, form.llm.fallback.model, compatFallbackKeyInput]);
 
-  // Embeddings inherit settings.llm by default (embedding.provider === ''), so
-  // switching the CHAT provider silently changes the EMBEDDING model too — which
-  // invalidates an already-embedded library and breaks vector search until a
-  // re-embed (#dimension-mismatch). When the library is embedded and embeddings
-  // are inheriting, pin them to the index's actual model on a provider switch and
-  // surface a notice so the operator understands what happened (and can opt to
-  // re-embed on the new provider instead).
+  // Embeddings inherit settings.llm when embedding.provider === '', so switching the
+  // CHAT provider would silently change the EMBEDDING model, invalidating an
+  // already-embedded library and breaking vector search until a re-embed. Pin them
+  // to the index's actual model instead and surface a notice.
   const [embedPinNotice, setEmbedPinNotice] = useState<{ model: string; dim: number; newProvider: string } | null>(null);
   const changeLlmProvider = (v: string) => {
     if (v === form.llm.provider) return;
@@ -114,9 +110,8 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       if (!f) return f;
       const next = { ...f, llm: { ...f.llm, provider: v } };
       if (pin && meta) {
-        // Stored as "provider:model" (e.g. "ollama:nomic-embed-text"); split on
-        // the FIRST colon so ollama tags with their own colon (bge-m3:latest)
-        // keep the tag intact in the model field.
+        // Stored as "provider:model"; split on the FIRST colon so ollama tags with
+        // their own colon (bge-m3:latest) keep the tag intact.
         const i = meta.model.indexOf(':');
         const pinProvider = i > 0 ? meta.model.slice(0, i) : '';
         const pinModel = i > 0 ? meta.model.slice(i + 1) : meta.model;
@@ -1264,11 +1259,8 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         saveLabel="Save LLM provider"
       />
 
-      {/* Chat-provider switch would otherwise drag the inherited embedding model
-          with it and invalidate the already-embedded library. We pinned
-          embeddings to the index's model; this notice explains it and lets the
-          operator instead opt to re-embed on the new provider. The SAFE outcome
-          (keep the pin) is the default — only the explicit confirm switches. */}
+      {/* The SAFE outcome (keep the embedding pin) is the default; only the explicit
+          confirm re-embeds on the new provider. */}
       <V3AlertDialog
         open={embedPinNotice != null}
         onOpenChange={(o) => { if (!o) setEmbedPinNotice(null); }}

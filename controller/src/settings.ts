@@ -96,6 +96,7 @@ import {
   normalizeArchiveRetentionDays,
   normalizeDjPrompts,
   normalizePersonaArray,
+  normalizeTtsFallback,
   normalizeSchedule,
   normalizeScheduleOverride,
   normalizeShows,
@@ -111,6 +112,7 @@ import {
   validateScheduleOverrideStrict,
   validateScheduleStrict,
   validateShowsStrict,
+  validateTtsBlock,
   validateWeatherMoodsStrict,
   validateWebhooksStrict,
 } from './settings/validate.js';
@@ -599,6 +601,12 @@ export async function load() {
       defaultEngine: TTS_ENGINES.includes(stored.tts?.defaultEngine)
         ? stored.tts.defaultEngine
         : DEFAULTS.tts.defaultEngine,
+      // Operator-chosen rescue slot. Reuses the persona voice-slot normaliser
+      // so the per-engine voice rules can't drift between the two; only the
+      // `enabled` flag is extra. Absent/non-boolean coerces to the default
+      // (off), so an upgrade from a settings.json written before this key
+      // existed keeps today's chain byte-for-byte.
+      fallback: normalizeTtsFallback(stored.tts?.fallback),
       // Stored as a plain boolean; coerce missing/non-boolean (older saves) to
       // the default. See DEFAULTS.tts.heavyEnabled for the semantics.
       heavyEnabled:
@@ -1438,6 +1446,29 @@ export async function update(patch) {
         throw new Error('tts.enabled must be a boolean');
       }
       next.tts.enabled = t.enabled;
+    }
+    if (t.fallback !== undefined) {
+      const fb = t.fallback || {};
+      if (fb.enabled !== undefined && typeof fb.enabled !== 'boolean') {
+        throw new Error('tts.fallback.enabled must be a boolean');
+      }
+      // Same strict validator every persona voice slot goes through, so the
+      // per-engine voice rules are enforced identically — `where` names the
+      // full path, so a bad value reads `tts.fallback.voice must ...`.
+      // Deliberately NO cross-field rule of the llm.fallback
+      // "openai-compatible needs baseUrl" kind: a cloud fallback whose provider
+      // has no key simply fails engineUsable() and is skipped at rescue time,
+      // which degrades to the local floor rather than blocking the save.
+      const slot = validateTtsBlock(
+        { ...next.tts.fallback, ...fb },
+        'tts.fallback',
+      );
+      next.tts.fallback = {
+        enabled: fb.enabled !== undefined ? fb.enabled : next.tts.fallback.enabled,
+        engine: slot.engine,
+        voice: slot.voice,
+        cloudProvider: slot.cloudProvider,
+      };
     }
     if (t.heavyEnabled !== undefined) {
       if (typeof t.heavyEnabled !== 'boolean') {

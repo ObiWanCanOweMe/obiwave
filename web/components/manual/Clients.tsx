@@ -334,6 +334,12 @@ export default function Clients() {
           Running the station yourself rather than listening along? That&rsquo;s covered in{' '}
           <Link href="/setup" className="bs-link">the setup guide</Link>.
         </p>
+        <p>
+          This page covers tuning in with players that already exist. For apps and
+          integrations built specifically for SUB/WAVE — alternative players, bots,
+          terminal clients, MCP servers — see the{' '}
+          <Link href="/apps" className="bs-link">apps directory</Link>.
+        </p>
       </section>
     </ManualPage>
   );

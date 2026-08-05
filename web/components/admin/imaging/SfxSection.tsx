@@ -75,7 +75,6 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
         }
       />
 
-      {/* On/off */}
       <PanelBox>
         <div className="flex flex-wrap items-center justify-between gap-5 px-[18px] py-[16px]">
           <div className="min-w-[240px] flex-1">
@@ -95,7 +94,6 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
         </div>
       </PanelBox>
 
-      {/* Library */}
       <PanelBox>
         <PanelHead label={`effect library · ${pad2(list.length)}`} />
         {list.length === 0 ? (
@@ -105,8 +103,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             {list.map(s => (
               <div
                 key={s.name}
-                /* Mobile drops the play/delete cluster under the text — see
-                   JinglesSection for the same reflow. */
+                /* Mobile drops the play/delete cluster below the text (as JinglesSection). */
                 className="grid grid-cols-1 items-center gap-3 px-[18px] py-[15px] sm:grid-cols-[1fr_auto] sm:gap-[18px]"
               >
                 <div className="min-w-0">
@@ -151,7 +148,6 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
         )}
       </PanelBox>
 
-      {/* Create — ElevenLabs */}
       <Modal
         open={modal === 'create'}
         onOpenChange={(o) => { if (!o) setModal(null); }}
@@ -226,7 +222,6 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
         </div>
       </Modal>
 
-      {/* Import — bring your own audio */}
       <Modal
         open={modal === 'import'}
         onOpenChange={(o) => { if (!o) setModal(null); }}

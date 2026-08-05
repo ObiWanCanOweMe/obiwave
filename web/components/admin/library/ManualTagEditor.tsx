@@ -1,9 +1,5 @@
 'use client';
 
-// Inline editor for a single track's moods and energy.
-//
-// Part of the library/ split - see ../LibraryPanel.tsx.
-
 import type { ChangeEvent } from 'react';
 import { useState } from 'react';
 import { Btn, Eyebrow, Pill, Seg } from '../ui';

@@ -39,26 +39,21 @@ interface ThemeDef {
   builtin?: boolean;
 }
 
-// SWATCH_KEYS (paper / ink / accent / overlay — reads the palette at a glance,
-// overlay doubles as the hover wash) + THEME_TOKENS come from the generated
-// registry mirror now, so this form, the controller validator and the no-flash
-// bootstrap can't drift.
+// SWATCH_KEYS + THEME_TOKENS come from the generated registry mirror, so this
+// form, the controller validator and the no-flash bootstrap can't drift.
 
-// Each swatch is its own ref because useDynamicStyle wants a single element
-// per call. The arbitrary token values can't go through Tailwind utilities
-// (issue #50 bans the inline `style` prop), so we route them through the
-// DOM-API hook instead.
+// One ref per swatch because useDynamicStyle takes a single element. Arbitrary
+// token values can't go through Tailwind utilities and issue #50 bans the inline
+// `style` prop, hence the DOM-API hook.
 function Swatch({ color }: { color?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   useDynamicStyle(ref, { background: color || 'transparent' });
   return <span ref={ref} className="h-7 w-7" aria-hidden="true" />;
 }
 
-// Live preview — applies the in-progress token map (+ resolved display font) to
-// a scoped subtree so the operator sees the palette they're building without
-// touching the live page theme. Tokens are set via the DOM API (ref), not the
-// inline style prop (issue #50); omitted tokens derive from the base palette via
-// the globals.css :root fallbacks, exactly like the real system.
+// Applies the in-progress tokens to a scoped subtree, never the live page theme.
+// Set via the DOM API, not the inline style prop (issue #50); omitted tokens
+// derive from the globals.css :root fallbacks, exactly like the real system.
 function ThemePreview({ tokens, mode }: { tokens: Record<string, string>; mode: 'light' | 'dark' }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -92,10 +87,8 @@ function ThemePreview({ tokens, mode }: { tokens: Record<string, string>; mode: 
   );
 }
 
-// Create or edit a custom theme — AI-drafted from a description or built by hand,
-// saved as state/themes/<id>.json via POST /themes. Passing an existing theme's
-// id overwrites that file (edit); omitting it derives a new id from the name
-// (create). Tokens are editable and previewed live before save.
+// Saved as state/themes/<id>.json via POST /themes. Passing an existing theme's id
+// overwrites that file (edit); omitting it derives a new id from the name (create).
 function ThemeEditorModal({
   open,
   onOpenChange,
@@ -117,8 +110,7 @@ function ThemeEditorModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Seed the form each time the modal opens: from the theme being edited, or
-  // blank for a fresh create. Keyed on `open` so re-opening always starts clean.
+  // Keyed on `open` so re-opening always starts clean.
   useEffect(() => {
     if (!open) return;
     setErr(null);
@@ -152,8 +144,7 @@ function ThemeEditorModal({
       // globals.css, and an empty value would fail the typed validator.
       const cleaned = Object.fromEntries(Object.entries(tokens).filter(([, v]) => v.trim() !== ''));
       const body: Record<string, unknown> = { name: name.trim(), description: description.trim(), mode, tokens: cleaned };
-      // Pass the id when editing so the same state/themes/<id>.json is overwritten
-      // even if the operator renamed it; omit it on create so a fresh id is derived.
+      // Keeps the same file even if the operator renamed the theme.
       if (isEdit && editing) body.id = editing.id;
       const r = await adminFetch('/themes', {
         method: 'POST',
@@ -270,17 +261,16 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
   const activeId = data.values?.theme?.active;
   const PUBLIC_API = (process.env.NEXT_PUBLIC_API_URL as string | undefined) || '/api';
 
-  // Skin = the player's full-screen layout (ui.skin); distinct from the theme,
-  // which is the palette. Both live in this section now. Save through the same
-  // settings flow — the player picks it up on its next /state poll.
+  // Skin = the player's full-screen layout (ui.skin); the theme is the palette. The
+  // player picks a change up on its next /state poll.
   const activeSkinId = SKINS.some(s => s.id === data.values?.ui?.skin)
     ? (data.values?.ui?.skin as string)
     : DEFAULT_SKIN_ID;
   const activeSkinName = SKINS.find(s => s.id === activeSkinId)?.name ?? 'Classic';
   const chooseSkin = (id: string) => { if (!busy) saveSettings({ ui: { skin: id } }); };
 
-  // Theme list is public — fetch through the unauthenticated /themes endpoint
-  // so a signed-out admin still sees swatches while signing in.
+  // Unauthenticated /themes, so a signed-out admin still sees swatches while
+  // signing in.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -315,16 +305,14 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
 
   const choose = async (theme: ThemeDef) => {
     if (theme.id === activeId || busy) return;
-    // Save through the existing settings flow. ThemeProvider's 30 s poll
-    // would pick this up eventually, but the admin viewing this page wants
-    // the swatch swap to feel instant — apply locally on click.
+    // ThemeProvider's 30s poll would pick this up eventually; apply locally so the
+    // swatch swap is instant.
     applyTheme(theme);
     cacheTheme(theme);
     await saveSettings({ theme: { active: theme.id } });
   };
 
-  // When an edit saves, refresh the list and — if the edited theme is the one
-  // on air — re-apply it so the admin page updates now (the poll would too).
+  // Re-apply when the edited theme is the one on air, so the admin page updates now.
   const onSaved = (next: ThemeDef[], savedId?: string) => {
     setThemes(next);
     if (savedId && savedId === activeId) {
@@ -333,9 +321,8 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
     }
   };
 
-  // Delete a user theme's state/themes/<id>.json. If it was the active theme,
-  // fall back to the first remaining one (built-ins lead the list) through the
-  // normal selection flow so nothing points at a now-missing id.
+  // Deleting the active theme falls back to the first remaining one (built-ins lead
+  // the list), so nothing points at a now-missing id.
   const remove = async (theme: ThemeDef) => {
     try {
       const r = await adminFetch(`/themes/${encodeURIComponent(theme.id)}`, { method: 'DELETE' });
@@ -375,7 +362,6 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
         </div>
       </Card>
 
-      {/* Themes — the palette picker merged with create / edit / refresh. */}
       <Card title="Themes" sub="the station-wide palette">
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -403,10 +389,9 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
               {themes.map(t => {
                 const isActive = t.id === activeId;
                 return (
-                  // basis-full: on a phone the swatch strip + name leaves no
-                  // room beside Edit/Remove, so the picker takes the whole row
-                  // and the actions wrap under it. `sm:basis-0` + `grow` is
-                  // byte-for-byte the old `flex-1`.
+                  // basis-full: on a phone the swatch strip + name leaves no room
+                  // beside Edit/Remove, so the picker takes the whole row and the
+                  // actions wrap under it.
                   <div key={t.id} className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                     <button
                       type="button"

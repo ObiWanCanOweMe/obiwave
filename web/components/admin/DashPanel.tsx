@@ -1,8 +1,7 @@
 'use client';
 
-// DJ command center — /admin/dash. Lets the operator step into the autonomous
-// booth: speak custom text on-air, fire any voice segment on demand,
-// flip the autonomous toggles, and watch live on-air status + the booth log.
+// DJ command center — /admin/dash. Speak custom text on air, fire voice segments,
+// flip the autonomous toggles, watch live status + the booth log.
 import { useEffect, useState } from 'react';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
@@ -66,6 +65,15 @@ import {
   maskIp,
   sortConnections,
 } from './dash/types';
+
+// Listeners-table header cells. `sticky top-0` resolves against the ScrollArea
+// viewport, and the opaque card-bg stops rows showing through underneath. The
+// rule is an inset shadow, not `border-b`: under border-collapse (Tailwind
+// preflight) the border belongs to the table, so it stays behind while the cell
+// scrolls away.
+const STICKY_TH =
+  'sticky top-0 z-[1] bg-[var(--card-bg)] shadow-[inset_0_-1px_0_var(--separator-strong)]';
+
 export default function DashPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [status, setStatus] = useState<DashStatus | null>(null);
@@ -75,14 +83,12 @@ export default function DashPanel() {
   const [sayText, setSayText] = useState('');
   const [sayMode, setSayMode] = useState('raw');
   const [sayKind, setSayKind] = useState('dj-speak');
-  // POST lifecycle for the PromptInputSubmit glyph: ready → submitted while
-  // the /dj/say call is in flight → a brief error flash on failure → ready.
+  // Drives the PromptInputSubmit glyph: ready → submitted → error flash → ready.
   const [sayStatus, setSayStatus] = useState<ChatStatus>('ready');
   const [confirmSkip, setConfirmSkip] = useState(false);
 
-  // Chip row for the manual voice box: hardcoded set until the controller has
-  // a generated batch (fetched on mount, cheap — the GET never calls a model),
-  // refreshed on demand via the ↻ button (the POST does).
+  // Hardcoded set until the controller has a generated batch. The GET on mount
+  // never calls a model; the ↻ button's POST does.
   const [saySuggestions, setSaySuggestions] = useState<string[]>(SAY_SUGGESTIONS);
   const [sayGenBusy, setSayGenBusy] = useState(false);
 
@@ -95,7 +101,6 @@ export default function DashPanel() {
   const [sort, setSort] = useState<SortState>({ key: 'connectedSeconds', dir: 'desc' });
   const [revealIps, setRevealIps] = useState(false);
 
-  // Live status — poll /now-playing + /state together every 3s.
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -128,8 +133,7 @@ export default function DashPanel() {
     };
   }, [hydrated, needsAuth, adminFetch]);
 
-  // Live listener connections — polled slower than status (10s) since it hits
-  // Icecast's admin interface, and the table doesn't need 3s freshness.
+  // Polled slower than status because it hits Icecast's admin interface.
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -155,10 +159,8 @@ export default function DashPanel() {
     };
   }, [hydrated, needsAuth, adminFetch]);
 
-  // Usage rollups for the health strip (DJ latency + TTS fallback) — polled
-  // every 15s. /stats is heavier than live status and both figures move slowly,
-  // so it gets its own slower cadence. Soft-fails: a miss just freezes the two
-  // meters at their last reading rather than erroring the dash.
+  // Health-strip rollups. /stats is heavy and both figures move slowly, hence
+  // the slower cadence; a miss freezes the meters rather than erroring the dash.
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -179,9 +181,7 @@ export default function DashPanel() {
     };
   }, [hydrated, needsAuth, adminFetch]);
 
-  // Recent listener requests + how the DJ resolved each — admin-gated, durable
-  // across restarts. Polled at the slower 10s cadence; this is a review surface,
-  // not a live ticker.
+  // A review surface, not a live ticker — hence the slower cadence.
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -207,8 +207,7 @@ export default function DashPanel() {
     };
   }, [hydrated, needsAuth, adminFetch]);
 
-  // Last generated suggestion batch, once on mount. Soft-fails: any miss
-  // (controller down, nothing generated since boot) leaves the hardcoded set.
+  // Last generated batch, once on mount. Any miss leaves the hardcoded set.
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
@@ -228,8 +227,7 @@ export default function DashPanel() {
     };
   }, [hydrated, needsAuth, adminFetch]);
 
-  // ↻ on the chip row — ask the station LLM for a fresh batch. Explicit
-  // operator action; failure toasts and leaves the current chips in place.
+  // Asks the station LLM for a fresh batch; failure leaves the current chips.
   const refreshSuggestions = async () => {
     setSayGenBusy(true);
     try {
@@ -248,7 +246,6 @@ export default function DashPanel() {
     }
   };
 
-  // Generic POST helper — drives the busy state; result goes to the toast.
   const act = async (
     key: string,
     path: string,
@@ -281,28 +278,24 @@ export default function DashPanel() {
       setSayText('');
       setSayStatus('ready');
     } else {
-      // Brief error flash on the submit glyph, then back to ready. The toast
-      // from act() carries the actual message; the text stays for a retry.
+      // act() already toasted the message; the text stays for a retry.
       setSayStatus('error');
       window.setTimeout(() => setSayStatus('ready'), 1500);
     }
   };
 
-  // PromptInput hands us { text, files }; only text matters here. Guard empty
-  // text and double-submits (Enter while a send is already in flight).
+  // Guards empty text and double-submits (Enter while a send is in flight).
   const onSaySubmit = (message: PromptInputMessage) => {
     const text = message.text.trim();
     if (!text || busy) return;
     void sendVoice(text);
   };
 
-  // Skip is disruptive — it cuts the track for every listener — so the Skip
-  // button opens a confirm dialog; this runs only after the operator accepts.
+  // Runs only after the confirm dialog — a skip cuts the track for every listener.
   const doSkip = () => act('skip', '/dj/skip', {}, 'skip track');
 
-  // Cancel a queued track before it airs. One click, no confirm — unlike
-  // skip, nothing on-air changes; worst case is a 409 because the track went
-  // on air first. Optimistically drop the row; the 3s poll confirms.
+  // No confirm: nothing on-air changes, worst case a 409 because the track went
+  // on air first. The row drops optimistically; the poll confirms.
   const cancelQueued = async (t: QueueEntry) => {
     const id = typeof t.subsonic_id === 'string' ? t.subsonic_id : '';
     if (!id) return;
@@ -332,8 +325,8 @@ export default function DashPanel() {
 
   const np = status?.nowPlaying;
   const ctx = status?.context;
-  // Station zone — on-air timestamps render in it so they match what the DJ
-  // speaks, regardless of the operator's own browser timezone (issue #418).
+  // On-air timestamps render in the station zone so they match what the DJ
+  // speaks, not the operator's browser timezone (issue #418).
   const tz = status?.timezone;
   const locale = status?.locale;
   const q: QueueState = status?.queue || {};
@@ -341,13 +334,9 @@ export default function DashPanel() {
   const listenersObj = listenersValue && typeof listenersValue === 'object' ? listenersValue : null;
   const upcoming = q.upcoming || [];
   const history = q.history || [];
-  // Booth log is the live DJ session, shown NEWEST FIRST — the operator
-  // watching the dash cares about what just went out, not the top of the
-  // session. `sessionMessages` arrives in air order, so reverse for display
-  // while carrying each turn's ORIGINAL index along: turnKey() folds the index
-  // into the React key, and a display index would shift under every turn the
-  // station adds, remounting the whole list. (The controller's djLog ring
-  // buffer is operator diagnostics — it lives on /admin/debug only.)
+  // `sessionMessages` arrives in air order and is shown newest first. Each turn
+  // carries its ORIGINAL index: turnKey() folds the index into the React key, and
+  // a display index would shift under every new turn, remounting the whole list.
   const booth = status?.sessionMessages || [];
   const boothNewestFirst = booth.map((turn, i) => ({ turn, i })).reverse();
 
@@ -356,10 +345,8 @@ export default function DashPanel() {
     ? `${ctx.weather.condition}${ctx.weather.temp != null ? ` ${Math.round(ctx.weather.temp)}°` : ''}`
     : '—';
 
-  // Inputs for the top-of-dash health strip. Listeners/queue/online come from
-  // the 3s live poll; latency + TTS-fallback from the 15s /stats poll. A meter
-  // with no data yet (stats not loaded, or zero calls since boot) is passed
-  // null so the strip shows "—" rather than a misleading zero.
+  // A meter with no data yet (stats not loaded, or zero calls since boot) is
+  // passed null so the strip shows "—" rather than a misleading zero.
   const lCurrent =
     listenersObj?.current ?? (typeof listenersValue === 'number' ? listenersValue : 0);
   const lPeak = listenersObj?.peak ?? lCurrent;
@@ -367,9 +354,8 @@ export default function DashPanel() {
     listeners: lCurrent,
     listenersPeak: lPeak,
     latencyMs: stats?.llm?.count ? (stats.llm.latency?.p95 ?? null) : null,
-    // Redline at the DJ-agent deadline (the fallback threshold), so the gauge
-    // tracks the model in use instead of a fixed ceiling. Null until /stats
-    // loads → StationHeader falls back to its built-in default scale.
+    // Redline at the DJ-agent deadline so the gauge tracks the model in use, not
+    // a fixed ceiling. Null until /stats loads → StationHeader's default scale.
     latencyDeadlineMs: stats?.llm?.agentTimeoutMs ?? null,
     ttsFallbackPct: stats?.tts?.count ? Math.round((stats.tts.fallbackRate ?? 0) * 1000) / 10 : null,
     online: status?.streamOnline ?? null,
@@ -383,7 +369,6 @@ export default function DashPanel() {
 
   return (
     <div className="grid gap-4">
-      {/* ── STATION HEADER: now-playing + unified health/status strip ───── */}
       <StationHeader
         metrics={healthMetrics}
         np={np}
@@ -397,13 +382,9 @@ export default function DashPanel() {
 
       {err && <ErrorState error={err} />}
 
-      {/* ── 2-COL OPS ──────────────────────────────────────────────────── */}
       <div className="stack-mobile grid grid-cols-[1.4fr_1fr] gap-4">
-        {/* LEFT */}
         <div className="grid grid-rows-[auto_1fr] gap-4">
           <Card title="Queue" sub={`${upcoming.length} upcoming`} bodyClass="px-3.5 py-1.5">
-            {/* The Card supplies the newsprint chrome; the Queue's own border/
-                radius/shadow are stripped so it reads as the card body. */}
             <Queue className="rounded-none border-0 bg-transparent p-0 shadow-none">
               {upcoming.length === 0 ? (
                 <div className="py-1 text-muted italic">queue empty, auto-playlist fallback</div>
@@ -430,9 +411,8 @@ export default function DashPanel() {
                         <QueueItemContent className="text-[12px] text-ink">
                           {t.title} <span className="text-muted">— {t.artist}</span>
                         </QueueItemContent>
-                        {/* Seam-type badge (#1257): stamped only once the seam's
-                            blend clip is actually queued, so no icon = plain
-                            crossfade, icon = stem blend. Definitive, not a
+                        {/* Seam-type badge (#1257), stamped only once the blend clip
+                            is queued: no icon = plain crossfade. Definitive, not a
                             prediction — blends are decided at pair drain. */}
                         {t.stemSeam ? (
                           <span
@@ -448,8 +428,7 @@ export default function DashPanel() {
                             ? t.duration
                             : ''}
                         </span>
-                        {/* Per-track cancel from develop (#1006), grafted into
-                            the Queue composition's actions slot. */}
+                        {/* Per-track cancel (#1006). */}
                         {typeof t.subsonic_id === 'string' && t.subsonic_id ? (
                           <QueueItemActions className="opacity-100">
                             <QueueItemAction
@@ -474,8 +453,6 @@ export default function DashPanel() {
                 </QueueList>
               )}
 
-              {/* Recently played — collapsed by default; a review surface,
-                  not part of the live queue read. */}
               {history.length > 0 && (
                 <QueueSection defaultOpen={false} className="border-t border-separator-strong">
                   <QueueSectionTrigger className="min-h-9 rounded-none bg-transparent px-1.5 py-2 text-[9px] font-bold tracking-[0.2em] text-muted uppercase hover:bg-[var(--overlay)] hover:text-ink sm:min-h-0">
@@ -520,12 +497,11 @@ export default function DashPanel() {
               <div className="text-muted italic">no session turns yet</div>
             ) : (
               <div className="relative min-h-[220px] flex-1">
-                {/* The absolute-inset wrapper keeps the log's content out of
-                    the card's intrinsic height, so the card tracks the right
-                    column instead of growing to fit every session turn. The
-                    scroller is anchored at the TOP rather than stick-to-bottom:
-                    with newest first, turns prepend, and a container sitting at
-                    scrollTop 0 keeps showing the newest turn on its own. */}
+                {/* The absolute-inset wrapper keeps the log out of the card's
+                    intrinsic height, so the card tracks the right column instead
+                    of growing to fit every turn. The scroller stays anchored at
+                    the TOP: newest first means turns prepend, so scrollTop 0
+                    keeps showing the newest turn on its own. */}
                 <div className="absolute inset-0">
                   <div
                     className="h-full overflow-y-auto"
@@ -567,13 +543,10 @@ export default function DashPanel() {
           </Card>
         </div>
 
-        {/* RIGHT */}
         <div className="grid gap-4">
           <Card title="Manual voice DJ" sub="speak now">
-            {/* Prompt chips — clicking fills the textarea, never sends.
-                Chips are directions for the DJ, not verbatim lines, so they
-                also flip the box to Styled (raw would air the instruction).
-                ↻ asks the station LLM for a fresh batch keyed to right now. */}
+            {/* Chips fill the textarea, never send, and flip the box to Styled —
+                they are directions for the DJ, and raw would air the instruction. */}
             <div className="mb-2.5 flex items-center gap-1.5">
               <div className="min-w-0 flex-1">
                 <Suggestions className="gap-1.5">
@@ -585,8 +558,8 @@ export default function DashPanel() {
                         setSayText(text);
                         setSayMode('styled');
                       }}
-                      // min-h-9 gives the chip a thumb-sized target on a
-                      // phone; sm: drops back to the dense desktop pill.
+                      // min-h-9 is a thumb-sized target on a phone; sm: drops
+                      // back to the dense desktop pill.
                       className="h-auto min-h-9 rounded-none border-separator-strong px-3 py-[3px] text-[9px] font-medium tracking-[0.04em] text-muted normal-case hover:bg-[var(--overlay)] hover:text-ink sm:min-h-0 sm:px-2"
                     />
                   ))}
@@ -617,10 +590,9 @@ export default function DashPanel() {
                   }
                 />
               </PromptInputBody>
-              {/* Two deliberate rows: the mode/duck controls, then the send
-                  button as a full-width action bar. On the ~550px column the
-                  old single flex-wrap row broke unpredictably, leaving the
-                  button dangling half-attached under empty space. */}
+              {/* Two rows (controls, then a full-width send bar): on the ~550px
+                  column a single flex-wrap row broke unpredictably, leaving the
+                  button dangling under empty space. */}
               <PromptInputFooter className="flex-col items-stretch gap-2.5">
                 <PromptInputTools className="flex-wrap items-center gap-x-5 gap-y-2">
                   <div className="flex items-center gap-1.5">
@@ -639,8 +611,8 @@ export default function DashPanel() {
                   disabled={!!busy || !sayText.trim()}
                   className="w-full rounded-none px-3"
                 >
-                  {/* No children while in flight / erroring so the status
-                      glyphs (spinner / ✕) take over from the label. */}
+                  {/* No children while in flight / erroring, so the status glyphs
+                      take over from the label. */}
                   {sayStatus === 'ready' ? 'Send to air →' : undefined}
                 </PromptInputSubmit>
               </PromptInputFooter>
@@ -648,8 +620,8 @@ export default function DashPanel() {
           </Card>
 
           <Card title="DJ segments" sub="fire on demand">
-            {/* 2-up on a phone so each cart pad keeps a full-width label
-                (and a 4th "banter" pad squares off rather than dangling). */}
+            {/* 2-up on a phone so each pad keeps a full-width label, and a 4th
+                "banter" pad squares off rather than dangling. */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {[...SEGMENTS, ...((status?.activeShow?.guests?.length ?? 0) > 0 ? [BANTER_SEGMENT] : [])].map(s => {
                 const k = `seg:${s.type}`;
@@ -667,8 +639,6 @@ export default function DashPanel() {
             </div>
           </Card>
 
-          {/* Live show control sits with the other on-air actions — the pads
-              above fire a segment now, this puts a whole show on now. */}
           <TakeoverCard tz={tz} locale={locale} />
 
           <Card title="Broadcast">
@@ -707,7 +677,6 @@ export default function DashPanel() {
         </div>
       </div>
 
-      {/* ── LISTENERS ──────────────────────────────────────────────────── */}
       <Card
         title="Listeners"
         sub={conns ? `${conns.count} connected` : 'live connections'}
@@ -732,35 +701,51 @@ export default function DashPanel() {
         ) : conns.connections.length === 0 ? (
           <div className="text-muted italic">nobody listening right now</div>
         ) : (
-          <ScrollArea>
+          /* Capped like the other admin lists so a busy station's connection list
+             scrolls inside the card instead of stretching the dash down the page. */
+          <ScrollArea className="max-h-[360px]">
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-left text-[9px] tracking-[0.2em] text-muted uppercase">
-                  <SortableTh label="IP" col="ip" sort={sort} onSort={setSort} className="pr-3" />
-                  {/* Mount is the least useful of the four on a phone — the
-                      remaining three fit 390px without a sideways scroll. */}
+                  <SortableTh
+                    label="IP"
+                    col="ip"
+                    sort={sort}
+                    onSort={setSort}
+                    className={STICKY_TH + ' pr-3'}
+                  />
+                  {/* Mount is dropped on a phone; the other three fit 390px
+                      without a sideways scroll. */}
                   <SortableTh
                     label="Mount"
                     col="mount"
                     sort={sort}
                     onSort={setSort}
-                    className="hidden pr-3 sm:table-cell"
+                    className={STICKY_TH + ' hidden pr-3 sm:table-cell'}
                   />
                   <SortableTh
                     label="Connected"
                     col="connectedSeconds"
                     sort={sort}
                     onSort={setSort}
-                    className="pr-3"
+                    className={STICKY_TH + ' pr-3'}
                   />
-                  <SortableTh label="Client" col="client" sort={sort} onSort={setSort} />
+                  <SortableTh
+                    label="Client"
+                    col="client"
+                    sort={sort}
+                    onSort={setSort}
+                    className={STICKY_TH}
+                  />
                 </tr>
               </thead>
               <tbody>
                 {sortConnections(conns.connections, sort).map((c, i) => (
                   <tr
                     key={`${c.ip}:${c.mount}:${i}`}
-                    className="border-t border-dashed border-separator-strong"
+                    // The sticky header already draws a solid rule, so the top
+                    // row's dashed border would double it.
+                    className="border-t border-dashed border-separator-strong first:border-t-0"
                   >
                     <td className="py-1.5 pr-3 font-mono whitespace-nowrap" title={c.ip}>
                       {revealIps ? c.ip || '—' : maskIp(c.ip)}
@@ -791,10 +776,7 @@ export default function DashPanel() {
         )}
       </Card>
 
-      {/* ── REQUESTS ───────────────────────────────────────────────────── */}
       <RequestsCard requests={requests} err={reqErr} tz={tz} locale={locale} />
-
-      {/* ── LIKES ──────────────────────────────────────────────────────── */}
 
       {!status && !err && <div className="text-muted italic">connecting…</div>}
 
@@ -810,7 +792,3 @@ export default function DashPanel() {
     </div>
   );
 }
-
-// A clickable column header. Clicking the active column flips direction;
-// clicking a new one selects it (descending for the duration column, ascending
-// for the text columns — the order an operator usually wants first).

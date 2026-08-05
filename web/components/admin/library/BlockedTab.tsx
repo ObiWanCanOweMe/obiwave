@@ -1,9 +1,5 @@
 'use client';
 
-// The blocked-tracks tab: what the operator has excluded, and un-blocking.
-//
-// Part of the library/ split - see ../LibraryPanel.tsx.
-
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, X, Ban } from 'lucide-react';
 import { Card, Btn } from '../ui';
@@ -31,9 +27,8 @@ export function BlockedTab({ entries, loading, unblocking, bulkBusy, onUnblock, 
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Prune the selection whenever the list changes — an entry removed by a single
-  // unblock (or by another admin session) must not linger as a checked ghost
-  // that the bulk action then reports as "already gone".
+  // An entry removed by a single unblock (or by another admin session) must not linger
+  // as a checked ghost the bulk action then reports as "already gone".
   useEffect(() => {
     setSelected(prev => {
       if (prev.size === 0) return prev;

@@ -1,18 +1,9 @@
 'use client';
-// "Play sample" button for the TTS picker. Posts the chosen engine/voice/speed
-// to POST /settings/tts/preview, gets back a WAV blob and plays it — so the
-// operator can hear a voice before saving. Shared by the Personas voice card and
-// the Settings voice tab. The endpoint bypasses the on-air persona AND the
-// silent fallback, so an unavailable engine returns a real error message here
-// rather than quietly playing Piper. Gain (dB) is a playout-time mix trim and is
-// not part of the rendered sample — only voice + speed are auditioned.
-//
-// Once a sample is synthesized it renders as an ai-elements AudioPlayer
-// (media-chrome under the hood) instead of a bare play/stop toggle: the clip
-// auto-plays on arrival (same behavior as before) and stays scrubbable /
-// replayable until the audition parameters change. A sample auditions one
-// exact engine/voice/speed combination, so it is discarded as stale the moment
-// any of those change.
+// "Play sample" for the TTS pickers: POST /settings/tts/preview → a WAV blob.
+// The endpoint bypasses the on-air persona AND the silent fallback, so an
+// unavailable engine returns a real error here rather than quietly playing Piper.
+// Gain (dB) is a playout-time mix trim, so only voice + speed are auditioned, and
+// a sample is discarded as stale the moment either changes.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { AdminAuth } from '../../../lib/adminAuth';
 import { Btn } from '../ui';
@@ -39,10 +30,8 @@ interface VoicePreviewButtonProps {
   // Persona's free-text on-air language ("Turkish", "Türkçe") — the server
   // renders the sample sentence in this language when it recognizes it.
   language?: string;
-  // Unsaved ElevenLabs voice_settings sliders (issue #696) — sent so the sample
-  // auditions the CURRENT slider positions, not the last-saved values. Only
-  // meaningful when engine is 'cloud' with the elevenlabs provider; the server
-  // ignores it everywhere else.
+  // Unsaved ElevenLabs sliders (issue #696), so the sample auditions the CURRENT
+  // positions. Only meaningful for cloud + elevenlabs; ignored server-side otherwise.
   voiceSettings?: {
     voiceStability: number;
     voiceStyle: number;
@@ -66,12 +55,10 @@ export function VoicePreviewButton({
 }: VoicePreviewButtonProps) {
   const [state, setState] = useState<PreviewState>('idle');
   const [error, setError] = useState<string | null>(null);
-  // Object URL of the rendered sample; non-null = the AudioPlayer is shown.
   const [sampleUrl, setSampleUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Abort any in-flight synthesis and revoke the current object URL.
   const discardSample = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -79,13 +66,11 @@ export function VoicePreviewButton({
     setSampleUrl(null);
   }, []);
 
-  // Revoke the object URL + abort synthesis if the card unmounts mid-sample.
+  // Unmounting mid-sample must abort synthesis and revoke the object URL.
   useEffect(() => () => discardSample(), [discardSample]);
 
-  // Drop a stale sample when the auditioned parameters change — the player
-  // must never replay the old voice under a new label. (voiceSettings is
-  // deliberately absent: it's an unstable inline object at the call site, and
-  // the pre-AudioPlayer version had the same blind spot.)
+  // The player must never replay the old voice under a new label. voiceSettings is
+  // deliberately absent from the deps: it's an unstable inline object at the call site.
   useEffect(() => {
     discardSample();
     setState('idle');
@@ -131,12 +116,8 @@ export function VoicePreviewButton({
         )}
       </div>
       {sampleUrl && (
-        // Compact single-row transport for a seconds-long clip: play,
-        // scrubbable time range, elapsed/total readout, mute — no seek-jump
-        // buttons. `key` remounts the element per sample so autoPlay fires
-        // again on re-synthesis. Theming rides the vendored CSS-var hooks:
-        // the shadcn bridge tokens already resolve to newsprint ink/vermilion,
-        // and the mono face keeps the timecode reading like a data readout.
+        // `key` remounts the element per sample so autoPlay fires again on
+        // re-synthesis. Theming rides the vendored CSS-var hooks.
         <AudioPlayer
           key={sampleUrl}
           className="mt-2 block w-fit"

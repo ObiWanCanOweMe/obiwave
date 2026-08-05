@@ -17,16 +17,15 @@ export const metadata = pageMeta({
 // read it live from the local controller at request time rather than at build.
 export const dynamic = 'force-dynamic';
 
-// Submission opens a GitHub Issue Form (no fork, no YAML). A workflow turns the
-// issue into a one-file pull request automatically. Mirrors the /skills +
-// /personas share flows.
+// Submission opens a GitHub Issue Form; a workflow turns it into a one-file PR.
+// Mirrors the /skills + /personas share flows.
 const SUBMIT_URL = showSubmitUrl();
 const DOCS_URL = 'https://github.com/perminder-klair/subwave/blob/main/docs/community.md';
 
-// The two catalog-backed regions. Each takes the in-flight promise rather than
-// calling fetchCommunityShows() itself, so the page issues exactly one request
-// no matter how many boundaries read it — no reliance on framework-level fetch
-// memoisation, which fetchCommunityShows opts out of with `cache: 'no-store'`.
+// Each region takes the in-flight promise rather than calling
+// fetchCommunityShows() itself, so the page issues exactly one request however
+// many boundaries read it. Framework-level fetch memoisation can't help here:
+// fetchCommunityShows opts out with `cache: 'no-store'`.
 
 async function ShowsStat({ shows }: { shows: Promise<CommunityShow[]> }) {
   const count = (await shows).length;
@@ -64,11 +63,10 @@ async function ShowsGrid({ shows }: { shows: Promise<CommunityShow[]> }) {
 }
 
 export default function CommunityShowsIndex() {
-  // Kick the controller call off but don't await it here: keeping this
-  // component synchronous is what lets the hero, the CTA and the closing note
-  // flush immediately while the catalog streams in behind the boundaries.
-  // fetchCommunityShows never rejects (it resolves to [] on any failure), so
-  // holding the promise unawaited can't produce an unhandled rejection.
+  // Started, not awaited: keeping this component synchronous is what lets the
+  // hero, CTA and closing note flush while the catalog streams in behind the
+  // boundaries. fetchCommunityShows resolves to [] on any failure, so holding
+  // the promise unawaited can't produce an unhandled rejection.
   const shows = fetchCommunityShows();
 
   return (

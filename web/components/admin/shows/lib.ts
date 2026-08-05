@@ -1,9 +1,6 @@
-// Pure show helpers: hydrating a stored/partial show into a fully-defaulted
-// one, validating it, and projecting it to the payload and table-row shapes.
-// hydrateShow is the single place the legacy singular -> plural coercion (#929)
-// lives, so the initial load and a community install can't drift apart.
-//
-// Part of the shows/ split - see ../ShowsPanel.tsx (mirrors schedule/lib.ts).
+// Pure show helpers: hydration, validation, and the payload / table-row
+// projections. hydrateShow is the single place the legacy singular → plural
+// coercion (#929) lives, so the initial load and a community install can't drift.
 
 import type { ShowFacet, ShowRow } from './ShowsTable';
 import { SHOW_COLORS } from '../schedule/lib';
@@ -16,9 +13,8 @@ export function clientMintId() {
   return 's_' + [...b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 
-// Hydrate a raw/partial show (from GET /settings or a community install
-// response) into a fully-defaulted Show. Kept in one place so the initial load
-// and the community install share the exact same legacy-field coercion (#929).
+// One place, so the initial load and a community install share the exact same
+// legacy-field coercion (#929).
 export function hydrateShow(s: Partial<Show>): Show {
   return {
     id: s.id ?? clientMintId(),
@@ -71,9 +67,8 @@ export function hasAnyMusicFilter(s: Show): boolean {
   return !!(s.moods.length || s.genres.length || s.energies.length || s.eras.length);
 }
 
-// The wire shape for one show — trimmed + the "only-means-something-with"
-// conditionals the server also enforces. Shared by the editor's Save show
-// (POST /shows) and the community install path so they stay identical.
+// Trimmed, with the "only-means-something-with" conditionals the server also
+// enforces. Shared by Save show (POST /shows) and the community install path.
 export function showPayload(s: Show) {
   return {
     id: s.id,
@@ -104,10 +99,8 @@ export function showPayload(s: Show) {
 }
 
 
-// "What it plays" facets — moods, genres, eras, energies as chips, plus the
-// hard-lock / playlist / length flags. The visual counterpart to the text
-// showFilterSummary() the strip cards still use. Shared by the slate card and
-// the table row so the two views can't drift.
+// The visual counterpart to the text showFilterSummary(). Shared by the slate card
+// and the table row so the two views can't drift.
 export function showFacets(s: Show): ShowFacet[] {
   const facets: ShowFacet[] = [];
   if (s.moods.length) s.moods.forEach(m => facets.push({ key: `mood-${m}`, label: m }));
@@ -132,9 +125,8 @@ export function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
 }
 
-// A persona as a table face — resolved avatar URL plus the initials to fall
-// back to. `index` is carried on the row because the panel keys colour and
-// editing off the show's position in the array.
+// `index` is carried on the row because the panel keys colour and editing off the
+// show's position in the array.
 function faceOf(p: Persona, apiBase: string) {
   return {
     key: p.id,
@@ -143,8 +135,7 @@ function faceOf(p: Persona, apiBase: string) {
   };
 }
 
-// Flatten one show into the table's view-model. Everything the row needs is
-// derived here, so ShowsTable never has to know the `Show` shape.
+// Everything the row needs is derived here, so ShowsTable never sees `Show`.
 export function showRow(s: Show, index: number, personas: Persona[], apiBase: string, hrs: number): ShowRow {
   const host = personas.find(p => p.id === s.personaId) ?? null;
   const guests = (s.guestPersonaIds || [])

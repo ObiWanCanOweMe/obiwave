@@ -13,6 +13,10 @@ const FORM = {
   tts: {
     enabled: true,
     defaultEngine: 'cloud',
+    // v1.4 makes the normalized fallback slot part of every settings form.
+    // Keep this fixture representative of the real SettingsPanel hydrator so
+    // the secret-state assertions exercise TtsSection's supported contract.
+    fallback: { enabled: false, engine: 'piper', voice: '', cloudProvider: 'openai' },
     kokoro: { voice: '' },
     chatterbox: { referenceVoice: '' },
     pocketTts: { voice: 'alba' },

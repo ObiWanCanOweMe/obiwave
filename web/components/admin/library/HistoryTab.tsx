@@ -1,9 +1,5 @@
 'use client';
 
-// The play-history tab - what actually went to air, newest first.
-//
-// Part of the library/ split - see ../LibraryPanel.tsx.
-
 import { Fragment } from 'react';
 import { RefreshCw, ListPlus } from 'lucide-react';
 import { Card, Btn } from '../ui';

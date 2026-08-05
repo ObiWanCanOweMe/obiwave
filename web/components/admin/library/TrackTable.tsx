@@ -1,10 +1,7 @@
 'use client';
 
-// The track table and its per-row action menus. One table serves all four
-// listing variants (recent, browse, search, untagged); `variant` decides which
-// columns and actions are offered.
-//
-// Part of the library/ split - see ../LibraryPanel.tsx.
+// One table serves every listing variant (recent, browse, search, untagged, liked);
+// `variant` decides which columns and actions are offered.
 
 import { Fragment, useRef, useState } from 'react';
 import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical, Undo2, Heart, HeartOff } from 'lucide-react';
@@ -48,23 +45,19 @@ interface TrackTableProps {
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: (rows: Track[]) => void;
-  // Likes (#1253). `likeIndex` decorates rows from every source; `liking` is the
-  // id with a toggle in flight. `onClearLikes` wraps DELETE /likes/song/:id —
-  // the operator's tool for pruning LISTENER likes, which the heart never does.
+  // Likes (#1253). `onClearLikes` (DELETE /likes/song/:id) prunes LISTENER likes,
+  // which the heart never does.
   likeIndex: LikeIndex;
   liking: string | null;
   onToggleLike: (t: Track, liked: boolean) => void;
   onClearLikes: (t: Track) => void;
 }
 
-// The actions column is a FIXED grid track (see .lib-row in globals.css), so
-// the heart is the one button whose width varies with its content. Cap the
-// label: without this a heavily-liked track widens the cluster past its track
-// and the whole row's actions overlap the mood/energy column.
+// The actions column is a FIXED grid track (.lib-row in globals.css). Uncapped, a
+// heavily-liked track widens the cluster until the actions overlap mood/energy.
 const countLabel = (n: number) => (n > 99 ? '99+' : String(n));
 
-// Heart state for one row: the inline `likedByOperator`/`likeCount` on a
-// /library/liked row if present, otherwise the shared index.
+// Inline `likedByOperator`/`likeCount` if the row has them, else the shared index.
 function likeStateFor(t: Track, index: LikeIndex): { liked: boolean; count: number } {
   if (t.likedByOperator != null || t.likeCount != null) {
     return { liked: !!t.likedByOperator, count: t.likeCount ?? 0 };
@@ -104,14 +97,10 @@ export function TrackTable(p: TrackTableProps) {
   const allSelected = p.rows.length > 0 && p.rows.every(t => p.selected.has(t.id));
 
   return (
-    // Dim (don't blank) stale rows while a refetch is in flight, so filter
-    // changes read as "updating" instead of silently showing old results.
+    // Dim, don't blank, stale rows during a refetch so filter changes read as updating.
     <div className={cn(p.loading && 'opacity-60 transition-opacity')}>
-      {/* Below sm: the 5-column grid (which ends in a fixed 150px actions track)
-          leaves the title ~60px, so header and rows lay out as a plain flex line
-          instead — checkbox · art · title · one overflow menu. `!` is needed to
-          beat `.admin-root .lib-colhead/.lib-row`; sm: hands it back to the CSS
-          grid untouched. */}
+      {/* Below sm: the 5-column grid leaves the title ~60px, so rows lay out as a plain
+          flex line instead. `!` beats `.admin-root .lib-colhead/.lib-row`. */}
       <div className="lib-colhead !flex sm:!grid">
         <span>
           <label className={CHECK_HIT}>
@@ -145,21 +134,18 @@ export function TrackTable(p: TrackTableProps) {
               />
             </label>
             <Thumb track={t} />
-            {/* flex-1 drives the phone layout; grid items ignore flex-*, so the
-                sm:+ grid column sizing is untouched. */}
+            {/* flex-1 drives the phone layout; grid items ignore flex-*, so the sm:+
+                grid column sizing is untouched. */}
             <div className="min-w-0 flex-1">
-              {/* The badge sits with the TITLE, not in the mood/energy cell:
-                  .lib-tags is display:none below 860px, and a never-play
-                  marker that disappears on a phone is not a marker. */}
+              {/* Badge sits with the TITLE, not the mood/energy cell: .lib-tags is
+                  display:none below 860px and this marker must survive a phone. */}
               <div className="flex min-w-0 items-center gap-2">
                 <div className="lib-title">{t.title || '—'}</div>
                 {t.blockedBy && (
                   <span className="lib-btag shrink-0" title={`blocked via ${blockedByLabel(t.blockedBy)}`}>
                     <Ban size={10} aria-hidden />
-                    {/* The scope word drops below sm: — at 390px the badge and
-                        the title compete for the same ~210px, and "never play"
-                        alone still answers the question the row poses. The full
-                        scope stays one tap away in the row menu. */}
+                    {/* Scope word drops below sm: at 390px the badge and title share
+                        ~210px. The full scope stays in the row menu. */}
                     <span aria-hidden>
                       never play
                       {t.blockedBy.type !== 'track' && (
@@ -185,21 +171,14 @@ export function TrackTable(p: TrackTableProps) {
                   <Tags size={12} />
                 </span>
               )}
-              {/* acoustic-analysis badges — independent of mood tagging, shown
-                  whenever the analyze pass has filled them in */}
               {t.bpm != null && <span className="lib-mtag lib-atag" title="tempo">{Math.round(t.bpm)} BPM</span>}
               {t.musicalKey && <span className="lib-mtag lib-atag" title="musical key">{t.musicalKey}</span>}
               {t.loudnessLufs != null && <span className="lib-mtag lib-atag" title="integrated loudness (LUFS)">{t.loudnessLufs.toFixed(1)} LUFS</span>}
               {t.instrumental === true && <span className="lib-mtag lib-atag" title="no vocals detected">instrumental</span>}
-              {/* sounds-like results carry their cosine match vs the query —
-                  shows where relevance falls off down the list */}
               {t.similarity != null && <span className="lib-mtag lib-atag" title="sound match vs your description">≈ {Math.round(t.similarity * 100)}%</span>}
             </div>
-            {/* icon-only action cluster — tooltips carry the verbs; the fixed
-                150px grid track keeps it aligned under the (empty) header cell.
-                Four 36px buttons are worth more than the title is on a phone, so
-                below sm: they collapse into the single overflow menu below and
-                each inline button hides. */}
+            {/* Four 36px buttons cost more than the title is worth on a phone, so below
+                sm: they collapse into the single overflow menu and each inline one hides. */}
             <div className="flex items-center justify-end gap-1.5">
               <RowActionsMenu
                 track={t}
@@ -234,8 +213,7 @@ export function TrackTable(p: TrackTableProps) {
                       size={12}
                       className={cn(like.liked && 'fill-vermilion text-vermilion')}
                     />
-                    {/* The count is every like on the song, listeners included —
-                        the filled heart is the operator's own, separately. */}
+                    {/* Count is every like on the song; the fill is the operator's own. */}
                     {like.count > 0 && <span className="mono-num text-[10px]">{countLabel(like.count)}</span>}
                   </span>
                 )}
@@ -265,8 +243,8 @@ export function TrackTable(p: TrackTableProps) {
               >
                 {editing ? <X size={12} /> : <Pencil size={12} />}
               </Btn>
-              {/* All track tabs — an untagged track found via search/recent can
-                  be LLM-tagged on the spot (/library/retag takes the row body). */}
+              {/* Offered on every tab: an untagged search/recent row can be tagged on
+                  the spot (/library/retag takes the row body). */}
               <Btn
                 sm
                 className="hidden sm:inline-flex"
@@ -279,9 +257,8 @@ export function TrackTable(p: TrackTableProps) {
                   ? <RotateCcw size={11} />
                   : <Sparkles size={11} />}
               </Btn>
-              {/* A blocked row offers the reverse, not another scope to add:
-                  one click lifts the entry that matched, wherever it was made
-                  from. */}
+              {/* A blocked row offers the reverse, not another scope to add: one click
+                  lifts the entry that matched, wherever it was made from. */}
               {t.blockedBy ? (
                 <Btn
                   sm
@@ -320,13 +297,6 @@ export function TrackTable(p: TrackTableProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Row disclosure plumbing, shared by BlockMenu and RowActionsMenu.
-// ---------------------------------------------------------------------------
-// Padded label wrapper around a row checkbox: the native box stays 13px, but the
-// negative margin cancels the padding so the ~37px touch target costs the layout
-// nothing. Reset at sm:, where the box sits in a 16px grid column.
-
 export function RowActionsMenu({
   track, tagged, editing, queuing, retagging, blocking, disabled, onQueue, onEdit, onRetag, onBlock, onUnblock,
   like, liking, onToggleLike, onClearLikes,
@@ -360,8 +330,7 @@ export function RowActionsMenu({
       <Btn
         ref={triggerRef}
         sm
-        // 36px square: this is the only row action on a phone, so it carries the
-        // whole cluster's tap target.
+        // 36px square: on a phone this is the whole cluster's tap target.
         className="size-9"
         onClick={() => setOpen(o => !o)}
         aria-label={`actions for ${track.title || 'track'}`}
@@ -426,12 +395,8 @@ export function RowActionsMenu({
   );
 }
 
-// ---------------------------------------------------------------------------
-// BlockMenu — the per-row "Never play" action. A Ban button opening a small
-// scope menu (track / album / artist); the server resolves album/artist ids
-// from the track id, so the row only needs t.id. No confirm dialog — blocking
-// is one-click reversible from the Blocked tab.
-// ---------------------------------------------------------------------------
+// The server resolves album/artist ids from the track id, so the row only needs t.id.
+// No confirm dialog: blocking is one-click reversible from the Blocked tab.
 function BlockMenu({ track, busy, disabled, onBlock, className }: {
   track: Track;
   busy: boolean;

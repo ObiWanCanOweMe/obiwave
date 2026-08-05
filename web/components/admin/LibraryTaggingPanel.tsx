@@ -1,12 +1,5 @@
 'use client';
 
-// The "Your DJ knows X%" tagging panel at the top of /admin/library —
-// coverage hero, the primary Start-tagging action, live structured run
-// progress, and the progressive-disclosure Maintenance & advanced drawer
-// (which also houses the optional acoustic + audio-fingerprint passes).
-// Extracted from LibraryPanel.tsx; the browse/search/untagged experience
-// stays over there.
-
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Sparkles, Activity, Play, Square, Terminal, Loader2, Moon } from 'lucide-react';
 import { useDynamicStyle } from '../../hooks/useDynamicStyle';
@@ -15,9 +8,6 @@ import { Input } from '../ui/input';
 import { cn } from '../../lib/cn';
 import LibraryTaggingModal from './LibraryTaggingModal';
 
-// ---------------------------------------------------------------------------
-// shared types (also consumed by LibraryPanel)
-// ---------------------------------------------------------------------------
 export interface Coverage {
   tagged: number;
   analysed: number;
@@ -40,40 +30,32 @@ export interface Coverage {
   // null = still probing; false = no analysis backend (sidecar/librosa) running.
   analysisAvailable?: boolean | null;
   analysisBackend?: string | null;
-  // Whether the backend can emit CLAP "sounds-like" embeddings. false = engine
-  // is up but on an image without the CLAP stack (an older tts-heavy) — drives
-  // the active "pull the latest image" warning. null = unknown / still probing.
+  // false = engine is up but on an image without the CLAP stack; null = still
+  // probing. Drives the "pull the latest image" warning.
   audioAnalysisAvailable?: boolean | null;
-  // Whether the natural-language "sounds like…" search can serve right now
-  // (audio vectors stored + CLAP text tower not reported absent). Gates the
-  // Search tab's mode toggle in LibraryPanel. Absent on old controllers.
+  // Audio vectors stored + CLAP text tower not reported absent. Gates the Search
+  // tab's mode toggle. Absent on old controllers.
   soundSearchAvailable?: boolean;
-  // Whether the backend can emit Demucs vocal-activity ranges. false = engine
-  // up but built without the Demucs stack (sidecar WITH_DEMUCS=0) — drives the
+  // false = engine up but built without Demucs (WITH_DEMUCS=0) — drives the
   // "rebuild with WITH_DEMUCS=1" warning when vocal activity is enabled.
   vocalAnalysisAvailable?: boolean | null;
-  // Text-embedding index provenance. `embeddingStale` = the library was embedded
-  // with a different model than the one currently configured, so a tag run is
-  // blocked until a re-embed — drives the one-click "re-embed" prompt below.
+  // `embeddingStale` = the library was embedded with a different model than the
+  // one configured, so a tag run is BLOCKED until a re-embed.
   embeddedModel?: string | null;
   embeddedDim?: number | null;
   currentEmbeddingModel?: string | null;
   embeddingStale?: boolean;
   // Embed-text SHAPE, separate from the model staleness above (#1246). An older
-  // format still answers KNN and never blocks a tag run — it just means those
-  // vectors were built before tracks carried their measured sound, so this is
-  // an advisory, not the red "tagging is blocked" banner. `labelOnlyVectors` is
-  // how many embedded tracks have NO musical signal at all in their text, so
-  // their similarity is artist/album wording. Absent on old controllers.
+  // format still answers KNN and never blocks a tag run — advisory only.
+  // `labelOnlyVectors` counts embedded tracks with NO musical signal in their
+  // text, so their similarity is artist/album wording. Absent on old controllers.
   embeddingFormatStale?: boolean;
   embeddedTextFormat?: number | null;
   currentTextFormat?: number | null;
   embeddedVectors?: number | null;
   labelOnlyVectors?: number | null;
-  // Backend-computed per-dimension status enums (controller/src/music/coverage-
-  // status.ts) — the single source of truth for the sounds-like + vocal rows,
-  // replacing the frontend's incapable/starved/gap derivations. The panel pairs
-  // these with the optimistic enable prop for enabled-vs-disabled wording.
+  // Backend-computed (controller/src/music/coverage-status.ts) and the single
+  // source of truth for the sounds-like + vocal rows.
   audioStatus?: DimensionStatus;
   vocalStatus?: DimensionStatus;
 }
@@ -98,15 +80,14 @@ export interface TaggerProgress {
   round?: number; // active-learn round
   errors?: number;
   llm?: { legs: Record<string, number> };
-  // Cumulative ms per phase, attached to the terminal 'done' event so the panel
-  // can show where the last run spent its time.
+  // Cumulative ms per phase, attached to the terminal 'done' event.
   timings?: Record<string, number>;
   updatedAt: string;
 }
 
-// A structured log event relayed from the tagger child (music/tagger-progress.ts
-// EVENT_PREFIX channel). The child DECLARES what a line means so the panel renders
-// by kind — no more regex-scraping console strings to guess intent/failure.
+// Relayed from the tagger child (music/tagger-progress.ts EVENT_PREFIX channel).
+// The child DECLARES what a line means so the panel renders by kind rather than
+// regex-scraping console strings.
 export interface TaggerEvent {
   kind: 'info' | 'success' | 'warning' | 'error';
   text: string;
@@ -132,17 +113,13 @@ export interface TaggerState {
   // Raw console lines interleaved with structured events, in chronological order
   // (broadcast/tagger.ts relays both). Capped at 100 server-side.
   lastLog?: (string | TaggerEvent)[];
-  // 'tag' (tag-library), 'analyze' (the acoustic/audio-embedding pass), or
-  // 'reconcile' (walk Navidrome + prune orphaned rows) — all run through the
-  // same single-flight child slot.
+  // All three run through the same single-flight child slot.
   mode?: 'tag' | 'analyze' | 'reconcile' | null;
   progress?: TaggerProgress | null;
   lastRun?: TaggerLastRun | null;
 }
 
-// libraryStats rides along on /settings — gives moods-in-use, last-tag time,
-// and withEmbedding (used to nudge a re-embed after a model swap) without an
-// extra request and regardless of which tab is active.
+// Rides along on /settings, so it needs no extra request on any tab.
 export interface LibraryStatsLite {
   total: number;
   byMood: Record<string, number>;
@@ -154,8 +131,7 @@ export interface LibraryStatsLite {
 
 export type Batch = '100' | '500' | '5000' | '10000' | 'all';
 
-// Daily-token-budget tier, mirrors controller/src/broadcast/dj-budget.ts. Drives
-// the Tagging modal's pre-run "budget nearly/already used" warning.
+// Mirrors controller/src/broadcast/dj-budget.ts.
 export type BudgetMode = 'normal' | 'soft' | 'hard';
 
 export type RescanOpts = {
@@ -163,27 +139,22 @@ export type RescanOpts = {
   reEnrich?: boolean;
   reAnalyze?: boolean;
   upgrade?: boolean;
-  // Whether a Re-analyse-acoustics pass also redoes the slow Demucs vocal pass.
-  // false → --no-vocal (re-do bpm/key + sounds-like, keep existing vocal ranges).
+  // false → --no-vocal (redo bpm/key + sounds-like, keep existing vocal ranges).
   vocal?: boolean;
-  // Reseed-only "re-embed, then continue tagging": after rebuilding vectors,
-  // forward-tag the untagged remainder in the same run (drops the re-scan's
-  // --rescan on the backend). Only honoured when reseed is the sole pass.
+  // After rebuilding vectors, forward-tag the untagged remainder in the same run
+  // (drops --rescan on the backend). Only honoured when reseed is the sole pass.
   thenTag?: boolean;
 };
 
-// Forward-run step toggles from the modal's Run tab. All default true except
-// `vocal` (the Demucs pass is ~90% of the acoustics cost, so it's opt-in per
-// run); an unchecked box sends `false`, which the controller maps to a skip
-// flag (enrich→--skip-enrich, tagMoods→--skip-tag, analyze→--skip-analyze,
+// An unchecked box sends `false`, which the controller maps to a skip flag
+// (enrich→--skip-enrich, tagMoods→--skip-tag, analyze→--skip-analyze,
 // reconcile→--no-prune). Only-reconcile is routed to onReconcile instead.
 export type TagSteps = {
   reconcile: boolean;
   enrich: boolean;
   tagMoods: boolean;
   analyze: boolean;
-  // Per-run Demucs vocal pass — only sent/honoured when analyze is on and vocal
-  // is enabled in settings; lets a run do bpm/key + CLAP without the slow Demucs.
+  // Only honoured when analyze is on and vocal is enabled in settings.
   vocal: boolean;
 };
 
@@ -191,9 +162,6 @@ export function num(n: number | null | undefined): string {
   return n != null ? n.toLocaleString('en-GB') : '—';
 }
 
-// ---------------------------------------------------------------------------
-// tagging panel — merged coverage + tagger, framed for humans
-// ---------------------------------------------------------------------------
 interface TaggingPanelProps {
   coverage: Coverage | null;
   libStats: LibraryStatsLite | null;
@@ -208,8 +176,7 @@ interface TaggingPanelProps {
   onRescan: (opts: RescanOpts) => void;
   // Walk Navidrome and prune library entries for tracks that no longer exist.
   onReconcile: () => void;
-  // Wipe ALL tagging data (tags, embeddings, acoustics, enrichment) and start
-  // fresh — backs the modal's Reset tab, behind a typed confirmation.
+  // Wipes ALL tagging data and starts fresh, behind a typed confirmation.
   onReset: () => void;
   // sounds-like (CLAP) controls — null until the first settings poll lands.
   audioEnabled: boolean | null;
@@ -218,9 +185,8 @@ interface TaggingPanelProps {
   // Vocal-activity (Demucs) controls — parallel to the sounds-like pair (#646).
   onToggleVocal: () => void;
   onVocalBackfill: () => void;
-  // Whether vocal-activity (Demucs) analysis is enabled — null until the first
-  // settings poll lands. Drives the "build WITH_DEMUCS=1" warning when on but
-  // the backend can't produce vocal ranges.
+  // null until the first settings poll lands. Drives the "build WITH_DEMUCS=1"
+  // warning when on but the backend can't produce vocal ranges.
   vocalEnabled: boolean | null;
   // Quiet-times gate (#1099) — any analysis run pauses while listeners are
   // tuned in, resuming after the idle window. Null until the settings poll.
@@ -229,18 +195,14 @@ interface TaggingPanelProps {
   onToggleQuiet: () => void;
   // Persist a new idle window (minutes, 1–120) — committed on blur/Enter.
   onQuietMinutes: (minutes: number) => void;
-  // Daily-token-budget tier from /settings — null until the first slow poll lands.
-  // Forwarded to the modal for its pre-run spend warning.
+  // null until the first slow poll lands.
   budgetMode: BudgetMode | null;
-  // Provider attribution forwarded to the modal's cost preview (#1162) — which
-  // provider the mood/energy LLM calls vs. the embedding calls actually bill to.
-  // Null until the settings poll lands.
+  // Which provider the mood/energy LLM calls vs. the embedding calls bill to
+  // (#1162). null until the settings poll lands.
   llmLabel: string | null;
   embedLabel: string | null;
 }
 
-// One friendly sentence per pipeline phase — shown under the live progress so
-// the operator knows what the run is actually doing right now.
 const PHASE_HINT: Record<TaggerProgress['phase'], string> = {
   walk: 'Reading the track list from Navidrome.',
   enrich: 'Fetching Last.fm tags and lyrics that help the DJ understand each track.',
@@ -252,8 +214,8 @@ const PHASE_HINT: Record<TaggerProgress['phase'], string> = {
   done: 'Wrapping up.',
 };
 
-// Short labels for the post-run phase breakdown (keys match the tagger's
-// timings map, which includes 'setup'/'walk' that aren't user-facing phases).
+// Keys match the tagger's timings map, which includes 'setup'/'walk' that
+// aren't user-facing phases.
 const PHASE_LABEL: Record<string, string> = {
   setup: 'setup',
   walk: 'scan',
@@ -265,19 +227,15 @@ const PHASE_LABEL: Record<string, string> = {
   analyze: 'acoustics',
 };
 
-// The tag pipeline in execution order — the stepper's canonical sequence, and
-// the ordering used to decide which phases are behind/ahead of the live one.
-// Excludes 'done' (a terminal marker, not a stage).
+// Execution order, used to decide which phases are behind/ahead of the live
+// one. Excludes 'done' (a terminal marker, not a stage).
 const PIPELINE: TaggerProgress['phase'][] = [
   'walk', 'enrich', 'embed', 'seed', 'propagate', 'learn', 'analyze',
 ];
 
-// The stepper only renders the phases a given run mode can actually reach: an
-// analyze run is acoustics-only, a reconcile run is a bare Navidrome scan, and a
-// tag run walks the whole pipeline. Not every tag run hits every phase (steps
-// can be deselected / re-scans skip forward work) — the caller marks phases
-// BEFORE the live one as done, so a skipped phase simply never lights up active
-// and is swept into "done" once a later phase starts, rather than sticking as a
+// Only the phases a given run mode can reach. Not every tag run hits every
+// phase (steps can be deselected), so the caller marks phases BEFORE the live
+// one as done — a skipped phase is swept into "done" rather than sticking as a
 // permanent "pending".
 function stepsForMode(mode: TaggerState['mode']): TaggerProgress['phase'][] {
   if (mode === 'analyze') return ['analyze'];
@@ -294,27 +252,23 @@ function fmtDur(ms: number): string {
   return r ? `${m}m ${r}s` : `${m}m`;
 }
 
-// Mirror of controller/src/music/coverage-status.ts `isBackfillable` — whether a
-// backfill/analyze would help IF the dimension is enabled (headroom, no hard
-// block). The panel ANDs it with the optimistic enable prop so the button toggles
-// the instant the operator clicks Enable, ahead of the next /coverage poll.
+// Mirror of controller/src/music/coverage-status.ts `isBackfillable`. The panel
+// ANDs it with the optimistic enable prop so the button toggles the instant
+// Enable is clicked, ahead of the next /coverage poll.
 function canBackfill(s: DimensionStatus | undefined): boolean {
   return s != null && s !== 'pending-heavy' && s !== 'pending-engine' && s !== 'complete';
 }
 
-// Coarser than fmtDur — a live ETA wobbles as the sampled rate drifts, so we
-// round hard (5s buckets under a minute, whole minutes above) to keep it calm:
-// "~40s left" / "~4m left".
+// Coarser than fmtDur: a live ETA wobbles as the sampled rate drifts, so round
+// hard — 5s buckets under a minute, whole minutes above.
 function fmtEta(ms: number): string {
   const s = Math.round(ms / 1000);
   if (s < 60) return `~${Math.max(5, Math.round(s / 5) * 5)}s left`;
   return `~${Math.round(s / 60)}m left`;
 }
 
-// Presentation for a structured event, keyed on the kind the child declared.
-// (The old 20-rule LOG_RULES regex table + keyword failure heuristic are gone —
-// the friendly wording now lives at the tagger call sites and rides the event
-// `text`; the panel just tints and tags by kind.)
+// Keyed on the kind the child declared — the friendly wording lives at the
+// tagger call sites and rides the event `text`.
 const EVENT_STYLE: Record<TaggerEvent['kind'], { emoji: string; cls: string }> = {
   error: { emoji: '⚠️', cls: 'text-vermilion font-semibold' },
   warning: { emoji: '⚠', cls: 'text-vermilion' },
@@ -322,10 +276,7 @@ const EVENT_STYLE: Record<TaggerEvent['kind'], { emoji: string; cls: string }> =
   info: { emoji: '', cls: 'text-muted' },
 };
 
-// A MUCH slimmer beautifier for the RAW (non-event) lines that remain — the
-// verbose per-batch progress console output and the synthetic [exit] marker.
-// Handles only: exit status, [llm-debug-raw]/JSON-body suppression, and
-// prefix-stripping. No LOG_RULES, no keyword failure scan.
+// For the RAW (non-event) lines only: exit status and prefix-stripping.
 function beautifyLog(raw: string): { text: string; cls: string } {
   if (/^\[exit 0\]/.test(raw))
     return { text: '✓  Finished', cls: 'text-emerald-500 font-semibold' };
@@ -340,11 +291,8 @@ function beautifyLog(raw: string): { text: string; cls: string } {
 
 export default function TaggingPanel(p: TaggingPanelProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  // Intent carried into the modal when opened from a contextual prompt — the
-  // "embeddings missing" nudge jumps straight to a pre-ticked re-embed.
   const [modalIntent, setModalIntent] = useState<'reembed' | null>(null);
-  // Dismiss-state for the last-run failure banner, keyed on the run's
-  // finishedAt so a NEW failure (different timestamp) re-shows it.
+  // Keyed on the run's finishedAt so a NEW failure re-shows the banner.
   const [dismissedFailAt, setDismissedFailAt] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
   const moodFillRef = useRef<HTMLSpanElement>(null);
@@ -352,9 +300,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const audioFillRef = useRef<HTMLSpanElement>(null);
   const vocalFillRef = useRef<HTMLSpanElement>(null);
   const runFillRef = useRef<HTMLSpanElement>(null);
-  // ETA baseline: the {done, at} captured when the current phase (or active-learn
-  // round) began. Pinned at phase entry so the rate is a stable phase-average
-  // rather than a jittery instantaneous window; reset by the effect below.
+  // Pinned at phase entry so the rate is a stable phase-average rather than a
+  // jittery instantaneous window; reset by the effect below.
   const etaRef = useRef<{ phase: string; round: number | null; done: number; at: number } | null>(null);
 
   const tagged = p.coverage?.tagged ?? p.libStats?.total ?? null;
@@ -369,21 +316,14 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   // Audio embeddings only exist once at least one is written; until then the
   // row reads "not enabled" rather than a misleading 0% (CLAP is opt-in).
   const audioOn = (audioEmbedded ?? 0) > 0;
-  // Vocal row is hidden unless the operator opted in (env or settings) — the
-  // common case never sees it. Backend resolves env-vs-settings precedence.
+  // Backend resolves env-vs-settings precedence.
   const vocalWanted = p.coverage?.vocalWanted === true;
-  // The Pause/Enable button + meter-vs-collapsed layout must react to a toggle
-  // immediately, so drive them off the optimistic settings prop (p.vocalEnabled,
-  // flipped on click in LibraryPanel) — mirroring how the audio row uses
-  // p.audioEnabled. vocalWanted (from the polled /coverage, 60s cadence) only
-  // lags, so it just fills the gap before /settings first loads. The modal's
-  // per-run vocal checkboxes get this same optimistic value — coverage-driven,
-  // they stayed invisible until a repoll/refresh after enabling. Only the
-  // analysis-state bits (vocalStatus) stay coverage-driven.
+  // Drive the button + layout off the OPTIMISTIC settings prop so a toggle
+  // applies at once; vocalWanted rides the 60s /coverage poll and only fills
+  // the gap before /settings first loads. Only vocalStatus stays coverage-driven.
   const vocalOptedIn = p.vocalEnabled ?? vocalWanted;
 
-  // Quiet-times minutes input — validate + commit on blur/Enter; out-of-range
-  // or unparsable values snap back to the persisted setting rather than saving.
+  // Out-of-range or unparsable values snap back to the persisted setting.
   const commitQuietMinutes = (el: HTMLInputElement) => {
     const v = Math.floor(Number(el.value));
     if (!Number.isFinite(v) || v < 1 || v > 120) {
@@ -393,43 +333,31 @@ export default function TaggingPanel(p: TaggingPanelProps) {
     if (v !== p.quietMinutes) p.onQuietMinutes(v);
   };
   const vocalOn = (vocalAnalyzed ?? 0) > 0;
-  // Whether ANY tagging/analysis work has ever landed. On a completely virgin
-  // library the honest affordance is the primary Start-tagging run, so the
-  // per-dimension Backfill buttons stay hidden until there's an actual gap to
-  // fill (some work done, this dimension behind) instead of sitting next to a
-  // 0-of-N meter looking like a duplicate of the modal's "Analyze acoustics".
+  // On a virgin library the per-dimension Backfill buttons stay hidden — the
+  // honest affordance there is the primary Start-tagging run.
   const anyWorkDone = (tagged ?? 0) > 0 || (analysed ?? 0) > 0 || audioOn || vocalOn;
   const remaining = total != null && tagged != null ? Math.max(0, total - tagged) : null;
   const running = !!p.tagger?.running;
-  // The first library count (walking Navidrome for a total) is in flight — size
-  // still unknown. This is distinct from a *failed* scan, where `scanning` is
-  // back to false but `total` stays null; only an active count should show the
-  // "checking…" affordance and gate the Start button. A failed/never-run scan
-  // falls through to "Library size unknown" rather than a forever-"updating".
+  // Distinct from a FAILED scan, where `scanning` is back to false but `total`
+  // stays null: only an active count shows "checking…" and gates Start, so a
+  // failed scan falls through to "Library size unknown".
   const scanning = !!p.coverage?.scanning;
   const libraryCounting = scanning && total == null;
   const analysisOff = p.coverage?.analysisAvailable === false;
-  // Per-dimension status enums from the backend (coverage-status.ts) — the single
-  // source of truth that replaced the four-nullable-boolean incapable/starved/gap
-  // derivations. 'pending-heavy' = today's `*Incapable` (lean/older engine that
-  // can't do this dimension); 'incapable' = today's `*Starved` (bpm/key ran,
-  // produced none, engine doesn't advertise the capability). Both are
-  // enable-independent, so the panel pairs them with the optimistic enable prop
-  // (p.audioEnabled / vocalOptedIn) below to pick "waiting…" vs "off · needs…"
-  // wording — reproducing every legacy string with no toggle lag. `undefined`
-  // for an old controller with no enum → the capability branches simply don't fire.
+  // 'pending-heavy' = lean/older engine that can't do this dimension;
+  // 'incapable' = bpm/key ran but produced none. Both are enable-independent,
+  // so the panel pairs them with the optimistic enable prop below to pick
+  // "waiting…" vs "off · needs…". `undefined` on an old controller → the
+  // capability branches simply don't fire.
   const audioStatus = p.coverage?.audioStatus;
   const vocalStatus = p.coverage?.vocalStatus;
 
-  // Acoustic-analysis section disclosure — collapsed by default; forced open
-  // while an analyze/backfill run is in flight (progress + Pause must stay
-  // visible), reverting to the manual choice when the run finishes.
+  // Forced open while an analyze/backfill run is in flight so progress and Pause
+  // stay visible; reverts to the manual choice when the run finishes.
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const analysisRunning = !!p.tagger?.running && p.tagger?.mode === 'analyze';
   const showAnalysis = analysisOpen || analysisRunning;
-  // One-line status so coverage stays glanceable while collapsed. Each fragment
-  // compresses its row's status logic: a percentage when the pass has numbers,
-  // waiting/on/off otherwise; a dead engine collapses the whole line.
+  // One-line status so coverage stays glanceable while collapsed.
   const analysisSummary = analysisOff
     ? 'engine off'
     : [
@@ -445,9 +373,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
               : vocalStatus === 'pending-heavy' ? 'vocal waiting' : 'vocal on')
           : 'vocal off',
       ].join(' · ');
-  // The library was embedded with a different model than the one now configured,
-  // so a tag run would fail on a dim/model mismatch — surface a blocking, one-click
-  // re-embed prompt instead of letting the operator hit a cryptic tagger error.
+  // A dim/model mismatch would fail the tag run, so this drives a blocking
+  // one-click re-embed prompt rather than a cryptic tagger error.
   const embeddingStale = p.coverage?.embeddingStale === true;
   const moodCount = p.libStats ? Object.keys(p.libStats.byMood || {}).length : 0;
   const lastTag = p.libStats?.updatedAt
@@ -459,11 +386,9 @@ export default function TaggingPanel(p: TaggingPanelProps) {
     (tagged ?? 0) > 0 && p.libStats != null && p.libStats.withEmbedding === 0;
 
   // Similarity-signal advisory (#1246): how much of the index can only be
-  // compared on its label text. Shown when it dominates — under half the index
-  // is ordinary (a partly-enriched library still gives the picker plenty to
-  // work with), and a warning that's always up is a warning nobody reads.
-  // Guarded on both fields being present so an older controller (which sends
-  // neither) shows nothing rather than "0 of 0".
+  // compared on its label text. Only shown when it dominates — under half is
+  // ordinary. Guarded on both fields so an older controller shows nothing
+  // rather than "0 of 0".
   const labelOnly = p.coverage?.labelOnlyVectors ?? null;
   const embeddedVectors = p.coverage?.embeddedVectors ?? null;
   const labelOnlyShare =
@@ -472,21 +397,17 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       : null;
   const similarityThin = labelOnlyShare != null && labelOnlyShare >= 0.5;
   // An older text format only matters once there IS something better to embed
-  // (some embedded tracks' rows now carry signal → share < 1). It must NOT be
-  // nested inside similarityThin: labelOnlyVectors counts the rows as they are
-  // TODAY, not what was in the text at embed time, so following the banner's
-  // own advice (run analysis) drops the share below the threshold and would
-  // hide the one remaining step — re-embedding — exactly when it becomes the
-  // step that matters. So it rides inside that banner while both are up, and
-  // stands alone once analysis has thickened the rows.
+  // (share < 1). Must NOT be nested inside similarityThin: labelOnlyVectors
+  // counts rows as they are TODAY, so running the analysis the banner advises
+  // drops the share below the threshold and would hide re-embedding exactly
+  // when it becomes the step that matters.
   const embeddingFormatStale =
     p.coverage?.embeddingFormatStale === true &&
     labelOnlyShare != null &&
     labelOnlyShare < 1;
 
-  // Structured live-run progress from the tagger child — survives page
-  // reloads and runs started elsewhere (no client-captured baseline). Null
-  // for an old child binary → the running view falls back to generic copy.
+  // Comes from the tagger child, so it survives page reloads and runs started
+  // elsewhere. Null on an old child binary → the view falls back to generic copy.
   const progress = running ? (p.tagger?.progress ?? null) : null;
   const runPct = progress?.total
     ? Math.min(100, Math.round(((progress.done ?? 0) / progress.total) * 100))
@@ -494,10 +415,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const runIndeterminate = !!progress && progress.total == null && progress.phase !== 'done';
   const legEntries = progress?.llm ? Object.entries(progress.llm.legs) : [];
 
-  // Phase stepper — the pipeline stages this run mode can reach, each tagged
-  // done/active/pending by comparing to the live phase's position in PIPELINE
-  // order (so a phase the child skipped never strands as "pending"). Empty for
-  // an old child binary with no progress sentinel → the stepper stays hidden.
+  // Each stage is tagged done/active/pending by its position relative to the
+  // live phase in PIPELINE order, so a skipped phase never strands as "pending".
   const stepList = progress
     ? (() => {
         const curIdx =
@@ -510,15 +429,12 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       })()
     : [];
 
-  // Per-phase ETA — extrapolate the remaining items from the average rate since
-  // the phase baseline. Recomputed on every progress poll (~3s while running)
-  // inside the effect below, since it needs Date.now() (impure — not allowed at
-  // render time). Suppressed for indeterminate phases (no total), the first ~10s
-  // of a phase (too little signal), and a stalled/zero rate.
+  // Lives in state, not a render-time derivation, because it needs Date.now().
+  // Suppressed for indeterminate phases, the first ~10s of a phase (too little
+  // signal), and a stalled rate.
   const [etaMs, setEtaMs] = useState<number | null>(null);
-  // Re-pin the ETA baseline whenever the phase or active-learn round changes so
-  // each phase's rate is measured from its own start, then re-estimate against
-  // the pinned baseline. Clears once the run ends.
+  // Re-pin the baseline whenever the phase or active-learn round changes so each
+  // phase's rate is measured from its own start.
   useEffect(() => {
     if (!progress || progress.phase === 'done') {
       etaRef.current = null;
@@ -527,8 +443,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
     }
     const b = etaRef.current;
     if (!b || b.phase !== progress.phase || b.round !== (progress.round ?? null)) {
-      // Fresh phase — pin the baseline and hold off on an estimate until the
-      // next poll gives us a rate to measure.
+      // Fresh phase — hold off on an estimate until the next poll gives a rate.
       etaRef.current = {
         phase: progress.phase,
         round: progress.round ?? null,
@@ -552,10 +467,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
     );
   }, [progress]);
 
-  // After a run ends, the child's final 'done' event sticks around (broadcast/
-  // tagger.ts keeps it post-exit) — surface its per-phase breakdown when idle so
-  // the operator can see where the time went (usually the chat-model seed/re-tag
-  // phases, not embeddings) without scraping the log.
+  // broadcast/tagger.ts keeps the child's final 'done' event post-exit, so its
+  // per-phase breakdown is still readable when idle.
   const lastTimings =
     !running && p.tagger?.progress?.phase === 'done' ? p.tagger.progress.timings : undefined;
   const lastTimingEntries = lastTimings
@@ -564,10 +477,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         .sort((a, b) => b[1] - a[1])
     : [];
 
-  // Last-run failure banner: only when idle, the run genuinely failed (a signal
-  // exit — Stop / restart-kill — is 'stopped' and shows nothing), and this
-  // finishedAt hasn't been dismissed. A fresh failure has a new timestamp, so it
-  // re-shows past a dismiss.
+  // A signal exit (Stop / restart-kill) is 'stopped' and shows nothing. A fresh
+  // failure has a new timestamp, so it re-shows past a dismiss.
   const lastRun = p.tagger?.lastRun ?? null;
   const showFailBanner =
     !running && lastRun?.outcome === 'failed' && lastRun.finishedAt !== dismissedFailAt;
@@ -597,7 +508,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
 
   return (
     <section className="card">
-      {/* headline */}
       <div className="border-b border-ink p-4 sm:p-6">
         <Eyebrow className="text-vermilion">library · tagging</Eyebrow>
         <h1 className="lib-hero-title">
@@ -615,7 +525,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </p>
       </div>
 
-      {/* coverage — the single hero meter */}
       <div className="border-b border-ink">
         <div className="p-4 sm:p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -735,12 +644,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </div>
       </div>
 
-      {/* acoustic & audio coverage — collapsed by default behind a one-line
-          summary (the three meters + Backfill/Pause rows + explainers dominate
-          the panel while most visits never touch them). Auto-expands while an
-          analyze/backfill run is in flight so progress and Pause stay visible;
-          manual state wins again once the run finishes. Not persisted — a
-          fresh load starts collapsed, same as the log drawer. */}
+      {/* Disclosure state is not persisted — a fresh load starts collapsed,
+          same as the log drawer. */}
       <div className="border-b border-ink px-4 py-3.5 sm:px-6">
         <button
           type="button"
@@ -856,9 +761,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
             </span>
           )}
         </div>
-        {/* Vocal (Demucs) row — the opt-in entry point now that the modal tab is
-            gone. Collapsed to a single "off · Enable" line until opted in (#646);
-            once wanted it shows the full meter + Disable + Backfill. */}
+        {/* Collapsed to a single "off · Enable" line until opted in (#646). */}
         {(vocalOptedIn || !analysisOff) && (
           <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-dashed border-separator-strong pt-3">
             <span className="caption flex items-center gap-2">
@@ -951,9 +854,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           </div>
         )}
         {/* Quiet-times gate (#1099) — a pass-level control, not a coverage
-            dimension: while on, ANY analysis run (auto or manual) pauses when
-            listeners are tuned in and resumes after the idle window. Engine-
-            independent, so it renders regardless of analyzer capability. */}
+            dimension, and engine-independent, so it always renders. */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-dashed border-separator-strong pt-3">
           <span className="caption flex items-center gap-2">
             <Moon size={13} /> Quiet times · analyse only while idle
@@ -1033,8 +934,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       </div>
       )}
 
-      {/* last-run failure banner — idle only; matches the embeddingStale banner's
-          danger styling. 'stopped' runs (Stop / restart-kill) show nothing. */}
       {showFailBanner && (
         <div className="mx-4 mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 border border-l-[3px] border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] text-ink sm:mx-6">
           <span>
@@ -1058,7 +957,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </div>
       )}
 
-      {/* action zone — idle vs running */}
       {!running ? (
         <div className="flex flex-wrap items-center gap-4 p-4 sm:p-6">
           <div className="min-w-0 flex-1 text-[13px] sm:min-w-[220px]">
@@ -1124,9 +1022,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
               <Square size={11} /> Stop
             </Btn>
           </div>
-          {/* pipeline stepper — where in the run we are (done · active · ahead),
-              so a bar that resets to 0% each phase no longer reads as "starting
-              over". Hidden when there's no structured progress (old child). */}
+          {/* Without this, a bar that resets to 0% each phase reads as
+              "starting over". Hidden when there's no structured progress. */}
           {stepList.length > 0 && (
             <div className="lib-steps">
               {stepList.map((s, i) => (
@@ -1175,7 +1072,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </div>
       )}
 
-      {/* last-run phase breakdown — only when idle and the child reported timings */}
       {lastTimingEntries.length > 0 && (
         <div className="border-t border-dashed border-separator-strong px-4 py-3 text-[11px] text-muted sm:px-6">
           <span className="font-bold text-ink">Last run</span>
@@ -1188,7 +1084,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </div>
       )}
 
-      {/* footer */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-dashed border-separator-strong px-4 py-3 sm:px-6">
         <button
           type="button"
@@ -1202,8 +1097,6 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         </button>
       </div>
 
-      {/* log drawer — reuses the theme-aware .term surface; each line is dressed
-          up for humans (emoji + friendly phrasing + tint) via beautifyLog */}
       {p.logOpen && (
         <pre
           ref={logRef}
@@ -1212,8 +1105,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         >
           {(p.tagger?.lastLog ?? []).length
             ? (p.tagger?.lastLog ?? []).map((line, i) => {
-                // Structured events render directly by kind; raw strings fall
-                // back to the slim beautifier.
+                // Structured events render by kind; raw strings fall back.
                 if (typeof line === 'object' && line !== null) {
                   const st = EVENT_STYLE[line.kind] ?? EVENT_STYLE.info;
                   return (
@@ -1245,8 +1137,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         libraryTotal={total}
         analysisOff={analysisOff}
         vocalWanted={vocalOptedIn}
-        // sounds-like only runs when the dimension is on AND the engine can do
-        // it — otherwise the acoustics steps are bpm/key-only (honest hints).
+        // Only true when the dimension is on AND the engine can do it —
+        // otherwise the acoustics steps are bpm/key-only.
         soundsLikeActive={!analysisOff && audioStatus !== 'pending-heavy' && !!p.audioEnabled}
         budgetMode={p.budgetMode}
         llmLabel={p.llmLabel}

@@ -49,10 +49,13 @@ export function useUnsavedGuard(
 
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
+      // Legacy browsers still key off returnValue; the string is never shown.
       e.returnValue = '';
     };
 
     const onClick = (e: MouseEvent) => {
+      // Anything but a plain left click means a new tab, context menu or
+      // download, none of which lose the pending work.
       if (e.defaultPrevented || e.button !== 0) return;
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const target = e.target as Element | null;

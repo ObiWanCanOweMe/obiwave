@@ -22,8 +22,7 @@ interface UseModelDiscoveryResult {
   refresh: () => void;
 }
 
-// Debounce window for discovery triggered by typing into a base-URL / server
-// field, so a multi-character edit fires one request instead of one per keystroke.
+// One request per multi-character edit of a base-URL field, not per keystroke.
 const DEBOUNCE_MS = 400;
 
 export function useModelDiscovery({
@@ -39,9 +38,8 @@ export function useModelDiscovery({
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Monotonic request id: only the latest in-flight request may write state, so
-  // a slow response for a stale (provider, baseUrl, scope) can't clobber a newer
-  // one. This guards every input, not just the provider.
+  // Monotonic request id: only the newest in-flight request may write state, so
+  // a slow response for a stale (provider, baseUrl, scope) can't clobber it.
   const reqIdRef = useRef(0);
 
   const runFetch = useCallback(async (signal?: AbortSignal) => {
@@ -103,8 +101,8 @@ export function useModelDiscovery({
     };
   }, [runFetch, enabled, provider]);
 
-  // Manual refresh fires immediately (no debounce) and bumps the request id, so
-  // any debounced or in-flight auto-discovery is superseded.
+  // Manual refresh fires immediately and bumps the request id, superseding any
+  // debounced or in-flight auto-discovery.
   const refresh = useCallback(() => { runFetch(); }, [runFetch]);
 
   return { models, loading, error, refresh };

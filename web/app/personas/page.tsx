@@ -17,13 +17,12 @@ export const metadata = pageMeta({
 // read it live from the local controller at request time rather than at build.
 export const dynamic = 'force-dynamic';
 
-// Submission opens a GitHub Issue Form in the community catalog repo (no fork, no
-// YAML). A workflow there turns the issue into a one-file PR. Mirrors the /skills
-// share flow.
+// Submission opens a GitHub Issue Form in the community catalog repo; a workflow
+// turns it into a one-file PR.
 const SUBMIT_URL = personaSubmitUrl();
 
-// Catalog-backed regions, each reading the one in-flight promise rather than
-// calling the loader itself — see the note in app/shows/page.tsx.
+// Each region reads the one in-flight promise rather than calling the loader
+// itself — see the note in app/shows/page.tsx.
 
 async function PersonasStat({ personas }: { personas: Promise<CommunityPersona[]> }) {
   const count = (await personas).length;

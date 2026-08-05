@@ -243,6 +243,16 @@ export const DEFAULTS = {
     // place — broadcast/voice-policy.ts. Applies live; no restart.
     enabled: true,
     defaultEngine: 'piper',
+    // Operator-chosen rescue voice — the TTS analogue of settings.llm.fallback.
+    // When a persona's engine is known-unavailable up front, or throws
+    // mid-render, this slot speaks instead: engine AND voice, where the
+    // hardcoded chain behind it (defaultEngine → piper → kokoro) only ever
+    // chose an engine and spoke with whatever global default it carried.
+    // `enabled: false` (and an absent block, which normalises to this) keeps
+    // the pre-fallback behaviour byte-for-byte. Same {engine, voice,
+    // cloudProvider} shape as a persona's own tts block — deliberately, since
+    // audio/tts.ts hands it to speakWith() as a synthetic persona.
+    fallback: { enabled: false, engine: 'piper', voice: '', cloudProvider: 'openai' },
     // Advisory flag — does the operator intend to run the optional tts-heavy
     // sidecar (Chatterbox + PocketTTS)? Both setup wizards (CLI + /onboarding)
     // write to this so each surface knows the other's choice. Nothing in the

@@ -18,14 +18,13 @@ export const metadata = pageMeta({
 export const dynamic = 'force-dynamic';
 
 const REPO = 'https://github.com/perminder-klair/subwave';
-// Submission opens a GitHub Issue Form in the community catalog repo (no fork, no
-// YAML). A workflow there turns the issue into a one-file PR; the catalog
-// rebuilds on merge. Mirrors the /stations add flow.
+// Submission opens a GitHub Issue Form in the community catalog repo; a workflow
+// turns it into a one-file PR and the catalog rebuilds on merge.
 const SUBMIT_URL = skillSubmitUrl();
 const DOCS_URL = `${REPO}/blob/main/docs/custom-skills.md`;
 
-// Catalog-backed regions, each reading the one in-flight promise rather than
-// calling the loader itself — see the note in app/shows/page.tsx.
+// Each region reads the one in-flight promise rather than calling the loader
+// itself — see the note in app/shows/page.tsx.
 
 async function SkillsStat({ skills }: { skills: Promise<CommunitySkill[]> }) {
   const count = (await skills).length;

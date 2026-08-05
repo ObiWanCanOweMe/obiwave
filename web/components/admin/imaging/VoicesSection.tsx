@@ -1,9 +1,7 @@
 'use client';
 
-/* The voice-clone reference library — the WAVs Chatterbox and PocketTTS clone
-   from. Import-only (there's no prompt-to-voice generator), so this is
-   SfxSection's import half without the create half. Dropping files into
-   state/voices/ on the host still works and still shows up here. */
+/* The WAVs Chatterbox and PocketTTS clone from. Import-only — there is no
+   prompt-to-voice generator. Files dropped into state/voices/ by hand show up here. */
 
 import type { ChangeEvent } from 'react';
 import { useRef, useState } from 'react';
@@ -44,7 +42,6 @@ export function VoicesSection({ voicesData, busy, uploadVoice, onDelete, adminFe
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] || null;
     setImportFile(f);
-    // Default the name from the filename stem so the common case is one click.
     if (f && !importName.trim()) setImportName(f.name.replace(/\.[^.]+$/, ''));
   };
 
@@ -88,8 +85,7 @@ export function VoicesSection({ voicesData, busy, uploadVoice, onDelete, adminFe
         ) : (
           <div className="divide-y divide-separator-soft">
             {list.map(v => (
-              /* Mobile drops the play/delete cluster under the text — see
-                 SfxSection for the same reflow. */
+              /* Mobile drops the play/delete cluster below the text (as SfxSection). */
               <div
                 key={v.file}
                 className="grid grid-cols-1 items-center gap-3 px-[18px] py-[15px] sm:grid-cols-[1fr_auto] sm:gap-[18px]"
@@ -108,8 +104,7 @@ export function VoicesSection({ voicesData, busy, uploadVoice, onDelete, adminFe
                       </>
                     )}
                   </MetaLine>
-                  {/* Advisory, never blocking — the operator's file is stored
-                      exactly as uploaded. */}
+                  {/* Advisory, never blocking: the file is stored exactly as uploaded. */}
                   {v.warning === 'short' && (
                     <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">
                       Under {minSec}s — there may not be enough speech here to clone reliably.

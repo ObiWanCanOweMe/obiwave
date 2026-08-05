@@ -195,6 +195,10 @@ services:
       # RUNTIME source of truth for absolute URLs (canonicals, og:url,
       # robots.txt, sitemap.xml) — the generic image serves any domain.
       - SITE_URL=\${SITE_URL:-}
+      # Set to 1 to keep the shared product pages (landing, docs, news,
+      # catalogs) self-canonical + in this install's sitemap instead of
+      # crediting getsubwave.com (web/lib/site.ts IS_OFFICIAL_SITE).
+      - SUBWAVE_INDEX_ALL=\${SUBWAVE_INDEX_ALL:-}
       # GA Measurement ID at RUNTIME (web/lib/ga.ts) — analytics turn on with a
       # \`web\` recreate, no rebuild. The build-arg above still bakes it.
       - GA_ID=\${NEXT_PUBLIC_GA_ID:-}
@@ -485,6 +489,10 @@ services:
       - NODE_ENV=production
       - SUBWAVE_HOMEPAGE=\${SUBWAVE_HOMEPAGE:-player}
       - SITE_URL=\${SITE_URL:-}
+      # Set to 1 to keep the shared product pages (landing, docs, news,
+      # catalogs) self-canonical + in this install's sitemap instead of
+      # crediting getsubwave.com (web/lib/site.ts IS_OFFICIAL_SITE).
+      - SUBWAVE_INDEX_ALL=\${SUBWAVE_INDEX_ALL:-}
       # GA Measurement ID at RUNTIME (web/lib/ga.ts) — analytics turn on with a
       # \`web\` recreate, no rebuild.
       - GA_ID=\${NEXT_PUBLIC_GA_ID:-}
@@ -953,6 +961,10 @@ SITE_URL=
 
 # Web
 # SUBWAVE_HOMEPAGE=player          # or 'landing' for the marketing host
+# SUBWAVE_INDEX_ALL=1              # index the shared docs/news/catalog pages on
+#                                  # THIS domain too; default points their
+#                                  # canonicals at getsubwave.com so search
+#                                  # engines credit one copy
 # NEXT_PUBLIC_GA_ID=               # Google Analytics ID. Applied at RUNTIME
 #                                  # (recreate \`web\`, no rebuild) as well as at
 #                                  # build time. Unset → no analytics.
@@ -1169,4 +1181,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.3.0`; // x-release-please-version
+export const CLI_VERSION = `1.4.0`; // x-release-please-version

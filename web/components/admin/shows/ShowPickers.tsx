@@ -1,17 +1,8 @@
 'use client';
 
 // Visual pickers for the show editor's "persona owner" and "theme override"
-// fields — richer replacements for the plain name dropdowns.
-//
-//  • PersonaPicker — a card grid showing each host's avatar (initials
-//    fallback), name and tagline, so you pick a face, not a string.
-//  • ThemePicker  — swatch cards showing each palette's actual colours, plus a
-//    "Station default" card that mirrors the live station palette.
-//
-// Both mirror existing admin patterns: the persona card from
-// personas/PersonaRoster, the swatch strip + SWATCH_KEYS from SettingsPanel's
-// theme gallery. Swatch colours route through useDynamicStyle because the lint
-// rule (#50) bans the inline `style` prop.
+// fields. Swatch colours route through useDynamicStyle because the lint rule (#50)
+// bans the inline `style` prop.
 
 import { useRef } from 'react';
 import { cn } from '../../../lib/cn';
@@ -34,8 +25,8 @@ interface ThemeOpt {
   tokens?: Record<string, string>;
 }
 
-// Fallback for the "Station default" card when the active theme's tokens aren't
-// known: paint the live CSS variables so it still shows the real palette.
+// When the active theme's tokens aren't known, paint the live CSS variables so the
+// "Station default" card still shows the real palette.
 const LIVE_TOKENS: Record<string, string> = {
   '--bg': 'var(--bg)',
   '--ink': 'var(--ink)',
@@ -66,8 +57,6 @@ function Swatch({ color }: { color?: string }) {
   return <span ref={ref} className="h-5 w-5" aria-hidden="true" />;
 }
 
-// ---------------------------------------------------------------------------
-
 export function PersonaPicker({
   personas,
   value,
@@ -93,7 +82,7 @@ export function PersonaPicker({
             aria-pressed={selected}
             className={cn(cardClass(selected), 'gap-2.5 p-2.5')}
           >
-            {/* Initials sit behind the image so a missing / broken avatar still
+            {/* Initials sit behind the image so a broken avatar still
                 shows a readable placeholder. */}
             <span className="relative grid size-9 flex-none place-items-center overflow-hidden border border-ink bg-[var(--ink-softer)]">
               <span className="text-[11px] font-extrabold text-muted">{initials(p.name)}</span>
@@ -121,11 +110,8 @@ export function PersonaPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
-
-// Multi-select variant for the show's guest co-hosts: same persona cards, but
-// each toggles in/out of the selection. The host is excluded by the caller;
-// unselected cards go inert once `max` guests are picked.
+// The host is excluded by the caller; unselected cards go inert once `max` guests
+// are picked.
 export function GuestPersonaPicker({
   personas,
   value,
@@ -184,8 +170,6 @@ export function GuestPersonaPicker({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
 
 function ThemeCard({
   selected,
