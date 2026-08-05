@@ -11,6 +11,10 @@ const webLock = JSON.parse(
 );
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
 const scan = await readFile(new URL('../../.github/workflows/scan-images.yml', import.meta.url), 'utf8');
+const recovery = await readFile(
+  new URL('../../.github/workflows/recover-v1.3.0-obiwave.2.yml', import.meta.url),
+  'utf8',
+);
 const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
@@ -30,6 +34,94 @@ const caddyfiles = await Promise.all(
 );
 const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
 
+function jobBlock(workflow, jobName) {
+  const match = workflow.match(
+    new RegExp(`^  ${jobName}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:\\n|(?![\\s\\S]))`, 'm'),
+  );
+  assert.ok(match, `missing ${jobName} job`);
+  return match[1];
+}
+
+function jobNeeds(job) {
+  const match = job.match(/^    needs: \[([^\]]*)\]$/m);
+  assert.ok(match, 'missing job needs');
+  return match[1].split(',').map((name) => name.trim());
+}
+
+function jobScalar(job, key) {
+  const match = job.match(new RegExp(`^    ${key}: ([^\\n#]+?)\\s*$`, 'm'));
+  assert.ok(match, `missing ${key}`);
+  return match[1];
+}
+
+function yamlScalar(value) {
+  const scalar = value.trim().replace(/\s+#.*$/, '');
+  if ((scalar.startsWith('"') && scalar.endsWith('"')) || (scalar.startsWith("'") && scalar.endsWith("'"))) {
+    return scalar.slice(1, -1);
+  }
+  return scalar;
+}
+
+function permissionDeclarations(workflow) {
+  return workflow.split('\n').flatMap((line, lineNumber) => {
+    const match = line.match(/^(\s*)(?:permissions|"permissions"|'permissions')\s*:(.*)$/);
+    return match ? [{ indent: match[1].length, inlineValue: match[2], lineNumber }] : [];
+  });
+}
+
+function assertRecoveryPermissionForms(workflow) {
+  for (const declaration of permissionDeclarations(workflow)) {
+    assert.equal(declaration.inlineValue.trim(), '', 'permissions must use block form');
+  }
+}
+
+function permissionEntries(workflow) {
+  const lines = workflow.split('\n');
+  const entries = [];
+  for (const declaration of permissionDeclarations(workflow)) {
+    for (let lineNumber = declaration.lineNumber + 1; lineNumber < lines.length; lineNumber += 1) {
+      const line = lines[lineNumber];
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      const indent = line.match(/^\s*/)[0].length;
+      if (indent <= declaration.indent) break;
+      const entry = line.match(/^\s*((?:"[^"]*"|'[^']*'|[^:\s]+))\s*:\s*(.*?)\s*$/);
+      if (entry) entries.push({ key: yamlScalar(entry[1]), value: yamlScalar(entry[2]) });
+    }
+  }
+  return entries;
+}
+
+function assertRecoveryPermissions(workflow) {
+  assertRecoveryPermissionForms(workflow);
+  assert.deepEqual(
+    permissionEntries(workflow)
+      .filter(({ value }) => value === 'write')
+      .map(({ key }) => key),
+    ['security-events'],
+    'unexpected write permissions',
+  );
+}
+
+function assertNoJobEnv(job) {
+  assert.doesNotMatch(job, /^    (?:env|"env"|'env')\s*:/m, 'deploy environment must be step-scoped');
+}
+
+function stepBlock(job, stepName) {
+  const match = job.match(
+    new RegExp(`^      - name: ${stepName}\\n([\\s\\S]*?)(?=^      - |(?![\\s\\S]))`, 'm'),
+  );
+  assert.ok(match, `missing ${stepName} step`);
+  return match[1];
+}
+
+function stepEnv(step) {
+  const match = step.match(/^        env:\n((?:          [^\n]+\n?)*)/m);
+  assert.ok(match, 'missing step environment');
+  return Object.fromEntries(
+    [...match[1].matchAll(/^          ([A-Z0-9_]+): ([^\n]+)$/gm)].map(([, key, value]) => [key, value]),
+  );
+}
+
 test('Caddy owns the listener-auth namespace before the general API proxy', () => {
   for (const caddyfile of caddyfiles) {
     const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
@@ -39,6 +131,87 @@ test('Caddy owns the listener-auth namespace before the general API proxy', () =
     assert.ok(listenerMatcherIndex >= 0, 'missing listener-auth namespace matcher');
     assert.ok(apiProxyIndex > listenerMatcherIndex, 'listener-auth matcher must precede the general API proxy');
   }
+});
+
+test('recovery contract rejects alternate permission and deploy-environment forms', () => {
+  for (const [mutation, expected] of [
+    [recovery.replace('permissions:\n  contents: read', 'permissions: write-all'), /block form/],
+    [recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'), /block form/],
+    [
+      recovery.replace(
+        '  deploy-production:',
+        '  permission-mutation:\n    "permissions": "write-all"\n  deploy-production:',
+      ),
+      /block form/,
+    ],
+    [
+      recovery.replace(
+        '  deploy-production:',
+        '  permission-mutation:\n    permissions:\n      actions: "write"\n  deploy-production:',
+      ),
+      /unexpected write permissions/,
+    ],
+  ]) {
+    assert.throws(() => assertRecoveryPermissions(mutation), expected);
+  }
+
+  const deploy = jobBlock(recovery, 'deploy-production');
+  for (const mutation of [
+    `${deploy.replace('    environment: production', '    env: inherited\n    environment: production')}`,
+    `${deploy.replace('    environment: production', '    env: {PORTAINER_URL: leaked}\n    environment: production')}`,
+    `${deploy.replace('    environment: production', '    "env": {PORTAINER_URL: leaked}\n    environment: production')}`,
+  ]) {
+    assert.throws(() => assertNoJobEnv(mutation), /deploy environment must be step-scoped/);
+  }
+});
+
+test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
+  assert.match(recovery, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(recovery, /workflow_dispatch:[\s\S]*?inputs:/);
+
+  const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
+  assert.ok(defaultPermissions, 'missing default workflow permissions');
+  assert.match(defaultPermissions, /^  contents: read$/m);
+  assertRecoveryPermissions(recovery);
+
+  const validate = jobBlock(recovery, 'validate');
+  const policy = jobBlock(recovery, 'vulnerability-policy');
+  const deploy = jobBlock(recovery, 'deploy-production');
+  assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
+  assert.deepEqual(jobNeeds(policy), ['validate']);
+  assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
+  assert.match(
+    policy,
+    /^    with:\n      release_tag: v1\.3\.0-obiwave\.2\n      recovery_manifest: security\/releases\/v1\.3\.0-obiwave\.2\.json$/m,
+  );
+  assert.match(
+    policy,
+    /^    permissions:\n      contents: read\n      packages: read\n      security-events: write$/m,
+  );
+  assert.deepEqual(jobNeeds(deploy), ['validate', 'vulnerability-policy']);
+  assert.equal(jobScalar(deploy, 'environment'), 'production');
+  assert.match(
+    deploy,
+    /^    concurrency:\n      group: subwave-production\n      cancel-in-progress: false$/m,
+  );
+  assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
+  assertNoJobEnv(deploy);
+  const deployStep = stepBlock(deploy, 'Deploy immutable release through Portainer');
+  assert.deepEqual(stepEnv(deployStep), {
+    PORTAINER_URL: '${{ vars.PORTAINER_URL }}',
+    PORTAINER_API_KEY: '${{ secrets.PORTAINER_API_KEY }}',
+    PORTAINER_STACK_ID: '${{ vars.PORTAINER_STACK_ID }}',
+    PORTAINER_ENDPOINT_ID: '${{ vars.PORTAINER_ENDPOINT_ID }}',
+    SUBWAVE_RELEASE_TAG: 'v1.3.0-obiwave.2',
+    SUBWAVE_HEALTH_URL: '${{ vars.SUBWAVE_HEALTH_URL }}',
+    SUBWAVE_STREAM_URL: '${{ vars.SUBWAVE_STREAM_URL }}',
+    SUBWAVE_STREAM_PASSWORD: '${{ secrets.SUBWAVE_STREAM_PASSWORD }}',
+  });
+  assert.deepEqual(
+    [...deploy.matchAll(/^\s+run: ([^\n]+)$/gm)].map(([, command]) => command),
+    ['node scripts/deploy/portainer-release.mjs'],
+  );
+  assert.doesNotMatch(recovery, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
 });
 
 test('official JavaScript actions use the Node 24 runtime', async () => {
@@ -227,16 +400,20 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
 test('private image scans authenticate with package read permission', () => {
   assert.match(publish, /vulnerability-policy:[\s\S]*?permissions:[\s\S]*?packages: read/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
-  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
+  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4/);
 });
 
-test('image scans pin Trivy to the reviewed immutable release commit', () => {
-  assert.doesNotMatch(scan, /aquasecurity\/trivy-action@0\.28\.0/);
-  assert.match(
-    scan,
-    /uses: aquasecurity\/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0\.36\.0/,
-  );
-  assert.match(scan, /version: v0\.67\.2/);
+test('image scans invoke the local pinned scanner runner for JSON and SARIF', () => {
+  const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  assert.match(scanJob, /uses: docker\/setup-buildx-action@v4/);
+  assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format json/);
+  assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format sarif/);
+});
+
+test('recovery input is transferred through the environment, never interpolated into Bash', () => {
+  const resolveJob = scan.slice(scan.indexOf('  resolve-tag:'), scan.indexOf('  scan:'));
+  assert.match(resolveJob, /env:\s*\n\s+REQUESTED_TAG: \$\{\{ inputs\.release_tag \}\}\s*\n\s+RECOVERY_MANIFEST: \$\{\{ inputs\.recovery_manifest \}\}/);
+  assert.doesNotMatch(resolveJob, /RECOVERY_MANIFEST="\$\{\{ inputs\.recovery_manifest \}\}"/);
 });
 
 test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
@@ -257,10 +434,9 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
     'subwave-analyzer-cuda',
   ]);
 
-  assert.match(scanJob, /format: json/);
-  assert.match(scanJob, /output: \$\{\{ matrix\.image \}\}\.json/);
   assert.match(scanJob, /name: trivy-json-\$\{\{ matrix\.image \}\}/);
-  assert.match(scanJob, /format: sarif/);
+  assert.match(scanJob, /Record JSON scanner status[\s\S]*?if: always\(\)/);
+  assert.match(scanJob, /Upload policy JSON[\s\S]*?if: always\(\)/);
   assert.match(scanJob, /Upload SARIF[\s\S]*if: always\(\)/);
 
   const policyJob = scan.slice(scan.indexOf('  vulnerability-policy:'));
@@ -274,23 +450,27 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
 
 test('release scans exercise production child commands in controller and both AIO images', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  const jsonRunnerIndex = scanJob.indexOf('      - name: Scan ${{ matrix.image }} for policy JSON');
+  const productionProbeIndex = scanJob.indexOf('      - name: Exercise production child command');
+  assert.ok(jsonRunnerIndex >= 0 && productionProbeIndex > jsonRunnerIndex, 'production probe must follow the JSON runner');
   assert.match(
     scanJob,
-    /if: contains\(fromJSON\('\["subwave-controller","subwave-aio","subwave-aio-heavy"\]'\), matrix\.image\)/,
+    /if: always\(\) && contains\(fromJSON\('\["subwave-controller","subwave-aio","subwave-aio-heavy"\]'\), matrix\.image\) && steps\.json-scan\.outcome == 'success'/,
   );
   assert.match(
     scanJob,
-    /docker run --rm --entrypoint \/bin\/sh[\s\S]*ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:\$\{\{ needs\.resolve-tag\.outputs\.tag \}\}/,
+    /docker run --rm --entrypoint \/bin\/sh \$\{\{ steps\.refs\.outputs\.tag_ref \}\}/,
   );
   assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npm/);
   assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npx/);
   assert.match(scanJob, /\/app\/node_modules\/\.bin\/tsx scripts\/production-command\.test\.ts/);
 });
 
-test('report-only scanner exit codes are backed by fail-closed aggregate enforcement', () => {
-  assert.match(scan, /exit-code: "0"/);
-  assert.match(scan, /steps\.json-scan\.outcome/);
-  assert.match(scan, /outcome: succeeded \? 'success' : 'failure'/);
+test('image scanner outcomes remain visible to the aggregate policy gate', () => {
+  assert.match(scan, /id: json-scan[\s\S]*?continue-on-error: true/);
+  assert.match(scan, /Record JSON scanner status[\s\S]*?steps\.json-scan\.outcome/);
+  assert.match(scan, /Upload policy JSON[\s\S]*?if: always\(\)/);
+  assert.match(scan, /vulnerability-policy:\s*\n\s+needs: \[resolve-tag, scan\][\s\S]*?if: always\(\)/);
   assert.match(scan, /vulnerability-policy:[\s\S]*node scripts\/security\/trivy-policy\.mjs/);
 });
 
