@@ -67,13 +67,9 @@ jobs:
               echo 'recovery_manifest must be repository-relative below security/releases/' >&2
               exit 1
             }
-            RECOVERY_MANIFEST="$RECOVERY_MANIFEST" node --input-type=module <<'NODE'
-            import { loadRecoveryManifest } from './scripts/release/recovery-manifest.mjs';
-            await loadRecoveryManifest({
-              manifestPath: process.env.RECOVERY_MANIFEST,
-              scannerPath: 'security/trivy-scanner.json',
-            });
-            NODE
+            node scripts/release/recovery-manifest.mjs validate \
+              --manifest "$RECOVERY_MANIFEST" \
+              --scanner security/trivy-scanner.json
           fi
           node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
           import { readFile } from 'node:fs/promises';
