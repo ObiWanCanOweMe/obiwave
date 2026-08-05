@@ -11,6 +11,10 @@ const webLock = JSON.parse(
 );
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
 const scan = await readFile(new URL('../../.github/workflows/scan-images.yml', import.meta.url), 'utf8');
+const recovery = await readFile(
+  new URL('../../.github/workflows/recover-v1.3.0-obiwave.2.yml', import.meta.url),
+  'utf8',
+);
 const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
@@ -30,6 +34,34 @@ const caddyfiles = await Promise.all(
 );
 const workflowDirectory = new URL('../../.github/workflows/', import.meta.url);
 
+function jobBlock(workflow, jobName) {
+  const match = workflow.match(
+    new RegExp(`^  ${jobName}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:\\n|(?![\\s\\S]))`, 'm'),
+  );
+  assert.ok(match, `missing ${jobName} job`);
+  return match[1];
+}
+
+function jobNeeds(job) {
+  const match = job.match(/^    needs: \[([^\]]*)\]$/m);
+  assert.ok(match, 'missing job needs');
+  return match[1].split(',').map((name) => name.trim());
+}
+
+function jobScalar(job, key) {
+  const match = job.match(new RegExp(`^    ${key}: ([^\\n#]+?)\\s*$`, 'm'));
+  assert.ok(match, `missing ${key}`);
+  return match[1];
+}
+
+function jobEnv(job) {
+  const match = job.match(/^    env:\n((?:      [^\n]+\n?)*)/m);
+  assert.ok(match, 'missing job environment');
+  return Object.fromEntries(
+    [...match[1].matchAll(/^      ([A-Z0-9_]+): ([^\n]+)$/gm)].map(([, key, value]) => [key, value]),
+  );
+}
+
 test('Caddy owns the listener-auth namespace before the general API proxy', () => {
   for (const caddyfile of caddyfiles) {
     const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
@@ -39,6 +71,38 @@ test('Caddy owns the listener-auth namespace before the general API proxy', () =
     assert.ok(listenerMatcherIndex >= 0, 'missing listener-auth namespace matcher');
     assert.ok(apiProxyIndex > listenerMatcherIndex, 'listener-auth matcher must precede the general API proxy');
   }
+});
+
+test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
+  assert.match(recovery, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(recovery, /workflow_dispatch:[\s\S]*?inputs:/);
+
+  const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
+  assert.ok(defaultPermissions, 'missing default workflow permissions');
+  assert.match(defaultPermissions, /^  contents: read$/m);
+  assert.doesNotMatch(
+    recovery,
+    /^\s+(?:contents|packages|actions|checks|deployments|id-token|issues|pull-requests|statuses): write$/m,
+  );
+
+  const validate = jobBlock(recovery, 'validate');
+  const policy = jobBlock(recovery, 'vulnerability-policy');
+  const deploy = jobBlock(recovery, 'deploy-production');
+  assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
+  assert.deepEqual(jobNeeds(policy), ['validate']);
+  assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
+  assert.match(
+    policy,
+    /^    with:\n      release_tag: v1\.3\.0-obiwave\.2\n      recovery_manifest: security\/releases\/v1\.3\.0-obiwave\.2\.json$/m,
+  );
+  assert.match(
+    policy,
+    /^    permissions:\n      contents: read\n      packages: read\n      security-events: write$/m,
+  );
+  assert.deepEqual(jobNeeds(deploy), ['validate', 'vulnerability-policy']);
+  assert.equal(jobScalar(deploy, 'environment'), 'production');
+  assert.equal(jobEnv(deploy).SUBWAVE_RELEASE_TAG, 'v1.3.0-obiwave.2');
+  assert.doesNotMatch(recovery, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
 });
 
 test('official JavaScript actions use the Node 24 runtime', async () => {
