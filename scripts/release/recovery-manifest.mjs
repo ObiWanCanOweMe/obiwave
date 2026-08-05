@@ -210,8 +210,8 @@ export function verifyRecoveryPreflight({ manifest, repository, run = commandRun
 
 function parseCli(argv) {
   const [command, ...rest] = argv;
-  if (!['verify-all', 'verify-image', 'image'].includes(command)) {
-    throw new Error('Recovery command must be verify-all, verify-image, or image');
+  if (!['validate', 'verify-all', 'verify-image', 'image'].includes(command)) {
+    throw new Error('Recovery command must be validate, verify-all, verify-image, or image');
   }
   const allowed = new Set(['manifest', 'scanner', 'repository', 'image']);
   const values = {};
@@ -224,10 +224,13 @@ function parseCli(argv) {
     values[flag.slice(2)] = value;
   }
   if (!values.manifest || !values.scanner) throw new Error('Recovery command requires --manifest and --scanner');
+  if (command === 'validate' && (values.repository || values.image)) {
+    throw new Error('validate does not accept --repository or --image');
+  }
   if (command === 'verify-all' && (!values.repository || values.image)) {
     throw new Error('verify-all requires --repository and does not accept --image');
   }
-  if (command !== 'verify-all' && (!values.image || values.repository)) {
+  if (!['validate', 'verify-all'].includes(command) && (!values.image || values.repository)) {
     throw new Error(`${command} requires --image and does not accept --repository`);
   }
   return { command, values };
@@ -244,6 +247,7 @@ async function writeImageOutput(image) {
 export async function runCli(argv = process.argv.slice(2)) {
   const { command, values } = parseCli(argv);
   const manifest = await loadRecoveryManifest({ manifestPath: values.manifest, scannerPath: values.scanner });
+  if (command === 'validate') return;
   if (command === 'verify-all') {
     process.stdout.write(`${JSON.stringify(verifyRecoveryPreflight({ manifest, repository: values.repository }))}\n`);
     return;

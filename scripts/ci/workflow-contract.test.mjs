@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const webPackage = JSON.parse(
@@ -122,6 +126,26 @@ function stepEnv(step) {
   );
 }
 
+function stepRun(job, stepName) {
+  const lines = job.split('\n');
+  const stepIndex = lines.findIndex((line) => line === `      - name: ${stepName}`);
+  assert.notEqual(stepIndex, -1, `missing ${stepName} step`);
+  const runIndex = lines.findIndex((line, index) => index > stepIndex && line === '        run: |');
+  assert.notEqual(runIndex, -1, `missing ${stepName} run block`);
+  const script = [];
+  for (const line of lines.slice(runIndex + 1)) {
+    if (line === '') {
+      script.push('');
+      continue;
+    }
+    const indent = line.match(/^ */)[0].length;
+    if (indent <= 8) break;
+    assert.ok(indent >= 10, `invalid ${stepName} run indentation`);
+    script.push(line.slice(10));
+  }
+  return `${script.join('\n')}\n`;
+}
+
 test('Caddy owns the listener-auth namespace before the general API proxy', () => {
   for (const caddyfile of caddyfiles) {
     const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
@@ -212,6 +236,29 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
     ['node scripts/deploy/portainer-release.mjs'],
   );
   assert.doesNotMatch(recovery, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
+});
+
+test('scanner resolve-tag executes recovery validation as valid Bash', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-resolve-tag-'));
+  const outputPath = join(directory, 'github-output');
+  try {
+    const result = spawnSync('bash', ['-e'], {
+      cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      encoding: 'utf8',
+      input: stepRun(jobBlock(scan, 'resolve-tag'), 'Resolve and validate release tag'),
+      env: {
+        ...process.env,
+        GITHUB_EVENT_NAME: 'workflow_call',
+        GITHUB_OUTPUT: outputPath,
+        RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
+        REQUESTED_TAG: 'v1.3.0-obiwave.2',
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(await readFile(outputPath, 'utf8'), /^tag=v1\.3\.0-obiwave\.2$/m);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('official JavaScript actions use the Node 24 runtime', async () => {

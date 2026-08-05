@@ -262,6 +262,17 @@ function runImageCli(extra = [], env = process.env) {
   ], { encoding: 'utf8', env });
 }
 
+test('validate CLI accepts the exact manifest without external preflight', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', manifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
 test('image CLI emits the canonical references as one JSON object', () => {
   const result = runImageCli();
   assert.equal(result.status, 0, result.stderr);
