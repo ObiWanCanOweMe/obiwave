@@ -54,16 +54,56 @@ function jobScalar(job, key) {
   return match[1];
 }
 
+function yamlScalar(value) {
+  const scalar = value.trim().replace(/\s+#.*$/, '');
+  if ((scalar.startsWith('"') && scalar.endsWith('"')) || (scalar.startsWith("'") && scalar.endsWith("'"))) {
+    return scalar.slice(1, -1);
+  }
+  return scalar;
+}
+
+function permissionDeclarations(workflow) {
+  return workflow.split('\n').flatMap((line, lineNumber) => {
+    const match = line.match(/^(\s*)(?:permissions|"permissions"|'permissions')\s*:(.*)$/);
+    return match ? [{ indent: match[1].length, inlineValue: match[2], lineNumber }] : [];
+  });
+}
+
 function assertRecoveryPermissionForms(workflow) {
-  assert.doesNotMatch(
-    workflow,
-    /^\s*permissions:\s*(?:write-all\b|\{)/m,
-    'permissions must use block form',
+  for (const declaration of permissionDeclarations(workflow)) {
+    assert.equal(declaration.inlineValue.trim(), '', 'permissions must use block form');
+  }
+}
+
+function permissionEntries(workflow) {
+  const lines = workflow.split('\n');
+  const entries = [];
+  for (const declaration of permissionDeclarations(workflow)) {
+    for (let lineNumber = declaration.lineNumber + 1; lineNumber < lines.length; lineNumber += 1) {
+      const line = lines[lineNumber];
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      const indent = line.match(/^\s*/)[0].length;
+      if (indent <= declaration.indent) break;
+      const entry = line.match(/^\s*((?:"[^"]*"|'[^']*'|[^:\s]+))\s*:\s*(.*?)\s*$/);
+      if (entry) entries.push({ key: yamlScalar(entry[1]), value: yamlScalar(entry[2]) });
+    }
+  }
+  return entries;
+}
+
+function assertRecoveryPermissions(workflow) {
+  assertRecoveryPermissionForms(workflow);
+  assert.deepEqual(
+    permissionEntries(workflow)
+      .filter(({ value }) => value === 'write')
+      .map(({ key }) => key),
+    ['security-events'],
+    'unexpected write permissions',
   );
 }
 
 function assertNoJobEnv(job) {
-  assert.doesNotMatch(job, /^    env:/m, 'deploy environment must be step-scoped');
+  assert.doesNotMatch(job, /^    (?:env|"env"|'env')\s*:/m, 'deploy environment must be step-scoped');
 }
 
 function stepBlock(job, stepName) {
@@ -94,17 +134,32 @@ test('Caddy owns the listener-auth namespace before the general API proxy', () =
 });
 
 test('recovery contract rejects alternate permission and deploy-environment forms', () => {
-  for (const mutation of [
-    recovery.replace('permissions:\n  contents: read', 'permissions: write-all'),
-    recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'),
+  for (const [mutation, expected] of [
+    [recovery.replace('permissions:\n  contents: read', 'permissions: write-all'), /block form/],
+    [recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'), /block form/],
+    [
+      recovery.replace(
+        '  deploy-production:',
+        '  permission-mutation:\n    "permissions": "write-all"\n  deploy-production:',
+      ),
+      /block form/,
+    ],
+    [
+      recovery.replace(
+        '  deploy-production:',
+        '  permission-mutation:\n    permissions:\n      actions: "write"\n  deploy-production:',
+      ),
+      /unexpected write permissions/,
+    ],
   ]) {
-    assert.throws(() => assertRecoveryPermissionForms(mutation), /permissions must use block form/);
+    assert.throws(() => assertRecoveryPermissions(mutation), expected);
   }
 
   const deploy = jobBlock(recovery, 'deploy-production');
   for (const mutation of [
     `${deploy.replace('    environment: production', '    env: inherited\n    environment: production')}`,
     `${deploy.replace('    environment: production', '    env: {PORTAINER_URL: leaked}\n    environment: production')}`,
+    `${deploy.replace('    environment: production', '    "env": {PORTAINER_URL: leaked}\n    environment: production')}`,
   ]) {
     assert.throws(() => assertNoJobEnv(mutation), /deploy environment must be step-scoped/);
   }
@@ -117,11 +172,7 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
   const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
   assert.ok(defaultPermissions, 'missing default workflow permissions');
   assert.match(defaultPermissions, /^  contents: read$/m);
-  assertRecoveryPermissionForms(recovery);
-  assert.deepEqual(
-    [...recovery.matchAll(/^\s+([a-z-]+): write$/gm)].map(([, permission]) => permission),
-    ['security-events'],
-  );
+  assertRecoveryPermissions(recovery);
 
   const validate = jobBlock(recovery, 'validate');
   const policy = jobBlock(recovery, 'vulnerability-policy');
