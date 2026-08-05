@@ -109,6 +109,15 @@ function resolveApprovedDirectory(workspace, directory, label) {
   return resolved;
 }
 
+function lstatIfPresent(path) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 function resolveWorkspaceBindings(output, cacheDirectory) {
   const workspace = realpathSync(process.cwd());
   const outputHost = resolve(workspace, `.${output.slice('/workspace'.length)}`);
@@ -117,10 +126,9 @@ function resolveWorkspaceBindings(output, cacheDirectory) {
     throw new Error('Trivy workspace path is invalid');
   }
   resolveApprovedDirectory(workspace, dirname(outputHost), 'output directory');
-  if (existsSync(outputHost)) {
-    if (lstatSync(outputHost).isSymbolicLink() || !insideWorkspace(workspace, realpathSync(outputHost))) {
-      throw new Error('Trivy output must resolve inside the workspace');
-    }
+  const outputEntry = lstatIfPresent(outputHost);
+  if (outputEntry?.isSymbolicLink() || (outputEntry && !insideWorkspace(workspace, realpathSync(outputHost)))) {
+    throw new Error('Trivy output must resolve inside the workspace');
   }
   return {
     workspace,

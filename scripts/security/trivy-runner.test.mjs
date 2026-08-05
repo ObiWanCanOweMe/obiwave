@@ -287,6 +287,29 @@ test('rejects cache and output paths that resolve through a workspace symlink', 
   }
 });
 
+test('rejects a dangling output-file symlink before Docker can pull or scan', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-dangling-output-'));
+  const originalDirectory = process.cwd();
+  try {
+    await symlink(join(tmpdir(), 'subwave-trivy-outside-target-does-not-exist'), join(directory, 'report.json'));
+    process.chdir(directory);
+    const command = runner();
+
+    assert.throws(() => runTrivyScan({
+      scanner: scannerConfig,
+      image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' },
+      format: 'json',
+      output: '/workspace/report.json',
+      cacheDirectory: '/workspace/cache',
+      run: command.run,
+    }), /output.*workspace/i);
+    assert.deepEqual(command.calls, []);
+  } finally {
+    process.chdir(originalDirectory);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('runCli translates real recovery arguments and loads the checked-in scanner and manifest', async () => {
   const imageDigest = 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f';
   const command = runner(
