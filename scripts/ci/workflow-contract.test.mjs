@@ -227,16 +227,14 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
 test('private image scans authenticate with package read permission', () => {
   assert.match(publish, /vulnerability-policy:[\s\S]*?permissions:[\s\S]*?packages: read/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
-  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4[\s\S]*?uses: aquasecurity\/trivy-action/);
+  assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4/);
 });
 
-test('image scans pin Trivy to the reviewed immutable release commit', () => {
-  assert.doesNotMatch(scan, /aquasecurity\/trivy-action@0\.28\.0/);
-  assert.match(
-    scan,
-    /uses: aquasecurity\/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0\.36\.0/,
-  );
-  assert.match(scan, /version: v0\.67\.2/);
+test('image scans invoke the local pinned scanner runner for JSON and SARIF', () => {
+  const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
+  assert.match(scanJob, /uses: docker\/setup-buildx-action@v4/);
+  assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format json/);
+  assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format sarif/);
 });
 
 test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
@@ -257,10 +255,9 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
     'subwave-analyzer-cuda',
   ]);
 
-  assert.match(scanJob, /format: json/);
-  assert.match(scanJob, /output: \$\{\{ matrix\.image \}\}\.json/);
   assert.match(scanJob, /name: trivy-json-\$\{\{ matrix\.image \}\}/);
-  assert.match(scanJob, /format: sarif/);
+  assert.match(scanJob, /Record JSON scanner status[\s\S]*?if: always\(\)/);
+  assert.match(scanJob, /Upload policy JSON[\s\S]*?if: always\(\)/);
   assert.match(scanJob, /Upload SARIF[\s\S]*if: always\(\)/);
 
   const policyJob = scan.slice(scan.indexOf('  vulnerability-policy:'));
@@ -280,17 +277,18 @@ test('release scans exercise production child commands in controller and both AI
   );
   assert.match(
     scanJob,
-    /docker run --rm --entrypoint \/bin\/sh[\s\S]*ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:\$\{\{ needs\.resolve-tag\.outputs\.tag \}\}/,
+    /docker run --rm --entrypoint \/bin\/sh \$\{\{ steps\.refs\.outputs\.tag_ref \}\}/,
   );
   assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npm/);
   assert.match(scanJob, /test ! -e \/usr\/local\/bin\/npx/);
   assert.match(scanJob, /\/app\/node_modules\/\.bin\/tsx scripts\/production-command\.test\.ts/);
 });
 
-test('report-only scanner exit codes are backed by fail-closed aggregate enforcement', () => {
-  assert.match(scan, /exit-code: "0"/);
-  assert.match(scan, /steps\.json-scan\.outcome/);
-  assert.match(scan, /outcome: succeeded \? 'success' : 'failure'/);
+test('image scanner outcomes remain visible to the aggregate policy gate', () => {
+  assert.match(scan, /id: json-scan[\s\S]*?continue-on-error: true/);
+  assert.match(scan, /Record JSON scanner status[\s\S]*?steps\.json-scan\.outcome/);
+  assert.match(scan, /Upload policy JSON[\s\S]*?if: always\(\)/);
+  assert.match(scan, /vulnerability-policy:\s*\n\s+needs: \[resolve-tag, scan\][\s\S]*?if: always\(\)/);
   assert.match(scan, /vulnerability-policy:[\s\S]*node scripts\/security\/trivy-policy\.mjs/);
 });
 

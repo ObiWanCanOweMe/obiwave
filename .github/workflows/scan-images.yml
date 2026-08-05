@@ -10,6 +10,11 @@ on:
         description: Exact fork-qualified release tag to scan
         required: true
         type: string
+      recovery_manifest:
+        description: Optional repository-relative immutable recovery manifest
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
@@ -17,6 +22,11 @@ on:
       release_tag:
         description: Exact fork-qualified release tag to scan
         required: true
+        type: string
+      recovery_manifest:
+        description: Optional repository-relative immutable recovery manifest
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -29,9 +39,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      scanner_image: ${{ steps.resolve.outputs.scanner_image }}
+      scanner_version: ${{ steps.resolve.outputs.scanner_version }}
+      recovery_manifest: ${{ steps.resolve.outputs.recovery_manifest }}
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
@@ -47,7 +61,35 @@ jobs:
             RELEASE_TAG="$REQUESTED_TAG"
           fi
           RELEASE_TAG="$RELEASE_TAG" node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
+          RECOVERY_MANIFEST="${{ inputs.recovery_manifest }}"
+          if [[ -n "$RECOVERY_MANIFEST" ]]; then
+            [[ "$RECOVERY_MANIFEST" =~ ^security/releases/[A-Za-z0-9._-]+\.json$ ]] || {
+              echo 'recovery_manifest must be repository-relative below security/releases/' >&2
+              exit 1
+            }
+            RECOVERY_MANIFEST="$RECOVERY_MANIFEST" node --input-type=module <<'NODE'
+            import { loadRecoveryManifest } from './scripts/release/recovery-manifest.mjs';
+            await loadRecoveryManifest({
+              manifestPath: process.env.RECOVERY_MANIFEST,
+              scannerPath: 'security/trivy-scanner.json',
+            });
+            NODE
+          fi
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFile } from 'node:fs/promises';
+          const scanner = JSON.parse(await readFile('security/trivy-scanner.json', 'utf8'));
+          const keys = ['schemaVersion', 'version', 'imageRef'];
+          if (scanner === null || typeof scanner !== 'object' || Array.isArray(scanner)
+            || Object.keys(scanner).length !== keys.length || !keys.every((key) => Object.hasOwn(scanner, key))
+            || scanner.schemaVersion !== 1 || !/^\d+\.\d+\.\d+$/.test(scanner.version)
+            || !/^[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}$/.test(scanner.imageRef)) {
+            throw new Error('security/trivy-scanner.json is invalid');
+          }
+          console.log(`scanner_image=${scanner.imageRef}`);
+          console.log(`scanner_version=${scanner.version}`);
+          NODE
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "recovery_manifest=$RECOVERY_MANIFEST" >> "$GITHUB_OUTPUT"
 
   scan:
     needs: resolve-tag
@@ -67,16 +109,39 @@ jobs:
           - subwave-analyzer-heavy
           - subwave-analyzer-cuda
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve immutable image references
+        id: refs
+        env:
+          IMAGE: ${{ matrix.image }}
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+        run: |
+          if [[ -n "$RECOVERY_MANIFEST" ]]; then
+            node scripts/release/recovery-manifest.mjs image \
+              --manifest "$RECOVERY_MANIFEST" \
+              --scanner security/trivy-scanner.json \
+              --image "$IMAGE" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Exercise production child command in ${{ matrix.image }}
         if: contains(fromJSON('["subwave-controller","subwave-aio","subwave-aio-heavy"]'), matrix.image)
         run: |
-          docker run --rm --entrypoint /bin/sh ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }} -ceu '
+          docker run --rm --entrypoint /bin/sh ${{ steps.refs.outputs.tag_ref }} -ceu '
             test ! -e /usr/local/bin/npm
             test ! -e /usr/local/bin/npx
             exec /app/node_modules/.bin/tsx scripts/production-command.test.ts
@@ -85,21 +150,27 @@ jobs:
       - name: Scan ${{ matrix.image }} for policy JSON
         id: json-scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
-          version: v0.67.2
-          scanners: vuln
-          format: json
-          output: ${{ matrix.image }}.json
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+        env:
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+        run: |
+          recovery_args=()
+          if [[ -n "$RECOVERY_MANIFEST" ]]; then
+            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST" --pull-ref "${{ steps.refs.outputs.pull_ref }}")
+          fi
+          node scripts/security/trivy-runner.mjs \
+            --scanner security/trivy-scanner.json \
+            --image-name "${{ matrix.image }}" \
+            --tag-ref "${{ steps.refs.outputs.tag_ref }}" \
+            --format json \
+            --output "${{ matrix.image }}.json" \
+            --cache-directory .tmp/trivy-cache \
+            "${recovery_args[@]}"
 
       - name: Record JSON scanner status
         if: always()
         env:
           IMAGE: ${{ matrix.image }}
-          IMAGE_REF: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
+          IMAGE_REF: ${{ steps.refs.outputs.tag_ref }}
           SCAN_OUTCOME: ${{ steps.json-scan.outcome }}
         run: |
           node --input-type=module <<'NODE'
@@ -132,15 +203,21 @@ jobs:
 
       - name: Scan ${{ matrix.image }} for SARIF
         continue-on-error: true
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/obiwancanoweme/${{ matrix.image }}:${{ needs.resolve-tag.outputs.tag }}
-          version: v0.67.2
-          scanners: vuln
-          format: sarif
-          output: trivy-${{ matrix.image }}.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+        env:
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+        run: |
+          recovery_args=()
+          if [[ -n "$RECOVERY_MANIFEST" ]]; then
+            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST" --pull-ref "${{ steps.refs.outputs.pull_ref }}")
+          fi
+          node scripts/security/trivy-runner.mjs \
+            --scanner security/trivy-scanner.json \
+            --image-name "${{ matrix.image }}" \
+            --tag-ref "${{ steps.refs.outputs.tag_ref }}" \
+            --format sarif \
+            --output "trivy-${{ matrix.image }}.sarif" \
+            --cache-directory .tmp/trivy-cache \
+            "${recovery_args[@]}"
 
       - name: Upload SARIF to code scanning
         if: always()
