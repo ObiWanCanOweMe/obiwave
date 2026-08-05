@@ -54,12 +54,16 @@ function jobScalar(job, key) {
   return match[1];
 }
 
-function jobEnv(job) {
-  const match = job.match(/^    env:\n((?:      [^\n]+\n?)*)/m);
-  if (!match) return {};
-  return Object.fromEntries(
-    [...match[1].matchAll(/^      ([A-Z0-9_]+): ([^\n]+)$/gm)].map(([, key, value]) => [key, value]),
+function assertRecoveryPermissionForms(workflow) {
+  assert.doesNotMatch(
+    workflow,
+    /^\s*permissions:\s*(?:write-all\b|\{)/m,
+    'permissions must use block form',
   );
+}
+
+function assertNoJobEnv(job) {
+  assert.doesNotMatch(job, /^    env:/m, 'deploy environment must be step-scoped');
 }
 
 function stepBlock(job, stepName) {
@@ -89,6 +93,23 @@ test('Caddy owns the listener-auth namespace before the general API proxy', () =
   }
 });
 
+test('recovery contract rejects alternate permission and deploy-environment forms', () => {
+  for (const mutation of [
+    recovery.replace('permissions:\n  contents: read', 'permissions: write-all'),
+    recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'),
+  ]) {
+    assert.throws(() => assertRecoveryPermissionForms(mutation), /permissions must use block form/);
+  }
+
+  const deploy = jobBlock(recovery, 'deploy-production');
+  for (const mutation of [
+    `${deploy.replace('    environment: production', '    env: inherited\n    environment: production')}`,
+    `${deploy.replace('    environment: production', '    env: {PORTAINER_URL: leaked}\n    environment: production')}`,
+  ]) {
+    assert.throws(() => assertNoJobEnv(mutation), /deploy environment must be step-scoped/);
+  }
+});
+
 test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
   assert.match(recovery, /^on:\n  workflow_dispatch:\s*$/m);
   assert.doesNotMatch(recovery, /workflow_dispatch:[\s\S]*?inputs:/);
@@ -96,6 +117,7 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
   const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
   assert.ok(defaultPermissions, 'missing default workflow permissions');
   assert.match(defaultPermissions, /^  contents: read$/m);
+  assertRecoveryPermissionForms(recovery);
   assert.deepEqual(
     [...recovery.matchAll(/^\s+([a-z-]+): write$/gm)].map(([, permission]) => permission),
     ['security-events'],
@@ -122,7 +144,7 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
     /^    concurrency:\n      group: subwave-production\n      cancel-in-progress: false$/m,
   );
   assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
-  assert.deepEqual(jobEnv(deploy), {});
+  assertNoJobEnv(deploy);
   const deployStep = stepBlock(deploy, 'Deploy immutable release through Portainer');
   assert.deepEqual(stepEnv(deployStep), {
     PORTAINER_URL: '${{ vars.PORTAINER_URL }}',
