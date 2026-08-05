@@ -11,6 +11,18 @@ const SCANNER_VERSION = '0.67.2';
 const SCANNER_IMAGE = 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08';
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
+const APPROVED_IMAGES = Object.freeze([
+  Object.freeze({ name: 'subwave-caddy', digest: 'sha256:10a653cd8eb73a4aa55998d4f499ed7184a37ae99a41c2222f7a9434175290cd' }),
+  Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:e983017f0bae67fa10cd7bf9833403227c2e193492175087e03bb8ac99df236b' }),
+  Object.freeze({ name: 'subwave-controller', digest: 'sha256:e516778b297cc92f65b22e2336a2a8c7c16618f63fe19746f01dc9dbf405f7f6' }),
+  Object.freeze({ name: 'subwave-web', digest: 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f' }),
+  Object.freeze({ name: 'subwave-aio', digest: 'sha256:50e961965b7f449f330c83e8942fea58d02a7dc5265e3efa8c3600017f48166e' }),
+  Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:48c0e3bd7fc6dba4e8dc01b6eec12b267be9ac1635d7af15e8a5710724c3427d' }),
+  Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:ee4dd62bf79eddbf6329ea059e5e172ef176c87353c18d05dd1ec3c0f0c53025' }),
+  Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:be9a81fd5b43c97e4093399aebc8d00cfdfa656d032602e7ca0644e49934164f' }),
+  Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:82e7c5bef067ffe35db03a2bbe08c518e764fb61065eee34af4213aede4ebe00' }),
+  Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72' }),
+]);
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -59,15 +71,17 @@ export function validateRecoveryManifest({ manifest, scannerConfig }) {
   ) {
     fail('scanner config must equal the recovery scanner');
   }
-  if (!Array.isArray(manifest.images) || manifest.images.length !== EXPECTED_IMAGES.length) {
-    fail(`images must contain exactly ${EXPECTED_IMAGES.length} entries`);
+  if (!Array.isArray(manifest.images) || manifest.images.length !== APPROVED_IMAGES.length) {
+    fail(`images must contain exactly ${APPROVED_IMAGES.length} entries`);
   }
   for (const [index, entry] of manifest.images.entries()) {
+    const approved = APPROVED_IMAGES[index];
     if (!hasExactKeys(entry, ['name', 'digest'])) fail(`image ${index} keys must be name and digest`);
-    if (entry.name !== EXPECTED_IMAGES[index]) {
-      fail(`image ${index} must equal ${EXPECTED_IMAGES[index]}`);
+    if (entry.name !== approved.name || entry.name !== EXPECTED_IMAGES[index]) {
+      fail(`image ${index} must equal ${approved.name}`);
     }
     if (!DIGEST.test(entry.digest)) fail(`image ${entry.name} must have a lowercase sha256 digest`);
+    if (entry.digest !== approved.digest) fail(`image ${entry.name} digest is not approved`);
   }
   return freezeManifest(manifest);
 }

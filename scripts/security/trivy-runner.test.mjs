@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runCli, runTrivyScan } from './trivy-runner.mjs';
 
-const digest = `sha256:${'a'.repeat(64)}`;
+const digest = 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f';
 const otherDigest = `sha256:${'b'.repeat(64)}`;
 const scannerConfig = Object.freeze({
   schemaVersion: 1,
@@ -25,16 +25,16 @@ const exactRecovery = Object.freeze({
   sourceCommit: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
   scanner: Object.freeze({ version: '0.67.2', imageRef: scannerConfig.imageRef }),
   images: Object.freeze([
-    Object.freeze({ name: 'subwave-caddy', digest }),
-    Object.freeze({ name: 'subwave-broadcast', digest }),
-    Object.freeze({ name: 'subwave-controller', digest }),
+    Object.freeze({ name: 'subwave-caddy', digest: 'sha256:10a653cd8eb73a4aa55998d4f499ed7184a37ae99a41c2222f7a9434175290cd' }),
+    Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:e983017f0bae67fa10cd7bf9833403227c2e193492175087e03bb8ac99df236b' }),
+    Object.freeze({ name: 'subwave-controller', digest: 'sha256:e516778b297cc92f65b22e2336a2a8c7c16618f63fe19746f01dc9dbf405f7f6' }),
     Object.freeze({ name: 'subwave-web', digest }),
-    Object.freeze({ name: 'subwave-aio', digest }),
-    Object.freeze({ name: 'subwave-aio-heavy', digest }),
-    Object.freeze({ name: 'subwave-tts-heavy', digest }),
-    Object.freeze({ name: 'subwave-analyzer', digest }),
-    Object.freeze({ name: 'subwave-analyzer-heavy', digest }),
-    Object.freeze({ name: 'subwave-analyzer-cuda', digest }),
+    Object.freeze({ name: 'subwave-aio', digest: 'sha256:50e961965b7f449f330c83e8942fea58d02a7dc5265e3efa8c3600017f48166e' }),
+    Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:48c0e3bd7fc6dba4e8dc01b6eec12b267be9ac1635d7af15e8a5710724c3427d' }),
+    Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:ee4dd62bf79eddbf6329ea059e5e172ef176c87353c18d05dd1ec3c0f0c53025' }),
+    Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:be9a81fd5b43c97e4093399aebc8d00cfdfa656d032602e7ca0644e49934164f' }),
+    Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:82e7c5bef067ffe35db03a2bbe08c518e764fb61065eee34af4213aede4ebe00' }),
+    Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72' }),
   ]),
 });
 const workspace = process.cwd();
@@ -146,7 +146,7 @@ test('uses the same pinned scanner command for SARIF output', () => {
 });
 
 test('scans a normal canonical tag without recovery pull or local retagging', () => {
-  const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' });
+  const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.1-obiwave.1' });
   const command = runner(success(), success());
 
   const result = runTrivyScan({
@@ -190,7 +190,7 @@ test('fails before pulling when a successful recovery pre-verifier reports the w
 });
 
 test('fails closed without scanning when a normal image pull fails', () => {
-  const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' });
+  const image = Object.freeze({ image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.1-obiwave.1' });
   const command = runner(failure('private pull secret'));
 
   const error = thrown(() => runTrivyScan({
@@ -248,7 +248,7 @@ test('rejects a normal scan image outside the canonical registry namespace', () 
   const command = runner();
   assert.throws(() => runTrivyScan({
     scanner: scannerConfig,
-    image: { image: 'subwave-web', tagRef: 'ghcr.io/other/subwave-web:v1.4.0-obiwave.1' },
+    image: { image: 'subwave-web', tagRef: 'ghcr.io/other/subwave-web:v1.3.1-obiwave.1' },
     format: 'json',
     output: '/workspace/subwave-web.json',
     cacheDirectory: '/workspace/.tmp/trivy-cache',
@@ -272,7 +272,7 @@ test('rejects cache and output paths that resolve through a workspace symlink', 
       const command = runner();
       assert.throws(() => runTrivyScan({
         scanner: scannerConfig,
-        image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' },
+        image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.1-obiwave.1' },
         format: 'json',
         output: '/workspace/report.json',
         cacheDirectory: '/workspace/cache',
@@ -297,7 +297,7 @@ test('rejects a dangling output-file symlink before Docker can pull or scan', as
 
     assert.throws(() => runTrivyScan({
       scanner: scannerConfig,
-      image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.4.0-obiwave.1' },
+      image: { image: 'subwave-web', tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.1-obiwave.1' },
       format: 'json',
       output: '/workspace/report.json',
       cacheDirectory: '/workspace/cache',

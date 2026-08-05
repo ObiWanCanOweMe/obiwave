@@ -85,6 +85,9 @@ test('rejects scanner-config disagreement', () => {
 rejects('a foreign image namespace', (manifest) => { manifest.images[0].name = 'ghcr.io/foreign/subwave-caddy'; });
 rejects('an uppercase digest', (manifest) => { manifest.images[0].digest = `sha256:${'A'.repeat(64)}`; });
 rejects('a malformed digest', (manifest) => { manifest.images[0].digest = 'sha256:abc'; });
+rejects('a valid lowercase digest that is not approved for the image', (manifest) => {
+  manifest.images[0].digest = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+});
 rejects('a duplicate image', (manifest) => { manifest.images[1].name = 'subwave-caddy'; });
 rejects('a missing image', (manifest) => { manifest.images.pop(); });
 rejects('an extra image', (manifest) => {
