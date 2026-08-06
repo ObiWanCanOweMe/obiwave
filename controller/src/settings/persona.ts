@@ -10,6 +10,7 @@ import {
   DJ_SOULS,
   FREQUENCIES,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowEras,
   coerceShowGenres,
   coerceShowMoods,
@@ -126,6 +127,9 @@ function resolveShowShape(show, s) {
     genres: coerceShowGenres(show),
     eras: coerceShowEras(show),
     energies: coerceShowEnergies(show),
+    // Instrumental / vocal steering, backed by Demucs vocal ranges. '' = no
+    // constraint. Single-valued: the two states are mutually exclusive.
+    vocals: coerceShowVocals(show),
     // When true, every set music filter (mood, genre, era, energy) is a hard
     // filter on the pick pool instead of a soft lean; off-filter tracks only
     // survive as a never-starve fallback. Defaults off.

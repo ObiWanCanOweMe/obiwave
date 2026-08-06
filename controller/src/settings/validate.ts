@@ -29,6 +29,7 @@ import {
   SCRIPT_LENGTHS,
   SHOWS_LIMIT,
   SHOW_ENERGY,
+  SHOW_VOCALS,
   SHOW_FILTER_VALUES_MAX,
   SHOW_MOODS,
   SHOW_TOPIC_MAX,
@@ -48,6 +49,7 @@ import {
   coerceGuestPersonaIds,
   coercePlaylistIds,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowGenres,
   coerceShowMoods,
   emptyWeek,
@@ -58,19 +60,24 @@ import {
 import { BOUNDS, rawMaxTrackSec } from './defaults.js';
 import { minTrackSeconds } from './store.js';
 
-function validateTtsBlock(raw, where) {
+// Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
+// every persona's `tts` block AND the station-wide TTS fallback slot
+// (`settings.tts.fallback`) — same shape, same per-engine voice rules, one
+// implementation. `where` is the settings path prefix used in error messages,
+// so a bad fallback voice reads `tts.fallback.voice must ...`.
+export function validateTtsBlock(raw, where) {
   const t = raw || {};
   if (!TTS_ENGINES.includes(t.engine)) {
-    throw new Error(`${where}.tts.engine must be one of: ${TTS_ENGINES.join(', ')}`);
+    throw new Error(`${where}.engine must be one of: ${TTS_ENGINES.join(', ')}`);
   }
   if (!TTS_CLOUD_PROVIDERS.includes(t.cloudProvider)) {
-    throw new Error(`${where}.tts.cloudProvider must be one of: ${TTS_CLOUD_PROVIDERS.join(', ')}`);
+    throw new Error(`${where}.cloudProvider must be one of: ${TTS_CLOUD_PROVIDERS.join(', ')}`);
   }
   let voice = String(t.voice ?? '').trim();
   if (t.engine === 'kokoro') {
     if (!KOKORO_VOICE_RE.test(voice)) {
       throw new Error(
-        `${where}.tts.voice must match <lang><gender>_<name> for kokoro, e.g. bf_isabella`,
+        `${where}.voice must match <lang><gender>_<name> for kokoro, e.g. bf_isabella`,
       );
     }
   } else if (t.engine === 'chatterbox') {
@@ -79,7 +86,7 @@ function validateTtsBlock(raw, where) {
     // uploaded into config.chatterbox.voiceDir.
     if (voice && !CHATTERBOX_VOICE_RE.test(voice)) {
       throw new Error(
-        `${where}.tts.voice for chatterbox must be a .wav filename (no path), or empty for the default voice`,
+        `${where}.voice for chatterbox must be a .wav filename (no path), or empty for the default voice`,
       );
     }
   } else if (t.engine === 'pocket-tts') {
@@ -92,22 +99,22 @@ function validateTtsBlock(raw, where) {
     if (!voice) voice = 'alba';
     if (!POCKET_TTS_VOICE_RE.test(voice) && !CHATTERBOX_VOICE_RE.test(voice)) {
       throw new Error(
-        `${where}.tts.voice for pocket-tts must be a built-in voice id (e.g. alba) or a .wav filename`,
+        `${where}.voice for pocket-tts must be a built-in voice id (e.g. alba) or a .wav filename`,
       );
     }
   } else if (t.engine === 'cloud') {
     // openai-compatible voices are server-specific; an empty voice lets the
     // server use its own default. openai/elevenlabs both require a voice id.
     if (t.cloudProvider === 'openai-compatible') {
-      if (voice.length > 100) throw new Error(`${where}.tts.voice must be 0-100 chars`);
+      if (voice.length > 100) throw new Error(`${where}.voice must be 0-100 chars`);
     } else if (voice.length < 1 || voice.length > 100) {
-      throw new Error(`${where}.tts.voice must be 1-100 chars`);
+      throw new Error(`${where}.voice must be 1-100 chars`);
     }
   } else if (t.engine === 'remote') {
     // Remote engine voices are server-specific — the sidecar interprets them
     // (built-in id, reference-wav filename, or VoiceDesign prompt). Empty is
     // valid: the sidecar picks its own default.
-    if (voice.length > 100) throw new Error(`${where}.tts.voice must be 0-100 chars`);
+    if (voice.length > 100) throw new Error(`${where}.voice must be 0-100 chars`);
   } else {
     // piper: empty = use the baked-in default voice. Otherwise the value must
     // be an .onnx filename (no path separators) referencing a model the operator
@@ -119,7 +126,7 @@ function validateTtsBlock(raw, where) {
     // and must not block saving the shipped roster (issue #454).
     if (voice && !PIPER_VOICE_RE.test(voice) && !KOKORO_VOICE_RE.test(voice)) {
       throw new Error(
-        `${where}.tts.voice for piper must be an .onnx filename (no path), or empty for the default voice`,
+        `${where}.voice for piper must be an .onnx filename (no path), or empty for the default voice`,
       );
     }
   }
@@ -203,7 +210,7 @@ export function validatePersonasStrict(raw) {
       }
       djMode = item.djMode;
     }
-    const tts = validateTtsBlock(item.tts, `personas[${i}]`);
+    const tts = validateTtsBlock(item.tts, `personas[${i}].tts`);
     // skills — optional. Absent → null ("all skills", legacy/default). Present
     // → an explicit slug array (the UI always sends one once edited).
     let skills: string[] | null = null;
@@ -304,7 +311,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     // A stale id (a retired built-in like the old "sunset"/"neon" palettes,
     // renamed in 58c3782b, or a custom theme file deleted under our feet) is
     // DROPPED to "" rather than throwing — same tolerance as the lenient load
-    // path and the serve-time getTheme() fallback. Throwing here bricked EVERY
+    // path and the serve-time fallback in GET /themes. Throwing here bricked EVERY
     // shows/schedule save and full restore for any install still carrying one
     // retired id on one show, because update() re-validates the whole array
     // (issue #917 is the theme.active twin of this). Self-heals: the dead id
@@ -347,6 +354,15 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
       }
     }
     const energies = coerceShowEnergies({ energies: rawEnergies });
+    // One value, not a list — instrumental and vocal are mutually exclusive and
+    // wanting both is wanting neither. Absent/'' is no constraint, so an
+    // existing show round-trips unchanged.
+    if (item.vocals != null && item.vocals !== '') {
+      if (typeof item.vocals !== 'string' || !SHOW_VOCALS.includes(item.vocals)) {
+        throw new Error(`shows[${i}].vocals must be '' or one of: ${SHOW_VOCALS.join(', ')}`);
+      }
+    }
+    const vocals = coerceShowVocals(item);
     // Opt-in hard filter across every set music constraint — mood, genre, era,
     // energy (vs the default soft leans). Boolean, defaults OFF. The legacy
     // genre-only `genreStrict` is deliberately NOT carried over (see the load
@@ -469,7 +485,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('s_');
     if (seen.has(id)) id = mintId('s_');
     seen.add(id);
-    return { id, name, topic, personaId: item.personaId, guestPersonaIds, banter, programme, segmentSkill, moods, themeId, genres, eras, energies, filtersStrict, maxTrackSeconds, playlistIds, playlistStrict, excludedPlaylistIds };
+    return { id, name, topic, personaId: item.personaId, guestPersonaIds, banter, programme, segmentSkill, moods, themeId, genres, eras, energies, vocals, filtersStrict, maxTrackSeconds, playlistIds, playlistStrict, excludedPlaylistIds };
   });
 }
 

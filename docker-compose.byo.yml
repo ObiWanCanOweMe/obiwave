@@ -163,6 +163,10 @@ services:
       - NODE_ENV=production
       - SUBWAVE_HOMEPAGE=${SUBWAVE_HOMEPAGE:-player}
       - SITE_URL=${SITE_URL:-}
+      # Set to 1 to keep the shared product pages (landing, docs, news,
+      # catalogs) self-canonical + in this install's sitemap instead of
+      # crediting getsubwave.com (web/lib/site.ts IS_OFFICIAL_SITE).
+      - SUBWAVE_INDEX_ALL=${SUBWAVE_INDEX_ALL:-}
       # GA Measurement ID at RUNTIME (web/lib/ga.ts) — analytics turn on with a
       # `web` recreate, no rebuild.
       - GA_ID=${NEXT_PUBLIC_GA_ID:-}

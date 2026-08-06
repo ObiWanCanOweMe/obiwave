@@ -10,13 +10,10 @@ import {
   type ProviderDrafts,
 } from './providerState';
 
-// Shape of every wizard step in one place — easier to pass around than
-// individual setState callbacks. Each step component reads/writes via the
-// `set` updater rather than its own state, so the Review step can show the
-// whole picture without prop-drilling.
+// Every step reads and writes through the `set` updater rather than its own
+// state, so the Review step can show the whole picture without prop-drilling.
 export interface WizardData {
   navidrome: { url: string; user: string; pass: string };
-  // Connection-test result so the step can show a green check across renders.
   navidromeTest: { ok: boolean | null; msg?: string };
 
   llm: {
@@ -30,12 +27,9 @@ export interface WizardData {
 
   tts: {
     defaultEngine: 'piper' | 'kokoro' | 'cloud' | 'chatterbox' | 'pocket-tts' | 'remote';
-    // Advisory toggle — does the operator intend to run the optional
-    // tts-heavy sidecar (Chatterbox + PocketTTS)? Persisted via
-    // /onboarding/save into settings.tts.heavyEnabled. The web wizard can't
-    // start the sidecar itself; this just captures the intent and shows the
-    // copy-paste docker commands. The CLI setup writes COMPOSE_PROFILES into
-    // .env when its equivalent prompt is answered yes.
+    // Advisory only: the web wizard can't start the tts-heavy sidecar, so this
+    // captures intent (persisted to settings.tts.heavyEnabled) and shows the
+    // copy-paste docker commands. The CLI setup writes COMPOSE_PROFILES to .env.
     heavyEnabled: boolean;
     cloud: { enabled: boolean; provider: string; apiKey: string; model: string; voice: string };
   };
@@ -43,18 +37,17 @@ export interface WizardData {
   dj: {
     stationName: string;
     locationName: string;
-    // Weather coordinates — strings since they back text inputs; parsed +
-    // range-checked by the controller's settings.update() on save.
+    // Strings because they back text inputs; parsed and range-checked by the
+    // controller's settings.update() on save.
     lat: string;
     lng: string;
-    // IANA zone, auto-filled when a city is picked in the location step. '' =
-    // Auto (server zone), matching the admin sentinel.
+    // IANA zone. '' = Auto (server zone), matching the admin sentinel.
     timezone: string;
     frequency: 'silent' | 'quiet' | 'moderate' | 'chatty' | 'aggressive';
   };
 
-  // The wizard's "API keys" bucket — anything destined for state/secrets.env.
-  // Keyed by env-var name to match the controller's allow list.
+  // Destined for state/secrets.env, keyed by env-var name to match the
+  // controller's allow list.
   apiKeys: Record<string, string>;
 }
 
@@ -63,9 +56,8 @@ export const DEFAULT_DATA: WizardData = {
   navidromeTest: { ok: null },
   llm: {
     provider: 'ollama',
-    // Default to Ollama's hosted "cloud" model — works out of the box with
-    // a stock Ollama install (no local pull needed) and matches the model
-    // shipped in the terminal wizard's defaults.
+    // Ollama's hosted "cloud" model works with a stock install (no local pull)
+    // and matches the terminal wizard's default.
     model: 'glm-5.1:cloud',
     apiKey: '',
     baseUrl: '',
@@ -101,10 +93,9 @@ export const STEP_LABELS: Record<StepId, string> = {
   review: 'Review',
 };
 
-// Turn a thrown fetch failure into a human-readable pill message. AbortSignal
-// timeouts reject with a TimeoutError; everything else (connection refused,
-// DNS, CORS/TLS) is a bare "Failed to fetch" that means nothing to an operator
-// — so we point them at the real culprit: reaching the controller.
+// AbortSignal timeouts reject with a TimeoutError; everything else (connection
+// refused, DNS, CORS/TLS) is a bare "Failed to fetch" that means nothing to an
+// operator, so point them at the real culprit: reaching the controller.
 function fetchErrorMsg(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return 'timed out — the controller did not respond';
@@ -163,15 +154,14 @@ export function useWizard() {
     });
   }, []);
 
-  // POST helpers — every wizard write goes through adminFetch so the same
-  // 401-handling that the admin shell uses applies here. Both test helpers
-  // catch their own failures into the result pill: a rejected/timed-out
-  // browser→controller fetch must surface as a red pill, never as an
+  // Every wizard write goes through adminFetch for the admin shell's
+  // 401-handling. Both test helpers catch their own failures into the result
+  // pill: a rejected or timed-out fetch must surface as a red pill, never as an
   // unhandled throw that wedges the button on "Testing…" (issue #682).
   const testNavidrome = useCallback(async () => {
-    // The browser→controller hop has no default timeout; without one a request
-    // that never gets a response leaves the button stuck forever. 15s clears
-    // the 5s server-side Subsonic probe with margin.
+    // The browser→controller hop has no default timeout, so a request that
+    // never answers wedges the button. 15s clears the 5s server-side Subsonic
+    // probe with margin.
     try {
       const r = await auth.adminFetch('/onboarding/test-navidrome', {
         method: 'POST',
@@ -241,7 +231,6 @@ export function useWizard() {
   }, [auth, data.llm.provider, data.llm.baseUrl, data.llm.apiKey]);
 
   const save = useCallback(async () => {
-    // Stitch the apiKeys into the right env-var keys before sending.
     const apiKeys: Record<string, string> = { ...data.apiKeys };
     if (data.llm.apiKey) {
       const k =
@@ -262,8 +251,8 @@ export function useWizard() {
       if (k) apiKeys[k] = data.tts.cloud.apiKey;
     }
     if (data.tts.cloud.enabled && data.tts.cloud.provider === 'fish-audio') {
-      // The key may already be supplied by the root environment; only validate
-      // fields that the wizard itself must persist for a usable Fish request.
+      // The key may already come from the root environment, so only validate
+      // fields the wizard itself must persist for a usable Fish request.
       const model = data.tts.cloud.model.trim();
       const voice = data.tts.cloud.voice.trim();
       if (!model || model.length > 100 || /[\r\n]/.test(model)) {
@@ -292,7 +281,7 @@ export function useWizard() {
       },
       weather: { locationName: data.dj.locationName, lat: data.dj.lat, lng: data.dj.lng },
       station: data.dj.stationName,
-      // '' = Auto; only sent so a picked city's zone reaches settings.update().
+      // '' = Auto; sent so a picked city's zone reaches settings.update().
       timezone: data.dj.timezone,
       apiKeys,
     };

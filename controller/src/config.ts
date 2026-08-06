@@ -213,6 +213,11 @@ export const config = {
     // controller learns to air the link OVER the bed rather than over the next
     // song. Mirrors jinglePlayingFile; same {filename, startedAt} shape.
     bedPlayingFile: `${STATE_DIR}/bed-playing.json`,
+    // Written by radio.liq's starve guard (#1300 bug 7): {starved, since, at},
+    // unix SECONDS. `at` is a heartbeat refreshed every tick WHILE starved, so
+    // the controller can tell a live outage from a marker left behind by a
+    // mixer that died mid-outage. Read via broadcast/music-starve.ts.
+    musicStarvedFile: `${STATE_DIR}/music-starved.json`,
   },
   session: {
     // The live DJ session — a chat-history JSON the controller rewrites as

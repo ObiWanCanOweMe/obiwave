@@ -8,10 +8,9 @@ import { Button } from '@/components/ui/button';
 import { useWizard, STEP_ORDER, STEP_LABELS } from './useWizard';
 import { DjStep, LlmStep, NavidromeStep, ReviewStep, TtsStep } from './steps';
 
-// Outer chrome for the first-run wizard. Sign-in gate (admin creds from .env),
-// step indicator, body, and back/next buttons. The Review step calls `onDone`
-// which redirects to /admin so the operator lands in the place they'll spend
-// their actual time.
+// Outer chrome for the first-run wizard: sign-in gate (admin creds from .env),
+// step indicator, body, back/next. The Review step calls `onDone`, which
+// redirects to /admin.
 export default function WizardShell() {
   const router = useRouter();
   const w = useWizard();
@@ -95,9 +94,7 @@ export default function WizardShell() {
           <Button variant="outline" onClick={w.back} disabled={w.stepIdx === 0}>
             ← Back
           </Button>
-          {/* Escape hatch lives next to Back so it can't be confused with the
-              primary CTA on the right. Only shown on the review step — earlier
-              steps have a Next button there. */}
+          {/* Next to Back so it can't be confused with the primary CTA. */}
           {w.step === 'review' && (
             <Link href="/setup" className="bs-link text-xs text-muted">
               read the docs instead

@@ -8,6 +8,102 @@
 
 set -eu
 
+# ---- Shared state bootstrap -------------------------------------------------
+# Creates the dirs the controller, analyzer and liquidsoap share and opens them
+# to mode 777: those containers write here as OTHER uids, so an operator would
+# otherwise have to chown every bind-mount source before first boot.
+#
+# NOTHING in here is fatal (#1300 bug 10). Under `set -eu` the old bulk
+# `mkdir -p a b c` / `chmod 777 a b c` made every state path load-bearing: one
+# on a mount that refuses the change — a read-only bind, an NFS export without
+# the right perms, the exFAT/NTFS disk people move the stem cache to — aborted
+# this script BEFORE icecast started, and compose surfaced that as
+# `dependency failed to start: container sub-wave-broadcast is unhealthy`,
+# naming neither the path nor the chmod. A station that refuses to boot over a
+# permission convenience is strictly worse than one running on a degraded
+# mount: icecast still serves and the dead-air guard still airs the emergency
+# loop, but an exited container airs nothing.
+#
+# Kept byte-for-byte in step with docker/aio/supervisor.sh's copy (same
+# function, same list, same messages) — scripts/state-bootstrap.test.ts drives
+# both through one table.
+state_warn() { echo "broadcast: WARNING $*" >&2; }
+
+# GNU stat uses `-c %a`; macOS/BSD stat uses `-f %Lp`. Contributor tests run
+# these library-mode helpers on both families, while production containers use
+# GNU coreutils. Keep one probe so warning decisions and diagnostics agree.
+state_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || echo '?'
+}
+
+# True when `other` can write the dir. This — not chmod's exit status — is
+# what the warning keys on: a mount that is already world-writable and simply
+# refuses chmod is a WORKING configuration, and a line printed on every boot of
+# a healthy station is a line operators learn to skip past.
+state_writable_by_others() {
+    case "$(state_mode "$1")" in
+        *[2367]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+state_prepare_dir() {
+    local p=$1
+    mkdir -p "$p" 2>/dev/null || true
+    if [ ! -d "$p" ]; then
+        state_warn "state dir $p could not be created — a read-only or unwritable mount; the station boots, but anything writing there will fail"
+        return 0
+    fi
+    chmod 777 "$p" 2>/dev/null || true
+    if [ ! -w "$p" ] || ! state_writable_by_others "$p"; then
+        state_warn "state dir $p is mode $(state_mode "$p") and chmod could not change it — the controller and analyzer containers write there as other uids; chown/chmod it on the host"
+    fi
+    return 0
+}
+
+state_prepare_file() {
+    local p=$1
+    local mode=${2:-}
+    touch "$p" 2>/dev/null || true
+    if [ ! -f "$p" ]; then
+        state_warn "state file $p could not be created — a read-only or unwritable mount"
+        return 0
+    fi
+    [ -n "$mode" ] && chmod "$mode" "$p" 2>/dev/null || true
+    return 0
+}
+
+bootstrap_state_dirs() {
+    local root=$1
+    local dir=$2
+    local sub
+    state_prepare_dir "$root"
+    state_prepare_dir "$dir"
+    # stems + transitions belong to the analyzer (uid 10001) — the stem cache
+    # and the rendered transition clips. They are also the only two dirs worth
+    # relocating to a bigger disk, and the ONLY way to do that is a bind mount
+    # at <state>/stems (music/stem-cache.ts stemsRoot() is <stateDir>/stems,
+    # with no setting behind it). A fresh bind mount lands root-owned 755, so
+    # without the same 777 treatment the rest of the state dir gets, the
+    # analyzer cannot write the cache it was just pointed at.
+    for sub in voice voices archive jingles logs sessions sfx stems transitions; do
+        state_prepare_dir "$dir/$sub"
+    done
+    # Liquidsoap's reload_mode="watch" playlists need the files to exist.
+    state_prepare_file "$dir/auto.m3u" 666
+    state_prepare_file "$dir/jingles.m3u" 666
+    # Keep a co-located Navidrome from scanning the hourly archive mixdowns in
+    # as junk "HH-00" tracks (issue #273). Harmless when paths don't overlap.
+    state_prepare_file "$dir/archive/.ndignore"
+    return 0
+}
+
+# Sourcing with SUBWAVE_BROADCAST_LIB=1 defines the helpers above WITHOUT
+# booting a station, so scripts/state-bootstrap.test.ts can drive them.
+if [ "${SUBWAVE_BROADCAST_LIB:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 # ---- Multi-station pointer resolution ---------------------------------------
 # state/stations/active.json ({"activeId":"<slug>"}) picks the station dir this
 # boot serves; install-level files (icecast secrets) stay at $STATE_ROOT. No jq
@@ -32,33 +128,7 @@ TEMPLATE=/etc/icecast2/icecast.xml.template
 RENDERED=/etc/icecast2/icecast.xml
 
 # ---- Bootstrap shared state dirs --------------------------------------------
-# Mode 777 because the controller container writes here as a different uid —
-# operators shouldn't have to chown bind-mount sources before first boot.
-
-mkdir -p "$STATE_ROOT" \
-         "$STATE_DIR" \
-         "$STATE_DIR/voice" \
-         "$STATE_DIR/voices" \
-         "$STATE_DIR/archive" \
-         "$STATE_DIR/jingles" \
-         "$STATE_DIR/logs" \
-         "$STATE_DIR/sessions" \
-         "$STATE_DIR/sfx"
-chmod 777 "$STATE_ROOT" \
-          "$STATE_DIR" \
-          "$STATE_DIR/voice" \
-          "$STATE_DIR/voices" \
-          "$STATE_DIR/archive" \
-          "$STATE_DIR/jingles" \
-          "$STATE_DIR/logs" \
-          "$STATE_DIR/sessions" \
-          "$STATE_DIR/sfx"
-# Liquidsoap's reload_mode="watch" playlists need the files to exist.
-touch "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-chmod 666 "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-# Keep a co-located Navidrome from scanning the hourly archive mixdowns in as
-# junk "HH-00" tracks (issue #273). Harmless when paths don't overlap.
-touch "$STATE_DIR/archive/.ndignore"
+bootstrap_state_dirs "$STATE_ROOT" "$STATE_DIR"
 
 # The compose logs bind mount lands owned by root on first boot; liquidsoap
 # (uid 10000) writes radio.log there.

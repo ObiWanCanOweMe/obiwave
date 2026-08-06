@@ -6,6 +6,7 @@
 // this only covers cloud voices — tts.js still owns the dispatch + fallback.
 
 import { generateSpeech } from 'ai';
+import type { FetchFunction } from '@ai-sdk/provider-utils';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createElevenLabs } from '@ai-sdk/elevenlabs';
 import { writeFile, mkdir } from 'node:fs/promises';
@@ -14,6 +15,7 @@ import crypto from 'node:crypto';
 import { config } from '../../../config.js';
 import * as settings from '../../../settings.js';
 import { transcodeAudio, hasFfmpeg } from '../../../audio/audio-import.js';
+import { compatParamsBody } from '../../../settings/compat-params.js';
 import { cloudExpressionCueFamily, isElevenLabsV3, snapV3Stability, soulBrief } from '../core/pure.js';
 import { FISH_DEFAULT_MODEL, synthesizeFish } from './fish-audio.js';
 
@@ -250,6 +252,39 @@ export function resolveCloudApiKey(
   return '';
 }
 
+// Merge the operator's extra body fields into the outgoing /audio/speech POST
+// (issue #1317). This has to happen at the fetch layer because the AI SDK's
+// OpenAI speech model builds a CLOSED body — `{model, input, voice,
+// response_format, speed, instructions}` and nothing else. Its
+// `providerOptions.openai` escape hatch is no use either: the schema accepts
+// only `instructions` + `speed`, and in @ai-sdk/openai 4.0.11 the merge loop
+// that would copy them into the body iterates an empty object, so nothing gets
+// through at all. Rewriting the serialized body is the one hook that works
+// without forking the provider.
+//
+// Everything here degrades to a pass-through rather than throwing: a param that
+// doesn't make it costs an un-tuned render, while an exception costs the whole
+// segment and drops the show to a local fallback voice. Extras are merged LAST
+// so the operator can also correct an SDK default (e.g. `response_format`);
+// the fields SUB/WAVE owns are reserved in settings/compat-params.ts.
+function compatBodyFetch(extras: Record<string, unknown>): FetchFunction | undefined {
+  if (!Object.keys(extras).length) return undefined;
+  return async (input, init) => {
+    const body = init?.body;
+    if (typeof body !== 'string') return fetch(input, init);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return fetch(input, init);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fetch(input, init);
+    // Re-stringify rather than patching the text: the body is small, and
+    // undici recomputes Content-Length for a string body on its own.
+    return fetch(input, { ...init, body: JSON.stringify({ ...parsed, ...extras }) });
+  };
+}
+
 function speechModel(c: any) {
   const apiKey = resolveCloudApiKey(c);
   if (c.provider === 'elevenlabs') {
@@ -264,6 +299,9 @@ function speechModel(c: any) {
       baseURL: c.baseUrl,
       apiKey: apiKey || 'unused',
       name: 'openai-compatible',
+      // Undefined when the operator configured no extras, which keeps the
+      // request shape byte-identical to the pre-#1317 default station.
+      fetch: compatBodyFetch(compatParamsBody(c.compatParams)),
     });
     return provider.speech(c.model);
   }

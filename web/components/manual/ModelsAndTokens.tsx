@@ -49,11 +49,11 @@ export default function ModelsAndTokens() {
           </li>
         </ul>
         <p>
-          One thing to internalise before choosing: <strong>the provider is part of the
-          choice</strong>. The same model can behave differently through different routes,
-          because each provider translates tools and structured output its own way — a model
-          that fails through one route can be flawless through another. When you evaluate a
-          model, evaluate it through the provider you&rsquo;ll actually run.
+          <strong>The provider is part of the choice.</strong> The same model can behave
+          differently through different routes, because each provider translates tools and
+          structured output its own way: a model that fails through one route can be
+          flawless through another. When you evaluate a model, evaluate it through the
+          provider you&rsquo;ll actually run.
         </p>
       </section>
 
@@ -61,10 +61,10 @@ export default function ModelsAndTokens() {
         <p className="bs-eyebrow">MEASURED, NOT GUESSED</p>
         <h2>Which models hold up.</h2>
         <p>
-          SUB/WAVE ships a benchmark that drives every kind of call the DJ makes — track
-          picks, talk segments, listener requests, scripts, banter, programme plans — against
+          SUB/WAVE ships a benchmark that drives every kind of call the DJ makes (track
+          picks, talk segments, listener requests, scripts, banter, programme plans) against
           any model, in both picker modes, and scores the output against the station&rsquo;s own
-          rules. The table below is the running record — it grows as more models and
+          rules. The table below is the running record, and it grows as more models and
           providers get benched (station configured lean unless noted):
         </p>
         <LlmBenchTable />
@@ -83,7 +83,7 @@ export default function ModelsAndTokens() {
           checks that too, now.
         </p>
         <p>
-          Two patterns worth knowing whatever you run: the Gemma family at every size shares
+          Two habits show up whatever you run: the Gemma family at every size shares
           the same habits (it can repeat an artist when the shortlist pressures it to, and it
           fumbles feature choices on three-hour programme plans), and the multi-hour programme
           plan is the hardest single call in the system — the only one that dented every model
@@ -219,8 +219,8 @@ export default function ModelsAndTokens() {
         <p>
           By default the embedding model <strong>follows your LLM provider</strong>, so
           there&rsquo;s usually nothing extra to set up — an Ollama-local station gets{' '}
-          <code>nomic-embed-text</code> for free. Two things are worth knowing if you
-          stray from that:
+          <code>nomic-embed-text</code> for free. Two things matter if you stray from
+          that:
         </p>
         <ul className="bs-list">
           <li>
@@ -263,7 +263,7 @@ export default function ModelsAndTokens() {
           </li>
         </ul>
         <p>
-          <strong>One catch worth internalising:</strong> the vector index is built at your
+          <strong>One catch:</strong> the vector index is built at your
           embedding model&rsquo;s dimension, so <em>changing the embedding model means re-embedding
           the whole library</em> (Admin &rarr; Library tagger &rarr; Re-scan &rarr; &ldquo;Re-embed
           all tracks&rdquo;). Changing the <em>chat</em> model never needs this — but if embeddings

@@ -3,6 +3,7 @@
 import type { ChangeEvent, ReactNode } from 'react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { AsyncResultGeneration, runManagedKeyProbe } from '../../../lib/managedKeyProbe';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
@@ -18,6 +19,9 @@ import {
 } from '../../ui/select';
 import { Card, Btn, Pill, Seg } from '../ui';
 import { EngineSelector } from '../tts/EngineSelector';
+import { CloudProviderSelector } from '../tts/CloudProviderSelector';
+import { cloudProviderLabel, resolveKeyPresence } from '../tts/cloudProviderMeta';
+import { EngineVoiceFields, ENGINE_UNAVAILABLE } from '../tts/EngineVoiceFields';
 import { VoicePreviewButton } from '../tts/VoicePreviewButton';
 import { VoicePicker } from '../tts/VoicePicker';
 import { ModelCombobox } from '../llm/ModelCombobox';
@@ -26,10 +30,11 @@ import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult, KEY_HINTS, ELEVENLABS_VS_DEFAULTS,
   FISH_TTS_DEFAULTS,
   type SectionProps, type FormState, type FormUpdater, type CloudTtsCfg,
+  type TtsFallbackForm,
 } from './shared';
 
-// Labels for Kokoro phonemizer language override options. Keyed by the lang
-// codes exposed by the controller (synced with KOKORO_LANGS in settings.ts).
+// Kokoro phonemizer language labels, keyed by the controller's lang codes —
+// keep in sync with KOKORO_LANGS in settings.ts.
 const KOKORO_LANG_LABELS: Record<string, string> = {
   'en-gb': 'English (UK)',
   'en-us': 'English (US)',
@@ -56,22 +61,27 @@ function envKeyForCloudProvider(provider: string): 'OPENAI_API_KEY' | 'ELEVENLAB
   return 'OPENAI_API_KEY';
 }
 
-function cloudProviderLabel(provider: string): string {
-  if (provider === 'openai') return 'OpenAI';
-  if (provider === 'elevenlabs') return 'ElevenLabs';
-  if (provider === 'fish-audio') return 'Fish Audio';
-  return 'OpenAI-compatible';
+// Small labelled rule that splits the Cloud panel into its three steps. Same
+// type treatment as the other in-card headings (HeavyEngineSetupGuide's).
+function GroupHead({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="flex-none text-[10px] font-bold tracking-[0.16em] text-ink uppercase">
+        {children}
+      </span>
+      <span className="h-px min-w-0 flex-1 bg-[var(--separator-strong)]" />
+    </div>
+  );
 }
 
-// Voice-level (dB) trim. Engine ids match the server contract exactly — note the
-// hyphen in `pocket-tts`. Range mirrors the server clamp (TTS_GAIN_CLAMP_DB=12).
+// Engine ids match the server contract exactly — note the hyphen in `pocket-tts`.
+// Range mirrors the server clamp (TTS_GAIN_CLAMP_DB=12).
 const TTS_GAIN_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'] as const;
 const TTS_GAIN_MIN = -12;
 const TTS_GAIN_MAX = 12;
 const TTS_GAIN_STEP = 0.5;
 
-// Pretty-print a gain: "0 dB" clean-neutral, otherwise a signed one-decimal value
-// with a real minus sign (e.g. "+3.0 dB", "−2.5 dB").
+// Signed one-decimal dB with a real minus sign; unity prints as a bare "0 dB".
 function formatGainDb(v: number): string {
   if (!v) return '0 dB';
   const sign = v > 0 ? '+' : '−';
@@ -79,8 +89,6 @@ function formatGainDb(v: number): string {
 }
 
 
-// Compact per-engine voice-level control: a labelled range slider + live readout,
-// writing into form.tts.gainDb[engineId]. Dropped into each engine's config panel.
 function TtsGainField({
   engineId,
   form,
@@ -120,8 +128,8 @@ function TtsGainField({
   );
 }
 
-// Speech-rate trim. Range mirrors the server clamp (clampTtsSpeed: 0.5–2.0×).
-// Only Piper/Kokoro/cloud honour speed — chatterbox/pocket-tts/remote ignore it.
+// Range mirrors the server clamp (clampTtsSpeed: 0.5–2.0×). Only Piper/Kokoro/
+// cloud honour speed — chatterbox/pocket-tts/remote ignore it.
 const TTS_SPEED_MIN = 0.5;
 const TTS_SPEED_MAX = 2;
 const TTS_SPEED_STEP = 0.05;
@@ -131,9 +139,6 @@ function formatSpeed(v: number): string {
   return `${v.toFixed(2)}×`;
 }
 
-// Compact per-engine speech-speed control: a labelled range slider + live readout,
-// writing into form.tts.speed[engineId]. Disabled (with a hint) for the engines
-// whose workers ignore speed, so operators see why it has no effect there.
 function TtsSpeedField({
   engineId,
   form,
@@ -177,13 +182,9 @@ function TtsSpeedField({
   );
 }
 
-// ElevenLabs voice_settings — the four expressive knobs their API takes on
-// every request. Ranges match ElevenLabs' native 0..1 (stability, style,
-// similarity_boost) plus the boolean use_speaker_boost. Rendered only when the
-// cloud provider is `elevenlabs` — other providers ignore the fields, so
-// showing them there would be misleading. Design matches TtsGainField /
-// TtsSpeedField exactly (same field class, same 360px cap, same label +
-// tabular readout row) so the block blends into the surrounding form.
+// ElevenLabs voice_settings. Ranges match their native 0..1 (stability, style,
+// similarity_boost) plus the boolean use_speaker_boost. Rendered only for the
+// `elevenlabs` provider — every other provider ignores these fields.
 const ELEVENLABS_SLIDER_STEP = 0.01;
 
 function formatPct(v: number): string {
@@ -258,10 +259,6 @@ function ElevenLabsVoiceSettingsField({
   );
 }
 
-// Prominent, self-contained "engine not installed" callout with a step-by-step
-// setup guide. Chatterbox and PocketTTS both live in the optional `tts-heavy`
-// sidecar, so the recommended path is identical; only the engine label and the
-// legacy build-arg differ.
 function FishAudioSettingsField({
   form,
   setForm,
@@ -325,6 +322,97 @@ function FishAudioSettingsField({
   );
 }
 
+// Quick-add names for the servers operators actually run. These are hints, not
+// a schema — a compatibility server accepts whatever its own implementation
+// defines, which is exactly why the field is free-form (issue #1317).
+const COMPAT_PARAM_SUGGESTIONS: { key: string; value: string; note: string }[] = [
+  { key: 'temperature', value: '0.8', note: 'Chatterbox · variation' },
+  { key: 'seed', value: '0', note: 'Chatterbox · repeatability' },
+  { key: 'exaggeration', value: '0.5', note: 'Chatterbox · intensity' },
+  { key: 'cfg_weight', value: '0.5', note: 'Chatterbox · pacing' },
+];
+
+const COMPAT_PARAM_MAX = 20;
+
+function CompatParamsField({ form, setForm }: { form: FormState; setForm: FormUpdater }) {
+  const rows = form.tts.cloud.compatParams;
+  const setRows = (next: CloudTtsCfg['compatParams']) =>
+    setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, compatParams: next } } }));
+  const used = new Set(rows.map(r => r.key.trim()));
+  return (
+    <div className="field mt-4">
+      <Label>Extra generation parameters</Label>
+      <div className="field-hint mb-2 max-w-[620px]">
+        Sent as extra fields in every <code>/audio/speech</code> request, for
+        knobs your server supports but the OpenAI API doesn’t define —
+        Chatterbox’s <code>temperature</code> and <code>seed</code>, for
+        instance. Values are read as JSON when they look like it
+        (<code>0.8</code>, <code>42</code>, <code>true</code>) and sent as text
+        otherwise. <code>model</code>, <code>voice</code>, <code>input</code>{' '}
+        and <code>speed</code> are set by SUB/WAVE and can’t be overridden here.
+      </div>
+      <div className="flex flex-col gap-2">
+        {rows.map((row, idx) => (
+          <div
+            key={idx}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[220px_220px_auto] sm:justify-start"
+          >
+            <Input
+              aria-label="Parameter name"
+              value={row.key}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setRows(rows.map((r, i) => i === idx ? { ...r, key: e.target.value } : r))}
+              placeholder="name (e.g. temperature)"
+              maxLength={60}
+              className="min-w-0"
+            />
+            <Input
+              aria-label="Parameter value"
+              value={row.value}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setRows(rows.map((r, i) => i === idx ? { ...r, value: e.target.value } : r))}
+              placeholder="value (e.g. 0.8)"
+              maxLength={400}
+              className="col-start-1 row-start-2 min-w-0 sm:col-start-2 sm:row-start-1"
+            />
+            <Btn
+              sm
+              title="Remove parameter"
+              className="col-start-2 row-start-1 size-9 shrink-0 sm:col-start-3 sm:size-auto"
+              onClick={() => setRows(rows.filter((_, i) => i !== idx))}
+            >
+              <Trash2 size={12} />
+            </Btn>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Btn
+          className="min-h-9 sm:min-h-0"
+          disabled={rows.length >= COMPAT_PARAM_MAX}
+          onClick={() => setRows([...rows, { key: '', value: '' }])}
+        >
+          Add parameter
+        </Btn>
+        {COMPAT_PARAM_SUGGESTIONS.filter(s => !used.has(s.key)).map(s => (
+          <Btn
+            key={s.key}
+            sm
+            title={s.note}
+            className="min-h-9 sm:min-h-0"
+            disabled={rows.length >= COMPAT_PARAM_MAX}
+            onClick={() => setRows([...rows, { key: s.key, value: s.value }])}
+          >
+            + {s.key}
+          </Btn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Chatterbox and PocketTTS both live in the optional `tts-heavy` sidecar, so the
+// setup path is identical; only the engine label and the legacy build-arg differ.
 function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'PocketTTS'; buildArg: string }) {
   return (
     <div
@@ -399,6 +487,13 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     setCloudKeyTesting(false);
   }, [form.tts.cloud.provider]);
 
+  // The fallback's provider can differ from the default engine's, so key presence
+  // is checked per-provider, never off the global `available.cloud` flag.
+  // `openai-compatible` has no key-based entry and is trusted, as in engineUsable().
+  const fallbackCloudUnconfigured = form.tts.fallback.engine === 'cloud'
+    && form.tts.fallback.cloudProvider !== 'openai-compatible'
+    && data.tts?.available?.cloudByProvider?.[form.tts.fallback.cloudProvider] === false;
+
   const isCloudEngine = form.tts.defaultEngine === 'cloud';
   const isCompat = form.tts.cloud.provider === 'openai-compatible';
   const isFish = form.tts.cloud.provider === 'fish-audio';
@@ -409,8 +504,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     (isCompat && !!form.tts.cloud.baseUrl.trim())
     || (!isCompat && (ttsKeySet || !!cloudKeyInput.trim()))
   );
-  // Fish publishes model ids rather than an account model-list endpoint. Its
-  // two S2.1 suggestions are local UI data; the field still accepts custom ids.
+  // Fish has no account model-list endpoint; its two S2.1 suggestions are local
+  // UI data and the field still accepts custom ids.
   const ttsDiscoveryEnabled = cloudDiscoveryReady && !isFish;
 
   const ttsDiscovery = useModelDiscovery({
@@ -422,9 +517,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     adminFetch,
   });
 
-  // Voice list from the provider itself — the compat server's /audio/voices, or
-  // the operator's ElevenLabs account (where their cloned voices live). Same
-  // readiness gate as model discovery: a URL for compat, a saved key otherwise.
+  // Voice list from the provider itself (compat /audio/voices, or the operator's
+  // ElevenLabs account). Same readiness gate as model discovery: a URL for
+  // compat, a saved key otherwise.
   const voiceDiscovery = useVoiceDiscovery({
     provider: form.tts.cloud.provider,
     baseUrl: form.tts.cloud.baseUrl,
@@ -490,10 +585,18 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     : { ...available, cloud: providerCloudReady };
   const ENGINE_LABELS: Record<string, string> = { piper: 'Piper', kokoro: 'Kokoro', chatterbox: 'Chatterbox', 'pocket-tts': 'PocketTTS', cloud: 'Cloud', remote: 'Remote' };
 
+  // Send (and dirty-check) what the controller will actually store: trimmed,
+  // with untouched blank rows dropped. Otherwise an operator who presses "Add
+  // parameter" and saves leaves the form permanently dirty against a saved list
+  // that never contained the empty row.
+  const effectiveCompatParams = form.tts.cloud.compatParams
+    .map(p => ({ key: p.key.trim(), value: p.value.trim() }))
+    .filter(p => p.key || p.value);
+
   const save = async () => {
-    // Managed-provider keys must land first. Fish voice discovery reads the
-    // saved process secret, and submitting an empty undiscovered Fish voice to
-    // settings would otherwise fail before the key became usable.
+    // Managed-provider keys must land first: Fish voice discovery reads the saved
+    // process secret, so an empty undiscovered Fish voice would fail the settings
+    // write before the key became usable.
     let managedKeySaved = false;
     if (!isCompat && cloudKeyInput.trim()) {
       const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
@@ -517,6 +620,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       tts: {
         enabled: form.tts.enabled,
         defaultEngine: form.tts.defaultEngine,
+        fallback: form.tts.fallback,
         kokoro: { voice: form.tts.kokoro?.voice, lang: form.kokoroLang },
         chatterbox: { referenceVoice: form.tts.chatterbox?.referenceVoice ?? '' },
         pocketTts: { voice: form.tts.pocketTts?.voice ?? 'alba' },
@@ -533,6 +637,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           temperature: form.tts.cloud.temperature,
           topP: form.tts.cloud.topP,
           latency: form.tts.cloud.latency,
+          compatParams: effectiveCompatParams,
           // Authenticated compatibility servers use their own scoped slot.
           // Keep writing the compatibility-owned legacy slot for older
           // controllers while also populating the dedicated upstream slot.
@@ -546,11 +651,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               : {}),
         },
         remote: { url: form.tts.remote.url },
-        // Per-engine voice-level trim. Always sent (server clamps + drops unknown
-        // keys); keyed by engine id, `pocket-tts` with the hyphen.
+        // Always sent — the server clamps and drops unknown keys. Keyed by engine
+        // id, `pocket-tts` with the hyphen.
         gainDb: form.tts.gainDb,
-        // Per-engine speech speed (×). Same contract as gainDb; inert for the
-        // engines whose workers ignore speed (chatterbox/pocket-tts).
+        // Same contract as gainDb; inert for the engines that ignore speed.
         speed: form.tts.speed,
       },
     });
@@ -568,8 +672,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const selectCloudProvider = (f: FormState, provider: string): FormState => {
     const provVoices = CLOUD_VOICES[provider as keyof typeof CLOUD_VOICES] || [];
-    // Switching provider invalidates the old provider-specific ids. Re-entering
-    // the already-selected cloud engine preserves manual/custom values.
+    // Switching provider invalidates the old provider-specific ids; re-entering
+    // the already-selected engine preserves manual/custom values.
     const sameProvider = provider === f.tts.cloud.provider;
     const voice = sameProvider
       ? f.tts.cloud.voice
@@ -602,6 +706,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     temperature?: number;
     topP?: number;
     latency?: 'low' | 'normal' | 'balanced';
+    compatParams?: { key?: string; value?: string }[];
   };
   const savedTts: {
     enabled?: boolean;
@@ -609,6 +714,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     kokoro?: { voice?: string; lang?: string };
     chatterbox?: { referenceVoice?: string };
     pocketTts?: { voice?: string };
+    fallback?: { enabled?: boolean; engine?: string; voice?: string; cloudProvider?: string };
     cloud?: SavedCloud;
     remote?: { url?: string };
     gainDb?: Record<string, number>;
@@ -619,19 +725,23 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const savedKokoroLang: string = savedTts.kokoro?.lang || '';
   const savedChatterboxVoice: string = savedTts.chatterbox?.referenceVoice || '';
   const savedPocketTtsVoice: string = savedTts.pocketTts?.voice || '';
+  const savedFallback = savedTts.fallback || {};
   const savedCloud: SavedCloud = savedTts.cloud || {};
   const savedRemoteUrl: string = savedTts.remote?.url || '';
   const savedEngineLabel = ENGINE_LABELS[savedEngine] || savedEngine;
   const formEngineLabel = ENGINE_LABELS[form.tts.defaultEngine] || form.tts.defaultEngine;
 
+  const compatParamsDirty = JSON.stringify(effectiveCompatParams)
+    !== JSON.stringify((savedCloud.compatParams || []).map(p => ({ key: String(p?.key ?? ''), value: String(p?.value ?? '') })));
+
   const savedGainDb: Record<string, number> = savedTts.gainDb || {};
-  // Any engine whose form gain differs from its saved value (absent → 0 unity).
+  // Absent reads as 0 unity.
   const gainDirty = TTS_GAIN_ENGINES.some(
     e => (form.tts.gainDb?.[e] ?? 0) !== (savedGainDb[e] ?? 0),
   );
 
   const savedSpeed: Record<string, number> = savedTts.speed || {};
-  // Any engine whose form speed differs from its saved value (absent → 1.0 unity).
+  // Absent reads as 1.0 unity.
   const speedDirty = TTS_GAIN_ENGINES.some(
     e => (form.tts.speed?.[e] ?? 1) !== (savedSpeed[e] ?? 1),
   );
@@ -645,6 +755,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || (form.kokoroLang || '') !== savedKokoroLang
     || (form.tts.chatterbox?.referenceVoice || '') !== savedChatterboxVoice
     || (form.tts.pocketTts?.voice || '') !== savedPocketTtsVoice
+    || form.tts.fallback.enabled !== (savedFallback.enabled === true)
+    || form.tts.fallback.engine !== (savedFallback.engine ?? 'piper')
+    || form.tts.fallback.voice !== (savedFallback.voice ?? '')
+    || form.tts.fallback.cloudProvider !== (savedFallback.cloudProvider ?? 'openai')
     || form.tts.cloud.provider !== (savedCloud.provider || '')
     || (form.tts.cloud.model || '').trim() !== (savedCloud.model || '').trim()
     || (form.tts.cloud.voice || '').trim() !== (savedCloud.voice || '').trim()
@@ -653,6 +767,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || form.tts.cloud.voiceStyle !== (savedCloud.voiceStyle ?? ELEVENLABS_VS_DEFAULTS.voiceStyle)
     || form.tts.cloud.voiceSimilarityBoost !== (savedCloud.voiceSimilarityBoost ?? ELEVENLABS_VS_DEFAULTS.voiceSimilarityBoost)
     || form.tts.cloud.voiceUseSpeakerBoost !== (savedCloud.voiceUseSpeakerBoost ?? ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost)
+    || compatParamsDirty
     || form.tts.cloud.temperature !== (savedCloud.temperature ?? FISH_TTS_DEFAULTS.temperature)
     || form.tts.cloud.topP !== (savedCloud.topP ?? FISH_TTS_DEFAULTS.topP)
     || form.tts.cloud.latency !== (savedCloud.latency ?? FISH_TTS_DEFAULTS.latency)
@@ -765,6 +880,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               value={form.tts.defaultEngine}
               engineIds={engines}
               available={selectorAvailable}
+              // This IS Settings → Voice, so the default "go to Settings →
+              // Voice" wording would send the operator in a circle.
+              statusOpts={{ cloudKeyAction: 'pick a provider below and add its key' }}
               onChange={selectEngine}
             />
             <div className="field-hint">
@@ -978,254 +1096,282 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         )}
 
         {form.tts.defaultEngine === 'cloud' && (() => {
+          const providerIds = data.tts?.cloudProviders
+            || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
           return (
-          <div className="mt-4">
+          // Three ordered steps — provider, then credentials, then what to
+          // render with. Model and voice discovery both depend on the
+          // credentials, so those have to come first; they used to sit below,
+          // under hints telling the operator to look "above" for them.
+          <div className="mt-4 grid gap-[26px]">
             <div className="field">
               <Label>Provider</Label>
-              <Seg
-                accent
+              <CloudProviderSelector
                 value={form.tts.cloud.provider}
-                options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible']).map(p => ({ id: p, label: cloudProviderLabel(p) }))}
+                providerIds={providerIds}
+                availability={{
+                  cloudByProvider: resolveKeyPresence(providerIds, available.cloudByProvider, data.env),
+                  compatBaseUrlSet: !!form.tts.cloud.baseUrl.trim(),
+                }}
                 onChange={v => {
                   cloudKeyGeneration.current.invalidate();
                   setForm(f => selectCloudProvider(f, v));
                 }}
+                // Connection is the very next block, and it carries its own
+                // KeyStatus — a "next step" note here would just bounce the eye.
+                enableHint={false}
+                gridClassName="md:grid-cols-4"
+                hint={<>
+                  Which service renders Cloud speech. Each provider keeps its own
+                  key, model and voice, so switching here doesn’t carry the last
+                  one’s settings across.
+                </>}
               />
             </div>
-            {isCompat && (
-              <div className="field mt-3.5">
-                <Label>Server base URL</Label>
-                <Input
-                  value={form.tts.cloud.baseUrl}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, baseUrl: e.target.value } } }))
-                  }
-                  placeholder="http://192.168.1.101:5000/v1"
-                  className="max-w-[360px]"
-                />
-                <div className="field-hint">
-                  Any OpenAI-compatible TTS server (Chatterbox, Qwen3 TTS,
-                  VibeVoice, …) that exposes <code>/v1/audio/speech</code>,
-                  including the <code>/v1</code> suffix. Must be reachable from the
-                  controller container. Use the host’s LAN or Tailscale IP, not
-                  <code>127.0.0.1</code>.
+
+            <div className="grid gap-3.5">
+              <GroupHead>Connection</GroupHead>
+              {isCompat && (
+                <div className="field">
+                  <Label>Server base URL</Label>
+                  <Input
+                    value={form.tts.cloud.baseUrl}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, baseUrl: e.target.value } } }))
+                    }
+                    placeholder="http://192.168.1.101:5000/v1"
+                    className="max-w-[360px]"
+                  />
+                  <div className="field-hint">
+                    Any OpenAI-compatible TTS server (Chatterbox, Qwen3 TTS,
+                    VibeVoice, …) that exposes <code>/v1/audio/speech</code>,
+                    including the <code>/v1</code> suffix. Must be reachable from the
+                    controller container. Use the host’s LAN or Tailscale IP, not
+                    <code>127.0.0.1</code>.
+                  </div>
                 </div>
-              </div>
-            )}
-            <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-[18px]">
-              <div className="field">
-                <Label>Model</Label>
-                <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
-                  {isFish ? (
-                    <>
-                      <Input
-                        list="fish-audio-models"
+              )}
+              {!isCompat && (() => {
+                const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
+                return (
+                  <>
+                    <div className="field">
+                      <Label>{cloudProviderLabel(form.tts.cloud.provider)} API key</Label>
+                      <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
+                        <Input
+                          type="password"
+                          autoComplete="off"
+                          value={cloudKeyInput}
+                          placeholder={data.env?.[cloudKeyVar] ? '•••••• (on file)' : (KEY_HINTS[cloudKeyVar] ?? '')}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                            cloudKeyGeneration.current.invalidate();
+                            setCloudKeyInput(e.target.value);
+                            setCloudKeyTest(null);
+                            setCloudKeyTesting(false);
+                          }}
+                          className="max-w-[360px]"
+                        />
+                        <Btn
+                          onClick={testCloudKey}
+                          disabled={cloudKeyTesting || (!cloudKeyInput.trim() && !data.env?.[cloudKeyVar])}
+                        >
+                          {cloudKeyTesting ? 'Testing…' : 'Test key'}
+                        </Btn>
+                      </div>
+                      <div className="field-hint">
+                        Stored in <code>state/secrets.env</code>, takes effect immediately. Leave blank to keep the existing key.
+                      </div>
+                      {cloudKeyVar === 'OPENAI_API_KEY' && (
+                        <div className="field-hint">
+                          This key is shared across LLM and Cloud TTS.
+                        </div>
+                      )}
+                    </div>
+                    {cloudKeyTest && <KeyTestResult result={cloudKeyTest} />}
+                    <KeyStatus envVar={cloudKeyVar} present={!!data.env?.[cloudKeyVar]} />
+                  </>
+                );
+              })()}
+              {isCompat && (
+                <div className="field">
+                  <Label>API key</Label>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={compatKeyInput}
+                    placeholder={savedCloud.compatApiKey === 'set' ? '•••••• (on file)' : 'Optional'}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setCompatKeyInput(e.target.value)}
+                    className="max-w-[360px]"
+                  />
+                  <div className="field-hint">
+                    Optional, only if your server requires one (e.g. SUB/WAVE DJ
+                    Brain); most self-hosted servers accept any non-empty key.
+                    Blank keeps the existing key. Saved with these settings, takes
+                    effect immediately.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-3.5">
+              <GroupHead>Model &amp; voice</GroupHead>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[18px]">
+                <div className="field">
+                  <Label>Model</Label>
+                  <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
+                    {isFish ? (
+                      <>
+                        <Input
+                          list="fish-audio-models"
+                          value={form.tts.cloud.model}
+                          maxLength={100}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                            setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: e.target.value } } }))
+                          }
+                          placeholder="s2.1-pro"
+                          className="max-w-[360px]"
+                        />
+                        <datalist id="fish-audio-models">
+                          {CLOUD_MODELS['fish-audio'].map(model => <option key={model} value={model} />)}
+                        </datalist>
+                      </>
+                    ) : ttsDiscovery.models.length > 0 ? (
+                      <ModelCombobox
+                        models={ttsDiscovery.models}
                         value={form.tts.cloud.model}
-                        maxLength={100}
+                        onChange={v => setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: v } } }))}
+                        placeholder="Select a model"
+                      />
+                    ) : (
+                      <Input
+                        value={form.tts.cloud.model}
                         onChange={(e: ChangeEvent<HTMLInputElement>) =>
                           setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: e.target.value } } }))
                         }
-                        placeholder="s2.1-pro"
+                        placeholder={
+                          isCompat
+                            ? 'chatterbox'
+                            : (CLOUD_MODELS[form.tts.cloud.provider as keyof typeof CLOUD_MODELS]?.[0] || 'gpt-4o-mini-tts')
+                        }
                         className="max-w-[360px]"
                       />
-                      <datalist id="fish-audio-models">
-                        {CLOUD_MODELS['fish-audio'].map(model => <option key={model} value={model} />)}
-                      </datalist>
-                    </>
-                  ) : ttsDiscovery.models.length > 0 ? (
-                    <ModelCombobox
-                      models={ttsDiscovery.models}
-                      value={form.tts.cloud.model}
-                      onChange={v => setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: v } } }))}
-                      placeholder="Select a model"
-                    />
-                  ) : (
-                    <Input
-                      value={form.tts.cloud.model}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, model: e.target.value } } }))
-                      }
-                      placeholder={
-                        isCompat
-                          ? 'chatterbox'
-                          : (CLOUD_MODELS[form.tts.cloud.provider as keyof typeof CLOUD_MODELS]?.[0] || 'gpt-4o-mini-tts')
-                      }
-                      className="max-w-[360px]"
-                    />
-                  )}
-                  {ttsDiscovery.loading
-                    ? <span className="animate-pulse text-[11px] whitespace-nowrap text-muted">discovering…</span>
-                    : ttsDiscoveryEnabled && (
-                      <Btn onClick={ttsDiscovery.refresh} title="Refresh model list">↻</Btn>
-                    )
+                    )}
+                    {ttsDiscovery.loading
+                      ? <span className="animate-pulse text-[11px] whitespace-nowrap text-muted">discovering…</span>
+                      : ttsDiscoveryEnabled && (
+                        <Btn onClick={ttsDiscovery.refresh} title="Refresh model list">↻</Btn>
+                      )
+                    }
+                  </div>
+                  <div className="field-hint">
+                    {isFish
+                      ? <>Use <code>s2.1-pro</code> for the full model or <code>s2.1-pro-free</code> for the free tier. You can also type a custom Fish model id.</>
+                      : ttsDiscovery.models.length > 0
+                        ? `${ttsDiscovery.models.length} model${ttsDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
+                      : !ttsDiscoveryEnabled
+                        ? (isCompat
+                            ? 'Set a base URL above to discover available models.'
+                            : 'Set an API key above to discover and select a model.')
+                        : ttsDiscovery.error
+                          ? `Discovery failed: ${ttsDiscovery.error}. Type a model ID manually.`
+                          : ttsDiscovery.loading
+                            ? 'Discovering models…'
+                            : (isCompat
+                                ? 'Model id exactly as the server reports it at /v1/models, required.'
+                                : 'e.g. "gpt-4o-mini-tts" (OpenAI) or "eleven_flash_v2_5" (ElevenLabs).')}
+                  </div>
+                </div>
+                {(() => {
+                  const provider = form.tts.cloud.provider;
+                  const voice = form.tts.cloud.voice.trim();
+                  const isPreset = isKnownCloudVoice(provider, discoveredVoices, voice);
+                  const setVoice = (v: string) =>
+                    setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, voice: v } } }));
+                  // A compat server that advertised no voices leaves nothing to pick
+                  // from — keep the plain text box it had before discovery.
+                  const hasList = discoveredVoices.length > 0 || !isCompat;
+                  if (!hasList) {
+                    return (
+                      <div className="field">
+                        <Label>Default voice</Label>
+                        <Input
+                          value={form.tts.cloud.voice}
+                          maxLength={100}
+                          placeholder="Server-specific (cloning ref or speaker id)"
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setVoice(e.target.value)}
+                        />
+                        <div className="field-hint">
+                          {voiceDiscovery.loading
+                            ? 'Checking the server for a voice list…'
+                            : <>Server-specific: Chatterbox cloning ref name, Qwen3
+                                speaker id, etc. Leave blank to let the server pick its
+                                own default.</>}
+                        </div>
+                      </div>
+                    );
                   }
-                </div>
-                <div className="field-hint">
-                  {isFish
-                    ? <>Use <code>s2.1-pro</code> for the full model or <code>s2.1-pro-free</code> for the free tier. You can also type a custom Fish model id.</>
-                    : ttsDiscovery.models.length > 0
-                      ? `${ttsDiscovery.models.length} model${ttsDiscovery.models.length !== 1 ? 's' : ''} discovered. Pick one from the list.`
-                    : !ttsDiscoveryEnabled
-                      ? (isCompat
-                          ? 'Set a base URL above to discover available models.'
-                          : 'Set an API key above to discover and select a model.')
-                      : ttsDiscovery.error
-                        ? `Discovery failed: ${ttsDiscovery.error}. Type a model ID manually.`
-                        : ttsDiscovery.loading
-                          ? 'Discovering models…'
-                          : (isCompat
-                              ? 'Model id exactly as the server reports it at /v1/models, required.'
-                              : 'e.g. "gpt-4o-mini-tts" (OpenAI) or "eleven_flash_v2_5" (ElevenLabs).')}
-                </div>
-              </div>
-              {(() => {
-                const provider = form.tts.cloud.provider;
-                const voice = form.tts.cloud.voice.trim();
-                const isPreset = isKnownCloudVoice(provider, discoveredVoices, voice);
-                const setVoice = (v: string) =>
-                  setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, voice: v } } }));
-                // A compat server that advertised no voices leaves nothing to
-                // pick from — keep the plain text box it had before discovery.
-                const hasList = discoveredVoices.length > 0 || !isCompat;
-                if (!hasList) {
                   return (
                     <div className="field">
                       <Label>Default voice</Label>
-                      <Input
-                        value={form.tts.cloud.voice}
-                        maxLength={100}
-                        placeholder="Server-specific (cloning ref or speaker id)"
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setVoice(e.target.value)}
+                      <VoicePicker
+                        value={isPreset ? voice : CUSTOM_VOICE_ID}
+                        onChange={val => {
+                          // Clearing the preset flips isPreset false, revealing the
+                          // free-text input below.
+                          setVoice(val === CUSTOM_VOICE_ID ? '' : val);
+                        }}
+                        groups={buildCloudVoiceGroups(provider, discoveredVoices)}
+                        title="Default cloud voice"
+                        preview={{
+                          engine: 'cloud',
+                          cloudProvider: provider,
+                          cloudModel: form.tts.cloud.model,
+                          fishSettings: provider === 'fish-audio'
+                            ? {
+                              temperature: form.tts.cloud.temperature,
+                              topP: form.tts.cloud.topP,
+                              latency: form.tts.cloud.latency,
+                            }
+                            : undefined,
+                          adminFetch,
+                        }}
                       />
+                      {!isPreset && (
+                        <Input
+                          // A blank compat voice is legitimate — the server picks
+                          // its own default — so don't flag it red.
+                          className={cn('mt-2', voice || isCompat ? 'border-ink' : 'border-[var(--danger)]')}
+                          value={form.tts.cloud.voice}
+                          maxLength={100}
+                          placeholder={isCompat ? 'Blank = server default' : 'Enter a custom voice id'}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setVoice(e.target.value)}
+                        />
+                      )}
                       <div className="field-hint">
-                        {voiceDiscovery.loading
-                          ? 'Checking the server for a voice list…'
-                          : <>Server-specific: Chatterbox cloning ref name, Qwen3
-                              speaker id, etc. Leave blank to let the server pick its
-                              own default.</>}
+                        Used when a Cloud persona hasn’t set its own voice.{' '}
+                        {discoveredVoices.length > 0
+                          ? <>{discoveredVoices.length} voice{discoveredVoices.length === 1 ? '' : 's'} found
+                              on your {isCompat ? 'server' : 'account'}. Or choose <em>Custom voice id…</em> to
+                              enter one that isn’t listed.</>
+                          : <>Pick a default, or choose <em>Custom voice id…</em> for any other OpenAI voice
+                              name, ElevenLabs voice id, or Fish Audio reference id.</>}
                       </div>
                     </div>
                   );
-                }
-                return (
-                  <div className="field">
-                    <Label>Default voice</Label>
-                    <VoicePicker
-                      value={isPreset ? voice : CUSTOM_VOICE_ID}
-                      onChange={val => {
-                        // "Custom voice id…" clears the preset so isPreset flips
-                        // false and the free-text input below appears for entry.
-                        setVoice(val === CUSTOM_VOICE_ID ? '' : val);
-                      }}
-                      groups={buildCloudVoiceGroups(provider, discoveredVoices)}
-                      title="Default cloud voice"
-                      preview={{
-                        engine: 'cloud',
-                        cloudProvider: provider,
-                        cloudModel: form.tts.cloud.model,
-                        fishSettings: provider === 'fish-audio'
-                          ? {
-                            temperature: form.tts.cloud.temperature,
-                            topP: form.tts.cloud.topP,
-                            latency: form.tts.cloud.latency,
-                          }
-                          : undefined,
-                        adminFetch,
-                      }}
-                    />
-                    {!isPreset && (
-                      <Input
-                        // A blank compat voice is legitimate — the server picks
-                        // its own default — so don't flag it red.
-                        className={cn('mt-2', voice || isCompat ? 'border-ink' : 'border-[var(--danger)]')}
-                        value={form.tts.cloud.voice}
-                        maxLength={100}
-                        placeholder={isCompat ? 'Blank = server default' : 'Enter a custom voice id'}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setVoice(e.target.value)}
-                      />
-                    )}
-                    <div className="field-hint">
-                      Used when a Cloud persona hasn’t set its own voice.{' '}
-                      {discoveredVoices.length > 0
-                        ? <>{discoveredVoices.length} voice{discoveredVoices.length === 1 ? '' : 's'} found
-                            on your {isCompat ? 'server' : 'account'}. Or choose <em>Custom voice id…</em> to
-                            enter one that isn’t listed.</>
-                        : <>Pick a default, or choose <em>Custom voice id…</em> for any other OpenAI voice
-                            name, ElevenLabs voice id, or Fish Audio reference id.</>}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-            {!isCompat && (() => {
-              const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
-              return (
-                <>
-                  <div className="field">
-                    <Label>{cloudProviderLabel(form.tts.cloud.provider)} API key</Label>
-                    <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
-                      <Input
-                        type="password"
-                        autoComplete="off"
-                        value={cloudKeyInput}
-                        placeholder={data.env?.[cloudKeyVar] ? '•••••• (on file)' : (KEY_HINTS[cloudKeyVar] ?? '')}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                          cloudKeyGeneration.current.invalidate();
-                          setCloudKeyInput(e.target.value);
-                          setCloudKeyTest(null);
-                          setCloudKeyTesting(false);
-                        }}
-                        className="max-w-[360px]"
-                      />
-                      <Btn
-                        onClick={testCloudKey}
-                        disabled={cloudKeyTesting || (!cloudKeyInput.trim() && !data.env?.[cloudKeyVar])}
-                      >
-                        {cloudKeyTesting ? 'Testing…' : 'Test key'}
-                      </Btn>
-                    </div>
-                    <div className="field-hint">
-                      Stored in <code>state/secrets.env</code>, takes effect immediately. Leave blank to keep the existing key.
-                    </div>
-                    {cloudKeyVar === 'OPENAI_API_KEY' && (
-                      <div className="field-hint">
-                        This key is shared across LLM and Cloud TTS.
-                      </div>
-                    )}
-                  </div>
-                  {cloudKeyTest && <KeyTestResult result={cloudKeyTest} />}
-                </>
-              );
-            })()}
-            {isCompat && (
-              <div className="field">
-                <Label>API key</Label>
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  value={compatKeyInput}
-                  placeholder={savedCloud.compatApiKey === 'set' ? '•••••• (on file)' : 'Optional'}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setCompatKeyInput(e.target.value)}
-                  className="max-w-[360px]"
-                />
-                <div className="field-hint">
-                  Optional, only if your server requires one (e.g. SUB/WAVE DJ
-                  Brain); most self-hosted servers accept any non-empty key.
-                  Blank keeps the existing key. Saved with these settings, takes
-                  effect immediately.
-                </div>
+                })()}
               </div>
-            )}
-            <TtsGainField engineId="cloud" form={form} setForm={setForm} />
-            <TtsSpeedField engineId="cloud" form={form} setForm={setForm} />
-            {form.tts.cloud.provider === 'elevenlabs' && (
-              <ElevenLabsVoiceSettingsField form={form} setForm={setForm} />
-            )}
-            {isFish && <FishAudioSettingsField form={form} setForm={setForm} />}
-            {!isCompat && (() => {
-              const kv = envKeyForCloudProvider(form.tts.cloud.provider);
-              return <KeyStatus envVar={kv} present={!!data.env?.[kv]} />;
-            })()}
+            </div>
+
+            <div className="grid">
+              <GroupHead>Voice tuning</GroupHead>
+              <TtsGainField engineId="cloud" form={form} setForm={setForm} />
+              <TtsSpeedField engineId="cloud" form={form} setForm={setForm} />
+              {form.tts.cloud.provider === 'elevenlabs' && (
+                <ElevenLabsVoiceSettingsField form={form} setForm={setForm} />
+              )}
+              {isFish && <FishAudioSettingsField form={form} setForm={setForm} />}
+              {isCompat && <CompatParamsField form={form} setForm={setForm} />}
+            </div>
           </div>
           );
         })()}
@@ -1267,7 +1413,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           );
         })()}
 
-          {/* Audition the selected engine + its configured voice + speed. */}
           {(() => {
             const e = form.tts.defaultEngine;
             const previewVoice =
@@ -1316,7 +1461,68 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
-      {/* Speech corrections moved to /admin/moods (MoodsPanel). */}
+      {/* The operator's explicit rescue, ahead of the hardcoded
+          default-engine → Piper → Kokoro floor. */}
+      <Card
+        title="Fallback voice"
+        sub="what speaks when a persona's engine fails"
+      >
+        <div className="field">
+          <Label>Fallback</Label>
+          <Seg
+            value={form.tts.fallback.enabled ? 'on' : 'off'}
+            options={[{ id: 'off', label: 'Off' }, { id: 'on', label: 'On' }]}
+            onChange={v => setForm(f => ({
+              ...f,
+              tts: { ...f.tts, fallback: { ...f.tts.fallback, enabled: v === 'on' } },
+            }))}
+          />
+          <div className="field-hint max-w-[70ch]">
+            When a persona’s engine can’t speak — a sidecar that’s down, a cloud
+            provider with no key, or a call that fails mid-render — the station
+            rescues the segment so the DJ never goes silent. Off, it rescues onto
+            the default engine above and whatever voice that engine happens to
+            carry. On, it uses the engine <em>and voice</em> you pick here first,
+            and only falls through to Piper if that can’t speak either.
+          </div>
+        </div>
+
+        {form.tts.fallback.enabled && (
+          <div className="mt-4 max-w-[560px]">
+            <EngineVoiceFields
+              value={form.tts.fallback}
+              onChange={(patch: Partial<TtsFallbackForm>) => setForm(f => ({
+                ...f,
+                tts: { ...f.tts, fallback: { ...f.tts.fallback, ...patch } },
+              }))}
+              data={data}
+              adminFetch={adminFetch}
+              engineHint={<>
+                Pick something that’s reliably up — a local engine is the safest
+                rescue, since the usual reason to need one is a sidecar or cloud
+                provider being unreachable.
+              </>}
+              unavailableNote={(engine: string) => (
+                <>{ENGINE_UNAVAILABLE[engine]} A fallback that can’t speak is
+                  skipped, so the station would drop to <strong>Piper</strong> instead.</>
+              )}
+              cloudIssue={fallbackCloudUnconfigured && (
+                <>
+                  <strong>This fallback voice won’t play.</strong> No API key is
+                  configured for that cloud provider — add one above. Until then
+                  the fallback is skipped, and the station drops to{' '}
+                  <strong>Piper</strong> instead.
+                </>
+              )}
+              previewHint={<>
+                Plays a short sample in the fallback voice. Worth auditioning —
+                you’ll normally only hear it when something has already gone
+                wrong.
+              </>}
+            />
+          </div>
+        )}
+      </Card>
 
       <SaveBar
         note={ttsDirty

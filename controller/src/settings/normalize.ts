@@ -37,6 +37,7 @@ import {
   coerceGuestPersonaIds,
   coercePlaylistIds,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowEras,
   coerceShowGenres,
   coerceShowMoods,
@@ -90,7 +91,13 @@ function normalizeSkills(raw: unknown) {
   }
   return out;
 }
-function normalizeTts(raw: unknown) {
+// Lenient normaliser for a `{engine, voice, cloudProvider}` voice slot. Shared
+// by every persona's `tts` block AND the station-wide TTS fallback slot
+// (`settings.tts.fallback`) — the two carry the same shape by design, because a
+// fallback slot is handed to speakWith() as a synthetic persona (the same trick
+// synthesizeSample() uses for previews). Keeping one normaliser is what stops
+// the per-engine voice rules drifting between the two.
+export function normalizeTts(raw: unknown) {
   const r = (raw ?? {}) as Record<string, unknown>;
   const engine = TTS_ENGINES.includes(r.engine as string) ? (r.engine as string) : 'piper';
   const cloudProvider = TTS_CLOUD_PROVIDERS.includes(r.cloudProvider as string)
@@ -131,6 +138,20 @@ function normalizeTts(raw: unknown) {
   if (!voice && engine === 'cloud' && cloudProvider !== 'openai-compatible') voice = 'alloy';
   if (!voice && engine !== 'cloud' && engine !== 'chatterbox' && engine !== 'piper' && engine !== 'remote') voice = 'bf_isabella';
   return { engine, cloudProvider, voice, gainDb: clampTtsGain(r.gainDb), speed: clampTtsSpeed(r.speed) };
+}
+
+// Load-time shape for `settings.tts.fallback` — the station's operator-chosen
+// rescue voice. The voice slot itself goes through normalizeTts() (one set of
+// per-engine rules for personas and the fallback alike); only `enabled` is
+// extra. An absent block normalises to disabled + engine defaults, so a
+// settings.json written before this key existed keeps the pre-fallback chain
+// byte-for-byte. gainDb/speed are deliberately dropped: the resolved engine's
+// own trims and the on-air persona's still apply, and a third trim on the
+// rescue slot would be a level surprise nobody configured.
+export function normalizeTtsFallback(raw: unknown) {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const { engine, voice, cloudProvider } = normalizeTts(r);
+  return { enabled: typeof r.enabled === 'boolean' ? r.enabled : false, engine, voice, cloudProvider };
 }
 
 export function normalizePersona(raw: unknown) {
@@ -221,8 +242,8 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     seen.add(id);
     // themeId is the optional per-show theme override. Lenient path: we only
     // sanity-check the shape. A stale id (theme file deleted under our feet)
-    // is harmless — routes/public.ts falls back to the station default at
-    // serve time via getTheme()'s own fallback. Empty/missing means "no
+    // is harmless — routes/public.ts (GET /themes) falls back to the station
+    // default at serve time. Empty/missing means "no
     // override" and is stored as an empty string for round-trip cleanliness.
     const themeId =
       typeof item.themeId === 'string' && item.themeId.trim()
@@ -237,6 +258,9 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     const genres = coerceShowGenres(item);
     const eras = coerceShowEras(item);
     const energies = coerceShowEnergies(item);
+    // Vocal steering (#1300 FR 13): '' = no constraint, which is what every
+    // show predating the field carries, so loading one is a no-op.
+    const vocals = coerceShowVocals(item);
     // Opt-in: hard-filter the pick pool to EVERY set music filter (mood, genre,
     // era, energy) instead of the default soft leans. Only meaningful when at
     // least one filter is set; defaults OFF. The legacy genre-only `genreStrict`
@@ -285,6 +309,7 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
       genres,
       eras,
       energies,
+      vocals,
       filtersStrict,
       maxTrackSeconds,
       playlistIds,

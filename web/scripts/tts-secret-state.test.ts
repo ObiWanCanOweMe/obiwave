@@ -13,6 +13,10 @@ const FORM = {
   tts: {
     enabled: true,
     defaultEngine: 'cloud',
+    // v1.4 makes the normalized fallback slot part of every settings form.
+    // Keep this fixture representative of the real SettingsPanel hydrator so
+    // the secret-state assertions exercise TtsSection's supported contract.
+    fallback: { enabled: false, engine: 'piper', voice: '', cloudProvider: 'openai' },
     kokoro: { voice: '' },
     chatterbox: { referenceVoice: '' },
     pocketTts: { voice: 'alba' },
@@ -29,6 +33,9 @@ const FORM = {
       temperature: 0.7,
       topP: 0.7,
       latency: 'normal',
+      // v1.5 makes compatibility parameters part of the normalized Cloud TTS
+      // form. SettingsPanel always supplies an array, including on upgrades.
+      compatParams: [],
     },
     remote: { url: '' },
     gainDb: Object.fromEntries(ENGINE_IDS.map(id => [id, 0])),
@@ -40,8 +47,11 @@ const FORM = {
 const DATA = {
   values: {
     tts: {
+      enabled: true,
       defaultEngine: 'cloud',
-      cloud: { provider: 'openai-compatible', compatApiKey: 'set' },
+      kokoro: { voice: '', lang: 'en-us' },
+      pocketTts: { voice: 'alba' },
+      cloud: { provider: 'openai-compatible', model: 'compat-model', compatApiKey: 'set' },
     },
   },
   tts: {
@@ -58,9 +68,17 @@ function textContent(node: ReactTestInstance): string {
 
 async function renderTtsSection(
   saveSettings: () => Promise<boolean>,
-): Promise<{ renderer: ReactTestRenderer; input: () => ReactTestInstance; save: () => Promise<void> }> {
+): Promise<{
+  renderer: ReactTestRenderer;
+  input: () => ReactTestInstance;
+  isUnsaved: () => boolean;
+  setFallback: (patch: Partial<FormState['tts']['fallback']>) => Promise<void>;
+  save: () => Promise<void>;
+}> {
+  let updateForm!: (updater: (current: FormState) => FormState) => void;
   function Harness() {
     const [form, setForm] = useState(FORM);
+    updateForm = updater => setForm(current => updater(current));
     return createElement(TtsSection, {
       data: DATA,
       form,
@@ -79,6 +97,15 @@ async function renderTtsSection(
   return {
     renderer,
     input,
+    isUnsaved: () => textContent(renderer.root).includes('Your edits below aren’t live until you Save.'),
+    setFallback: async patch => {
+      await act(async () => {
+        updateForm(current => ({
+          ...current,
+          tts: { ...current.tts, fallback: { ...current.tts.fallback, ...patch } },
+        }));
+      });
+    },
     save: async () => {
       await act(async () => { await saveButton.props.onClick({}); });
     },
@@ -93,6 +120,20 @@ async function typeSecret(view: Awaited<ReturnType<typeof renderTtsSection>>): P
 }
 
 async function main() {
+  const fallbackEdits: { name: string; patch: Partial<FormState['tts']['fallback']> }[] = [
+    { name: 'enabled', patch: { enabled: true } },
+    { name: 'engine', patch: { engine: 'kokoro' } },
+    { name: 'voice', patch: { voice: 'en_US-lessac-medium' } },
+    { name: 'cloud provider', patch: { cloudProvider: 'elevenlabs' } },
+  ];
+  for (const { name, patch } of fallbackEdits) {
+    const dirtyView = await renderTtsSection(async () => true);
+    assert.equal(dirtyView.isUnsaved(), false, `${name}: normalized saved fallback starts clean`);
+    await dirtyView.setFallback(patch);
+    assert.equal(dirtyView.isUnsaved(), true, `${name}: fallback edit is marked unsaved`);
+    await act(async () => { dirtyView.renderer.unmount(); });
+  }
+
   let calls = 0;
   let outcome = async () => true;
   const view = await renderTtsSection(async () => { calls += 1; return outcome(); });

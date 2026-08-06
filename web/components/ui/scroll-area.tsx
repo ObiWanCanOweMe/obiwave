@@ -14,9 +14,9 @@ const ScrollArea = React.forwardRef<
     className={cn("relative overflow-hidden", className)}
     {...props}
   >
-    {/* max-h-[inherit] mirrors any max-h-* cap from the root onto the
-        viewport — `h-full` alone can't resolve against a parent whose height
-        is only max-constrained, so capped ScrollAreas would never scroll. */}
+    {/* max-h-[inherit] mirrors any max-h-* cap from the root onto the viewport:
+        `h-full` alone can't resolve against a parent whose height is only
+        max-constrained, so capped ScrollAreas would never scroll. */}
     <ScrollAreaPrimitive.Viewport className="h-full max-h-[inherit] w-full rounded-[inherit]">
       {children}
     </ScrollAreaPrimitive.Viewport>

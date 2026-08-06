@@ -297,7 +297,7 @@ export function clampNumCtx(raw: unknown, def: number): number {
 // Non-numeric/NaN falls back to `def`. See appliedRepeatPenalty() in
 // capabilities.ts — Ollama ignores this field (ai-sdk-ollama v4 has no
 // per-call repeat_penalty channel at all; restoration is a tracked follow-up).
-function clampRepeatPenalty(raw: unknown, def: number): number {
+export function clampRepeatPenalty(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
   return Math.min(2.0, Math.max(1.0, raw));
 }
@@ -692,6 +692,12 @@ export function normalizeMoodMap(
 // tagger's per-track energy classes and the `tracksByMood` agent-tool filter.
 export const SHOW_ENERGY = ['low', 'medium', 'high'];
 
+// Vocal steering a show can pin. Unlike the list filters above this is ONE
+// value, because the three states are mutually exclusive and "both" is just no
+// constraint — which is what '' means, and what every show that predates the
+// field carries. Backed by Demucs vocal ranges (music/show-filter.trackInstrumental).
+export const SHOW_VOCALS = ['instrumental', 'vocal'];
+
 // Default festival calendar — the seeded set the admin UI shows on first boot.
 // After the operator edits the list, persisted festivals replace these.
 export const FESTIVAL_DEFAULTS = [
@@ -958,6 +964,8 @@ export interface NormalizedShow {
   genres: string[];
   eras: EraWindow[];
   energies: string[];
+  /** '' = no constraint. See SHOW_VOCALS. */
+  vocals: string;
   filtersStrict: boolean;
   maxTrackSeconds: number | null;
   playlistIds: string[];
@@ -1030,6 +1038,14 @@ export function coerceShowEnergies(item: unknown): string[] {
   return coerceShowList(item, 'energies', 'energy',
     (v) => (typeof v === 'string' && SHOW_ENERGY.includes(v) ? v : null),
     (v) => v);
+}
+
+// Anything unrecognised — absent, null, 'any', a typo — reads as no constraint.
+// A show whose vocal steering silently stops applying is a much smaller failure
+// than one that stops playing music.
+export function coerceShowVocals(item: unknown): string {
+  const v = (item as { vocals?: unknown } | null | undefined)?.vocals;
+  return typeof v === 'string' && SHOW_VOCALS.includes(v) ? v : '';
 }
 
 export function coerceShowEras(item: unknown): EraWindow[] {

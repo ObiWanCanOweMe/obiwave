@@ -30,16 +30,12 @@ export interface StationFeed {
   state: StationState;
   session: SessionPayload;
   /** Epoch ms when the current track became AUDIBLE to this listener, null
-   *  before the first poll. Consumers derive elapsed/progress from it locally
-   *  (useElapsed) so the per-second tick doesn't re-render the whole player
-   *  tree.
-   *
+   *  before the first poll. Consumers derive elapsed/progress locally
+   *  (useElapsed) so the per-second tick doesn't re-render the player tree.
    *  Listener-time, not broadcast-time: the server stamps startedAt at the live
-   *  edge, but Icecast bursts `stream.bufferSeconds` of audio on connect so
-   *  everyone hears that far behind it. This carries the offset already added,
-   *  which is why it can briefly sit in the future — useElapsed clamps at 0, so
-   *  the clock holds 0:00 until the track actually starts instead of banking
-   *  the buffer as elapsed time (issue #1114). */
+   *  edge but Icecast bursts `stream.bufferSeconds` on connect, so this carries
+   *  the offset already added and can briefly sit in the future — useElapsed
+   *  clamps at 0 rather than banking the buffer as elapsed (issue #1114). */
   trackStartedAt: number | null;
   /** Station IANA timezone (e.g. "Europe/London"), or null before first poll.
    *  Render on-air timestamps in this zone so they match what the DJ speaks
@@ -52,10 +48,9 @@ const EMPTY_STATE: StationState = { upcoming: [], history: [], djLog: [] };
 const EMPTY_SESSION: SessionPayload = { session: null, messages: [] };
 const OFFLINE_CONFIRM_POLLS = 4;
 
-// Only commit a freshly-parsed payload when it differs from what's already in
-// state — returning `prev` from the updater skips the re-render, so a quiet
-// poll tick costs nothing. Server JSON keeps stable key order, making the
-// stringify comparison reliable (and cheap at a few KB every 5s).
+// Returning `prev` from the updater skips the re-render, so a quiet poll tick
+// costs nothing. Server JSON keeps stable key order, so the stringify compare is
+// reliable (and cheap at a few KB every 5s).
 function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
   setter(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 }
@@ -86,13 +81,12 @@ export function useStationFeed({
   const [locale, setLocale] = useState<StationLocale>('en-GB');
   const lastTrackKeyRef = useRef<string | null>(null);
   const offlinePollsRef = useRef(0);
-  // Listener buffer depth, in ms. Lives in a ref (not state) so the polling
-  // effect never re-subscribes when it arrives — it only needs the latest value
-  // at tick time. 0 until the first payload lands, which degrades to the old
+  // Listener buffer depth in ms. A ref, not state, so the polling effect never
+  // re-subscribes when it arrives. 0 until the first payload lands, degrading to
   // live-edge behaviour rather than guessing an offset.
   const leadMsRef = useRef(0);
-  // Pending track switch: a track whose metadata has arrived but whose audio
-  // hasn't reached this listener yet. Held here until it's audible.
+  // Holds a track whose metadata has arrived but whose audio hasn't reached this
+  // listener yet, until it's audible.
   const promoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -104,8 +98,7 @@ export function useStationFeed({
           client.session(),
         ]);
         const np = npRes.nowPlaying;
-        // Refresh the buffer depth before it's used below. Clamped to a sane
-        // window: a bad value here would either park the clock in the far
+        // Clamped: a bad value here would either park the clock in the far
         // future or wind it back past the track start.
         leadMsRef.current = listenerLeadMsForFormat(
           npRes.stream,
@@ -113,12 +106,11 @@ export function useStationFeed({
           leadMsRef.current,
         );
         const trackKey = np ? `${np.title}\u0000${np.artist}` : null;
-        // Prefer the queue's authoritative start time over "first seen by this
-        // client": a tab that was hidden at the transition (or a poll that hit
-        // a torn now-playing.json read and flipped through null) would stamp
-        // Date.now() mid-track, dragging elapsed/remaining/progress minutes
-        // behind the broadcast. Guarded to the matching track and to plausible
-        // values (a skewed server clock in the future falls back to first-seen).
+        // Prefer the queue's start time over "first seen by this client": a tab
+        // hidden at the transition (or a poll that flipped through null on a torn
+        // now-playing.json read) would stamp Date.now() mid-track and drag the
+        // clock minutes behind. Guarded to the matching track and to plausible
+        // values — a server clock skewed into the future falls back to first-seen.
         const cur = (stRes as StationState & { current?: { title?: string; startedAt?: string } }).current;
         let serverStart = NaN;
         if (np?.title && cur && cur.title === np.title && cur.startedAt) {
@@ -139,18 +131,15 @@ export function useStationFeed({
           };
           const wait = audibleAt - Date.now();
           // Promote immediately when the audio is already out (wait <= 0), when
-          // the stream drops (nothing to stay in sync with), or on the very
-          // first payload — a cold load has no earlier track to keep showing,
-          // so showing the incoming one is the best available answer. The clock
-          // is still right in that case because trackStartedAt carries the
-          // offset and useElapsed clamps at 0.
+          // the stream drops, or on the first payload — a cold load has no
+          // earlier track to keep showing. The clock stays right there because
+          // trackStartedAt carries the offset and useElapsed clamps at 0.
           if (wait <= 0 || trackKey == null || lastTrackKeyRef.current == null) {
             if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
             commit();
           } else {
-            // Re-armed on every poll while the switch is pending, so the wait
-            // is always recomputed against the freshest server stamp rather
-            // than drifting on a stale one.
+            // Re-armed on every poll while the switch is pending, so the wait is
+            // recomputed against the freshest server stamp rather than drifting.
             if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
             promoteTimerRef.current = setTimeout(commit, wait);
           }

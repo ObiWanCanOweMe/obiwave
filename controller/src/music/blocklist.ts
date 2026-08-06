@@ -15,19 +15,48 @@
 // fallback for album/artist entries because library-db rows carry only name
 // strings — without it an artist block would leak through the mood/vector
 // sources. Track entries never name-match (covers/re-recordings share titles).
+//
+// RULE entries (#1300 FR 1, closes #752) live beside the id entries in the
+// same file: attribute/tag predicates ("anything tagged christmas"), optional
+// seasonal allow-window, optional show scope — see
+// docs/superpowers/specs/2026-08-05-exclusion-rules-design.md. Pure matching
+// lives in blocklist-rules.ts; this module owns state, persistence, and the
+// evaluation context (station-zone clock, active show, playlist member sets).
+// Because every song source already flows through rejectBlocked/isBlocked,
+// rules are enforced at every chokepoint the id entries cover, with zero new
+// enforcement sites. hitOf() is the one entries-then-rules answer.
 import { config } from '../config.js';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { writeFileAtomic } from '../util/atomic-file.js';
+import { zonedParts } from '../time.js';
+import { resolveActiveShow } from '../settings.js';
+import { resolvePlaylistMemberSets } from './show-playlist.js';
+import {
+  compileRules,
+  coerceStoredRule,
+  ruleActive,
+  ruleMatches,
+  validateRulePatch,
+  RULES_MAX,
+  type BlockRule,
+  type CompiledRule,
+  type RuleField,
+} from './blocklist-rules.js';
+
+export type { BlockRule, RuleField, SeasonWindow } from './blocklist-rules.js';
 
 export type BlockType = 'track' | 'album' | 'artist';
 
-// The slice of an entry a listing row needs: enough to render the badge and to
-// issue the DELETE that removes it. Rides admin listing rows as `blockedBy`.
-export interface BlockRef {
-  type: BlockType;
-  id: string;
-  name: string | null;
-}
+// The slice of a match a listing row needs: enough to render the badge and to
+// issue the DELETE (or open the rule editor) that clears it. Rides admin
+// listing rows as `blockedBy`. Entries keep their historical {type,id,name}
+// shape (plus the kind discriminant); rule refs carry the rule's display
+// surface — `seasonal` so the UI can say "lifts on Dec 1" territory vs a
+// permanent block.
+export type BlockRef =
+  | { kind: 'entry'; type: BlockType; id: string; name: string | null }
+  | { kind: 'rule'; field: RuleField; id: string; label: string; seasonal: boolean };
 
 export interface BlockEntry {
   type: BlockType;
@@ -43,6 +72,8 @@ export interface BlockEntry {
 const FILE_PATH = `${config.stateDir}/blocklist.json`;
 
 let entries: BlockEntry[] = [];
+let rules: BlockRule[] = [];
+let compiledRules: CompiledRule[] = [];
 let loaded = false;
 
 // In-memory match index, rebuilt on every mutation. Maps rather than Sets
@@ -80,6 +111,86 @@ function rebuildIndex() {
       if (e.name) artistNames.set(norm(e.name), e);
     }
   }
+  // Rule side: value normalisation happens once per mutation, and the
+  // active-set memo below re-derives from the fresh compile.
+  compiledRules = compileRules(rules);
+  ruleCtxCache = null;
+}
+
+// ── Rule evaluation context ─────────────────────────────────────────────────
+
+// The active-rule subset is a function of the station-zone clock and the
+// on-air show, neither of which changes per track — so it's computed at most
+// once per RULE_CONTEXT_TTL_MS, not per matchOf() call. rejectBlocked sweeps
+// hundreds of tracks through the chokepoints; a per-track zonedParts (an Intl
+// formatToParts round-trip) would dominate the cost of the match itself. The
+// TTL bounds season/show-boundary staleness at 15s, well inside the accepted
+// boundary races (spec: pick/push-time evaluation, minutes-wide).
+const RULE_CONTEXT_TTL_MS = 15_000;
+let ruleCtxCache: { at: number; active: CompiledRule[] } | null = null;
+
+function activeCompiledRules(): CompiledRule[] {
+  if (!compiledRules.length) return [];
+  const now = Date.now();
+  if (ruleCtxCache && now - ruleCtxCache.at < RULE_CONTEXT_TTL_MS) return ruleCtxCache.active;
+  const { month, day } = zonedParts(new Date(now));
+  // Settings may not be loaded in auxiliary processes (tagger child) — a
+  // failed resolve reads as "no show on air", which leaves show-scoped rules
+  // inert (under-blocking in a listing context, never over-blocking).
+  let activeShowId: string | null = null;
+  try {
+    activeShowId = resolveActiveShow()?.id ?? null;
+  } catch {}
+  const ctx = { month, day, activeShowId };
+  const active = compiledRules.filter((cr) => ruleActive(cr.rule, ctx));
+  ruleCtxCache = { at: now, active };
+  maybeRefreshPlaylistMembers();
+  return active;
+}
+
+// Test seam + rule-mutation hook: drop the memo so the next evaluation
+// re-reads the clock and show.
+export function invalidateRuleContext() {
+  ruleCtxCache = null;
+}
+
+// ── Playlist member sets (field: 'playlist' rules) ──────────────────────────
+
+// The one async-sourced matcher input, pre-resolved into module state so
+// matchOf stays synchronous. Refreshed on load, on rule mutation, and lazily
+// on a 30-min TTL (the same horizon show-playlist's memo uses — and the fetch
+// IS show-playlist's memoised getPlaylist, so a playlist used as both anchor
+// and rule is fetched once). A stale/deleted playlist id resolves to nothing:
+// the rule is inert for that id rather than wrong.
+const PLAYLIST_MEMBERS_TTL_MS = 30 * 60 * 1000;
+let playlistMembers = new Map<string, Set<string>>();
+let playlistMembersAt = 0;
+let playlistRefreshInflight: Promise<void> | null = null;
+
+function playlistRuleIds(): string[] {
+  return [...new Set(rules.filter((r) => r.field === 'playlist').flatMap((r) => r.values))];
+}
+
+export async function refreshPlaylistMembers(): Promise<void> {
+  const ids = playlistRuleIds();
+  if (!ids.length) {
+    playlistMembers = new Map();
+    playlistMembersAt = Date.now();
+    return;
+  }
+  playlistMembers = await resolvePlaylistMemberSets(ids);
+  playlistMembersAt = Date.now();
+}
+
+function maybeRefreshPlaylistMembers() {
+  if (!playlistRuleIds().length) return;
+  if (Date.now() - playlistMembersAt < PLAYLIST_MEMBERS_TTL_MS) return;
+  if (playlistRefreshInflight) return;
+  playlistRefreshInflight = refreshPlaylistMembers()
+    .catch((err) => console.warn(`[blocklist] playlist member refresh failed: ${err.message}`))
+    .finally(() => {
+      playlistRefreshInflight = null;
+    });
 }
 
 export async function load() {
@@ -98,26 +209,49 @@ export async function load() {
       album: e.album ?? null,
       addedAt: e.addedAt ?? new Date().toISOString(),
     }));
+    // Rules: pre-rules files carry no `rules` key → []. Records that don't
+    // parse are dropped (state files never block boot), loudly.
+    const rawRules = Array.isArray(raw?.rules) ? raw.rules : [];
+    rules = rawRules.map(coerceStoredRule).filter((r: BlockRule | null): r is BlockRule => r !== null);
+    if (rules.length < rawRules.length) {
+      console.error(`[blocklist] dropped ${rawRules.length - rules.length} unparseable rule(s) from blocklist.json`);
+    }
   } catch (err: any) {
     // Missing file is the normal first-boot case; anything else (corrupt JSON)
     // starts empty rather than blocking boot — the station keeps playing.
     if (err?.code !== 'ENOENT') console.error('[blocklist] load failed, starting empty:', err.message);
     entries = [];
+    rules = [];
   }
   rebuildIndex();
-  if (entries.length) console.log(`[blocklist] loaded ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`);
+  if (entries.length || rules.length) {
+    console.log(`[blocklist] loaded ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}, ${rules.length} rule${rules.length === 1 ? '' : 's'}`);
+  }
+  // Playlist-rule member sets need Subsonic; never block boot on it. A miss
+  // leaves those rules inert until the lazy TTL refresh lands.
+  if (playlistRuleIds().length) {
+    refreshPlaylistMembers().catch((err) => console.warn(`[blocklist] playlist member load failed: ${err.message}`));
+  }
 }
 
 async function persist() {
-  await writeFileAtomic(FILE_PATH, JSON.stringify({ entries }, null, 2));
+  await writeFileAtomic(FILE_PATH, JSON.stringify({ entries, rules }, null, 2));
 }
 
 export function list(): BlockEntry[] {
   return entries.slice();
 }
 
+export function listRules(): BlockRule[] {
+  return rules.slice();
+}
+
+// "Nothing can block anything" — the hot-path skip. A seasonal rule currently
+// in season still counts as non-empty (activity is the memo's business, and
+// cheapness comes from the compiled index, not from pretending the list is
+// empty).
 export function isEmpty(): boolean {
-  return entries.length === 0;
+  return entries.length === 0 && rules.length === 0;
 }
 
 // Add an entry; returns it, or null when (type, id) is already blocked.
@@ -189,31 +323,110 @@ export function matchOf(song: any): BlockEntry | null {
   );
 }
 
+// Which ACTIVE rule blocks this row, or null. First match in list order —
+// stable per mutation, so the badge a row shows doesn't wander between polls.
+export function ruleMatchOf(song: any): BlockRule | null {
+  const active = activeCompiledRules();
+  if (!active.length || !song) return null;
+  for (const cr of active) {
+    if (ruleMatches(cr, song, playlistMembers)) return cr.rule;
+  }
+  return null;
+}
+
+// The one enforcement/visibility answer: id/name entries first (most
+// specific — the UI names the entry and unblocks exactly it), then active
+// rules. Every consumer that needs to SAY what blocked a track reads this;
+// isBlocked is a predicate over it.
+export function hitOf(song: any): BlockRef | null {
+  const entry = matchOf(song);
+  if (entry) return refOf(entry);
+  const rule = ruleMatchOf(song);
+  return rule ? ruleRefOf(rule) : null;
+}
+
 // The enforcement predicate.
 export function isBlocked(song: any): boolean {
-  return matchOf(song) !== null;
+  return hitOf(song) !== null;
 }
 
 // Display slice of an entry — what a listing row carries as `blockedBy`.
 export function refOf(entry: BlockEntry): BlockRef {
-  return { type: entry.type, id: entry.id, name: entry.name };
+  return { kind: 'entry', type: entry.type, id: entry.id, name: entry.name };
+}
+
+export function ruleRefOf(rule: BlockRule): BlockRef {
+  return { kind: 'rule', field: rule.field, id: rule.id, label: rule.label, seasonal: !!rule.season };
 }
 
 // Array filter for song-source returns; identity when nothing is blocked.
 export function rejectBlocked<T>(arr: T[]): T[] {
-  if (entries.length === 0) return arr;
+  if (isEmpty()) return arr;
   return (arr || []).filter((s) => !isBlocked(s));
 }
 
 // The opposite of rejectBlocked, for the ADMIN listing surfaces: keep every row
-// and stamp which entry blocks it. The library browser shows the library — the
-// operator has to be able to see a blocked track in order to review or unblock
-// it, and without this marking two copies of the same song on different albums
-// are indistinguishable. Always stamps the field, null when clear — one row
-// shape whether or not the station blocks anything.
+// and stamp what blocks it — an id entry or a currently-active rule. The
+// library browser shows the library — the operator has to be able to see a
+// blocked track in order to review or unblock it, and without this marking two
+// copies of the same song on different albums are indistinguishable. Always
+// stamps the field, null when clear — one row shape whether or not the station
+// blocks anything.
 export function annotate<T extends object>(arr: T[]): Array<T & { blockedBy: BlockRef | null }> {
-  return (arr || []).map((row) => {
-    const hit = matchOf(row);
-    return { ...row, blockedBy: hit ? refOf(hit) : null };
+  return (arr || []).map((row) => ({ ...row, blockedBy: hitOf(row) }));
+}
+
+// ── Rule CRUD ───────────────────────────────────────────────────────────────
+
+export async function addRule(input: unknown): Promise<BlockRule> {
+  if (rules.length >= RULES_MAX) throw new Error(`at most ${RULES_MAX} rules`);
+  const patch = validateRulePatch(input);
+  const rule: BlockRule = { id: randomUUID(), addedAt: new Date().toISOString(), ...patch };
+  rules.push(rule);
+  rebuildIndex();
+  await persist();
+  refreshPlaylistMembers().catch((err) => console.warn(`[blocklist] playlist member refresh failed: ${err.message}`));
+  return rule;
+}
+
+// Full-replace update (the editor round-trips the whole rule). Returns null
+// when the id is unknown.
+export async function updateRule(id: string, input: unknown): Promise<BlockRule | null> {
+  const idx = rules.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const patch = validateRulePatch(input);
+  const rule: BlockRule = { id, addedAt: rules[idx]!.addedAt, ...patch };
+  rules[idx] = rule;
+  rebuildIndex();
+  await persist();
+  refreshPlaylistMembers().catch((err) => console.warn(`[blocklist] playlist member refresh failed: ${err.message}`));
+  return rule;
+}
+
+export async function removeRule(id: string): Promise<boolean> {
+  const before = rules.length;
+  rules = rules.filter((r) => r.id !== id);
+  if (rules.length === before) return false;
+  rebuildIndex();
+  await persist();
+  return true;
+}
+
+// Listing surface for the admin Blocked tab: each rule with whether it is
+// blocking RIGHT NOW (season + show scope) and how many of the caller's rows
+// it matches. matchCount is deliberately activity-AGNOSTIC — "what would this
+// rule block" — so a typo'd value reads 0 and a seasonal rule shows its reach
+// while in season. The caller supplies the rows (db.ruleMatchRows()); this
+// module doesn't reach into library-db.
+export function rulesWithStats(
+  rows: any[],
+): Array<BlockRule & { active: boolean; matchCount: number }> {
+  const activeIds = new Set(activeCompiledRules().map((cr) => cr.rule.id));
+  return compiledRules.map((cr) => {
+    let matchCount = 0;
+    for (const row of rows) {
+      if (ruleMatches(cr, row, playlistMembers)) matchCount++;
+    }
+    return { ...cr.rule, active: activeIds.has(cr.rule.id), matchCount };
   });
 }

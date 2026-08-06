@@ -1,7 +1,7 @@
 'use client';
 
-// Listener likes (#991) — the heart button's operator controls: on/off, the
-// Navidrome star write-back, and whether the leaderboard steers the AI DJ.
+// Listener likes (#991): on/off, the Navidrome star write-back, and whether the
+// leaderboard steers the AI DJ.
 
 import type { ChangeEvent } from 'react';
 import { Input } from '../../ui/input';

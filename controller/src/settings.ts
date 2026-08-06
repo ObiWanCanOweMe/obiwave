@@ -66,6 +66,7 @@ import {
   clampMaxOutputTokens,
   clampNoRepeatWindow,
   clampNumCtx,
+  clampRepeatPenalty,
   clampTtsGain,
   clampTtsSpeed,
   coerceGuestPersonaIds,
@@ -91,11 +92,13 @@ import {
   rawMaxTrackSec,
 } from './settings/defaults.js';
 import { get, minTrackSeconds, peek, setCache } from './settings/store.js';
+import { validateCompatParams } from './settings/compat-params.js';
 import {
   SKILL_RENAMES,
   normalizeArchiveRetentionDays,
   normalizeDjPrompts,
   normalizePersonaArray,
+  normalizeTtsFallback,
   normalizeSchedule,
   normalizeScheduleOverride,
   normalizeShows,
@@ -111,6 +114,7 @@ import {
   validateScheduleOverrideStrict,
   validateScheduleStrict,
   validateShowsStrict,
+  validateTtsBlock,
   validateWeatherMoodsStrict,
   validateWebhooksStrict,
 } from './settings/validate.js';
@@ -177,6 +181,7 @@ export {
   clampMaxOutputTokens,
   clampTtsGain,
   clampTtsSpeed,
+  coerceShowVocals,
   normalizeDial,
   normalizeSearchApiKeys,
   personaToneDirectives,
@@ -499,8 +504,8 @@ export async function load() {
     theme: {
       // We only validate the *shape* here. The active id might reference a
       // theme file that's since been removed; the public /themes endpoint
-      // and getTheme() both fall back to the default id when that happens, so
-      // a stale id doesn't break the UI.
+      // falls back to the default id when that happens, so a stale id doesn't
+      // break the UI.
       active:
         typeof stored.theme?.active === 'string' && stored.theme.active.trim()
           ? stored.theme.active.trim()
@@ -599,6 +604,12 @@ export async function load() {
       defaultEngine: TTS_ENGINES.includes(stored.tts?.defaultEngine)
         ? stored.tts.defaultEngine
         : DEFAULTS.tts.defaultEngine,
+      // Operator-chosen rescue slot. Reuses the persona voice-slot normaliser
+      // so the per-engine voice rules can't drift between the two; only the
+      // `enabled` flag is extra. Absent/non-boolean coerces to the default
+      // (off), so an upgrade from a settings.json written before this key
+      // existed keeps today's chain byte-for-byte.
+      fallback: normalizeTtsFallback(stored.tts?.fallback),
       // Stored as a plain boolean; coerce missing/non-boolean (older saves) to
       // the default. See DEFAULTS.tts.heavyEnabled for the semantics.
       heavyEnabled:
@@ -708,6 +719,20 @@ export async function load() {
           ['low', 'normal', 'balanced'].includes(stored.tts?.cloud?.latency)
             ? stored.tts.cloud.latency
             : DEFAULTS.tts.cloud.latency,
+        // Extra openai-compatible body fields. This block composes tts.cloud
+        // field by field rather than spreading DEFAULTS, so a key missing here
+        // is a key that survives a save but vanishes on the next restart —
+        // params would quietly stop applying and nothing would say why.
+        // Lenient like the Fish knobs above: an invalid hand-edited list drops
+        // to none rather than throwing, because settings.load() failing means
+        // the controller doesn't boot at all.
+        compatParams: (() => {
+          try {
+            return validateCompatParams(stored.tts?.cloud?.compatParams);
+          } catch {
+            return [];
+          }
+        })(),
       },
       remote: {
         url:
@@ -749,6 +774,13 @@ export async function load() {
       // Clamp to a sane band: 0 disables (Ollama default), else [2048, 131072].
       // Non-numeric/NaN falls back to the default. Floored to an integer.
       numCtx: clampNumCtx(stored.llm?.numCtx, DEFAULTS.llm.numCtx),
+      // Clamped to [1.0, 2.0]; 1.0 = off. This block does NOT spread DEFAULTS,
+      // so a field missing HERE is written to settings.json by update() and then
+      // silently dropped on the next cold load — which is exactly what happened
+      // to repeat_penalty between #918 and #1327: the operator's configured
+      // value survived in memory for that process, vanished on restart, and
+      // llama.cpp fell back to its own 1.0 default with nothing in the logs.
+      repeatPenalty: clampRepeatPenalty(stored.llm?.repeatPenalty, DEFAULTS.llm.repeatPenalty),
       pickerAgent:
         typeof stored.llm?.pickerAgent === 'boolean'
           ? stored.llm.pickerAgent
@@ -803,6 +835,7 @@ export async function load() {
             typeof fb.reasoning === 'boolean' ? fb.reasoning : DEFAULTS.llm.fallback.reasoning,
           toolChoice: fb.toolChoice === 'auto' ? 'auto' : DEFAULTS.llm.fallback.toolChoice,
           numCtx: clampNumCtx(fb.numCtx, DEFAULTS.llm.fallback.numCtx),
+          repeatPenalty: clampRepeatPenalty(fb.repeatPenalty, DEFAULTS.llm.fallback.repeatPenalty),
         };
       })(),
     },
@@ -1310,7 +1343,7 @@ export async function update(patch) {
       // A stale active theme (a retired built-in renamed in 58c3782b, or a
       // custom theme that isn't on disk) falls back to the built-in default
       // rather than failing the save — same tolerance as shows[].themeId above
-      // and the serve-time getTheme() fallback, and the same precedent as the
+      // and the serve-time fallback in GET /themes, and the same precedent as the
       // activeDjPromptId reset. Throwing here aborted the whole restore for any
       // install whose active theme id had since been retired (issue #917).
       next.theme.active = (await isValidThemeId(v)) ? v : DEFAULT_THEME_ID;
@@ -1438,6 +1471,29 @@ export async function update(patch) {
         throw new Error('tts.enabled must be a boolean');
       }
       next.tts.enabled = t.enabled;
+    }
+    if (t.fallback !== undefined) {
+      const fb = t.fallback || {};
+      if (fb.enabled !== undefined && typeof fb.enabled !== 'boolean') {
+        throw new Error('tts.fallback.enabled must be a boolean');
+      }
+      // Same strict validator every persona voice slot goes through, so the
+      // per-engine voice rules are enforced identically — `where` names the
+      // full path, so a bad value reads `tts.fallback.voice must ...`.
+      // Deliberately NO cross-field rule of the llm.fallback
+      // "openai-compatible needs baseUrl" kind: a cloud fallback whose provider
+      // has no key simply fails engineUsable() and is skipped at rescue time,
+      // which degrades to the local floor rather than blocking the save.
+      const slot = validateTtsBlock(
+        { ...next.tts.fallback, ...fb },
+        'tts.fallback',
+      );
+      next.tts.fallback = {
+        enabled: fb.enabled !== undefined ? fb.enabled : next.tts.fallback.enabled,
+        engine: slot.engine,
+        voice: slot.voice,
+        cloudProvider: slot.cloudProvider,
+      };
     }
     if (t.heavyEnabled !== undefined) {
       if (typeof t.heavyEnabled !== 'boolean') {
@@ -1585,6 +1641,14 @@ export async function update(patch) {
           throw new Error('tts.cloud.latency must be one of: low, normal, balanced');
         }
         next.tts.cloud.latency = c.latency;
+      }
+      // Extra openai-compatible body fields (issue #1317). Rejected rather than
+      // clamped: unlike a slider, a bad param name or type is a request the
+      // server 4xxs, which mid-show means a silent drop to a local fallback
+      // voice. The rule is shared with the send path — see
+      // settings/compat-params.ts.
+      if (c.compatParams !== undefined) {
+        next.tts.cloud.compatParams = validateCompatParams(c.compatParams);
       }
       // The legacy inline slot is compatibility-owned. Managed providers,
       // including Fish, use process env/state/secrets.env and must never retain

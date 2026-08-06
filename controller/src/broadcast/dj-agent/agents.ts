@@ -30,9 +30,9 @@ export const pickerAgent = defineAgent({
   maxSteps: 2,
   timeoutMs: agentDeadline,
   buildSystem: ({ showAt, playlistTracks }: any = {}) => pickSystem(showAt ?? null, !!playlistTracks?.length),
-  buildTools: ({ recentIds, recentKeys, hardRecentIds, hardRecentKeys, audioWaypoint, genreLock, eraLock, moodLock, energyLock, playlistLock, playlistTracks, excludedIds }) => {
+  buildTools: ({ recentIds, recentKeys, hardRecentIds, hardRecentKeys, audioWaypoint, genreLock, eraLock, moodLock, energyLock, vocalLock, playlistLock, playlistTracks, excludedIds }) => {
     // For a strict show (filtersStrict) EVERY set music filter — genre, era,
-    // mood, energy — becomes a hard lock the discovery tools enforce on
+    // mood, energy, vocals — becomes a hard lock the discovery tools enforce on
     // candidates, not just the prompt. The locks are ALL pre-resolved in
     // pickViaAgent and threaded through run() (async work — genre free text →
     // library tags, library-coverage gating — that this sync builder can't do),
@@ -40,7 +40,14 @@ export const pickerAgent = defineAgent({
     // one place off one show snapshot also keeps the prompt's brief and the
     // tools' locks agreeing across a show boundary. Track length is an on-air
     // cut, NOT a pick filter (#447), so no length cap is passed here.
-    const { tools, seen } = buildPickerTools({ recentIds, recentKeys, hardRecentIds, hardRecentKeys, audioWaypoint, genreLock, eraLock, moodLock, energyLock, playlistLock, playlistTracks, excludedIds });
+    //
+    // Every lock pickViaAgent passes must be named in BOTH the destructure above
+    // and the buildPickerTools call below. run() hands its args through untyped,
+    // so a lock missing from either list is not a type error — it silently takes
+    // buildPickerTools' `null` default and that dimension goes unenforced here
+    // while the pool picker still honours it, i.e. the two pick paths drift on
+    // the same show. Pinned by scripts/picker-lock-forwarding.test.ts.
+    const { tools, seen } = buildPickerTools({ recentIds, recentKeys, hardRecentIds, hardRecentKeys, audioWaypoint, genreLock, eraLock, moodLock, energyLock, vocalLock, playlistLock, playlistTracks, excludedIds });
     return { tools, extras: { seen } };
   },
   // Native-path acceptance: the picked id must be one a discovery tool actually

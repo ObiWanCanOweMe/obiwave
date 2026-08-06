@@ -1,32 +1,5 @@
 'use client';
 
-// Library — /admin/library (redesigned).
-//
-// One merged "Your DJ knows X%" tagging panel up top — coverage, the primary
-// Start-tagging action, and progressive-disclosure Maintenance & log — then a
-// clearer browse/search/untagged experience:
-//   • Recently added — newest album tracks for quick discovery.
-//   • Browse — filters the tagged moods index (mood/energy/genre/year/q).
-//   • Search — Navidrome free-text (/dj/search, paged) plus, when the heavy
-//     analyzer's CLAP text tower is up, a natural-language "sounds like" mode
-//     (/library/search-sound).
-//   • Untagged — paginates through library tracks that haven't been tagged yet.
-//
-// Tab choice, browse filters, and the search query are mirrored into the URL
-// query string (history.replaceState) so reloads and shared links keep the view.
-//
-// Rows carry album art (via the public /cover/:id proxy, letter-tile fallback)
-// and inline mood/energy tags so operators *see* what tagging produces. Each
-// row supports Queue (push to the live queue) and, where applicable, Retag /
-// Tag (single-track LLM classification via /library/retag).
-//
-// All colours come from theme tokens (the operator picks a theme in Settings),
-// so the page renders correctly under every palette — no hardcoded hex.
-//
-// This file owns the panel's state and data fetching; the pieces it renders
-// live in ./library/ (types, bits, Tabs, BrowseFilters, TrackTable, BlockedTab,
-// HistoryTab, ManualTagEditor, AddToPlaylistBar).
-
 import type { ChangeEvent, FormEvent } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Sparkles, RefreshCw, ListMusic, X, Telescope, ArrowRight } from 'lucide-react';
@@ -38,6 +11,7 @@ import { Card, Btn, Seg } from './ui';
 import { llmProviderLabel } from './llm/providerMeta';
 import TaggingPanel, { num } from './LibraryTaggingPanel';
 import type {
+  AnalysisFailure,
   Coverage,
   TaggerState,
   LibraryStatsLite,
@@ -72,6 +46,7 @@ import { Tabs } from './library/Tabs';
 import { BrowseFilters } from './library/BrowseFilters';
 import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
+import { BlockRulesCard } from './library/BlockRulesCard';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
 import {
@@ -88,12 +63,13 @@ export default function LibraryPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const ready = hydrated && !needsAuth;
 
-  // shared state
   const [tab, setTab] = useState<Tab>('tracks');
   const [trackMode, setTrackMode] = useState<TrackMode>('all');
   const trackModeRef = useRef(trackMode);
   trackModeRef.current = trackMode;
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  // null = not fetched yet (the panel shows "Loading…"); [] = fetched, empty.
+  const [failures, setFailures] = useState<AnalysisFailure[] | null>(null);
   const [tagger, setTagger] = useState<TaggerState | null>(null);
   const [libStats, setLibStats] = useState<LibraryStatsLite | null>(null);
   const [batch, setBatch] = useState<Batch>('500');
@@ -102,29 +78,25 @@ export default function LibraryPanel() {
   const [audioEnabled, setAudioEnabled] = useState<boolean | null>(null);
   // settings.audio.vocalActivity — null until the first /settings poll lands.
   const [vocalEnabled, setVocalEnabled] = useState<boolean | null>(null);
-  // settings.audio.analyzeQuietOnly + analyzeQuietMinutes — the quiet-times
-  // gate (#1099); null until the first /settings poll lands.
+  // settings.audio.analyzeQuietOnly + analyzeQuietMinutes — quiet-times gate (#1099).
   const [quietEnabled, setQuietEnabled] = useState<boolean | null>(null);
   const [quietMins, setQuietMins] = useState<number | null>(null);
   // Daily-token-budget tier from /settings — null until the first slow poll lands.
   const [budgetMode, setBudgetMode] = useState<BudgetMode | null>(null);
-  // Provider attribution for the Tagging modal (#1162) — "Google · gemini-2.0-
-  // flash-lite" for the LLM seed calls, "OpenAI" for the embedding calls. Null
-  // until the slow poll lands (the modal omits the attribution).
+  // Provider attribution for the Tagging modal (#1162). Null until the slow
+  // poll lands, and the modal then omits the attribution.
   const [llmLabel, setLlmLabel] = useState<string | null>(null);
   const [embedLabel, setEmbedLabel] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [queuing, setQueuing] = useState<string | null>(null);
   const [retagging, setRetagging] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  // manual tagging — which row's inline editor is open, and which is saving.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [manualBusy, setManualBusy] = useState<string | null>(null);
-  // Mood vocab, lifted out of the browse response so the editor has it on any
-  // tab (browse is the only call that returns it; lazily fetched otherwise).
+  // Browse is the only call that returns the mood vocab, so it's lifted out
+  // here and lazily fetched on other tabs.
   const [vocab, setVocab] = useState<string[]>([]);
 
-  // browse state
   const [moods, setMoods] = useState<string[]>([]);
   const [energy, setEnergy] = useState<Energy>('any');
   const [vocal, setVocal] = useState<Vocal>('any');
@@ -137,10 +109,8 @@ export default function LibraryPanel() {
   const [browse, setBrowse] = useState<BrowseResponse | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
 
-  // genre list (lazy)
   const [genreList, setGenreList] = useState<{ value: string; songCount: number }[]>([]);
 
-  // search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('library');
   const [searchResults, setSearchResults] = useState<Track[] | null>(null);
@@ -148,23 +118,20 @@ export default function LibraryPanel() {
   // Library-mode paging: a full page from /dj/search means more may exist.
   const [searchHasMore, setSearchHasMore] = useState(false);
   const [searchingMore, setSearchingMore] = useState(false);
-  // The query/mode that produced searchResults — Load more must page THAT
-  // search, not whatever is currently typed in the (maybe edited) input.
+  // Load more must page the search that produced searchResults, not whatever is
+  // currently typed in the (maybe edited) input.
   const lastSearchRef = useRef<{ q: string; mode: SearchMode } | null>(null);
 
-  // untagged state
   const [untagged, setUntagged] = useState<Track[]>([]);
   const [untaggedCursor, setUntaggedCursor] = useState<string | null>(null);
   const [untaggedLoading, setUntaggedLoading] = useState(false);
 
-  // recent state
   const [recent, setRecent] = useState<Track[] | null>(null);
   const [recentLoading, setRecentLoading] = useState(false);
 
-  // likes state (#1253). `likeIndex` decorates rows on EVERY tab, so it's
-  // fetched once on mount rather than per listing — browse, search and
-  // sounds-like results come from three different sources and only this map
-  // covers all of them. `liked` is the Liked mode's own paged listing.
+  // Likes (#1253). `likeIndex` decorates rows on EVERY tab, so it's fetched once
+  // on mount: browse, search and sounds-like results come from three different
+  // sources and only this map covers all of them.
   const [likeIndex, setLikeIndex] = useState<LikeIndex>({});
   const likeIndexRequestGeneration = useRef(0);
   const [liking, setLiking] = useState<string | null>(null);
@@ -176,38 +143,29 @@ export default function LibraryPanel() {
   const likedRequestGeneration = useRef(0);
   const [pendingClearLikes, setPendingClearLikes] = useState<Track | null>(null);
 
-  // playlist state — row selection (any track tab) + the Navidrome playlist
-  // list shared by the add-to-playlist bar and the Playlists tab.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null);
   const [plBusy, setPlBusy] = useState(false);
 
-  // play-history state — the paged entry list for the History tab.
   const [historyRows, setHistoryRows] = useState<PlayEntry[] | null>(null);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // never-play blocklist state — the entry list for the Blocked tab, plus
-  // which row's block action / which entry's unblock is in flight.
   const [blockedEntries, setBlockedEntries] = useState<BlockEntry[] | null>(null);
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blocking, setBlocking] = useState<string | null>(null);
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // -----------------------------------------------------------------------
-  // URL state — tab, browse filters, and the search query live in the query
-  // string so a reload / back-button / shared link lands on the same view.
+  // Tab, browse filters and the search query mirror into the query string.
   // Restored once on mount (post-hydration, so no SSR mismatch); written back
-  // via history.replaceState (no Next.js navigation, no server round-trip).
-  // -----------------------------------------------------------------------
+  // via history.replaceState, not a Next.js navigation.
   const [urlRestored, setUrlRestored] = useState(false);
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const t = sp.get('tab');
-    // Legacy links: the old Recent and Untagged tabs are now Tracks (+ mode);
-    // the old Playlists tab is the dedicated builder screen.
+    // Legacy links: Recent/Untagged are now Tracks modes, Playlists its own screen.
     if (t === 'untagged') { setTab('tracks'); setTrackMode('needs'); }
     else if (t === 'recent') setTab('tracks');
     else if (t === 'playlists') { window.location.replace('/admin/playlists'); return; }
@@ -256,17 +214,14 @@ export default function LibraryPanel() {
     window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
   }, [urlRestored, tab, trackMode, moods, energy, vocal, genre, yearFrom, yearTo, q, sort, searchQuery, searchMode]);
 
-  // If coverage says the sound search can't serve (lean analyzer, no audio
-  // index), drop back to the metadata mode the toggle would otherwise hide.
+  // A lean analyzer can't serve sound search, so fall back to metadata mode —
+  // the toggle that would switch back is hidden in that case.
   useEffect(() => {
     if (coverage && coverage.soundSearchAvailable !== true && searchMode === 'sound') {
       setSearchMode('library');
     }
   }, [coverage, searchMode]);
 
-  // -----------------------------------------------------------------------
-  // polling — coverage (60 s) + tagger status (3 s while running, 10 s idle)
-  // -----------------------------------------------------------------------
   const loadCoverage = useCallback(async () => {
     if (!ready) return;
     try {
@@ -276,8 +231,34 @@ export default function LibraryPanel() {
     } catch { /* transient */ }
   }, [adminFetch, ready]);
 
-  // Fast loop payload — just the live tagger snapshot (GET /library/tagger), so a
-  // 3s running poll doesn't drag the whole heavy /settings body across each time.
+  // Per-track analysis failures (#1300 bug 3c). Fetched on demand, never
+  // polled: `coverage.analysisFailed` already says whether there is anything to
+  // look at, and on a healthy station the answer is zero forever.
+  const loadFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures?limit=200');
+      if (!r.ok) return;
+      const j = (await r.json()) as { failures?: AnalysisFailure[] };
+      setFailures(j.failures || []);
+    } catch { /* transient */ }
+  }, [adminFetch, ready]);
+
+  // Forget the failure history so the next run retries these tracks — the
+  // operator's move after fixing the cause. Refreshes coverage so the banner
+  // (driven by the count, not the list) goes away.
+  const clearFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures/clear', { method: 'POST' });
+      if (!r.ok) return;
+      setFailures([]);
+      loadCoverage();
+    } catch { /* transient */ }
+  }, [adminFetch, ready, loadCoverage]);
+
+  // Fast loop: just the tagger snapshot, so a 3s running poll doesn't drag the
+  // whole heavy /settings body across each time.
   const loadTaggerState = useCallback(async () => {
     if (!ready) return;
     try {
@@ -288,10 +269,8 @@ export default function LibraryPanel() {
     } catch { /* transient */ }
   }, [adminFetch, ready]);
 
-  // Slow loop payload — the settings-derived bits the panel shows but that change
-  // rarely: library stats, the audio/vocal opt-in toggles, and the daily-budget
-  // tier. Deliberately does NOT touch tagger state (the fast loop owns that) so
-  // the two pollers never race on it.
+  // Slow loop: the rarely-changing settings-derived bits. Deliberately does NOT
+  // touch tagger state (the fast loop owns it) so the two pollers never race.
   const loadSettingsData = useCallback(async () => {
     if (!ready) return;
     try {
@@ -310,11 +289,9 @@ export default function LibraryPanel() {
         );
       }
       if (j.budget) setBudgetMode(j.budget.mode);
-      // Which provider each tagging cost bills to (#1162). The tag-moods seed
-      // calls always ride the chat LLM legs (tag-library resolveTagConsumers);
-      // a blank embedding provider follows the LLM provider. Embedding model is
-      // shown only when explicitly set — the provider-default resolution table
-      // lives in Settings → Library and isn't duplicated here.
+      // Which provider each tagging cost bills to (#1162). A blank embedding
+      // provider follows the LLM provider; the embedding model shows only when
+      // explicitly set (the default resolution table lives in Settings).
       if (j.values?.llm?.provider) {
         const llm = j.values.llm;
         setLlmLabel(llmProviderLabel(llm.provider) + (llm.model ? ` · ${llm.model}` : ''));
@@ -332,7 +309,6 @@ export default function LibraryPanel() {
     return () => clearInterval(id);
   }, [ready, loadCoverage]);
 
-  // Fast: tagger state — 3s while a run is live so progress is snappy, 10s idle.
   useEffect(() => {
     if (!ready) return;
     loadTaggerState();
@@ -341,7 +317,6 @@ export default function LibraryPanel() {
     return () => clearInterval(id);
   }, [ready, loadTaggerState, tagger?.running]);
 
-  // Slow: settings-derived data (stats / audio toggles / budget) — 30s + on mount.
   useEffect(() => {
     if (!ready) return;
     loadSettingsData();
@@ -356,11 +331,8 @@ export default function LibraryPanel() {
     return () => clearInterval(id);
   }, [ready, tagger?.running, loadCoverage]);
 
-  // -----------------------------------------------------------------------
-  // browse fetch — debounced on filter change. Each run aborts the previous
-  // in-flight request: without this, a slow earlier response can land after a
-  // faster later one and overwrite the table with results for stale filters.
-  // -----------------------------------------------------------------------
+  // Each run aborts the previous in-flight request: without it a slow earlier
+  // response can land after a faster later one and show stale-filter results.
   const browseAbortRef = useRef<AbortController | null>(null);
   const runBrowse = useCallback(async () => {
     if (!ready) return;
@@ -399,7 +371,6 @@ export default function LibraryPanel() {
     return () => clearTimeout(t);
   }, [ready, tab, runBrowse]);
 
-  // genre dropdown — fetch once
   useEffect(() => {
     if (!ready || genreList.length) return;
     let cancelled = false;
@@ -414,14 +385,10 @@ export default function LibraryPanel() {
     return () => { cancelled = true; };
   }, [ready, adminFetch, genreList.length]);
 
-  // reset to page 0 when any filter (other than page itself) changes
   useEffect(() => { setPage(0); }, [moods, energy, vocal, genre, yearFrom, yearTo, q, sort]);
 
-  // -----------------------------------------------------------------------
-  // search fetch — two modes: 'library' pages Navidrome metadata search
-  // (/dj/search, offset appends), 'sound' is the one-shot natural-language
-  // CLAP sounds-like search (/library/search-sound, no paging — fixed KNN).
-  // -----------------------------------------------------------------------
+  // 'library' pages Navidrome metadata search by offset; 'sound' is a one-shot
+  // CLAP search with no paging (fixed KNN).
   const executeSearch = useCallback(async (text: string, mode: SearchMode, offset: number) => {
     if (!text || !ready) return;
     const append = offset > 0;
@@ -465,7 +432,7 @@ export default function LibraryPanel() {
     if (last) executeSearch(last.q, last.mode, searchResults?.length || 0);
   };
 
-  // Deep link with a search query (?tab=search&sq=…) — run it once auth is up.
+  // Deep link (?tab=search&sq=…) runs once auth is up.
   const autoSearchedRef = useRef(false);
   useEffect(() => {
     if (!ready || !urlRestored || autoSearchedRef.current) return;
@@ -473,9 +440,6 @@ export default function LibraryPanel() {
     if (tab === 'search' && searchQuery.trim()) executeSearch(searchQuery.trim(), searchMode, 0);
   }, [ready, urlRestored, tab, searchQuery, searchMode, executeSearch]);
 
-  // -----------------------------------------------------------------------
-  // untagged paging
-  // -----------------------------------------------------------------------
   const loadUntagged = useCallback(async (cursor: string | null, append: boolean) => {
     if (!ready) return;
     setUntaggedLoading(true);
@@ -499,9 +463,6 @@ export default function LibraryPanel() {
     if (untagged.length === 0) loadUntagged(null, false);
   }, [tab, trackMode, ready, untagged.length, loadUntagged]);
 
-  // -----------------------------------------------------------------------
-  // recent fetch
-  // -----------------------------------------------------------------------
   const loadRecent = useCallback(async () => {
     if (!ready) return;
     setRecentLoading(true);
@@ -523,9 +484,7 @@ export default function LibraryPanel() {
     if (recent === null) loadRecent();
   }, [tab, trackMode, ready, recent, loadRecent]);
 
-  // -----------------------------------------------------------------------
-  // likes (#1253) — the shared index plus the Liked mode's own listing
-  // -----------------------------------------------------------------------
+  // Likes (#1253) — the shared index plus the Liked mode's own listing.
   const loadLikeIndex = useCallback(async () => {
     if (!ready) return;
     const request = beginLibraryRequest({
@@ -623,8 +582,7 @@ export default function LibraryPanel() {
     setLikedSort(next);
   };
 
-  // Patch the index (and any inline row fields) without a refetch — the whole
-  // point of the optimistic toggle is that the heart responds immediately.
+  // Patches the index without a refetch so the heart responds immediately.
   const patchLike = (id: string, next: { count: number; operator: boolean } | null) => {
     setLikeIndex(prev => {
       const out = { ...prev };
@@ -662,8 +620,8 @@ export default function LibraryPanel() {
         });
       const j = await r.json().catch(() => ({})) as { count?: number; error?: string };
       if (!r.ok) throw new Error(j.error || `like failed (${r.status})`);
-      // Settle on the server's count, which also folds in any listener likes
-      // that landed between render and click.
+      // Settle on the server's count — it folds in listener likes that landed
+      // between render and click.
       patchLike(track.id, { count: j.count ?? 0, operator: !isLiked });
       // In Liked mode a track nobody likes any more is no longer in the list.
       if (isLiked && (j.count ?? 0) === 0) {
@@ -729,12 +687,10 @@ export default function LibraryPanel() {
     }
   }, [adminFetch, ready]);
 
-  // Selection is per-view: switching tabs drops it (ids from another tab would
-  // be invisible, and "Add 12" with 9 off-screen rows is a foot-gun).
+  // Selection is per-view: ids from another tab would be invisible, and
+  // "Add 12" with 9 off-screen rows is a foot-gun.
   useEffect(() => { setSelected(new Set()); }, [tab]);
 
-  // The add-bar's dropdown needs the playlist list the first time a selection
-  // appears on a track tab — fetch lazily, once.
   useEffect(() => {
     if (selected.size > 0 && playlists === null && ready) loadPlaylists();
   }, [selected.size, playlists, ready, loadPlaylists]);
@@ -789,9 +745,6 @@ export default function LibraryPanel() {
     }
   };
 
-  // -----------------------------------------------------------------------
-  // play history
-  // -----------------------------------------------------------------------
   const loadHistory = useCallback(async (page: number) => {
     if (!ready) return;
     setHistoryLoading(true);
@@ -812,9 +765,6 @@ export default function LibraryPanel() {
     if (tab === 'history' && ready) loadHistory(historyPage);
   }, [tab, ready, historyPage, loadHistory]);
 
-  // -----------------------------------------------------------------------
-  // never-play blocklist
-  // -----------------------------------------------------------------------
   const loadBlocked = useCallback(async () => {
     if (!ready) return;
     setBlockedLoading(true);
@@ -834,11 +784,9 @@ export default function LibraryPanel() {
     if (tab === 'blocked' && ready) loadBlocked();
   }, [tab, ready, loadBlocked]);
 
-  // Re-mark the rows already on screen after a block or unblock. Refetching the
-  // tab instead would lose pagination and re-hit Navidrome on the Search tab,
-  // and matching client-side would mean a second copy of the normalised-name
-  // rules in music/blocklist.ts, free to drift. The server owns the answer;
-  // this just asks it about the rows we're holding.
+  // Re-marks the rows already on screen: refetching the tab would lose
+  // pagination and re-hit Navidrome, and matching client-side would duplicate
+  // the normalised-name rules in music/blocklist.ts, free to drift.
   const recheckBlocked = useCallback(async () => {
     const pools: Track[][] = [browse?.rows || [], searchResults || [], untagged, recent || [], liked || []];
     const byId = new Map<string, Track>();
@@ -847,8 +795,7 @@ export default function LibraryPanel() {
     const rows = [...byId.values()].map(t => ({ id: t.id, artist: t.artist, album: t.album }));
     try {
       const map: Record<string, BlockRef | null> = {};
-      // Chunked to stay under the endpoint's per-call cap, which a Search tab
-      // paged deep with Load more can otherwise exceed.
+      // Chunked to stay under the endpoint's per-call cap.
       for (let i = 0; i < rows.length; i += CHECK_CHUNK) {
         const r = await adminFetch('/library/blocklist/check', {
           method: 'POST',
@@ -866,14 +813,13 @@ export default function LibraryPanel() {
       setRecent(prev => (prev ? prev.map(patch) : prev));
       setLiked(prev => (prev ? prev.map(patch) : prev));
     } catch {
-      // Enrichment, not the operation — the block itself succeeded. Leave the
-      // last-known marks rather than blaming the operator with a toast.
+      // Enrichment, not the operation — the block itself succeeded, so leave
+      // the last-known marks rather than toasting.
     }
   }, [adminFetch, browse, searchResults, untagged, recent, liked]);
 
-  // Lift one entry. Shared by the Blocked tab's Unblock button, the row-level
-  // unblock, and the Undo action on the block toast, so all three converge on
-  // the same request, the same list update and the same re-mark.
+  // Shared by the Blocked tab's Unblock, the row-level unblock and the block
+  // toast's Undo, so all three get the same list update and re-mark.
   const removeEntry = useCallback(async (
     e: { type: BlockType; id: string; name?: string | null },
     { quiet = false }: { quiet?: boolean } = {},
@@ -900,9 +846,8 @@ export default function LibraryPanel() {
       if (!r.ok) throw new Error(j.error || `block failed (${r.status})`);
       const what = type === 'track' ? `“${track.title}”` : type === 'album' ? `album “${track.album}”` : track.artist;
       const entry = j.entry;
-      // Undo rather than a confirm dialog: a modal would tax every correct
-      // block to guard the occasional misclick, and the row badge means a
-      // wrong scope is visible even after the toast goes.
+      // Undo rather than a confirm dialog: the row badge keeps a wrong scope
+      // visible even after the toast goes.
       const msg = `${what} will never air${j.purged ? ` · ${j.purged} dropped from queue` : ''}`;
       if (entry) {
         notify.undo(msg, () => {
@@ -933,9 +878,12 @@ export default function LibraryPanel() {
     }
   };
 
-  // Row-level unblock: lifts whichever entry matched this row, which may be an
-  // album or artist block made from a different row entirely.
+  // Lifts whichever entry matched this row — possibly an album or artist block
+  // made from a different row entirely. Rule refs never reach here (TrackTable
+  // offers no one-click unblock for them — a rule can block hundreds of rows),
+  // so the guard is a type-level formality.
   const unblockRow = async (track: Track, ref: BlockRef) => {
+    if (ref.kind === 'rule') return;
     setBlocking(track.id);
     try {
       await removeEntry(ref);
@@ -946,9 +894,8 @@ export default function LibraryPanel() {
     }
   };
 
-  // Bulk unblock from the Blocked tab. One request, not N concurrent DELETEs:
-  // the controller rewrites blocklist.json once, so parallel single removes
-  // could persist a stale snapshot.
+  // One request, not N concurrent DELETEs: the controller rewrites
+  // blocklist.json once, so parallel removes could persist a stale snapshot.
   const bulkUnblock = async (batch: BlockEntry[]) => {
     if (batch.length === 0) return;
     setBulkBusy(true);
@@ -972,9 +919,6 @@ export default function LibraryPanel() {
     }
   };
 
-  // -----------------------------------------------------------------------
-  // row actions
-  // -----------------------------------------------------------------------
   const queueTrack = async (track: Track) => {
     setQueuing(track.id);
     try {
@@ -1009,8 +953,8 @@ export default function LibraryPanel() {
       setTimeout(() => setFlashId(curr => (curr === track.id ? null : curr)), 1100);
       if (tab === 'browse') runBrowse();
       if (tab === 'tracks' && trackMode === 'needs') setUntagged(prev => prev.filter(t => t.id !== track.id));
-      // Search/recent rows aren't refetched — patch the row so the new tags
-      // show immediately (the server stamps retagged rows source='llm').
+      // Search/recent rows aren't refetched, so patch them in place. The server
+      // stamps retagged rows source='llm'.
       if (tab === 'search') setSearchResults(prev => patchRows(prev, track, j.moods || [], j.energy ?? null, false, false, 'llm'));
       if (tab === 'tracks' && trackMode === 'all') setRecent(prev => patchRows(prev, track, j.moods || [], j.energy ?? null, false, false, 'llm'));
       loadCoverage();
@@ -1021,9 +965,8 @@ export default function LibraryPanel() {
     }
   };
 
-  // Mood vocab only rides along on the browse response. Keep `vocab` synced
-  // from it, and lazily fetch a one-row browse when the editor opens on a tab
-  // that hasn't loaded browse yet — avoids hardcoding SHOW_MOODS in the bundle.
+  // The vocab only rides along on the browse response, so other tabs fetch a
+  // one-row browse rather than hardcoding SHOW_MOODS into the bundle.
   useEffect(() => {
     if (browse?.moodVocab?.length) setVocab(browse.moodVocab);
   }, [browse]);
@@ -1043,10 +986,8 @@ export default function LibraryPanel() {
     setEditingId(t.id);
   };
 
-  // Patch the visible rows after a tag write so search/recent reflect it
-  // without a refetch. Album siblings in view update too when applyToAlbum.
-  // `source` mirrors what the server stamped: 'manual' for the inline editor,
-  // 'llm' for single-track retag.
+  // `source` must mirror what the server stamped: 'manual' for the inline
+  // editor, 'llm' for single-track retag.
   const patchRows = (
     rows: Track[] | null, track: Track,
     moods: string[], energy: string | null, cleared: boolean, applyToAlbum: boolean,
@@ -1102,9 +1043,6 @@ export default function LibraryPanel() {
     }
   };
 
-  // -----------------------------------------------------------------------
-  // tagger controls
-  // -----------------------------------------------------------------------
   const remaining = coverage?.total != null ? Math.max(0, coverage.total - coverage.tagged) : null;
 
   const startTagger = async (steps?: TagSteps) => {
@@ -1112,8 +1050,7 @@ export default function LibraryPanel() {
     try {
       const limit = batch === 'all' ? null : parseInt(batch, 10);
       const body: Record<string, unknown> = limit && limit > 0 ? { limit } : {};
-      // Forward-run step toggles from the modal's Run tab; absent on the legacy
-      // "Tag all" quick action, which then sends a plain full run.
+      // Absent on the legacy "Tag all" quick action, which sends a plain full run.
       if (steps) Object.assign(body, steps);
       const r = await adminFetch('/tag-library', {
         method: 'POST',
@@ -1147,16 +1084,9 @@ export default function LibraryPanel() {
     }
   };
 
-  // Re-scan with explicit flags — each maps to a tag-library CLI flag:
-  //   reseed     drop + rebuild every embedding from scratch (model-swap recovery)
-  //   reEnrich   re-fetch Last.fm tags + lyrics that feed the embeddings
-  //   reAnalyze  redo acoustic bpm/key analysis
-  //   upgrade    re-LLM-tag only rows whose prompt/model is stale
-  // Sends no limit — a partial reseed leaves the library in a mixed state KNN
-  // can't use. Existing mood tags survive as seeds, so a reseed re-spends
-  // embedding calls, not LLM. `thenTag` (reseed-only) rides along in opts: it
-  // continues into the forward tag pass after the whole-library re-embed, still
-  // with no limit so every untagged track is processed.
+  // Each opt maps to a tag-library CLI flag (reseed / reEnrich / reAnalyze /
+  // upgrade). Sends no limit — a partial reseed leaves the library in a mixed
+  // state KNN can't use, and `thenTag` continues into a full forward pass.
   const rescanTagger = async (opts: RescanOpts) => {
     setTaggerBusy(true);
     try {
@@ -1177,8 +1107,8 @@ export default function LibraryPanel() {
     }
   };
 
-  // Flip settings.audio.embeddings — the "sounds-like" (CLAP) opt-in. The
-  // toggle only persists the setting; vectors appear after an analysis run.
+  // Flips settings.audio.embeddings (the CLAP opt-in). Only persists the
+  // setting — vectors appear after an analysis run.
   const toggleAudio = async () => {
     if (audioEnabled == null) return;
     setTaggerBusy(true);
@@ -1191,8 +1121,7 @@ export default function LibraryPanel() {
       const j = await r.json().catch(() => ({})) as { error?: string };
       if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
       setAudioEnabled(!audioEnabled);
-      // When the analyzer can't fingerprint yet (lean image), frame enabling as
-      // pending rather than done — the incapable banner below explains the upgrade.
+      // On a lean analyzer, enabling is pending rather than done.
       const audioPending =
         coverage?.analysisAvailable !== false && coverage?.audioAnalysisAvailable === false;
       notify.ok(
@@ -1202,8 +1131,8 @@ export default function LibraryPanel() {
             : 'sounds-like analysis enabled'
           : 'sounds-like analysis disabled',
       );
-      // The toggle lives on the slow /settings loop — refresh it now so a manual
-      // re-open / status recompute doesn't wait up to 30s to reflect the flip.
+      // The toggle rides the slow /settings loop; refresh now so the flip shows
+      // without waiting out the 30s tick.
       void loadSettingsData();
     } catch (err) {
       notify.err(errorMessage(err));
@@ -1212,11 +1141,8 @@ export default function LibraryPanel() {
     }
   };
 
-  // Reconcile with Navidrome — walk the catalogue and prune library entries
-  // for tracks that no longer exist (deleted files, or IDs re-minted by a full
-  // rescan). No LLM/embedding cost; reuses the tagger's single-flight slot, so
-  // the running view + stop button below cover it. Usable at 100% coverage,
-  // where Start tagging is disabled.
+  // Prunes library entries whose tracks no longer exist in Navidrome. No
+  // LLM/embedding cost, and it reuses the tagger's single-flight slot.
   const reconcile = async () => {
     setTaggerBusy(true);
     try {
@@ -1237,9 +1163,7 @@ export default function LibraryPanel() {
     }
   };
 
-  // Run the analysis pass (bpm/key + audio fingerprints) as a background
-  // child — same single-flight state as the tagger, so the running view and
-  // stop button below cover it too.
+  // Runs as a background child on the tagger's single-flight state.
   const analyzeAudio = async () => {
     setTaggerBusy(true);
     try {
@@ -1260,8 +1184,7 @@ export default function LibraryPanel() {
     }
   };
 
-  // Flip settings.audio.vocalActivity — the Demucs vocal-activity opt-in (#646).
-  // Mirrors toggleAudio; env ANALYZE_VOCAL_ACTIVITY still wins "on".
+  // Demucs vocal-activity opt-in (#646). Env ANALYZE_VOCAL_ACTIVITY still wins "on".
   const toggleVocal = async () => {
     if (vocalEnabled == null) return;
     setTaggerBusy(true);
@@ -1284,9 +1207,8 @@ export default function LibraryPanel() {
             : 'vocal-activity analysis enabled'
           : 'vocal-activity analysis disabled',
       );
-      // Refresh the slow settings-derived state now rather than waiting for its
-      // tick — and coverage too, so the coverage-driven bits (vocalStatus, the
-      // vocal meter row) catch up without waiting out the 60s poll.
+      // Refresh both loops now so the coverage-driven bits (vocalStatus, the
+      // vocal meter row) don't wait out the 60s poll.
       void loadSettingsData();
       void loadCoverage();
     } catch (err) {
@@ -1296,11 +1218,9 @@ export default function LibraryPanel() {
     }
   };
 
-  // Flip settings.audio.analyzeQuietOnly — the quiet-times gate (#1099): any
-  // analysis run pauses while listeners are tuned in, resuming after the idle
-  // window. The pass re-reads the toggle from disk on every check, so a flip
-  // takes effect mid-run within one track; env ANALYZE_QUIET_ONLY still wins
-  // "on".
+  // Quiet-times gate (#1099): analysis pauses while listeners are tuned in. The
+  // pass re-reads the toggle from disk on every check, so a flip takes effect
+  // mid-run; env ANALYZE_QUIET_ONLY still wins "on".
   const toggleQuiet = async () => {
     if (quietEnabled == null) return;
     setTaggerBusy(true);
@@ -1326,8 +1246,7 @@ export default function LibraryPanel() {
     }
   };
 
-  // Persist a new idle window for the quiet-times gate (minutes, 1–120) —
-  // committed by the panel's number input on blur/Enter.
+  // Idle window for the quiet-times gate, in minutes (1–120).
   const saveQuietMinutes = async (minutes: number) => {
     setTaggerBusy(true);
     try {
@@ -1348,8 +1267,7 @@ export default function LibraryPanel() {
     }
   };
 
-  // Backfill Demucs vocal ranges on tracks that lack them — POST with vocal:true
-  // so the analyze pass forces the vocal scope (#646).
+  // vocal:true forces the analyze pass into the vocal scope (#646).
   const vocalBackfill = async () => {
     setTaggerBusy(true);
     try {
@@ -1370,10 +1288,8 @@ export default function LibraryPanel() {
     }
   };
 
-  // Reset — wipe ALL tagging data (tags, embeddings, acoustics, enrichment) and
-  // start fresh. Deletes library.db server-side; the Navidrome library itself is
-  // untouched, so every track simply returns to the untagged pool. Gated behind
-  // the modal's typed confirmation. Refused (409) while a tagger run is active.
+  // Deletes library.db server-side; Navidrome is untouched, so every track
+  // returns to the untagged pool. Refused (409) while a tagger run is active.
   const resetLibrary = async () => {
     setTaggerBusy(true);
     try {
@@ -1385,8 +1301,7 @@ export default function LibraryPanel() {
       const j = await r.json().catch(() => ({})) as { error?: string };
       if (!r.ok) throw new Error(j.error || `reset failed (${r.status})`);
       notify.ok('library reset — all tagging data wiped');
-      // Everything the tables/meters showed is gone. Refresh coverage + settings
-      // and drop the cached views so each tab reloads against the empty library.
+      // Drop the cached views so each tab reloads against the empty library.
       await loadCoverage();
       void loadSettingsData();
       setBrowse(null);
@@ -1403,9 +1318,6 @@ export default function LibraryPanel() {
     }
   };
 
-  // -----------------------------------------------------------------------
-  // derived
-  // -----------------------------------------------------------------------
   const stats = browse?.stats;
   const moodVocab = browse?.moodVocab || [];
   const moodCounts = stats?.byMood || libStats?.byMood || {};
@@ -1419,8 +1331,7 @@ export default function LibraryPanel() {
     setSort('artist'); setPage(0);
   };
 
-  // What the merged Tracks tab actually shows right now — drives the table's
-  // rows, empty-state copy, and accent Tag button (TrackTable keys on this).
+  // TrackTable keys its rows, empty-state copy and Tag button on this.
   const tableVariant: TableVariant =
     tab === 'tracks'
       ? (trackMode === 'needs' ? 'untagged' : trackMode === 'liked' ? 'liked' : 'recent')
@@ -1437,23 +1348,20 @@ export default function LibraryPanel() {
     tableVariant === 'untagged' ? untaggedLoading :
     tableVariant === 'liked' ? likedLoading :
     recentLoading;
-  // Distinct liked songs — free off the already-fetched index, so the mode
-  // label stays correct after an optimistic toggle with no extra request.
+  // Read off the already-fetched index so the mode label stays correct after an
+  // optimistic toggle with no extra request.
   const likedCount = Object.keys(likeIndex).length;
   const likedPages = Math.max(1, Math.ceil(likedTotal / PAGE_SIZE));
 
   return (
-    // grid-cols-1: the implicit `auto` track is sized by its items' min-content,
-    // so a doorway card's un-shrinkable copy blew the whole column (and every
-    // card stretched to it) past a phone viewport. minmax(0,1fr) caps the track.
+    // grid-cols-1: the implicit `auto` track is sized by min-content, so a
+    // doorway card's un-shrinkable copy blew the column past a phone viewport.
     <div className="grid grid-cols-1 gap-5">
-      {/* Doorways — Playlists and the Observatory live inside Library now
-          (pulled out of the sidebar); these are their front doors. */}
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <a
           href="/admin/playlists"
-          // min-w-0: a grid item's automatic minimum is its min-content, which
-          // the nowrap/truncated blurb below would otherwise pin ~510px wide.
+          // min-w-0: a grid item's automatic minimum is min-content, which the
+          // truncated blurb below would otherwise pin ~510px wide.
           className="group flex min-w-0 items-center gap-3.5 border border-ink bg-bg p-3.5 transition-colors hover:bg-ink-soft"
         >
           <span className="grid size-9 flex-none place-items-center border border-ink bg-[var(--accent)] text-white">
@@ -1511,11 +1419,13 @@ export default function LibraryPanel() {
         budgetMode={budgetMode}
         llmLabel={llmLabel}
         embedLabel={embedLabel}
+        failures={failures}
+        onLoadFailures={loadFailures}
+        onClearFailures={clearFailures}
       />
 
       <Tabs tab={tab} setTab={setTab} />
 
-      {/* contextual controls */}
       {tab === 'browse' && (
         <BrowseFilters
           moodVocab={moodVocab}
@@ -1565,8 +1475,7 @@ export default function LibraryPanel() {
       {tab === 'search' && (
         <Card bodyClass="!py-3">
           <div className="grid gap-2.5">
-            {/* Mode toggle only when the CLAP text tower + audio index exist —
-                on lean installs the tab stays plain metadata search. */}
+            {/* On lean installs the tab stays plain metadata search. */}
             {coverage?.soundSearchAvailable === true && (
               <div className="flex flex-wrap items-center gap-3">
                 <Seg
@@ -1588,16 +1497,14 @@ export default function LibraryPanel() {
                 )}
               </div>
             )}
-            {/* Phone: the query takes a full row of its own and the two buttons
-                share the row under it; from sm: the original single-row grid. */}
+            {/* Phone: query on its own row, both buttons on the row under it. */}
             <form onSubmit={runSearch} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_auto_auto]">
               <InputGroup className="col-span-2 sm:col-span-1">
                 <InputGroupAddon><Search /></InputGroupAddon>
                 <InputGroupInput
-                  // `required` only; deliberately no minLength — one-character
-                  // queries are legitimate here (an album called "1", an artist
-                  // filed under "M") and a length floor would reject them with a
-                  // native validation bubble.
+                  // Deliberately no minLength: one-character queries are
+                  // legitimate (an album called "1") and a floor would reject
+                  // them with a native validation bubble.
                   required
                   placeholder={searchMode === 'sound'
                     ? 'dusty late-night jazz with brushed drums, warm acoustic fingerpicking…'
@@ -1617,7 +1524,6 @@ export default function LibraryPanel() {
         </Card>
       )}
 
-      {/* add-to-playlist bar — appears when rows are selected on a track tab */}
       {tab !== 'blocked' && tab !== 'history' && selected.size > 0 && (
         <AddToPlaylistBar
           count={selected.size}
@@ -1629,15 +1535,21 @@ export default function LibraryPanel() {
       )}
 
       {tab === 'blocked' && (
-        <BlockedTab
-          entries={blockedEntries}
-          loading={blockedLoading}
-          unblocking={unblocking}
-          bulkBusy={bulkBusy}
-          onUnblock={unblockEntry}
-          onBulkUnblock={bulkUnblock}
-          onRefresh={loadBlocked}
-        />
+        <>
+          {/* Attribute rules above the id entries — one "why won't this air"
+              surface, two kinds of block. Self-contained; after a rule change
+              only the row marks on the other tabs need re-stamping. */}
+          <BlockRulesCard onChanged={() => { void recheckBlocked(); }} />
+          <BlockedTab
+            entries={blockedEntries}
+            loading={blockedLoading}
+            unblocking={unblocking}
+            bulkBusy={bulkBusy}
+            onUnblock={unblockEntry}
+            onBulkUnblock={bulkUnblock}
+            onRefresh={loadBlocked}
+          />
+        </>
       )}
 
       {tab === 'history' && (
@@ -1653,7 +1565,6 @@ export default function LibraryPanel() {
         />
       )}
 
-      {/* track list */}
       {tab !== 'blocked' && tab !== 'history' && (
       <Card
         title={
@@ -1803,9 +1714,3 @@ export default function LibraryPanel() {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// tabs
-// ---------------------------------------------------------------------------
-// Masthead tabs: icon left, name + subtitle stacked right. No count badges —
-// the panel subtitle below reports the real numbers for whichever view is open.

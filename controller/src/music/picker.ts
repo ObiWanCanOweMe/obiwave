@@ -16,7 +16,7 @@ import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
 import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
-import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type YearRange } from './show-filter.js';
+import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import * as likes from '../broadcast/likes.js';
 
@@ -156,7 +156,7 @@ function softRankByCompat(pool: Candidate[], current: { bpm: number | null; key:
 
 // Multi-value lists (#929): OR within an attribute, AND across attributes.
 // Empty list = no constraint on that attribute.
-type ShowFilter = { moods: string[]; genres: string[]; eras: YearRange[]; energies: string[]; strict?: boolean } | null;
+type ShowFilter = { moods: string[]; genres: string[]; eras: YearRange[]; energies: string[]; vocals: VocalMode; strict?: boolean } | null;
 
 function hasMusicFilter(f: ShowFilter): boolean {
   return !!f && (f.genres.length > 0 || hasEraBound(f.eras));
@@ -217,7 +217,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // Soft mode leaves the sources untouched (only the nz() shrink applies).
   const strict = !!(showFilter?.strict
     && (showFilter.genres.length || showFilter.moods.length || showFilter.energies.length
-      || hasEraBound(showFilter.eras)));
+      || showFilter.vocals || hasEraBound(showFilter.eras)));
   // Resolve the show's free-text genres to the library's exact tags ONCE, up
   // front. A resolution failure drops that entry (never-starve: none resolving
   // means no genre filter at all, so misspelled genres never strand the show).
@@ -245,6 +245,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     out = preferEra(out, showFilter!.eras);
     out = preferMood(out, showFilter!.moods);
     out = preferEnergyStrict(out, showFilter!.energies);
+    out = preferVocals(out, showFilter!.vocals);
     return out;
   };
 
@@ -535,6 +536,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       eras: showFilter!.eras,
       moods: showFilter!.moods,
       energies: showFilter!.energies,
+      vocals: showFilter!.vocals,
     }, { starve: false });
   }
 
@@ -665,6 +667,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
         genres: activeShow.genres ?? [],
         eras: activeShow.eras ?? [],
         energies: activeShow.energies ?? [],
+        vocals: (activeShow.vocals ?? '') as VocalMode,
         strict: activeShow.filtersStrict,
       }
     : null;
@@ -755,6 +758,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
             genres: activeShow.genres,
             eras: activeShow.eras,
             energies: activeShow.energies,
+            vocals: activeShow.vocals,
             filtersStrict: activeShow.filtersStrict,
           }
         : null,
