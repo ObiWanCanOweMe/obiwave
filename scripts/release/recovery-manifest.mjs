@@ -5,24 +5,42 @@ import { appendFile, readFile } from 'node:fs/promises';
 
 import { CANONICAL_IMAGE_NAMESPACE, EXPECTED_IMAGES } from '../security/trivy-policy.mjs';
 
-const RELEASE_TAG = 'v1.3.0-obiwave.2';
-const SOURCE_COMMIT = '41c8a329670f99c3b440a468adbb9fe2d900a4fe';
 const SCANNER_VERSION = '0.67.2';
 const SCANNER_IMAGE = 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08';
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
-const APPROVED_IMAGES = Object.freeze([
-  Object.freeze({ name: 'subwave-caddy', digest: 'sha256:10a653cd8eb73a4aa55998d4f499ed7184a37ae99a41c2222f7a9434175290cd' }),
-  Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:e983017f0bae67fa10cd7bf9833403227c2e193492175087e03bb8ac99df236b' }),
-  Object.freeze({ name: 'subwave-controller', digest: 'sha256:e516778b297cc92f65b22e2336a2a8c7c16618f63fe19746f01dc9dbf405f7f6' }),
-  Object.freeze({ name: 'subwave-web', digest: 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f' }),
-  Object.freeze({ name: 'subwave-aio', digest: 'sha256:50e961965b7f449f330c83e8942fea58d02a7dc5265e3efa8c3600017f48166e' }),
-  Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:48c0e3bd7fc6dba4e8dc01b6eec12b267be9ac1635d7af15e8a5710724c3427d' }),
-  Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:ee4dd62bf79eddbf6329ea059e5e172ef176c87353c18d05dd1ec3c0f0c53025' }),
-  Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:be9a81fd5b43c97e4093399aebc8d00cfdfa656d032602e7ca0644e49934164f' }),
-  Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:82e7c5bef067ffe35db03a2bbe08c518e764fb61065eee34af4213aede4ebe00' }),
-  Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72' }),
-]);
+const APPROVED_RECOVERIES = Object.freeze({
+  'v1.3.0-obiwave.2': Object.freeze({
+    sourceCommit: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
+    images: Object.freeze([
+      Object.freeze({ name: 'subwave-caddy', digest: 'sha256:10a653cd8eb73a4aa55998d4f499ed7184a37ae99a41c2222f7a9434175290cd' }),
+      Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:e983017f0bae67fa10cd7bf9833403227c2e193492175087e03bb8ac99df236b' }),
+      Object.freeze({ name: 'subwave-controller', digest: 'sha256:e516778b297cc92f65b22e2336a2a8c7c16618f63fe19746f01dc9dbf405f7f6' }),
+      Object.freeze({ name: 'subwave-web', digest: 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f' }),
+      Object.freeze({ name: 'subwave-aio', digest: 'sha256:50e961965b7f449f330c83e8942fea58d02a7dc5265e3efa8c3600017f48166e' }),
+      Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:48c0e3bd7fc6dba4e8dc01b6eec12b267be9ac1635d7af15e8a5710724c3427d' }),
+      Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:ee4dd62bf79eddbf6329ea059e5e172ef176c87353c18d05dd1ec3c0f0c53025' }),
+      Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:be9a81fd5b43c97e4093399aebc8d00cfdfa656d032602e7ca0644e49934164f' }),
+      Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:82e7c5bef067ffe35db03a2bbe08c518e764fb61065eee34af4213aede4ebe00' }),
+      Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72' }),
+    ]),
+  }),
+  'v1.5.0-obiwave.1': Object.freeze({
+    sourceCommit: 'fe269a1e632fe6f886ac987f641f41326e1392e0',
+    images: Object.freeze([
+      Object.freeze({ name: 'subwave-caddy', digest: 'sha256:cdf89341b5a0c5c31493f6b2653b45631aac6e184148af8a46db02ff3072f235' }),
+      Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:32eb3d4c2a4146e31f37a389bc4d3b8309d3f13bf31edf5e7bf3a687f96ad5d0' }),
+      Object.freeze({ name: 'subwave-controller', digest: 'sha256:5aa26e9be46fdb2d733e7da2c74af63bbfeb7630575cae6bcbf0bf7c9b29ee55' }),
+      Object.freeze({ name: 'subwave-web', digest: 'sha256:f2f635a3b9d581db1478a74e5dfddbdae6faa31bb4b7694c7e03095915130008' }),
+      Object.freeze({ name: 'subwave-aio', digest: 'sha256:f745b4ae1133af9e77f1006ccf2ca219a6df0243451b4e633c143f0b6cc1ab8a' }),
+      Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:2d37d9c15e88b90523c437e8330c7245050f92a2eefc513ac6a556ca7c68a90b' }),
+      Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:41a6be4327f9f321b0993da4bac93a6359e440c1c26f7af52b663bcb083a3784' }),
+      Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:ec22ae65a95f60d070414b2fa73a7ec481190d66355426ce1cdbfdb142ef9f2c' }),
+      Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:290e2cd443bcee737fc4806f77384f172858e133f4fc0c0292195be9d53c9c5c' }),
+      Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2' }),
+    ]),
+  }),
+});
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -51,9 +69,10 @@ export function validateRecoveryManifest({ manifest, scannerConfig }) {
     fail('manifest keys must be schemaVersion, releaseTag, sourceCommit, scanner, and images');
   }
   if (manifest.schemaVersion !== 1) fail('schemaVersion must equal 1');
-  if (manifest.releaseTag !== RELEASE_TAG) fail(`releaseTag must equal ${RELEASE_TAG}`);
-  if (manifest.sourceCommit !== SOURCE_COMMIT || !SHA.test(manifest.sourceCommit)) {
-    fail(`sourceCommit must equal ${SOURCE_COMMIT}`);
+  const approvedRecovery = APPROVED_RECOVERIES[manifest.releaseTag];
+  if (!approvedRecovery) fail('releaseTag is not approved');
+  if (manifest.sourceCommit !== approvedRecovery.sourceCommit || !SHA.test(manifest.sourceCommit)) {
+    fail(`sourceCommit must equal ${approvedRecovery.sourceCommit}`);
   }
   if (!hasExactKeys(manifest.scanner, ['version', 'imageRef'])) {
     fail('scanner keys must be version and imageRef');
@@ -71,11 +90,11 @@ export function validateRecoveryManifest({ manifest, scannerConfig }) {
   ) {
     fail('scanner config must equal the recovery scanner');
   }
-  if (!Array.isArray(manifest.images) || manifest.images.length !== APPROVED_IMAGES.length) {
-    fail(`images must contain exactly ${APPROVED_IMAGES.length} entries`);
+  if (!Array.isArray(manifest.images) || manifest.images.length !== approvedRecovery.images.length) {
+    fail(`images must contain exactly ${approvedRecovery.images.length} entries`);
   }
   for (const [index, entry] of manifest.images.entries()) {
-    const approved = APPROVED_IMAGES[index];
+    const approved = approvedRecovery.images[index];
     if (!hasExactKeys(entry, ['name', 'digest'])) fail(`image ${index} keys must be name and digest`);
     if (entry.name !== approved.name || entry.name !== EXPECTED_IMAGES[index]) {
       fail(`image ${index} must equal ${approved.name}`);
