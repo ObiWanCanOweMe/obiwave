@@ -117,10 +117,3 @@ export function HistoryTab({ rows, total, page, setPage, loading, queuing, onQue
     </>
   );
 }
-
-// ---------------------------------------------------------------------------
-// ManualTagEditor — inline mood/energy editor under a track row. Operator-set
-// tags (source='manual') feed songsByMood() → the picker exactly like the
-// LLM tagger's, and "apply to whole album" tags every track on the album so a
-// folder/album of content can be targeted at once (discussion #336).
-// ---------------------------------------------------------------------------

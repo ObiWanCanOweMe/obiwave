@@ -614,6 +614,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     kokoro?: { voice?: string; lang?: string };
     chatterbox?: { referenceVoice?: string };
     pocketTts?: { voice?: string };
+    fallback?: { enabled?: boolean; engine?: string; voice?: string; cloudProvider?: string };
     cloud?: SavedCloud;
     remote?: { url?: string };
     gainDb?: Record<string, number>;
@@ -624,6 +625,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const savedKokoroLang: string = savedTts.kokoro?.lang || '';
   const savedChatterboxVoice: string = savedTts.chatterbox?.referenceVoice || '';
   const savedPocketTtsVoice: string = savedTts.pocketTts?.voice || '';
+  const savedFallback = savedTts.fallback || {};
   const savedCloud: SavedCloud = savedTts.cloud || {};
   const savedRemoteUrl: string = savedTts.remote?.url || '';
   const savedEngineLabel = ENGINE_LABELS[savedEngine] || savedEngine;
@@ -650,6 +652,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || (form.kokoroLang || '') !== savedKokoroLang
     || (form.tts.chatterbox?.referenceVoice || '') !== savedChatterboxVoice
     || (form.tts.pocketTts?.voice || '') !== savedPocketTtsVoice
+    || form.tts.fallback.enabled !== (savedFallback.enabled === true)
+    || form.tts.fallback.engine !== (savedFallback.engine ?? 'piper')
+    || form.tts.fallback.voice !== (savedFallback.voice ?? '')
+    || form.tts.fallback.cloudProvider !== (savedFallback.cloudProvider ?? 'openai')
     || form.tts.cloud.provider !== (savedCloud.provider || '')
     || (form.tts.cloud.model || '').trim() !== (savedCloud.model || '').trim()
     || (form.tts.cloud.voice || '').trim() !== (savedCloud.voice || '').trim()

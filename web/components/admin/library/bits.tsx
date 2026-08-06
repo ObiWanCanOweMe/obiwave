@@ -97,11 +97,3 @@ export const MENU_PANEL =
   'absolute top-full right-0 z-50 mt-1 max-w-[calc(100vw-2rem)] min-w-[220px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md';
 export const MENU_ITEM =
   'flex w-full items-center gap-2 rounded px-2.5 py-2.5 text-left text-[12px] hover:bg-[var(--ink-soft)] hover:text-ink disabled:opacity-40';
-
-// ---------------------------------------------------------------------------
-// RowActionsMenu — the phone-only overflow menu. The four inline row buttons
-// (queue / edit / retag / never-play) cost ~160px, which is more than the track
-// title gets at 390px, so below sm: every action lives behind this one control
-// and the inline cluster hides. Same actions, same handlers — no mobile-only
-// behaviour, just a different affordance.
-// ---------------------------------------------------------------------------

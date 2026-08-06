@@ -60,5 +60,3 @@ export function titleize(s: unknown): string {
   const t = String(s ?? '').replace(/[-_]/g, ' ').trim();
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 }
-
-// The DJ context snapshot, rendered as labelled prose rather than raw JSON.

@@ -80,10 +80,3 @@ export function ManualTagEditor(props: {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// AddToPlaylistBar — shown while rows are selected on any track tab. Adds the
-// selection to an existing Navidrome playlist or creates a new one; both go
-// through the controller's /playlists routes (Subsonic createPlaylist /
-// updatePlaylist under the hood).
-// ---------------------------------------------------------------------------

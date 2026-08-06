@@ -108,6 +108,3 @@ export function oneLine(s: unknown, n = 80): string {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
-
-// The Requests card — every listener request and exactly how the AI DJ
-// resolved it. Newest first; each row expands to the full debug trace.

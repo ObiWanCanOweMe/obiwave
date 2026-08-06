@@ -127,11 +127,3 @@ export function BlockedTab({ entries, loading, unblocking, bulkBusy, onUnblock, 
     </Card>
   );
 }
-
-// ---------------------------------------------------------------------------
-// HistoryTab — the durable play log (GET /library/history), newest first.
-// Every aired track with when it played, how it was picked (DJ / request /
-// auto playlist), and which show was on air. Rows with a track id can be
-// re-queued straight from here. Grouped by day so a scan of "what aired last
-// night" doesn't need to parse timestamps.
-// ---------------------------------------------------------------------------

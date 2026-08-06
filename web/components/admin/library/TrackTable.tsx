@@ -444,10 +444,3 @@ function BlockMenu({ track, busy, disabled, onBlock, className }: {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// BlockedTab — the never-play blocklist manager. Lists entries newest-first
-// with a type badge and one-click unblock. The list governs AIRING only:
-// blocked tracks still appear in browse/search (the library browser shows the
-// library), they just never make it to the queue.
-// ---------------------------------------------------------------------------
