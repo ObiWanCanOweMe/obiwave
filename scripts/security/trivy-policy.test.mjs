@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -23,6 +23,11 @@ const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
 const V15_CUDA_DIGEST = 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
+const checkedInAcceptance = JSON.parse(
+  await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
+);
+const CUDA_ACCEPTANCE_JUSTIFICATION =
+  'This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.';
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -133,6 +138,24 @@ function validationError(options) {
 function violationCodes(error) {
   return error.violations.map(({ code }) => code);
 }
+
+test('checked-in CUDA mirror acceptances carry the reviewed release-aware statement', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    record.disposition === 'upstream-mirror' &&
+    record.images.length === 1 &&
+    record.images[0] === 'subwave-analyzer-cuda');
+
+  assert.equal(records.length, 160);
+  for (const record of records) {
+    assert.equal(record.justification, CUDA_ACCEPTANCE_JUSTIFICATION);
+    assert.equal(record.approvedOn, '2026-08-05');
+    assert.equal(record.expiresOn, '2026-11-03');
+  }
+  assert.equal(
+    checkedInAcceptance.acceptances.filter((record) => record.disposition === 'upstream-mirror').length,
+    160,
+  );
+});
 
 test('clean ten-image matrix returns a deterministic empty summary', () => {
   const summary = validateReports({
