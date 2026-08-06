@@ -199,9 +199,11 @@ class Queue {
       try {
         const arr = JSON.parse(readFileSync(config.queue.recentPlaysFile, 'utf8'));
         if (Array.isArray(arr)) {
-          // Drop anything older than 48h on boot — keeps the file from
-          // ballooning if the cap was raised between restarts.
-          const cutoff = Date.now() - 48 * 3_600_000;
+          // Drop anything older than 96h on boot — keeps the file from
+          // ballooning if the cap was raised between restarts, while holding
+          // enough history to supply a maxed count-based no-repeat window
+          // (clampNoRepeatWindow: up to 1000 distinct ≈ 2-3 days of air).
+          const cutoff = Date.now() - 96 * 3_600_000;
           this._recentPlays = arr
             .filter((p: RecentPlay) => p && p.endedAt && new Date(p.endedAt).getTime() > cutoff)
             .slice(0, config.queue.recentPlaysMax);
@@ -1104,7 +1106,7 @@ class Queue {
         // Hard length cap (#447 max-track-length): stamp a cue_out so Liquidsoap
         // cuts an over-length autonomous pick mid-air. Explicit listener requests
         // (requestedBy set) stay exempt — a requested long mix plays in full,
-        // mirroring the request path's selection-cap exemption in picker-tools.
+        // mirroring the request path's selection-cap exemption in the picker tools.
         // Beds: if this item's link would outlast the song's own intro, push an
         // instrumental bed into dj_queue AHEAD of the track. The DJ then talks
         // over the bed and the track ramps in under the closing words, instead

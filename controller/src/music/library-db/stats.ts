@@ -49,11 +49,19 @@ const STATS_TTL_MS = 5000;
 // Memoised on the same reasoning (and the same TTL) as stats() below: this is
 // a full scan of `tracks` with no index to help the predicate, and it rides the
 // coverage payload the admin Library panel polls every 30s from every open tab.
+// Its own TTL, deliberately much longer than stats(): this figure only moves
+// when the TAGGER runs, and it is read on a PICK path too (the picker tools
+// gate one advisory sentence on it, llm/…/picker/scope.ts). Picks are minutes
+// apart, so at the 5s display TTL every pick paid for a fresh full scan to
+// decide the wording of a tool description. Handle swaps still clear it
+// through invalidateStats(), so the staleness is bounded to "how recently did
+// the tagger change the answer", where minutes are immaterial.
+const LABEL_ONLY_TTL_MS = 5 * 60 * 1000;
 let labelOnlyCache: { at: number; value: number } | null = null;
 
 export function labelOnlyVectorCount(): number {
   const now = Date.now();
-  if (labelOnlyCache && now - labelOnlyCache.at < STATS_TTL_MS) return labelOnlyCache.value;
+  if (labelOnlyCache && now - labelOnlyCache.at < LABEL_ONLY_TTL_MS) return labelOnlyCache.value;
   const value = computeLabelOnlyVectorCount();
   labelOnlyCache = { at: Date.now(), value };
   return value;
@@ -111,6 +119,14 @@ function computeStats(): LibraryStats {
     (d.prepare(`SELECT COUNT(*) AS n FROM tracks WHERE ${SQL_HAS_MOODS}`).get() as {
       n: number;
     }).n;
+  // Every row in the mirror, tagged or not. `total` counts only TAGGED tracks,
+  // which is the right denominator for the tagging-coverage displays and the
+  // wrong one for anything asking "how big is this library" — the picker's
+  // recency windows, the no-repeat clamp and the deepCuts availability gate all
+  // operate over rows the tagger may never have reached. A synced-but-untagged
+  // install has total = 0 and a mirror full of playable tracks.
+  const mirrorTotal =
+    (d.prepare(`SELECT COUNT(*) AS n FROM tracks`).get() as { n: number }).n;
   const distinctArtists =
     (
       d
@@ -170,7 +186,7 @@ function computeStats(): LibraryStats {
     ((d.prepare('SELECT MAX(tagged_at) AS t FROM tracks').get() as { t: string | null }).t) ||
     null;
   return {
-    total, distinctArtists, byMood, byEnergy, byGenre, bySource,
+    total, mirrorTotal, distinctArtists, byMood, byEnergy, byGenre, bySource,
     withEmbedding, withAudioEmbedding, updatedAt,
   };
 }

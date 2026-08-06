@@ -39,15 +39,21 @@ export function ManualTagEditor(props: {
           {vocab.length === 0 && <SkeletonText lines={1} />}
           {vocab.map(m => {
             const on = sel.includes(m);
+            // Unpicked chips go unavailable once three are chosen, and every
+            // chip does while a save is in flight. Passed as `disabled` rather
+            // than by dropping onClick: without a handler the Pill falls back
+            // to a Badge <span>, which is neither focusable nor announced as
+            // unavailable — so the cap was invisible to a keyboard user, who
+            // simply found that chips had stopped responding.
+            const unavailable = busy || (!on && sel.length >= 3);
             return (
               <Pill
                 key={m}
                 tone={on ? 'accent' : 'default'}
-                onClick={busy || (!on && sel.length >= 3) ? undefined : () => toggle(m)}
-                className={cn(
-                  (busy || (!on && sel.length >= 3)) && !on && 'opacity-40',
-                  !busy && 'cursor-pointer',
-                )}
+                pressed={on}
+                disabled={unavailable}
+                onClick={() => toggle(m)}
+                className={cn(unavailable && !on && 'opacity-40')}
               >
                 {m}
               </Pill>

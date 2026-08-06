@@ -46,6 +46,10 @@ import {
   normalizeDial,
 } from './vocab.js';
 import { DEFAULTS, coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
+// The webhook rules themselves, so this lenient path and update()'s strict one
+// cannot restate them differently — see normalizeWebhooks below.
+import { WEBHOOK_ID_RE, webhookSchema, type WebhookParsed } from '../schemas/webhook.js';
+import { resolveWebhookIds } from '../schemas/webhook-server.js';
 
 // ── normalizers (lenient — used by load(), clamp/default rather than throw) ──
 
@@ -350,30 +354,44 @@ export function normalizeScheduleOverride(raw: unknown, showIds: string[]): Sche
   if (startedAt >= expiresAt || expiresAt <= Date.now()) return null;
   return { showId, startedAt, expiresAt };
 }
+// Lenient load-path counterpart of validateWebhooksStrict. The RULES are the
+// shared schema's — url shape, the 500-char caps, the event vocabulary, the id
+// pattern — so the two paths can no longer drift apart. What lives here is only
+// the LENIENCY, and each repair below is deliberate: at boot a bad row is
+// patched or dropped so a hand-edited settings.json still starts the station,
+// where update()'s strict path throws and tells the operator which field to fix.
 export function normalizeWebhooks(raw: unknown): Webhook[] {
   if (!Array.isArray(raw)) return [];
-  const out: Webhook[] = [];
-  const seen = new Set<string>();
+  const rows: WebhookParsed[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const url = typeof item.url === 'string' ? item.url.trim() : '';
-    if (!/^https?:\/\//.test(url) || url.length > 500) continue;
+    // An unknown event name is FILTERED OUT rather than failing the row, so
+    // retiring a name from WEBHOOK_EVENTS costs a hook that one subscription
+    // instead of deleting the operator's webhook. The schema's own min(1) then
+    // drops a row left with nothing to fire on, as it always did.
     const events = Array.isArray(item.events)
-      ? item.events.filter((e: string) => WEBHOOK_EVENTS.includes(e))
+      ? item.events.filter((e: string) => (WEBHOOK_EVENTS as readonly string[]).includes(e))
       : [];
-    if (!events.length) continue;
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('wh_');
-    if (seen.has(id)) id = mintId('wh_');
-    seen.add(id);
-    out.push({
-      id,
-      url,
+    const parsed = webhookSchema.safeParse({
+      ...item,
       events,
-      enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
+      // undefined lets the schema's own .default() apply. Repaired rather than
+      // rejected because none of the three is worth losing a working hook over:
+      // an unrecognised id is re-minted below, a non-boolean `enabled` falls
+      // back to on, and an over-long header is clamped to the same 500 the
+      // strict path enforces.
+      id: typeof item.id === 'string' && WEBHOOK_ID_RE.test(item.id) ? item.id : undefined,
+      enabled: typeof item.enabled === 'boolean' ? item.enabled : undefined,
       authHeader:
-        typeof item.authHeader === 'string' ? item.authHeader.slice(0, 500) : '',
+        typeof item.authHeader === 'string' ? item.authHeader.slice(0, 500) : undefined,
     });
-    if (out.length >= WEBHOOKS_LIMIT) break;
+    if (!parsed.success) continue;
+    rows.push(parsed.data);
+    if (rows.length >= WEBHOOKS_LIMIT) break;
   }
-  return out;
+  // Same minting and de-duplication the strict path runs, from the same module.
+  // Deliberately NOT mergeWebhookSecrets: there is no prior list at load, and
+  // resolving the redaction sentinel against nothing would blank a stored
+  // header rather than leave it alone.
+  return resolveWebhookIds(rows);
 }

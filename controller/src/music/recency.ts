@@ -135,15 +135,35 @@ export function trackKey(song: CandidateLike): string {
   return `${(song.title || '').toLowerCase().trim()}|${artistKey(song)}`;
 }
 
-export function recencyWindowsForLibrary(distinctArtists: number | null | undefined): RecencyWindows {
+// Large-library boost on the relaxable windows. The 12h/2h defaults were tuned
+// for small-to-mid libraries; at radio pace (~300-400 plays/day) 12h blocks
+// ~150-200 tracks, which on a 10k-50k catalogue is under 2% — far too little
+// memory to push selection anywhere new. Keys on TRACK COUNT, never distinct
+// artists (a 500-track library easily clears any artist threshold, and
+// doubling its window would over-block it): stepped, so the window only grows
+// where the catalogue can absorb it — even the largest step blocks under ~5%
+// of the library at that pace. The count guard (noRepeatWindow) is the
+// non-relaxable long-memory companion; this stays the relaxable short one.
+function librarySizeBoost(totalTracks: number): number {
+  if (totalTracks >= 20000) return 3;   // 36h track / 6h artist
+  if (totalTracks >= 8000) return 2;    // 24h / 4h
+  if (totalTracks >= 3000) return 1.5;  // 18h / 3h
+  return 1;
+}
+
+export function recencyWindowsForLibrary(
+  distinctArtists: number | null | undefined,
+  totalTracks: number | null | undefined = 0,
+): RecencyWindows {
+  const boost = librarySizeBoost(Math.floor(Number(totalTracks) || 0));
   if (!distinctArtists || distinctArtists <= 0) {
     return {
-      trackHours: DEFAULT_TRACK_RECENCY_HOURS,
-      artistHours: DEFAULT_ARTIST_RECENCY_HOURS,
+      trackHours: DEFAULT_TRACK_RECENCY_HOURS * boost,
+      artistHours: DEFAULT_ARTIST_RECENCY_HOURS * boost,
     };
   }
 
-  const scale = Math.min(1, Math.max(distinctArtists / DIVERSE_LIBRARY_ARTISTS, 1 / 12));
+  const scale = Math.min(1, Math.max(distinctArtists / DIVERSE_LIBRARY_ARTISTS, 1 / 12)) * boost;
   const roundToQuarterHour = (hours: number) => Math.round(hours * 4) / 4;
 
   return {

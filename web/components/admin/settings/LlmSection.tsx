@@ -280,6 +280,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         budgetSoftPct: form.llm.budgetSoftPct,
         exemptRequests: form.llm.exemptRequests,
         maxOutputTokens: form.llm.maxOutputTokens,
+        discoverySteps: form.llm.discoverySteps,
         ...(INLINE_KEY_PROVIDERS.includes(activeProvider) && compatKeyInput.trim()
           ? { apiKey: compatKeyInput.trim() }
           : {}),
@@ -290,6 +291,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           ollamaUrl: form.llm.fallback.ollamaUrl,
           numCtx: form.llm.fallback.numCtx,
           repeatPenalty: form.llm.fallback.repeatPenalty,
+          discoverySteps: form.llm.fallback.discoverySteps,
           providerBaseUrls: form.llm.fallback.providerBaseUrls,
           reasoning: form.llm.fallback.reasoning,
           ...(INLINE_KEY_PROVIDERS.includes(activeFallbackProvider) && compatFallbackKeyInput.trim()
@@ -871,6 +873,32 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 </div>
               )}
 
+              {form.llm.pickerAgent && (
+                <div className="field">
+                  <Label>Discovery rounds per pick</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={1}
+                    value={form.llm.fallback.discoverySteps}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, discoverySteps: Number(e.target.value) } } }))
+                    }
+                    placeholder="0"
+                    className="max-w-[200px]"
+                  />
+                  <div className="field-hint">
+                    The backup resolves its own budget, since it may be a different
+                    provider running a different model. <strong>0 = auto</strong>.
+                    Note the DJ is told how many rounds it has before a pick starts,
+                    and that promise has to hold on whichever leg ends up running &mdash;
+                    so the station uses the <em>lower</em> of the two numbers whenever
+                    the backup is enabled. 0&ndash;5.
+                  </div>
+                </div>
+              )}
+
               {LLM_ENV_VARS[form.llm.fallback.provider] && (() => {
                 const keyVar = LLM_ENV_VARS[form.llm.fallback.provider]!;
                 return (
@@ -1093,6 +1121,34 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         )}
 
         {form.llm.pickerAgent && (
+          <div className="field mt-4">
+            <Label>Discovery rounds per pick</Label>
+            <Input
+              type="number"
+              min={0}
+              max={5}
+              step={1}
+              value={form.llm.discoverySteps}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setForm(f => ({ ...f, llm: { ...f.llm, discoverySteps: Number(e.target.value) } }))
+              }
+              placeholder="0"
+              className="max-w-[200px]"
+            />
+            <div className="field-hint">
+              How many times the DJ may search your library before it has to commit
+              to a track. {' '}<strong>0 = auto</strong>, which picks for you based on
+              your provider: 1 for self-hosted servers (Ollama, llama.cpp, vLLM,
+              LM Studio), 3 for the cloud providers. Raise it if you run a capable
+              model on your own hardware &mdash; auto is cautious there because many
+              local models wander when given more than one round. Lower it to 1 to
+              cut tokens and latency: every round is a separate call, and they all
+              share the agent deadline above. 0&ndash;5.
+            </div>
+          </div>
+        )}
+
+        {form.llm.pickerAgent && (
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
             <div>
               <div className="text-[13px] font-bold">Resolve described requests via web</div>
@@ -1140,20 +1196,21 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           <Input
             type="number"
             min={0}
-            max={290}
+            max={1000}
             step={10}
             value={form.llm.noRepeatWindow}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
               setForm(f => ({ ...f, llm: { ...f.llm, noRepeatWindow: e.target.value } }))
             }
-            placeholder="100"
+            placeholder="250"
             className="max-w-[200px]"
           />
           <div className="field-hint">
             The last N <strong>distinct</strong> tracks can never be re-picked: a hard
             guard on both the agent and candidate-pool pickers, on top of the time-based
-            window. Auto-scales down on a small library so it never blocks everything.
-            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;290.
+            window. Auto-scales down on a small library so it never blocks everything;
+            on a big library, raise it — it is the station&apos;s long memory.
+            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;1000.
           </div>
         </div>
       </Card>

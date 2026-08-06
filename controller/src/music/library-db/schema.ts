@@ -382,6 +382,29 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 19');
   }
 
+  if (userVersion < 20) {
+    // Covering indexes for the airing index (plays.lastAiredIndex).
+    //
+    // That read is "when did each track last go to air", and every pick path
+    // consults it. It GROUP BYs the whole play history, which idx_plays_track
+    // (track_id alone) cannot serve: SQLite has to build a temp b-tree over
+    // every row on a station with a year of history, then again for the
+    // title|artist half. Trailing played_at makes each half an ordered
+    // covering scan with no sort at all — MAX() of the last row per group.
+    //
+    // Two indexes because the index has two keys and they are not
+    // interchangeable: ids resolve a track exactly, and the lowercased
+    // `title|artist` key is what catches a DUPLICATE COPY of an aired song
+    // (N Subsonic ids for one recording) — the same reason recency keys on
+    // both. Write cost is two extra inserts per airing, i.e. one row every
+    // few minutes.
+    runDdl(d, `
+      CREATE INDEX IF NOT EXISTS idx_plays_track_played ON plays(track_id, played_at);
+      CREATE INDEX IF NOT EXISTS idx_plays_key_played   ON plays(title, artist, played_at);
+    `);
+    d.pragma('user_version = 20');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —

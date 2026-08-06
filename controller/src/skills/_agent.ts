@@ -276,6 +276,9 @@ export const directorAgent = defineAgent({
   // things worse, not better, and was the direct cause of a run burning the
   // FULL agentTimeoutMs internally (45002ms observed) before recovery ever got
   // a turn. Left unset before, silently inheriting djAgent's default of 8.
+  // The per-provider discovery widening is opt-in (providerDiscoveryBudget on
+  // the pick/request agents) precisely so it can never override this cap —
+  // the director deliberately does NOT opt in.
   maxSteps: 2,
   // Wall-clock ceiling, mirroring the picker (dj-agent.ts). Without it a
   // gemma-class model that ignores toolChoice can drive the done-tool recovery

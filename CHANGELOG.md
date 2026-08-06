@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.0](https://github.com/perminder-klair/subwave/compare/v1.5.0...v1.6.0) (2026-08-06)
+
+
+### Features
+
+* library exploration — airing memory, unfenced wide sources, scaled recency (fixes the repeated-songs bubble) ([#1339](https://github.com/perminder-klair/subwave/issues/1339)) ([2d73550](https://github.com/perminder-klair/subwave/commit/2d73550568c30dd39baea79b77b87a571fda376a))
+* zod validation + shadcn form foundation (webhooks slice) ([#1323](https://github.com/perminder-klair/subwave/issues/1323)) ([80cada8](https://github.com/perminder-klair/subwave/commit/80cada85e4818436d37d9c06b4cfcb488c27021c))
+
+
+### Bug Fixes
+
+* **web:** stop admin scroll areas chaining to the page and popping their scrollbar ([#1341](https://github.com/perminder-klair/subwave/issues/1341)) ([eaaadd2](https://github.com/perminder-klair/subwave/commit/eaaadd2f96398fed2be25a6a702276b217e9c9a2))
+
 ## [1.5.0](https://github.com/perminder-klair/subwave/compare/v1.4.0...v1.5.0) (2026-08-05)
 
 

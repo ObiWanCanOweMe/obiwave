@@ -15,7 +15,7 @@
 // Policy chokepoint, like util/request-guard.ts: the clause below is the ONE
 // wording, shared by the pick/request schema field descriptions
 // (broadcast/dj-agent/schemas.ts) and the empty-tool-result rule the model sees
-// at the exact moment it fails (llm/internal/tools/picker-tools.ts). Never
+// at the exact moment it fails (llm/internal/tools/picker/scope.ts). Never
 // inline a second copy — they drift, and the wording is the whole fix.
 //
 // Pure + unit-pinned (scripts/pick-seed.test.ts).
@@ -75,9 +75,9 @@ export function classifyPickFailure(
   // unable to help (nearestId has no keys to match against, repickFromSeen
   // returns null on its first line), so the run was lost the moment discovery
   // came back empty — the answer the model gave is a symptom, not the cause.
-  // This is the #1247 path: one discovery call (COMMIT_AFTER_STEPS = 1 leaves
-  // no second) into a tool whose index doesn't cover the seed, then a forced
-  // commit with nothing.
+  // This is the #1247 path: the discovery budget (a single call on forced-tool
+  // providers — runDiscoverySteps in provider/capabilities.ts) spent on tools
+  // whose indexes don't cover the seed, then a forced commit with nothing.
   if (candidates === 0) {
     return {
       kind: 'no-candidates',

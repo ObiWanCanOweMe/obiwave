@@ -76,7 +76,10 @@ export default function ModelsAndTokens() {
           best keyless option. Pick any healthy <strong>pool-mode</strong> row for a lean
           station (<strong>Qwen3.5 9B</strong> is the small floor, and a local{' '}
           <strong>Gemma 4 12B</strong> — <code>locca serve gemma4</code> — does the same job
-          keylessly on your own box). Remember the route in the second line of each model
+          keylessly on your own box). <strong>GPT-5.6 Luna via OpenRouter</strong> is the
+          newest agent entry, and so far the only model benched that spends its full
+          multi-round discovery budget — up to three library searches per pick before it
+          commits. Remember the route in the second line of each model
           cell is part of the result — the same model through a different provider can score
           differently, and two of the scores above changed by 20+ points once bugs in{' '}
           <em>our own</em> thinking-suppression plumbing were found and fixed. The bench
@@ -113,7 +116,9 @@ export default function ModelsAndTokens() {
             come from a short pre-built shortlist, and the talk segments (weather, news,
             curiosities) fetch their data first and make a single call too, instead of running
             a tool-using agent. Far fewer tokens, and a task shape small models get right —
-            this is the setting that makes the 9B–12B class reliable.
+            this is the setting that makes the 9B–12B class reliable. If you&rsquo;d
+            rather keep the agent on but cheaper, set <em>Discovery rounds per
+            pick</em> to 1 instead.
           </li>
           <li>
             <strong>Reasoning off</strong> (Admin &rarr; LLM) — stops &ldquo;thinking&rdquo;
@@ -168,10 +173,23 @@ export default function ModelsAndTokens() {
             DJ: it remembers the session, reasons about what it has already played, and
             uses tools to dig through the library. Richer and more coherent — but it&rsquo;s
             a genuinely harder job, and the bench is blunt about who can do it:{' '}
-            <strong>Gemma 4 31B</strong> (Ollama cloud), <strong>MiniMax M2.7</strong> and
-            hosted models of GPT-5-Mini&rsquo;s class run it reliably; the 9B–12B locals do
-            not. You don&rsquo;t need to guess — turn it on and watch the booth log; every
+            <strong>Gemma 4 31B</strong> (Ollama cloud), <strong>GPT-5.6 Luna</strong>{' '}
+            (OpenRouter) and hosted models of GPT-5-Mini&rsquo;s class run it reliably;
+            the 9B–12B locals do not. You don&rsquo;t need to guess — turn it on and watch the booth log; every
             agent miss falls back to the pool picker anyway.
+          </li>
+          <li>
+            <strong>Discovery rounds per pick</strong> (Admin &rarr; LLM) — how many
+            times the picker agent may search the library before it has to commit to a
+            track. <em>0 = auto</em>: one round on self-hosted servers (the single
+            cornered call is what keeps small models honest), three on hosted
+            providers — enough to seed from the current track, refine on what came
+            back, and cross-check by sound before choosing. Raise it if you run a
+            genuinely capable model on your own hardware; auto is deliberately cautious
+            there. Every round is a separate model call and they all share the agent
+            deadline, so this dial is also where agent-mode tokens and pick latency go —
+            the backup model carries its own copy. Track picks only: talk segments
+            always fetch their data in a single round.
           </li>
           <li>
             <strong>Reasoning on</strong> (Admin &rarr; LLM) — let a thinking model work

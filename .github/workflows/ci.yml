@@ -50,6 +50,25 @@ jobs:
           npm run gen:themes
           git diff --exit-code ../web/lib/theme-tokens.generated.ts
 
+      - name: Verify schema mirror is up to date
+        if: matrix.package == 'controller'
+        run: |
+          npm run gen:schemas
+          git diff --exit-code ../web/lib/schemas.generated.ts
+
+      - name: Verify controller and web declare the same zod version
+        if: matrix.package == 'controller'
+        run: |
+          node -e '
+            const c = require("./package.json").dependencies.zod;
+            const w = require("../web/package.json").dependencies.zod;
+            for (const [pkg, range] of [["controller", c], ["web", w]]) {
+              if (!range) process.exit(1);
+            }
+            if (c !== w) process.exit(1);
+            console.log(`zod ${c} on both sides`);
+          '
+
       - name: Install analyzer Python test dependencies
         if: matrix.package == 'controller'
         run: |
