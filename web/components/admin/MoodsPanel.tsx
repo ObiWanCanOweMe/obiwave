@@ -202,9 +202,9 @@ export default function MoodsPanel() {
             Moods &amp; moments.
           </div>
           <div className="mt-1 text-[11px] leading-[1.6] text-muted">
-            The moods your station knows, and when it reaches for them — the words your library is
-            tagged with, and which mood each part of the day, the weather, and the calendar leans
-            into. Edit the list and every show, festival, and auto-DJ pick draws from it.
+            The words your library is tagged with, and which of them each part of the day, the
+            weather, and the calendar leans into. Edit the list and every show, festival, and
+            auto-DJ pick draws from it.
           </div>
         </div>
         <SectionTabs tabs={tabs} value={tab} onChange={selectTab} label="Moods sections" />
@@ -220,8 +220,8 @@ export default function MoodsPanel() {
             <div className="field-hint">
               Give each mood a short id (letters, digits, dashes) and, if you like, a sound
               description we use for audio tagging (needs the heavy analyzer). Change a mood or its
-              description and we’ll re-score audio moods on the next analysis pass and mark the
-              older tags stale — re-run the tagger to refresh them. If a mood is still used by a
+              description and the older tags are marked stale; audio moods re-score on the next
+              analysis pass, so re-run the tagger to refresh them. If a mood is still used by a
               show, festival, or one of the maps in Moments, you’ll need to reassign it before you
               can remove it.
             </div>

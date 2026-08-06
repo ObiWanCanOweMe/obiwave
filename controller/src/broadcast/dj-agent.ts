@@ -30,13 +30,13 @@ import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
-import { linkAirDate } from './queue/pure.js';
+import { linkClockAt } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
 import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
-import { hasEraBound, genreResolutionWarningOnce } from '../music/show-filter.js';
+import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { pickerAgent, requestAgent } from './dj-agent/agents.js';
@@ -161,7 +161,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null }): Promise<boolean> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
   const windows = recencyWindowsForLibrary(stats.distinctArtists);
@@ -232,6 +232,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const hasEnergyCoverage = Object.keys(stats.byEnergy ?? {}).length > 0;
   const moodLock = strict && activeShow?.moods?.length && hasMoodCoverage ? activeShow.moods : null;
   const energyLock = strict && activeShow?.energies?.length && hasEnergyCoverage ? activeShow.energies : null;
+  // Same coverage gate, one dimension further out: vocal ranges come from the
+  // OPT-IN heavy analyzer, so "no track has been measured" is the norm rather
+  // than the exception, and a hard lock would empty every tool for the whole
+  // show. Counted lazily — only a show that actually pins vocal steering pays
+  // for the query.
+  const vocalLock = strict && activeShow?.vocals && library.vocalAnalyzedCount() > 0
+    ? (activeShow.vocals as VocalMode)
+    : null;
   // A pinned anchor that resolves to nothing (deleted/recreated playlist →
   // stale id, or a Navidrome error — resolveShowPlaylistPool swallows both)
   // silently un-anchors the show: no lock, no showPlaylistTracks tool. Say so,
@@ -255,6 +263,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     eraLock,
     moodLock,
     energyLock,
+    vocalLock,
     playlistLock,
     playlistTracks,
     excludedIds,
@@ -441,7 +450,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // the track on-air now), instead of immediately over that on-air track (#189).
   // Stamp `current` as the link's back-announce target so the queue can drop the
   // link if a request jumps ahead of this pick before it airs.
-  const queued = await enqueuePick(queue, song, object.reason, 'agent', link, current, { sweep, washout, blend, dissolve, chop, loop });
+  const queued = await enqueuePick(queue, song, object.reason, 'agent', link, current, { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt: linkAirAt });
   // Pick was already queued/on-air and got deduped — don't record a session turn
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
@@ -457,9 +466,9 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   return true;
 }
 
-// The link's context, with the clock stepped back from `showAt` to the moment
-// the link actually AIRS (showAt minus the show-attribution padding — see
-// linkAirDate). ctx resolved at showAt is right for show identity but its
+// The link's context, with the clock stepped forward to `airAt` — the moment
+// the link actually AIRS (showAt minus the show-attribution padding, resolved
+// by linkClockAt). ctx resolved at showAt is right for show identity but its
 // clock runs PICK_SHOW_LOOKAHEAD_SEC fast, and every pick-attached link spoke
 // that padded time on air — "Local time eight fifty" logged at 08:48 (#1282).
 // The same identity/clock split runPickCycle's handoff already makes with its
@@ -467,9 +476,13 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
 // clock-derived fields (at/date/clock/time) move to air time. `isDark` rides
 // over from ctx — it comes from the weather fetch, not the clock, and a
 // two-minute shift can't flip it.
-function linkAirContext(ctx: any, showAt: Date | null) {
-  if (!showAt || !ctx) return ctx;
-  const airAt = linkAirDate(showAt);
+// `airAt` null means the air moment isn't forecastable well enough to speak
+// (no look-ahead, or too little runway left — #1314): ctx comes back untouched
+// and the caller passes clockIsAirTime false, which withholds the "Local time"
+// line from the prompt entirely rather than showing a time the model must be
+// trusted not to use.
+function linkAirContext(ctx: any, airAt: Date | null) {
+  if (!airAt || !ctx) return ctx;
   const clock: any = getClockContext(airAt);
   if (typeof ctx.clock?.isDark === 'boolean') clock.isDark = ctx.clock.isDark;
   return { ...ctx, at: airAt.toISOString(), date: getDateContext(airAt), clock, time: getTimeContext(airAt) };
@@ -497,16 +510,21 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // now (`current`) and leads into the pick — because by the time it airs,
   // `current` will have just ended and the pick will be starting (#189).
   let link: string | null = null;
+  // Resolved HERE rather than up in runTrackEvent: the pick call above has
+  // already spent part of the runway, and linkClockAt reads the live clock, so
+  // asking now is the most honest the forecast can be on this path (#1314).
+  const airAt = linkClockAt(showAt, Date.now());
   if (wantLink && current) {
     try {
       link = await dj.generateLink({
-        // ctx with the clock stepped back to the link's air moment — showAt's
-        // own clock carries the show-attribution padding and ran two minutes
-        // fast on air (#1282). Only with the look-ahead resolved may the link
-        // speak the clock at all (issue #864: generation-time clocks aired a
-        // track late).
-        previous: current, current: result.song, context: linkAirContext(ctx, showAt),
-        clockIsAirTime: !!showAt,
+        // ctx with the clock stepped to the link's air moment — showAt's own
+        // clock carries the show-attribution padding and ran two minutes fast
+        // on air (#1282). Only with the look-ahead resolved AND enough runway
+        // left for it to hold may the link speak the clock at all (issue #864:
+        // generation-time clocks aired a track late; #1314: forecast clocks
+        // aired a filler track early).
+        previous: current, current: result.song, context: linkAirContext(ctx, airAt),
+        clockIsAirTime: !!airAt,
         // Name the speaker explicitly. Left unset, scripts.generateLink falls
         // back to getEffectivePersona() on the wall clock, which disagrees with
         // the session inside the look-ahead window — the incoming DJ's line
@@ -539,7 +557,7 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   };
   // `current` is the link's back-announce target (passed to generateLink as
   // `previous`); stamp it so the queue drops the link if a request jumps ahead.
-  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx);
+  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, { linkClockAt: airAt });
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
@@ -652,8 +670,12 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // and ran two minutes FAST on air (#1282), so step it back to air time
     // (linkAirDate) before handing it over as the only time the link may
     // speak; without the look-ahead (unknown duration), ban the clock
-    // outright.
-    const airClock = showAt && ctx?.clock?.hhmm ? getClockContext(linkAirDate(showAt)) : null;
+    // outright. linkClockAt bans it in one more case (#1314): when so little
+    // of the on-air track is left that this round may not land before the
+    // seam, the forecast is a coin flip and a link that names a time would
+    // name the wrong one for a whole filler track.
+    const airAt = linkClockAt(showAt, Date.now());
+    const airClock = airAt && ctx?.clock?.hhmm ? getClockContext(airAt) : null;
     const clockClause = wantLink
       ? (airClock
           ? ` The link airs at about ${airClock.display || airClock.hhmm} — if you mention the clock, that is the time to use, never an earlier one.`
@@ -725,7 +747,13 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // and go straight to the one-call pool picker below to stretch the budget.
     if (settings.get().llm?.pickerAgent && !cheap && !breakerOpen()) {
       try {
-        const queued = await pickViaAgent(queue, ctx, { wantLink, audioWaypoint, current, showAt, rankTarget });
+        // `linkAirAt` mirrors the clause above: stamp the item with the air
+        // moment the model was TOLD to speak, and only when it was actually
+        // told one — a run given no clock makes no claim to go stale (#1314).
+        const queued = await pickViaAgent(queue, ctx, {
+          wantLink, audioWaypoint, current, showAt, rankTarget,
+          linkAirAt: airClock ? airAt : null,
+        });
         breakerSuccess();
         if (queued) return;
         // The agent produced a valid pick but it was already queued/on-air, so

@@ -93,10 +93,6 @@ export function getAllNews(): NewsMeta[] {
   return _cache;
 }
 
-export function getNewsSlugs(): string[] {
-  return getAllNews().map((a) => a.slug);
-}
-
 /** Null if the slug is unknown. */
 export function getNewsArticle(slug: string): NewsArticle | null {
   const hit = readRaw().find((r) => r.slug === slug);

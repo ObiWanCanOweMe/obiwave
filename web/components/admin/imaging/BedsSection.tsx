@@ -360,7 +360,7 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
           />
           <DropZone
             label={importFile ? `${importFile.name} · ${fmtSize(importFile.size)}` : 'choose a file…'}
-            hint={`same formats · at least ${minSec}s · up to 25 MB · converted to MP3`}
+            hint={`mp3 · wav · ogg · flac · m4a · aac · opus — at least ${minSec}s · up to 25 MB · converted to MP3`}
             onClick={() => importRef.current?.click()}
           />
           <p className="m-0 text-[12px] leading-[1.55] [text-wrap:pretty] text-muted">

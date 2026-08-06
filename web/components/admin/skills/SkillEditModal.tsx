@@ -57,16 +57,31 @@ interface SkillDefaults {
   label?: string;
   cooldown?: string;
   context?: string;
-  feed?: string;
-  feedMaxItems?: number;
   brief?: string;
+}
+
+// A knob the skill declares for itself in its tool.mjs (`configFields`, see the
+// controller's skills/config-fields.ts). The form renders whatever the skill
+// declares — nothing here is keyed on the skill's NAME, which is what let a
+// renamed copy of News keep its feed field (#1300).
+export interface SkillConfigField {
+  key: string;
+  type: 'text' | 'url' | 'number';
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  min?: number;
+  max?: number;
+  /** number fields only — whole numbers only, so the stepper moves by 1. */
+  integer?: boolean;
 }
 
 // GET /dj/skills/:kind/file — covers built-in and custom responses.
 interface SkillFileResponse {
   kind: string;
   custom?: boolean;
-  isNews?: boolean;
+  configFields?: SkillConfigField[];
+  config?: Record<string, string | number>;
   label?: string;
   cooldown?: string;
   context?: string;
@@ -74,8 +89,6 @@ interface SkillFileResponse {
   window?: 'any' | 'commute';
   requiresKey?: string;
   hasTool?: boolean;
-  feed?: string | null;
-  feedMaxItems?: number | null;
   tags?: string[];
   brief?: string;
   defaults?: SkillDefaults | null;
@@ -95,20 +108,37 @@ interface FileFields {
   cooldown: string;
   context: string[];
   window: 'any' | 'commute';
-  feed: string;
-  feedMaxItems: string;
+  /** Values for the skill's own declared knobs, keyed by field key. Strings
+   *  throughout — the controller coerces and validates against the declaration. */
+  config: Record<string, string>;
   tags: string[];
   brief: string;
 }
 
 function emptyFields(): FileFields {
-  return { label: '', cooldown: '', context: [], window: 'any', feed: '', feedMaxItems: '', tags: [], brief: '' };
+  return { label: '', cooldown: '', context: [], window: 'any', config: {}, tags: [], brief: '' };
+}
+
+// The skill's current knob values as form strings (the controller sends numbers
+// as numbers).
+function configValues(j: SkillFileResponse): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(j.config || {}).map(([k, v]) => [k, v == null ? '' : String(v)]),
+  );
 }
 
 // Comparison key for the tracked fields. Tags keep their order (an authored list,
-// not a set); only context is order-free.
+// not a set); only context is order-free. Config is normalised — a knob the
+// controller reports as unset is ABSENT, so typing into an empty field and
+// clearing it again must not read as an unsaved change.
 function fieldsKey(f: FileFields): string {
-  return JSON.stringify({ ...f, context: [...f.context].sort() });
+  const config = Object.fromEntries(
+    Object.entries(f.config)
+      .map(([k, v]) => [k, (v || '').trim()] as const)
+      .filter(([, v]) => v)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+  return JSON.stringify({ ...f, config, context: [...f.context].sort() });
 }
 
 function titleCase(slug: string): string {
@@ -127,7 +157,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const [name, setName] = useState('');            // slug — create only
   const [kind, setKind] = useState(skill?.kind || skill?.name || '');
   const [custom, setCustom] = useState(mode === 'create' ? true : !!skill?.custom);
-  const [isNews, setIsNews] = useState(false);
+  const [configFields, setConfigFields] = useState<SkillConfigField[]>([]);
   const [hasTool, setHasTool] = useState(false);
   const [requiresKey, setRequiresKey] = useState('');   // hidden passthrough
   const [knownContext, setKnownContext] = useState<string[]>(CONTEXT_FIELDS_FALLBACK);
@@ -192,8 +222,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
           cooldown: j.cooldown || '',
           context: splitContext(j.context),
           window: j.window === 'commute' ? 'commute' : 'any',
-          feed: j.feed || '',
-          feedMaxItems: j.feedMaxItems != null ? String(j.feedMaxItems) : '',
+          config: configValues(j),
           tags: Array.isArray(j.tags) ? j.tags : [],
           brief: j.brief || '',
         };
@@ -201,7 +230,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         setSnapshot(fieldsKey(next));
         setKind(j.kind || fileId);
         setCustom(!!j.custom);
-        setIsNews(!!j.isNews);
+        setConfigFields(Array.isArray(j.configFields) ? j.configFields : []);
         setHasTool(!!j.hasTool);
         setRequiresKey(j.requiresKey || '');
         setDefaults(j.defaults || null);
@@ -246,9 +275,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         body.window = fields.window;
         if (requiresKey) body.requiresKey = requiresKey;  // preserve disk-authored gate
       }
-      if (isNews) {
-        body.feed = fields.feed.trim() || undefined;
-        if (fields.feedMaxItems.trim()) body.feedMaxItems = fields.feedMaxItems.trim();
+      // Always sent when the skill declares knobs, so clearing a field clears
+      // the frontmatter line. Omitted entirely for a skill with none, which the
+      // controller reads as "leave whatever is on disk".
+      if (configFields.length) {
+        body.config = Object.fromEntries(
+          configFields.map(f => [f.key, (fields.config[f.key] || '').trim()]),
+        );
       }
 
       let r: Response;
@@ -415,13 +448,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
           cooldown: fj.cooldown || '',
           context: splitContext(fj.context),
           window: fj.window === 'commute' ? 'commute' : 'any',
-          feed: fj.feed || '',
-          feedMaxItems: fj.feedMaxItems != null ? String(fj.feedMaxItems) : '',
+          config: configValues(fj),
           tags: Array.isArray(fj.tags) ? fj.tags : [],
           brief: fj.brief || '',
         };
         setFields(next);
         setSnapshot(fieldsKey(next));
+        setConfigFields(Array.isArray(fj.configFields) ? fj.configFields : []);
         setHasTool(!!fj.hasTool);
       }
       flashFor('RESET TO SHIPPED DEFAULT');
@@ -617,28 +650,36 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               </div>
             )}
 
-            {isNews && (
+            {configFields.length > 0 && (
               <div className="sw-section">
-                <div style={sectionLabel}>NEWS FEED · RSS 2.0</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 16 }}>
-                  <input
-                    type="url"
-                    value={fields.feed}
-                    onChange={e => patch({ feed: e.target.value })}
-                    placeholder="https://…/rss.xml"
-                    style={{ ...inputBase, flex: '1 1 320px', minWidth: 0, padding: '11px 15px', fontSize: 14 }}
-                  />
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>MAX ITEMS</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={fields.feedMaxItems}
-                      onChange={e => patch({ feedMaxItems: e.target.value })}
-                      placeholder="10"
-                      style={{ ...inputBase, width: 90, padding: '11px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}
-                    />
-                  </label>
+                <div style={sectionLabel}>SKILL SETTINGS</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap', marginTop: 16 }}>
+                  {configFields.map(f => (
+                    <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: f.type === 'number' ? '0 0 auto' : '1 1 320px', minWidth: 0 }}>
+                      <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>{f.label}</span>
+                      <input
+                        type={f.type === 'number' ? 'number' : f.type === 'url' ? 'url' : 'text'}
+                        min={f.type === 'number' ? f.min : undefined}
+                        max={f.type === 'number' ? f.max : undefined}
+                        step={f.type === 'number' ? (f.integer ? 1 : 'any') : undefined}
+                        value={fields.config[f.key] || ''}
+                        onChange={e => patch({ config: { ...fields.config, [f.key]: e.target.value } })}
+                        placeholder={f.placeholder || ''}
+                        style={{
+                          ...inputBase,
+                          ...(f.type === 'number'
+                            ? { width: 110, padding: '11px 12px', fontVariantNumeric: 'tabular-nums' }
+                            : { width: '100%', minWidth: 0, padding: '11px 15px' }),
+                          boxSizing: 'border-box',
+                          fontSize: 14,
+                        }}
+                      />
+                      {f.hint && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{f.hint}</span>}
+                    </label>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '78ch' }}>
+                  Declared by this skill&apos;s <code>tool.mjs</code> and stored in its own <code>SKILL.md</code>, so a copy of the skill keeps its settings.
                 </div>
               </div>
             )}

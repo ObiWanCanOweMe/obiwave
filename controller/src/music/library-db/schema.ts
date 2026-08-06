@@ -357,6 +357,31 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 18');
   }
 
+  if (userVersion < 19) {
+    // Per-track analysis FAILURE stamp (#1300 bug 3c).
+    //
+    // A track whose analysis throws — a corrupt file, a stale library row, a
+    // container the decoder can't open — leaves every analysis column NULL,
+    // which is byte-identical to "never attempted". needsAnalysisIds therefore
+    // re-targets it on every pass, forever, and nothing anywhere records that
+    // it has already failed forty times or why. That is the second half of the
+    // "same count every run" report: the first half is a capability the backend
+    // lied about, and this is a file that will never analyse no matter who is
+    // asking.
+    //
+    // Three columns because the three questions are different: how many
+    // consecutive failures (the scope gate), when the last one was (is this
+    // stale?), and what it said (the only thing that makes it fixable). The
+    // count RESETS on success — it counts consecutive failures, so a track that
+    // failed twice on a flaky mount and then succeeded is not carrying a
+    // sentence. A --re-analyze clears all three: an explicit "do it all again"
+    // is exactly the operator saying the past does not apply.
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN analyze_error TEXT;`);
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN analyze_failed_at TEXT;`);
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN analyze_fail_count INTEGER;`);
+    d.pragma('user_version = 19');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —

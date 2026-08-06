@@ -1102,6 +1102,13 @@ SITE_URL=
 # (AIO one-click users: no overlay — pull
 # ghcr.io/perminder-klair/subwave-aio-cuda:<upstream-version> and pass the GPU
 # to the container. See docs/unraid.md.)
+#
+# GPU in a DIFFERENT machine? Run the analyzer there and point the station at
+# it — no need to move the stack or copy state around. Requires that the
+# analyzer sees this host's state dir at the same /var/sub-wave path (the
+# controller hands it pre-fetched file paths, not audio):
+#   docs/tts-heavy.md#running-the-analyzer-on-another-machine
+# ANALYZE_URL=http://192.168.1.101:8080   # overrides the in-compose analyzer
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
 # ANALYZE_IDLE_UNLOAD_S=  # seconds of no CLAP/Demucs use before the models are
@@ -1167,6 +1174,12 @@ SITE_URL=
 # --profile tts-heavy.
 # TTS_HEAVY_ENGINES=pocket-tts     # or: chatterbox  |  chatterbox,pocket-tts
 #
+# Own TTS server? There's nothing to set here — the *Remote* engine points the
+# DJ at any HTTP server that answers GET /health and returns rendered audio from
+# POST /speak (a GPU box, a Tailscale peer, a bridge in front of a vendor API
+# like Gemini TTS). It's a station setting, not env: admin → Settings → Voices →
+# Remote. Contract + a 20-line reference server: docs/custom-tts.md
+#
 # Memory ceilings for the model-loading sidecars (OOM containment — keeps a
 # runaway model load from taking down the host's other services). Defaults are
 # generous; raise for the heavy analyzer on large libraries, lower on a
@@ -1181,4 +1194,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.4.0`; // x-release-please-version
+export const CLI_VERSION = `1.5.0`; // x-release-please-version

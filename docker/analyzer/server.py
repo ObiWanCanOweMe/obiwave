@@ -103,6 +103,16 @@ class StdioWorker:
         self.last_heavy: float | None = None
         self.models_resident = False
         self.recycles = 0
+        # Capabilities the worker advertised at ready but LOST when the model
+        # was actually asked to load — {"audio_embedding": "<why>"}. Harvested
+        # from every response (analyze_worker.capability_loss) and deliberately
+        # NOT cleared by _reset(), which is the whole point: the worker's own
+        # _embed_failed dies with the process, and recycle_loop respawns the
+        # process on idle, so a purely in-worker latch resets itself every hour
+        # and the controller re-widens its backfill to the same doomed track
+        # set forever (#1300 bug 3). Cleared only by restarting THIS container,
+        # which is also the operator's retry after fixing the cause.
+        self.capability_errors: dict[str, str] = {}
 
     async def run(self) -> None:
         """Keep the worker alive forever (or until cancelled)."""
@@ -171,6 +181,9 @@ class StdioWorker:
             self._terminate()
             raise
         self.ready_meta = {k: v for k, v in msg.items() if k != "ready"}
+        # A pre-warm (env-enabled) model load fails BEFORE ready, so the ready
+        # line itself can already carry a loss.
+        self._note_capability_loss(msg)
         log.info(f"[{self.name}] ready {self.ready_meta or ''}".rstrip())
         # With an env flag on, the worker pre-warms that model BEFORE ready —
         # count it as resident (and heavy use, so the recycle clock runs)
@@ -215,6 +228,38 @@ class StdioWorker:
             if "released" in text and "reloads on next use" in text:
                 self.models_resident = False
 
+    def _note_capability_loss(self, msg: dict[str, Any]) -> None:
+        """Record a capability the worker just reported it can no longer do.
+
+        First observation per capability is logged at WARNING — a load failure
+        that only ever showed up as a missing field in an ok=true response is
+        precisely how this went unnoticed for so long.
+        """
+        lost = msg.get("capability_loss")
+        if not isinstance(lost, dict):
+            return
+        for name, why in lost.items():
+            reason = str(why)[:400]
+            if self.capability_errors.get(name) == reason:
+                continue
+            self.capability_errors[name] = reason
+            log.warning(f"[{self.name}] {name} unavailable: {reason}")
+
+    def capability(self, meta_key: str, loss_key: str) -> bool | None:
+        """Advertised capability, corrected by anything observed since.
+
+        `ready_meta` answers the question the worker could answer BEFORE
+        loading anything ("are the libraries installed"); an observed load
+        failure answers the one that matters ("can it actually produce this").
+        The observation wins, and only ever downward — a capability the worker
+        never claimed stays unclaimed."""
+        if not self.ready:
+            return None
+        if loss_key in self.capability_errors:
+            return False
+        value = self.ready_meta.get(meta_key)
+        return value if isinstance(value, bool) else None
+
     @staticmethod
     def _wants_models(payload: dict[str, Any]) -> bool:
         """Whether this request can load/use CLAP or Demucs. Texts always force
@@ -242,6 +287,7 @@ class StdioWorker:
             self.proc.stdin.write((req + "\n").encode())
             await self.proc.stdin.drain()
             msg = await self._await_message()
+            self._note_capability_loss(msg)
             # Stamp heavy use from what actually came back, not what was
             # asked: an analyze whose CLAP load failed still answers ok=true
             # (graceful degrade) but carries no model-derived fields, and must
@@ -333,26 +379,36 @@ async def health():
         "engines": ready_engines,
         "analyze_loaded": analyzer_worker.ready,
         # CLAP "sounds-like" capability (WITH_CLAP=1 builds only) — the admin
-        # UI warns to rebuild before a fruitless run. None until ready.
-        "analyze_audio_capable": (
-            analyzer_worker.ready_meta.get("audio_embedding_capable") if analyzer_worker.ready else None
+        # UI warns to rebuild before a fruitless run. None until ready. Reads
+        # through capability(), so a model that failed to LOAD reports false
+        # here rather than the ready line's install-time guess.
+        "analyze_audio_capable": analyzer_worker.capability(
+            "audio_embedding_capable", "audio_embedding"
         ),
         # Demucs vocal-activity capability (WITH_DEMUCS=1). None until ready.
-        "analyze_vocal_capable": (
-            analyzer_worker.ready_meta.get("vocal_activity_capable") if analyzer_worker.ready else None
+        "analyze_vocal_capable": analyzer_worker.capability(
+            "vocal_activity_capable", "vocal_activity"
         ),
+        # WHY a capability is false, when the reason is a failed load rather
+        # than a lean build — null in every other case, including a lean image.
+        # The distinction is the actionable part: "rebuild with the heavy image"
+        # and "give this host reach to huggingface.co, or pre-seed its cache"
+        # are opposite instructions, and a bare false can't tell them apart.
+        "analyze_audio_error": analyzer_worker.capability_errors.get("audio_embedding"),
+        "analyze_vocal_error": analyzer_worker.capability_errors.get("vocal_activity"),
         # Tail vocal ranges — a worker-version signal as much as a capability:
         # workers predating the feature never emit the key, so this stays None
         # on stale images and the controller's backfill widening (which
-        # requires === true) can't churn against them.
-        "analyze_tail_vocal_capable": (
-            analyzer_worker.ready_meta.get("tail_vocal_capable") if analyzer_worker.ready else None
+        # requires === true) can't churn against them. Demucs failing to load
+        # takes the tail down with it — same model, same separation.
+        "analyze_tail_vocal_capable": analyzer_worker.capability(
+            "tail_vocal_capable", "vocal_activity"
         ),
         # CLAP text tower (same 512-d space as the audio vectors) — powers
         # "sounds like ..." search and zero-shot moods. Needs torch, so lean
-        # images report false.
-        "analyze_text_capable": (
-            analyzer_worker.ready_meta.get("text_embedding_capable") if analyzer_worker.ready else None
+        # images report false. Shares CLAP's load, so it shares its failure.
+        "analyze_text_capable": analyzer_worker.capability(
+            "text_embedding_capable", "audio_embedding"
         ),
         # Best-effort residency (#1204): whether CLAP/Demucs are believed
         # loaded right now — lets an operator confirm the idle release

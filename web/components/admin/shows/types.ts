@@ -7,6 +7,20 @@ export const TOPIC_MAX = 2000;
 export const SHOWS_MAX = 64;
 // Mirrors the controller's GUESTS_PER_SHOW cap (settings.ts).
 export const GUESTS_MAX = 3;
+// Mirrors the controller's PLAYLISTS_PER_SHOW / EXCLUDED_PLAYLISTS_PER_SHOW
+// caps (settings/vocab.ts), which are the same figure. Pinned against drift by
+// controller/scripts/playlists-cap.test.ts.
+export const PLAYLISTS_MAX = 10;
+
+/** How much the panel knows about the live Navidrome playlist index.
+ *
+ * Three states, not a loaded/not-loaded boolean: an empty `playlists` array
+ * means something different in each, and only `ready` licenses the editor to
+ * call a show's pinned id missing. A boolean collapses `loading` and `error`
+ * into one bucket, and whichever way that bucket renders is wrong for the other
+ * half of it — a spinner that never resolves, or a "no playlists" line shown
+ * while the fetch is still in flight. */
+export type PlaylistIndexStatus = 'loading' | 'ready' | 'error';
 
 export interface Show {
   id: string;
@@ -30,6 +44,11 @@ export interface Show {
   genres: string[];
   eras: EraWindow[];
   energies: string[];
+  /** Single-valued, unlike the lists above: the two states are mutually
+   *  exclusive. '' = no constraint, and is what every show predating the field
+   *  carries. Backed by vocal-activity analysis, so it only steers tracks that
+   *  have had a vocal pass. */
+  vocals: '' | 'instrumental' | 'vocal';
   /** With ≥1 music filter set, EVERY set filter becomes HARD instead of a soft
    *  lean; off-filter tracks only play as a last resort. The controller does NOT
    *  auto-migrate legacy `genreStrict` shows — they load soft. */
@@ -89,6 +108,13 @@ export const DECADES: { key: string; label: string; from: number; to: number }[]
   { key: '1950', label: '50s', from: 1950, to: 1959 },
 ];
 export const ENERGY_OPTIONS = ['low', 'medium', 'high'];
+// Mirrors the controller's SHOW_VOCALS (settings/vocab.ts). '' is the absent
+// third state and deliberately has no chip — clearing the selection is how you
+// get back to it.
+export const VOCAL_OPTIONS = [
+  { key: 'instrumental', label: 'instrumental' },
+  { key: 'vocal', label: 'vocals' },
+];
 export const ANY_SENTINEL = '__any__';
 // Mirrors the controller's SHOW_FILTER_VALUES_MAX cap
 // (controller/src/settings/vocab.ts — read the comment there before changing

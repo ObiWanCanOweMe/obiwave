@@ -12,7 +12,6 @@ export interface RosterAvatarProps {
   size?: 'sm' | 'xs';
   className?: string;
 }
-
 export function RosterAvatar({ src, initials, size = 'sm', className }: RosterAvatarProps) {
   return (
     <span
@@ -36,5 +35,3 @@ export function RosterAvatar({ src, initials, size = 'sm', className }: RosterAv
     </span>
   );
 }
-
-export default RosterAvatar;

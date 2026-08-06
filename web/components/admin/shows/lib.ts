@@ -33,6 +33,10 @@ export function hydrateShow(s: Partial<Show>): Show {
       return fromYear != null || toYear != null ? [{ fromYear, toYear }] : [];
     })(),
     energies: Array.isArray(s.energies) ? s.energies : (s as { energy?: string }).energy ? [(s as { energy?: string }).energy!] : [],
+    // Anything unrecognised reads as no constraint, matching the controller's
+    // coerceShowVocals — a steering field that silently stops applying is a far
+    // smaller failure than a show that stops playing music.
+    vocals: s.vocals === 'instrumental' || s.vocals === 'vocal' ? s.vocals : '',
     filtersStrict: s.filtersStrict ?? false,
     maxTrackSeconds: s.maxTrackSeconds ?? null,
     playlistIds: Array.isArray(s.playlistIds) ? s.playlistIds : [],
@@ -64,7 +68,7 @@ export function showValid(s: Show): boolean {
 // At least one music filter set — the Strict filter toggle only means
 // something when there's a filter for it to harden.
 export function hasAnyMusicFilter(s: Show): boolean {
-  return !!(s.moods.length || s.genres.length || s.energies.length || s.eras.length);
+  return !!(s.moods.length || s.genres.length || s.energies.length || s.eras.length || s.vocals);
 }
 
 // Trimmed, with the "only-means-something-with" conditionals the server also
@@ -85,6 +89,7 @@ export function showPayload(s: Show) {
     genres: s.genres.map(g => g.trim()).filter(Boolean),
     eras: s.eras,
     energies: s.energies,
+    vocals: s.vocals || '',
     // Strict only means something with at least one music filter set.
     filtersStrict: hasAnyMusicFilter(s) && s.filtersStrict,
     maxTrackSeconds: s.maxTrackSeconds,
@@ -108,6 +113,7 @@ export function showFacets(s: Show): ShowFacet[] {
   s.genres.forEach(g => facets.push({ key: `genre-${g}`, label: g }));
   s.eras.forEach((e, idx) => facets.push({ key: `era-${idx}`, label: eraLabelOf(e) }));
   s.energies.forEach(en => facets.push({ key: `energy-${en}`, label: en }));
+  if (s.vocals) facets.push({ key: 'vocals', label: s.vocals === 'instrumental' ? 'instrumental' : 'vocals' });
   if (s.filtersStrict && hasAnyMusicFilter(s)) facets.push({ key: 'strict', label: 'strict', accent: true });
   const nPl = s.playlistIds?.length ?? 0;
   if (nPl) facets.push({ key: 'playlists', label: `${nPl} playlist${nPl > 1 ? 's' : ''}${s.playlistStrict ? ' · strict' : ''}` });

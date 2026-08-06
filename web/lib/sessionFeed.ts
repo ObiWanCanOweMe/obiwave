@@ -21,9 +21,6 @@ export function turnClass(turn: SessionTurn | null | undefined): TurnDisplayClas
   }
 }
 
-export const isVoice = (turn: SessionTurn | null | undefined): boolean =>
-  turnClass(turn) === 'voice';
-
 // "DJ" view = everything the DJ personally said or decided.
 export const isDjTurn = (turn: SessionTurn | null | undefined): boolean => {
   const c = turnClass(turn);

@@ -10,15 +10,15 @@ A station serves a plain HTTP API from the same origin it streams from, so nobod
 
 ## What's new
 
-The /apps page lists what the community has built against a station. There are four to start.
+The [/apps](/apps) page lists what the community has built against a station. There are four to start.
 
-One is a desk player that runs on a Raspberry Pi Pico 2 W, showing the current track on a small LCD with a physical skip button. A native desktop client covers macOS, Windows and Linux. A standalone MCP server lets you drive the booth from any MCP client. The fourth is the reference web player, which exists to be forked and restyled.
+One is a desk player that runs on a Raspberry Pi Pico 2 W, showing the current track on a small LCD with a physical skip button. A native desktop client covers macOS, Windows and Linux. A standalone MCP server lets you [drive the booth](/news/agent-in-the-booth) from any MCP client. The fourth is the reference web player, which exists to be forked and restyled.
 
-The masthead has a new Community item as well, gathering Skills, Personas, Shows and Apps behind one heading.
+The masthead has a new Community item as well, gathering [Skills](/skills), [Personas](/personas), [Shows](/shows) and Apps behind one heading.
 
 ## How to use it
 
-Browse the directory at /apps. The chips along the top filter by kind: mobile, web, desktop, terminal, bot, skin, integration.
+Browse the directory at [/apps](/apps). The chips along the top filter by kind: mobile, web, desktop, terminal, bot, skin, integration.
 
 If you built something, hit "Submit an app". That opens a GitHub issue form, so there is no fork and no JSON to write. Name, link and kind are the only fields you have to fill in. A bot turns your issue into a pull request, and once a maintainer merges it your app shows up on the next deploy. Edit the issue afterwards and the pull request follows.
 

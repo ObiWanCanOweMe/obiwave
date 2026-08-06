@@ -24,23 +24,12 @@ import { energyForDaypart } from '../context.js';
 
 export const ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'];
 
-// Voice kinds the system speaks. `kind` is passed by the caller and used to
-// look up an engine override in settings. Unknown kinds fall back to default.
-export const VOICE_KINDS = [
-  'dj-speak',       // listener-request intros + ad-hoc dialogue
-  'link',           // between-track auto links (light-duck channel)
-  'station-id',     // :15/:45 idents
-  'hourly-check',   // top-of-hour time/weather mention
-  'weather',        // weather change announcements (segment capability)
-  'news',           // headline read (segment capability)
-  'now-playing-dig',   // search-grounded detail about the on-air track (segment capability)
-  'curiosity',      // on-this-day / oddly-specific factoid (segment capability)
-  'album-anniversary', // round-number anniversary of the on-air album (segment capability)
-  'library-deep-cut',  // tease a forgotten track by the on-air artist (segment capability)
-  'jingle',         // pre-rendered station idents (offline path)
-  'default',        // fallback when a kind isn't explicitly mapped
-];
-
+// `kind` is passed by the caller and used to look up an engine override in
+// settings; unknown kinds fall back to default. The live set of kinds comes
+// from the skills capability table (`skills/_agent.ts` CAPABILITIES) plus the
+// scheduled ones below — there is deliberately no second hardcoded list here
+// to drift out of step with it.
+//
 // Every spoken segment — track intros, links, idents, weather, news, digs,
 // facts — is voiced by the persona on air: engine and voice come from the
 // effective persona's `tts` config. Only jingle rendering (a pre-recorded,

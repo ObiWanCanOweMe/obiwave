@@ -785,10 +785,6 @@ export function skillCatalog() {
       requiresKey,
       keyUrl,
       hint,
-      // News feed surfaced so /admin/skills can show/edit the current feed
-      // without a second fetch. Undefined on every other capability.
-      feed: c.feed || null,
-      feedMaxItems: c.feedMaxItems || null,
       // The "right now" fields this segment's situation may include (issue
       // #471). Resolved to the default profile (no weather) when unset, so the
       // admin UI can render the current tick-box selection without guessing.

@@ -307,6 +307,13 @@ export const DEFAULTS = {
       temperature: 0.7,
       topP: 0.7,
       latency: 'normal' as 'low' | 'normal' | 'balanced',
+      // Free-form extra body fields for openai-compatible servers (issue
+      // #1317) — Chatterbox's temperature/seed/exaggeration, and whatever the
+      // next self-hosted engine invents. Stored as text pairs and coerced to
+      // JSON types at send time; sent ONLY when provider ===
+      // 'openai-compatible'. Empty = today's request shape, byte for byte.
+      // Rules live in settings/compat-params.ts.
+      compatParams: [] as { key: string; value: string }[],
     },
     // Remote engine — a user-configured self-hosted TTS endpoint that renders
     // audio over HTTP (POST /speak → audio body, gated on a /health probe).

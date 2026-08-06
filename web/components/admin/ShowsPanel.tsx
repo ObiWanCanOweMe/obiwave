@@ -28,6 +28,7 @@ import type {
   CommunityShow,
   FormState,
   Persona,
+  PlaylistIndexStatus,
   Schedule,
   SettingsResponse,
   Show,
@@ -65,8 +66,12 @@ export default function ShowsPanel() {
   // Admin-gated, so it runs after sign-in; failures are silent (the field still
   // accepts free text).
   const [genres, setGenres] = useState<string[]>([]);
-  // Admin-gated; failures are silent (the picker just offers no options).
+  // Admin-gated. A failure is no longer silent in the picker — see below.
   const [playlists, setPlaylists] = useState<{ id: string; name: string; songCount: number | null }[]>([]);
+  // A pending or failed fetch leaves `playlists` empty too, so the editor needs
+  // to tell those apart from a genuinely empty Navidrome before it calls a show's
+  // pinned id missing (or tells the operator they have no playlists).
+  const [playlistsStatus, setPlaylistsStatus] = useState<PlaylistIndexStatus>('loading');
   // Guarded by scrollToEditorRef so unrelated re-renders don't yank the page.
   useEffect(() => {
     if (!scrollToEditorRef.current) return;
@@ -153,12 +158,25 @@ export default function ShowsPanel() {
     if (!hydrated || needsAuth) return;
     let cancelled = false;
     (async () => {
+      // Every exit that isn't a well-formed list lands on 'error', including a
+      // 200 with no `results` array: the index is unknown either way, and leaving
+      // it on 'loading' would spin forever. `cancelled` is checked before each
+      // set so an unmount/re-run never reports a state for a dead effect.
       try {
         const r = await adminFetch('/dj/playlists');
-        if (!r.ok || cancelled) return;
+        if (cancelled) return;
+        if (!r.ok) { setPlaylistsStatus('error'); return; }
         const j = (await r.json()) as { results?: { id: string; name: string; songCount: number | null }[] };
-        if (Array.isArray(j.results)) setPlaylists(j.results);
-      } catch {}
+        if (cancelled) return;
+        if (Array.isArray(j.results)) {
+          setPlaylists(j.results);
+          setPlaylistsStatus('ready');
+        } else {
+          setPlaylistsStatus('error');
+        }
+      } catch {
+        if (!cancelled) setPlaylistsStatus('error');
+      }
     })();
     return () => { cancelled = true; };
   }, [hydrated, needsAuth]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -206,7 +224,7 @@ export default function ShowsPanel() {
         shows: [...f.shows, {
           id, name: '', topic: '',
           personaId: personas[0]?.id || '', guestPersonaIds: [], banter: false, moods: [],
-          themeId: '', genres: [], eras: [], energies: [],
+          themeId: '', genres: [], eras: [], energies: [], vocals: '',
           filtersStrict: false, maxTrackSeconds: null,
           playlistIds: [], playlistStrict: false, excludedPlaylistIds: [],
           programme: false, segmentSkill: '',
@@ -434,6 +452,7 @@ export default function ShowsPanel() {
           activeThemeId={activeThemeId}
           genres={genres}
           playlists={playlists}
+          playlistsStatus={playlistsStatus}
           apiBase={apiBase}
           adminFetch={adminFetch}
           minTrackSeconds={data?.values?.minTrackSeconds}

@@ -597,6 +597,41 @@ router.get('/library/coverage', requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /library/analysis-failures — the tracks acoustic analysis has thrown on,
+// with the reason. There was no way to get this list short of querying
+// library.db by hand, which is what made a re-analysis loop unexplainable from
+// the outside (#1300 bug 3c). Worst and most recent first; `excluded` marks the
+// ones that have failed enough times to have left every analysis scope.
+// ---------------------------------------------------------------------------
+router.get('/library/analysis-failures', requireAdmin, (req, res) => {
+  try {
+    const limit = parseIntSafe(req.query?.limit, 200);
+    res.json({
+      failures: db.analysisFailures(Math.min(1000, Math.max(1, limit))),
+      excluded: db.analysisFailedCount(),
+      maxAttempts: db.MAX_ANALYSIS_FAILURES,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /library/analysis-failures/clear — forget the failure history so the
+// next pass tries these tracks again. The retry after fixing the cause (a
+// remounted share, a repaired file, an analyzer that can finally reach its
+// weights). Body `{ id }` clears one track; no body clears all of them.
+// ---------------------------------------------------------------------------
+router.post('/library/analysis-failures/clear', requireAdmin, (req, res) => {
+  try {
+    const id = typeof req.body?.id === 'string' && req.body.id ? req.body.id : undefined;
+    res.json({ ok: true, cleared: db.clearAnalysisFailures(id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /library/tagger — the tagger snapshot ALONE (same slicing as the /settings
 // payload's `tagger` slice, via the shared taggerView helper). The admin library
 // panel polls THIS on its fast loop (3s running / 10s idle) so live run progress
@@ -937,7 +972,63 @@ router.post('/library/manual-tag', requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.get('/library/blocklist', requireAdmin, (_req, res) => {
-  res.json({ entries: blocklist.list() });
+  // Rules ride the same listing with live stats: `active` (is it blocking
+  // right now — season + show scope) and `matchCount` (library-wide reach,
+  // activity-agnostic, so a typo'd value reads 0). The row scan only runs
+  // when rules exist.
+  let rules: ReturnType<typeof blocklist.rulesWithStats> = [];
+  if (blocklist.listRules().length) {
+    let rows: any[] = [];
+    try { rows = db.ruleMatchRows(); } catch {}
+    rules = blocklist.rulesWithStats(rows);
+  }
+  res.json({ entries: blocklist.list(), rules });
+});
+
+// ── Rule entries (attribute/tag predicates — #1300 FR 1) ────────────────────
+// Registered BEFORE the entry routes: DELETE /library/blocklist/:type/:id
+// would otherwise swallow /library/blocklist/rules/:id with type='rules'.
+
+router.post('/library/blocklist/rules', requireAdmin, async (req, res) => {
+  try {
+    const rule = await blocklist.addRule(req.body);
+    queue.log('blocked', `rule "${rule.label}" (${rule.field}: ${rule.values.join(', ')}) added to the never-play blocklist`);
+    // Same side-effects as adding an id entry: drop now-blocked upcoming
+    // tracks, rebuild auto.m3u so the LLM-free coast stops carrying them.
+    const purged = queue.purgeBlocked();
+    refreshAutoPlaylist().catch((err: any) => queue.log('error', `blocklist auto-playlist refresh failed: ${err.message}`));
+    res.status(201).json({ rule, purged });
+  } catch (err) {
+    // Validation errors are the operator's typo, not a server fault.
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/library/blocklist/rules/:id', requireAdmin, async (req, res) => {
+  try {
+    const rule = await blocklist.updateRule(req.params.id, req.body);
+    if (!rule) return res.status(404).json({ error: 'no such rule' });
+    queue.log('blocked', `rule "${rule.label}" updated on the never-play blocklist`);
+    const purged = queue.purgeBlocked();
+    refreshAutoPlaylist().catch((err: any) => queue.log('error', `blocklist auto-playlist refresh failed: ${err.message}`));
+    res.json({ rule, purged });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/library/blocklist/rules/:id', requireAdmin, async (req, res) => {
+  try {
+    const removed = await blocklist.removeRule(req.params.id);
+    if (!removed) return res.status(404).json({ error: 'no such rule' });
+    queue.log('blocked', `rule ${req.params.id} removed from the never-play blocklist`);
+    // No purge on remove — an un-blocked track simply becomes pickable again;
+    // auto.m3u picks it back up on its next refresh.
+    res.status(204).end();
+  } catch (err) {
+    queue.log('error', `/library/blocklist/rules delete failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Body: { type: 'track'|'album'|'artist', trackId } — the UI flow: block from a
@@ -1066,8 +1157,9 @@ router.post('/library/blocklist/check', requireAdmin, (req, res) => {
   for (const row of rows) {
     const id = row?.id;
     if (typeof id !== 'string' || !id) continue;
-    const hit = blocklist.matchOf(row);
-    blocked[id] = hit ? blocklist.refOf(hit) : null;
+    // hitOf covers rules too — tag fields absent from the slim check payload
+    // resolve through the library lookup inside the show-filter readers.
+    blocked[id] = blocklist.hitOf(row);
   }
   res.json({ blocked });
 });

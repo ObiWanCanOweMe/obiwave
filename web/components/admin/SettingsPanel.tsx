@@ -191,6 +191,12 @@ export default function SettingsPanel() {
             : v.tts?.cloud?.latency === 'balanced'
               ? 'balanced'
               : FISH_TTS_DEFAULTS.latency,
+          // Extra openai-compatible body fields (issue #1317). Rows are text
+          // pairs on the wire too — the controller coerces them to JSON types
+          // at send time, so the form never has to guess a value's shape.
+          compatParams: Array.isArray(v.tts?.cloud?.compatParams)
+            ? v.tts.cloud.compatParams.map(p => ({ key: String(p?.key ?? ''), value: String(p?.value ?? '') }))
+            : [],
         },
         remote: { url: v.tts?.remote?.url ?? '' },
         // Per-engine voice level (dB), keyed by engine id — `pocket-tts` (hyphen).

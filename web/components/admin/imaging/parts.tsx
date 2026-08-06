@@ -1,8 +1,9 @@
 'use client';
 
 /* Presentational helpers for the Imaging page. Every static style is a Tailwind
-   utility — inline `style` is eslint-forbidden here (issue #50) — so dynamic bar
-   heights ride the shared `Wave` component's DOM-mutation path instead. */
+   utility — inline `style` is eslint-forbidden here (issue #50) — so anything
+   with a computed pixel value sets it by DOM mutation in a layout effect
+   instead. */
 
 import type { ReactNode } from 'react';
 import { cn } from '../../../lib/cn';

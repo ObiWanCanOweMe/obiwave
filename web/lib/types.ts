@@ -46,18 +46,6 @@ export interface ActiveShow {
   guests?: { id?: string; name?: string; avatar?: string }[];
 }
 
-/** `/dj` response used by Landing + lock-screen artwork. */
-export interface DjPublic {
-  name?: string;
-  tagline?: string;
-  soul?: string;
-  frequency?: string;
-  avatar?: string;
-  station?: string;
-  location?: string;
-  locale?: StationLocale;
-}
-
 /** `/schedule` response — listener-safe view of the week. */
 export interface SchedulePersona {
   id: string;

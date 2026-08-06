@@ -332,10 +332,6 @@ export function setStreamIdle(v: boolean) {
   streamIdle = v;
 }
 
-export function isStreamIdle() {
-  return streamIdle;
-}
-
 // True when autonomous DJ LLM work is allowed right now. When the pause toggle
 // is off, always true. When on, allowed only if at least one listener is
 // counted — an unknown count (Icecast unreachable) is treated as occupied so a

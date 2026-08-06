@@ -148,7 +148,9 @@ export function TrackTable(p: TrackTableProps) {
                         ~210px. The full scope stays in the row menu. */}
                     <span aria-hidden>
                       never play
-                      {t.blockedBy.type !== 'track' && (
+                      {t.blockedBy.kind === 'rule' ? (
+                        <span className="hidden sm:inline"> · rule</span>
+                      ) : t.blockedBy.type !== 'track' && (
                         <span className="hidden sm:inline"> · {t.blockedBy.type}</span>
                       )}
                     </span>
@@ -257,9 +259,12 @@ export function TrackTable(p: TrackTableProps) {
                   ? <RotateCcw size={11} />
                   : <Sparkles size={11} />}
               </Btn>
-              {/* A blocked row offers the reverse, not another scope to add: one click
-                  lifts the entry that matched, wherever it was made from. */}
-              {t.blockedBy ? (
+              {/* An entry-blocked row offers the reverse, not another scope to add:
+                  one click lifts the entry that matched, wherever it was made from.
+                  A RULE-blocked row keeps the block menu — the rule may cover
+                  hundreds of rows, so lifting it lives on the Blocked tab, and an
+                  id entry on top is still a legitimate ask. */}
+              {t.blockedBy && t.blockedBy.kind !== 'rule' ? (
                 <Btn
                   sm
                   tone="accent"
@@ -364,7 +369,18 @@ export function RowActionsMenu({
             </button>
           )}
           <span className="my-1 block border-t border-dashed border-separator-strong" />
-          {track.blockedBy ? (
+          {track.blockedBy?.kind === 'rule' && (
+            /* Informational, not actionable: the rule may block hundreds of rows,
+               so lifting it happens on the Blocked tab, never as a row one-click. */
+            <span className={cn(MENU_ITEM, 'cursor-default items-start text-muted')}>
+              <Ban size={13} className="mt-px flex-none" />
+              <span>
+                Blocked via {blockedByLabel(track.blockedBy)}
+                <span className="block text-[10px]">manage rules on the Blocked tab</span>
+              </span>
+            </span>
+          )}
+          {track.blockedBy && track.blockedBy.kind !== 'rule' ? (
             <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onUnblock(track, track.blockedBy!))}>
               <Undo2 size={13} /> {unblockLabel(track.blockedBy)}
             </button>

@@ -9,7 +9,7 @@ import { personaSubmitUrl } from '@/lib/repo';
 export const metadata = pageMeta({
   title: 'SUB/WAVE — Community Personas',
   description:
-    'The community persona catalog — DJ identities shared by other stations. Browse them here, then install any from your station&rsquo;s admin console.',
+    'The community persona catalog: DJ identities other operators wrote and sent in. Read their souls here, install them from your own admin console.',
   path: '/personas',
 });
 
@@ -41,8 +41,8 @@ async function PersonasGrid({ personas }: { personas: Promise<CommunityPersona[]
   if (list.length === 0) {
     return (
       <p className="bs-news-empty">
-        No community personas to show yet — the catalog may still be loading, or this station
-        hasn&rsquo;t shipped one. Be the first to{' '}
+        Nothing in the persona catalog yet, or this station hasn&rsquo;t caught up with it. Be
+        the first to{' '}
         <AnimatedLink href={SUBMIT_URL} className="bs-link">
           share a persona
         </AnimatedLink>
@@ -69,10 +69,10 @@ export default function CommunityPersonasIndex() {
         <p className="bs-eyebrow">THE GREEN ROOM</p>
         <h1>Community Personas.</h1>
         <p>
-          A persona is a DJ identity — a name, a soul, and a few behaviour knobs that shape
-          everything they say on air. These are shared by the community and ship with every
-          station. Browse them here, then install the ones you like from your own admin
-          console — and give them your own voice and face there.
+          A persona is a DJ identity: a name, a soul, and the handful of dials that shape
+          everything they say on air. The soul is the prompt itself, not a written bio, so
+          what you read on a card is what the station hands the model. Every one below came
+          from another operator, and they ship with every station.
         </p>
       </header>
 
@@ -81,7 +81,7 @@ export default function CommunityPersonasIndex() {
       </Suspense>
 
       <div className="bs-station-cta">
-        <p className="bs-station-cta-copy">Dreamed up a DJ worth sharing? Add them to the catalog.</p>
+        <p className="bs-station-cta-copy">Dreamed up a DJ other stations should meet? Put them on the list.</p>
         <AnimatedLink href={SUBMIT_URL} variant="arrow" className="bs-station-cta-link">
           Share a persona
         </AnimatedLink>
@@ -95,10 +95,10 @@ export default function CommunityPersonasIndex() {
       </Suspense>
 
       <p className="bs-stations-report">
-        Installing is a two-tap job in your station&rsquo;s admin: open{' '}
-        <strong>Personas → Community</strong>, then <strong>Install</strong>. The persona joins
-        your roster off-air, with your station&rsquo;s default voice — audition it, pick a voice
-        and an avatar, then put it on the desk when you&rsquo;re ready.
+        To install, open <strong>Personas → Community</strong> in your station&rsquo;s admin and
+        hit <strong>Install</strong>. The persona joins your roster off-air with the
+        station&rsquo;s default voice. Audition it, give it a voice and a face, then put it on
+        the desk.
       </p>
     </article>
   );

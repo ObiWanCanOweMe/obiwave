@@ -93,4 +93,4 @@ export function useAdminAuth(): AdminAuth {
   return { auth, needsAuth, hydrated, signIn, signOut, adminFetch };
 }
 
-export { API_URL as ADMIN_API_URL, STORAGE_KEY as ADMIN_STORAGE_KEY };
+export { API_URL as ADMIN_API_URL };

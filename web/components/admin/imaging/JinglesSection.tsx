@@ -190,7 +190,7 @@ export function JinglesSection({
         open={modal === 'create'}
         onOpenChange={(o) => { if (!o) setModal(null); }}
         title="create jingle"
-        sub="we’ll voice it with Piper TTS"
+        sub="we’ll voice it in your station’s configured TTS voice"
         footer={
           <>
             <Button variant="ghost" size="sm" className="min-h-9 sm:min-h-0" onClick={() => setModal(null)}>Cancel</Button>

@@ -132,6 +132,10 @@ export async function getAllApps(): Promise<CommunityApp[]> {
     .filter((a): a is CommunityApp => a !== null)
     .sort((a, b) => {
       if (a.featured !== b.featured) return a.featured ? -1 : 1;
+      // Newest first; ISO yyyy-mm-dd compares lexicographically, and an entry
+      // without a date sorts after every dated one.
+      const byDate = (b.submitted ?? '').localeCompare(a.submitted ?? '');
+      if (byDate !== 0) return byDate;
       return a.name.localeCompare(b.name);
     });
 }

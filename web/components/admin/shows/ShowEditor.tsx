@@ -6,7 +6,7 @@
 // (which resets the AiFill box).
 
 import type { ChangeEvent, RefObject } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
 import { Label } from '../../ui/label';
@@ -23,7 +23,7 @@ import { Card, Btn, Eyebrow, Toggle } from '../ui';
 import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { AiFill } from '../AiFill';
 import GenreSuggest from '../GenreSuggest';
-import { PersonaPicker, GuestPersonaPicker, ThemePicker } from './ShowPickers';
+import { PersonaPicker, GuestPersonaPicker, ThemePicker, PlaylistPicker } from './ShowPickers';
 import { cn } from '../../../lib/cn';
 import {
   ANY_SENTINEL,
@@ -32,11 +32,13 @@ import {
   FILTER_VALUES_MAX,
   GUESTS_MAX,
   NAME_MAX,
+  PLAYLISTS_MAX,
   TOPIC_MAX,
+  VOCAL_OPTIONS,
   eraLabelOf,
   sameEra,
 } from './types';
-import type { Persona, Show, SkillOption, ThemeOption } from './types';
+import type { Persona, PlaylistIndexStatus, Show, SkillOption, ThemeOption } from './types';
 import { hasAnyMusicFilter, showValid } from './lib';
 import { ChipRow } from './ChipRow';
 
@@ -50,6 +52,9 @@ interface ShowEditorProps {
   activeThemeId: string;
   genres: string[];
   playlists: { id: string; name: string; songCount: number | null }[];
+  // Only 'ready' means /dj/playlists actually answered, so an id absent from
+  // `playlists` can't be called missing while the index is merely unknown.
+  playlistsStatus: PlaylistIndexStatus;
   apiBase: string;
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
   minTrackSeconds?: number;
@@ -62,7 +67,8 @@ interface ShowEditorProps {
 }
 
 export function ShowEditor({
-  show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists, apiBase,
+  show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists,
+  playlistsStatus, apiBase,
   adminFetch, minTrackSeconds, busy, isNew,
   update, onSave, onClose, onRemove,
 }: ShowEditorProps) {
@@ -87,6 +93,23 @@ export function ShowEditor({
   const unknownGenres = genres.length
     ? show.genres.filter(g => !knownGenres.has(norm(g)))
     : [];
+  // Discoverability hint only: blocklist rules scoped to this show are edited
+  // on Library → Blocked, not here — but a filter that silently loses to a rule
+  // there would be baffling without a pointer. Best-effort, 0 hides the line.
+  const [scopedRuleCount, setScopedRuleCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminFetch('/library/blocklist');
+        if (!r.ok || cancelled) return;
+        const j = await r.json() as { rules?: Array<{ showIds?: string[] }> };
+        if (cancelled) return;
+        setScopedRuleCount((j.rules || []).filter(ru => ru.showIds?.includes(show.id)).length);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [adminFetch, show.id]);
   return (
     <EditorDialog
       open
@@ -341,6 +364,26 @@ export function ShowEditor({
           </Field>
 
           <Field>
+            <Label>vocals</Label>
+            {/* Single-valued, unlike the filters around it: instrumental and
+                vocal are mutually exclusive, and wanting both is wanting
+                neither. Picking one REPLACES the other rather than capping at
+                one selection, which would grey out the chip you're switching
+                to; clicking the selected chip clears back to any. */}
+            <ChipRow
+              options={VOCAL_OPTIONS}
+              selected={show.vocals ? [show.vocals] : []}
+              onToggle={v => update({ vocals: show.vocals === v ? '' : (v as Show['vocals']) })}
+              cap={VOCAL_OPTIONS.length}
+            />
+            <span className="field-hint">
+              None selected = any. Backed by vocal-activity analysis, so it only
+              steers tracks that have had a vocal pass — on a library without
+              one it simply doesn&apos;t apply, and the show plays as before.
+            </span>
+          </Field>
+
+          <Field>
             <Label htmlFor="show-genre">genre leans</Label>
             {show.genres.length > 0 && (
               <div className="flex flex-wrap gap-1">
@@ -438,40 +481,13 @@ export function ShowEditor({
               over them. Pick none to let genre/era/mood drive selection
               (up to 10).
             </span>
-            {playlists.length === 0 ? (
-              <span className="field-hint opacity-60">
-                No Navidrome playlists found yet. Create some in Navidrome, then
-                reopen this panel.
-              </span>
-            ) : (
-              <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
-                {playlists.map(pl => {
-                  const checked = show.playlistIds.includes(pl.id);
-                  const atCap = !checked && show.playlistIds.length >= 10;
-                  return (
-                    <label
-                      key={pl.id}
-                      className={`flex items-center gap-2 text-sm ${atCap ? 'opacity-40' : 'cursor-pointer'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={atCap}
-                        onChange={() => update({
-                          playlistIds: checked
-                            ? show.playlistIds.filter(id => id !== pl.id)
-                            : [...show.playlistIds, pl.id],
-                        })}
-                      />
-                      <span className="truncate">{pl.name}</span>
-                      {pl.songCount != null && (
-                        <span className="field-hint">({pl.songCount})</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <PlaylistPicker
+              playlists={playlists}
+              status={playlistsStatus}
+              selected={show.playlistIds}
+              max={PLAYLISTS_MAX}
+              onChange={playlistIds => update({ playlistIds })}
+            />
           </Field>
 
           {show.playlistIds.length > 0 && (
@@ -503,41 +519,22 @@ export function ShowEditor({
               don&apos;t fit: gather them in a Navidrome playlist and exclude it
               here (up to 10).
             </span>
-            {playlists.length === 0 ? (
-              <span className="field-hint opacity-60">
-                No Navidrome playlists found yet. Create some in Navidrome, then
-                reopen this panel.
-              </span>
-            ) : (
-              <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
-                {playlists.map(pl => {
-                  const checked = show.excludedPlaylistIds.includes(pl.id);
-                  const atCap = !checked && show.excludedPlaylistIds.length >= 10;
-                  return (
-                    <label
-                      key={pl.id}
-                      className={`flex items-center gap-2 text-sm ${atCap ? 'opacity-40' : 'cursor-pointer'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={atCap}
-                        onChange={() => update({
-                          excludedPlaylistIds: checked
-                            ? show.excludedPlaylistIds.filter(id => id !== pl.id)
-                            : [...show.excludedPlaylistIds, pl.id],
-                        })}
-                      />
-                      <span className="truncate">{pl.name}</span>
-                      {pl.songCount != null && (
-                        <span className="field-hint">({pl.songCount})</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <PlaylistPicker
+              playlists={playlists}
+              status={playlistsStatus}
+              selected={show.excludedPlaylistIds}
+              max={PLAYLISTS_MAX}
+              onChange={excludedPlaylistIds => update({ excludedPlaylistIds })}
+            />
           </Field>
+
+          {scopedRuleCount > 0 && (
+            <span className="field-hint">
+              {scopedRuleCount} blocklist rule{scopedRuleCount === 1 ? '' : 's'} also
+              appl{scopedRuleCount === 1 ? 'ies' : 'y'} to this show — managed on{' '}
+              <a href="/admin/library?tab=blocked" className="underline">Library → Blocked</a>.
+            </span>
+          )}
         </Card>
 
         <Card flat title="Brief" bodyClass="grid gap-3.5">

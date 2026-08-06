@@ -4062,25 +4062,6 @@ html:has(.admin-root.paper) {
     }
 }
 
-/* Waveform */
-.admin-root .wave {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 60px;
-}
-.admin-root .wave span {
-    display: block;
-    width: 3px;
-    background: var(--ink);
-}
-.admin-root .wave.accent span {
-    background: var(--accent);
-}
-.admin-root .wave.muted span {
-    background: var(--muted);
-}
-
 /* Terminal-style log block */
 .admin-root .term {
     margin: 0;

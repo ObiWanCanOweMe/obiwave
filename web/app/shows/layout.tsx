@@ -6,7 +6,7 @@ import StationFooter from '@/components/landing/StationFooter';
 export const metadata: Metadata = {
   title: 'SUB/WAVE — Community Shows',
   description:
-    'The community show catalog for SUB/WAVE — produced-show templates shared by other stations, installable from any station&rsquo;s admin console.',
+    'The community show catalog for SUB/WAVE: show templates other operators built, installable from any station’s admin console.',
 };
 
 // Shared chrome for the /shows showcase: masthead, full-width broadsheet

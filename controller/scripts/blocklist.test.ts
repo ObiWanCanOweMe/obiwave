@@ -89,8 +89,9 @@ try {
   assert.equal(blocklist.isBlocked({ id: 's11', album: 'Live In', artist: 'Tokyo' }), true);
   assert.equal(blocklist.isBlocked({ id: 's12', album: 'Live', artist: 'In Tokyo' }), false, 'album/artist boundary must not smear');
 
-  // refOf carries only what a row needs to render and unblock.
-  assert.deepEqual(blocklist.refOf(blocklist.matchOf({ id: 'trk1' })!), { type: 'track', id: 'trk1', name: 'Song X' });
+  // refOf carries only what a row needs to render and unblock. The `kind`
+  // discriminant separates id entries from rule refs on the same wire shape.
+  assert.deepEqual(blocklist.refOf(blocklist.matchOf({ id: 'trk1' })!), { kind: 'entry', type: 'track', id: 'trk1', name: 'Song X' });
 
   // ── annotate: keep every row, stamp the blocking entry ────────────────────
   const annotated = blocklist.annotate([
@@ -125,6 +126,54 @@ try {
   const none = await blocklist.removeMany([{ type: 'track', id: 'ghost' }]);
   assert.equal(none.removed, 0);
   assert.equal(none.missing.length, 1);
+
+  // ── Rule entries (integration; pure matching pinned by ─────────────────────
+  // scripts/blocklist-rules.test.ts). Non-seasonal, unscoped rules here so the
+  // clock/show context can't flap the assertions.
+
+  // The remaining id entries at this point: track trk1, artist art1.
+  const rule = await blocklist.addRule({ label: 'No ambient tag', field: 'tag', values: ['ambient'] });
+  assert.ok(rule.id && rule.addedAt);
+  assert.equal(blocklist.isEmpty(), false);
+
+  const tagged = { id: 'r-t1', title: 'Drift', artist: 'Someone', genres: ['Ambient'], moods: [] };
+  assert.equal(blocklist.isBlocked(tagged), true, 'rule blocks by tag');
+  assert.equal(blocklist.isBlocked({ id: 'r-t2', genres: ['Rock'], moods: [] }), false);
+
+  // hitOf: entries FIRST (the UI unblocks exactly the entry), rules second.
+  const ruleHit = blocklist.hitOf(tagged);
+  assert.equal(ruleHit?.kind, 'rule');
+  assert.equal(ruleHit?.kind === 'rule' && ruleHit.label, 'No ambient tag');
+  assert.equal(ruleHit?.kind === 'rule' && ruleHit.seasonal, false);
+  const entryHit = blocklist.hitOf({ id: 'trk1', genres: ['Ambient'] });
+  assert.equal(entryHit?.kind, 'entry', 'an id entry outranks a matching rule');
+
+  // rejectBlocked + annotate consult rules through the same hitOf.
+  assert.deepEqual(blocklist.rejectBlocked([tagged, { id: 'ok', genres: ['Rock'] }]).map((s: any) => s.id), ['ok']);
+  const ruleAnnotated = blocklist.annotate([tagged]);
+  assert.equal(ruleAnnotated[0].blockedBy?.kind, 'rule');
+
+  // Persistence round-trip: rules ride blocklist.json beside entries, and a
+  // pre-rules file (no `rules` key) loads as zero rules (checked implicitly by
+  // the initial load at the top of this file).
+  const withRules = JSON.parse(readFileSync(join(stateDir, 'blocklist.json'), 'utf8'));
+  assert.equal(withRules.rules.length, 1);
+  assert.equal(withRules.rules[0].field, 'tag');
+
+  // Update replaces the patchable fields, keeps id + addedAt.
+  const updated = await blocklist.updateRule(rule.id, { label: 'No ambient tag', field: 'tag', values: ['ambient', 'drone'] });
+  assert.deepEqual(updated?.values, ['ambient', 'drone']);
+  assert.equal(updated?.addedAt, rule.addedAt);
+  assert.equal(await blocklist.updateRule('ghost', { label: 'x', field: 'tag', values: ['x'] }), null);
+
+  // Invalid payloads throw and change nothing.
+  await assert.rejects(() => blocklist.addRule({ label: '', field: 'tag', values: ['x'] }), /label/);
+  assert.equal(blocklist.listRules().length, 1);
+
+  // Remove → empty again (id entries still present, so isEmpty stays false).
+  assert.equal(await blocklist.removeRule(rule.id), true);
+  assert.equal(await blocklist.removeRule(rule.id), false, 'second remove is a miss');
+  assert.equal(blocklist.isBlocked(tagged), false, 'rule gone, track pickable again');
 
   console.log('blocklist.test.ts: all assertions passed');
 } finally {

@@ -26,7 +26,14 @@ import type {
 } from '@/lib/types';
 
 export interface ThemesPayload {
+  /** The effective theme — what a client should actually paint. */
   active: string;
+  /** Which level decided `active`. Absent on an older controller. */
+  activeSource?: 'show' | 'station';
+  /** settings.theme.active, i.e. what admin's station picker sets. */
+  stationDefault?: string;
+  /** Set only when an on-air show's themeId outranked the station default. */
+  activeShow?: { id: string; name: string; themeId: string } | null;
   themes: Theme[];
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
 import { notify, errorMessage } from '../../../lib/notify';
 import { applyTheme, cacheTheme, resolveFont } from '../../../lib/theme';
+import { useThemeSwitcher } from '../../ThemeProvider';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Modal } from '../../ui/modal';
 import { Input } from '../../ui/input';
@@ -250,7 +251,91 @@ function ThemeEditorModal({
   );
 }
 
+const NOTICE_CLASS =
+  'border border-[color-mix(in_oklab,var(--accent)_35%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] leading-[1.5] text-ink !normal-case';
+
+// Why the palette on screen isn't the one the station picker says is active.
+//
+// Three levels resolve a theme and each silently outranks the one below it:
+// this browser's own override (localStorage, set from the player's palette
+// menu) → the on-air show's themeId → the station default set right here. Save
+// a station theme while either of the upper two is in play and it applies, then
+// appears to revert seconds later when the next poll repaints — which is #1300
+// bug 12, reported as the setting not sticking.
+//
+// Nothing about the save failed, so this is a note rather than a warning, and
+// role="status" because it can appear in response to a save the operator just
+// made rather than at first paint. It renders only when a level above the
+// station default is actually winning; otherwise the picker's own "active" pill
+// already tells the whole story.
+//
+// Every input comes from ThemeProvider, which polls /themes every 30s and paints
+// from the same response. That is deliberate: which show is on air changes on
+// the clock, not on anything this page does, so a snapshot taken when the panel
+// mounted would go stale in both directions — silent through a show that starts
+// while the page is open (the exact flip this note exists to explain), and
+// lingering after one ends.
+function EffectiveThemeNotice({
+  activeSource,
+  active,
+  stationDefault,
+  activeShow,
+  themes,
+  overrideId,
+}: {
+  activeSource: 'show' | 'station' | null;
+  active: string | null;
+  stationDefault: string | null;
+  activeShow: { id: string; name: string; themeId: string } | null;
+  themes: ThemeDef[] | null;
+  overrideId: string | null;
+}) {
+  const nameOf = (id: string | null | undefined) =>
+    (id && themes?.find(t => t.id === id)?.name) || id || 'unknown';
+
+  // The browser override is checked first because it outranks the show, and it
+  // is the only level whose fix lives outside this page. Unlike the show below
+  // it, there's no "changes nothing visible" case to stay quiet about: the
+  // override outlives the save, so it will outrank whatever is picked next even
+  // when it currently happens to match the station default.
+  if (overrideId && themes?.some(t => t.id === overrideId)) {
+    return (
+      <div className={NOTICE_CLASS} role="status">
+        <b>This browser is pinned to “{nameOf(overrideId)}”.</b> You picked a
+        theme override for yourself from the player’s palette menu, so what you
+        see here is that, not the station theme — listeners are unaffected.
+        Clear the override in the player’s palette menu to follow the station
+        again.
+      </div>
+    );
+  }
+
+  if (activeSource !== 'show' || !activeShow) return null;
+  // A show pinning the same theme the station already defaults to changes
+  // nothing anyone can see — saying so would be noise.
+  if (active === stationDefault) return null;
+
+  return (
+    <div className={NOTICE_CLASS} role="status">
+      <b>
+        On air now: “{nameOf(active)}”, pinned by the show{' '}
+        {activeShow.name || activeShow.id}.
+      </b>{' '}
+      A show’s own theme outranks the station default for as long as it is on
+      air, so the theme you set below won’t be visible until the show ends. It
+      is saved either way. To change what’s showing right now, edit that show’s
+      theme override on the Shows page.
+    </div>
+  );
+}
+
 export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSectionProps) {
+  // Which level decided the theme actually on screen. ThemeProvider is the one
+  // place that resolves all three — it owns the browser override (localStorage,
+  // never seen by the server) and it polls /themes for the other two, painting
+  // from the same response the provenance comes in. Reading it here instead of
+  // snapshotting a second fetch is what keeps the notice in step with the paint.
+  const themeCtx = useThemeSwitcher();
   const [themes, setThemes] = useState<ThemeDef[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -270,7 +355,8 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
   const chooseSkin = (id: string) => { if (!busy) saveSettings({ ui: { skin: id } }); };
 
   // Unauthenticated /themes, so a signed-out admin still sees swatches while
-  // signing in.
+  // signing in. This is the editing list (it carries `builtin`, which decides
+  // Edit/Remove); the provenance behind the notice comes from ThemeProvider.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -295,6 +381,9 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       const next = j.themes ?? [];
       setThemes(next);
+      // A file dropped in can make a show's previously-dead themeId resolve, so
+      // the answer to "who's winning" may have just changed too.
+      themeCtx?.refreshThemes();
       notify.ok(`reloaded, ${next.length} theme${next.length === 1 ? '' : 's'}`);
     } catch (e) {
       notify.err(`Refresh failed: ${errorMessage(e)}`);
@@ -310,6 +399,11 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
     applyTheme(theme);
     cacheTheme(theme);
     await saveSettings({ theme: { active: theme.id } });
+    // Re-read provenance now rather than up to 30s from now: if a show is
+    // pinning its own theme, this save has just set a default that won't be
+    // visible until the show ends, and the operator should learn that here — not
+    // from the palette flipping back on ThemeProvider's next poll.
+    themeCtx?.refreshThemes();
   };
 
   // Re-apply when the edited theme is the one on air, so the admin page updates now.
@@ -330,6 +424,9 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       const next = j.themes ?? [];
       setThemes(next);
+      // Deleting the theme a show pinned makes that pin unresolvable, so the
+      // station default silently takes over — provenance just changed.
+      themeCtx?.refreshThemes();
       notify.ok(`removed "${theme.name}"`);
       if (theme.id === activeId && next[0]) await choose(next[0]);
     } catch (e) {
@@ -383,6 +480,15 @@ export function ThemeSection({ data, busy, saveSettings, adminFetch }: ThemeSect
               Couldn’t load themes: {error}
             </div>
           )}
+          <EffectiveThemeNotice
+            activeSource={themeCtx?.activeSource ?? null}
+            active={themeCtx?.stationActiveId ?? null}
+            stationDefault={themeCtx?.stationDefault ?? null}
+            activeShow={themeCtx?.activeShow ?? null}
+            themes={themes}
+            overrideId={themeCtx?.overrideId ?? null}
+          />
+
           {!themes && !error && <SkeletonRows rows={4} />}
           {themes && (
             <div className="grid gap-2">

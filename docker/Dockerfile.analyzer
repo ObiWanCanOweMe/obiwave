@@ -12,7 +12,11 @@
 #       the docker-compose.analyzer-gpu.yml overlay (a device reservation
 #       can't be toggled from .env).
 # Models are NOT baked — the heavy worker downloads weights into HF_HOME on
-# first use; compose mounts a named volume over that cache.
+# first use; compose mounts a named volume over that cache. That makes the
+# heavy tier's FIRST sounds-like/vocals pass a one-time outbound dependency on
+# huggingface.co, which is documented (and given an offline pre-seed recipe) in
+# docs/tts-heavy.md — a host without reach fails there, and the analyzer now
+# reports the reason on /health rather than degrading silently.
 
 FROM python:3.11-slim-bookworm
 

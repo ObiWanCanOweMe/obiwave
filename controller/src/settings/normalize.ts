@@ -37,6 +37,7 @@ import {
   coerceGuestPersonaIds,
   coercePlaylistIds,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowEras,
   coerceShowGenres,
   coerceShowMoods,
@@ -241,8 +242,8 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     seen.add(id);
     // themeId is the optional per-show theme override. Lenient path: we only
     // sanity-check the shape. A stale id (theme file deleted under our feet)
-    // is harmless — routes/public.ts falls back to the station default at
-    // serve time via getTheme()'s own fallback. Empty/missing means "no
+    // is harmless — routes/public.ts (GET /themes) falls back to the station
+    // default at serve time. Empty/missing means "no
     // override" and is stored as an empty string for round-trip cleanliness.
     const themeId =
       typeof item.themeId === 'string' && item.themeId.trim()
@@ -257,6 +258,9 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     const genres = coerceShowGenres(item);
     const eras = coerceShowEras(item);
     const energies = coerceShowEnergies(item);
+    // Vocal steering (#1300 FR 13): '' = no constraint, which is what every
+    // show predating the field carries, so loading one is a no-op.
+    const vocals = coerceShowVocals(item);
     // Opt-in: hard-filter the pick pool to EVERY set music filter (mood, genre,
     // era, energy) instead of the default soft leans. Only meaningful when at
     // least one filter is set; defaults OFF. The legacy genre-only `genreStrict`
@@ -305,6 +309,7 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
       genres,
       eras,
       energies,
+      vocals,
       filtersStrict,
       maxTrackSeconds,
       playlistIds,

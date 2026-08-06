@@ -1,7 +1,5 @@
 // Canonical GitHub URLs, one place for every share-to-community flow.
 
-export const REPO_URL = 'https://github.com/perminder-klair/subwave';
-
 // The community catalog repo, split out of the code repo so contributions
 // review and publish on their own cadence (stations fetch the catalog live).
 // COMMUNITY_CATALOG_URL overrides the FETCH url; this is only the human link.

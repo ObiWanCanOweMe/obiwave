@@ -18,8 +18,6 @@ export interface Skill {
   keyUrl?: string;
   cooldownMs?: number;
   custom?: boolean;
-  feed?: string | null;
-  feedMaxItems?: number | null;
   tags?: string[];
 }
 

@@ -26,6 +26,13 @@ interface ThemeContextValue {
   themes: Theme[];
   /** The station's active theme id — what every listener without an override sees. */
   stationActiveId: string | null;
+  /** Which level decided `stationActiveId`: an on-air show's own themeId, or the
+   *  station default. Null on a controller older than the provenance fields. */
+  activeSource: 'show' | 'station' | null;
+  /** settings.theme.active — what the admin picker sets, whether or not it won. */
+  stationDefault: string | null;
+  /** The on-air show that outranked the station default, or null when it didn't. */
+  activeShow: { id: string; name: string; themeId: string } | null;
   /** Per-browser override id, or null when none is set. */
   overrideId: string | null;
   /** Override if set and still in the registry, else the station's — what the
@@ -33,6 +40,9 @@ interface ThemeContextValue {
   effectiveId: string | null;
   /** Save or clear the override and re-apply immediately. null clears it. */
   setOverride: (id: string | null) => void;
+  /** Re-read /themes now instead of waiting out the poll. For a caller that
+   *  just changed something the next poll would otherwise report 30s late. */
+  refreshThemes: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -56,6 +66,11 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [stationActiveId, setStationActiveId] = useState<string | null>(null);
   const [overrideId, setOverrideIdState] = useState<string | null>(null);
+  // Provenance rides the same poll as the palette, so a consumer showing "why
+  // is this the theme on screen" can't fall out of step with the paint itself.
+  const [activeSource, setActiveSource] = useState<ThemeContextValue['activeSource']>(null);
+  const [stationDefault, setStationDefault] = useState<string | null>(null);
+  const [activeShow, setActiveShow] = useState<ThemeContextValue['activeShow']>(null);
 
   // localStorage is only safe to touch in an effect, so SSR renders through
   // cleanly. The pre-paint <script> already painted, so the one-tick lag is invisible.
@@ -80,30 +95,38 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
     [],
   );
 
-  // The effect is parameterless so it doesn't restart on every override change —
-  // the override is read from a ref inside the fetch.
+  // Set once the provider is torn down, so a fetch that lands afterwards
+  // doesn't repaint the document on its way out. Reset on mount because in
+  // StrictMode the first mount is immediately unmounted and remounted.
+  const goneRef = useRef(false);
   useEffect(() => {
-    let cancelled = false;
+    goneRef.current = false;
+    return () => { goneRef.current = true; };
+  }, []);
 
-    const refresh = async () => {
-      try {
-        const j = await defaultStationClient.themes();
-        if (cancelled) return;
-        setThemes(j.themes);
-        setStationActiveId(j.active);
-        applyEffective(j.themes, j.active, overrideRef.current);
-      } catch {
-        // Network blip — keep the existing CSS variables for the next poll.
-      }
-    };
-
-    refresh();
-    const id = setInterval(refresh, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+  // Parameterless so it doesn't change identity on every override change — the
+  // override is read from a ref inside the fetch.
+  const refreshThemes = useCallback(async () => {
+    try {
+      const j = await defaultStationClient.themes();
+      if (goneRef.current) return;
+      setThemes(j.themes);
+      setStationActiveId(j.active);
+      // Absent on an older controller, which reads as "no provenance to show".
+      setActiveSource(j.activeSource ?? null);
+      setStationDefault(j.stationDefault ?? null);
+      setActiveShow(j.activeShow ?? null);
+      applyEffective(j.themes, j.active, overrideRef.current);
+    } catch {
+      // Network blip — keep the existing CSS variables for the next poll.
+    }
   }, [applyEffective]);
+
+  useEffect(() => {
+    refreshThemes();
+    const id = setInterval(refreshThemes, 30_000);
+    return () => clearInterval(id);
+  }, [refreshThemes]);
 
   // Applies without waiting for the next poll.
   const setOverride = useCallback(
@@ -126,9 +149,13 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
       value={{
         themes,
         stationActiveId,
+        activeSource,
+        stationDefault,
+        activeShow,
         overrideId,
         effectiveId,
         setOverride,
+        refreshThemes,
       }}
     >
       {children}

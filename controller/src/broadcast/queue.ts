@@ -44,6 +44,12 @@ import {
   shouldDeadlinePick,
   DEADLINE_PICK_COOLDOWN_SEC,
 } from './drain-policy.js';
+import {
+  commitSatisfied,
+  skipPrepAction,
+  SKIP_COMMIT_WAIT_MS,
+  SKIP_POLL_INTERVAL_MS,
+} from './skip-policy.js';
 import * as stemBlend from './stem-blend.js';
 import type {
   DjLogEntry,
@@ -60,6 +66,7 @@ import {
   boundaryCarriesTrackVoice,
   formatAgo,
   knownDurationSec,
+  linkClockDrifted,
   pickLeadSec,
   pickLinkInterval,
   playAlreadyRecorded,
@@ -386,7 +393,12 @@ class Queue {
   // more) older than what actually just played. airIntro() uses linkPrev to
   // detect that and drop the now-stale back-announce rather than air a wrong
   // name. Left null for request intros (they never back-announce).
-  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null }: {
+  // `linkClockAt` is the air moment `introScript` was written against, present
+  // only when the generator gave the model a clock to speak (#1314). airIntro
+  // drops the line if the real seam lands too far from it — a forecast made
+  // from the on-air track's remaining play goes badly wrong when the pick
+  // misses that seam and auto.m3u fills the slot instead.
+  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
     track: Track;
     requestedBy?: string | null;
     intent?: string | null;
@@ -396,6 +408,7 @@ class Queue {
     aiPicked?: boolean;
     allowDuplicate?: boolean;
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
+    linkClockAt?: Date | number | null;
   }) {
     // Dedup guard. Applies to AI picks AND listener requests: two listener
     // requests resolving to the same song over the 25-45s identify/match window
@@ -412,8 +425,15 @@ class Queue {
     // so it sits above allowDuplicate. Every playback path funnels through
     // push() (dj-agent, requests, MCP, studio queue), making this the last
     // line even for sources that bypass the subsonic/library filters.
-    if (blocklist.isBlocked(track)) {
-      this.log('blocked', `${track?.title} — ${track?.artist} (on the never-play blocklist, refused)`);
+    const blockHit = blocklist.hitOf(track);
+    if (blockHit) {
+      // Name what refused it — an id entry reads as before; a rule names
+      // itself so the operator can find it on the Blocked tab (a seasonal
+      // refusal otherwise looks like a random "not found" to whoever queued).
+      const why = blockHit.kind === 'rule'
+        ? `blocked by rule "${blockHit.label}"${blockHit.seasonal ? ' (out of season)' : ''}, refused`
+        : 'on the never-play blocklist, refused';
+      this.log('blocked', `${track?.title} — ${track?.artist} (${why})`);
       return -2;
     }
     if (!allowDuplicate && track?.id) {
@@ -431,6 +451,11 @@ class Queue {
       linkPrev: (introScript && linkPrev)
         ? { id: linkPrev.id ?? null, title: linkPrev.title ?? null, artist: linkPrev.artist ?? null }
         : null,
+      // Same gate as linkPrev: a bare track makes no claim about the clock, so
+      // only a line that exists can carry the air moment it was written for.
+      linkClockAt: (introScript && linkClockAt != null)
+        ? (linkClockAt instanceof Date ? linkClockAt.getTime() : linkClockAt)
+        : null,
       introWav: null as string | null,
       introAired: false,
       queuedAt: new Date().toISOString(),
@@ -445,15 +470,16 @@ class Queue {
   }
 
   // Drop now-blocked tracks from the upcoming queue — called when a blocklist
-  // entry is added. Only undrained items (`!sent`) are removable; anything
-  // already handed to Liquidsoap plays out (we never interrupt), and the
-  // currently playing track is likewise left alone. Returns how many dropped.
+  // entry or rule is added/edited. Only undrained items (`!sent`) are
+  // removable; anything already handed to Liquidsoap plays out (we never
+  // interrupt), and the currently playing track is likewise left alone.
+  // Returns how many dropped.
   purgeBlocked(): number {
     const keep = this.upcoming.filter(i => i.sent || !blocklist.isBlocked(i.track));
     const dropped = this.upcoming.length - keep.length;
     if (dropped > 0) {
       this.upcoming = keep;
-      this.log('blocked', `purged ${dropped} upcoming track${dropped === 1 ? '' : 's'} now on the never-play blocklist`);
+      this.log('blocked', `purged ${dropped} upcoming track${dropped === 1 ? '' : 's'} now blocked by the never-play blocklist`);
       this.persist();
     }
     return dropped;
@@ -1188,6 +1214,46 @@ class Queue {
     }
   }
 
+  // Commit the queued pick to Liquidsoap before an operator skip (#1300 bug
+  // 6). Under pair-aware drain the held pick isn't in dj_queue for most of
+  // each track's runtime — a bare telnet skip falls through to the randomized
+  // auto playlist while the admin queue shows a different "next". Force-drain
+  // whatever is held, then wait until the dj_queue_status probe reports a
+  // RESOLVED request waiting (a sent-but-still-downloading request loses the
+  // fallback race just the same), bounded by SKIP_COMMIT_WAIT_MS — past it
+  // the skip proceeds anyway (ending THIS track is the operator's intent) and
+  // the caller reports the miss honestly. Never throws: a skip must not fail
+  // on its safety net.
+  async commitBeforeSkip(): Promise<{ pending: boolean; committed: boolean; waitedMs: number }> {
+    if (skipPrepAction(this.upcoming.length) === 'skip-now') {
+      return { pending: false, committed: false, waitedMs: 0 };
+    }
+    const t0 = Date.now();
+    // One forced kick covers every held item; a busy sender re-runs it forced
+    // on release (pendingForceDrain), so the loop below only observes.
+    void this.drainToLiquidsoap(true);
+    let headSentAt: number | null = null;
+    const deadline = t0 + SKIP_COMMIT_WAIT_MS;
+    while (true) {
+      const head = this.upcoming[0];
+      if (!head) {
+        // Everything aired or was cancelled while waiting — nothing left to
+        // protect, the skip falls through honestly.
+        return { pending: false, committed: false, waitedMs: Date.now() - t0 };
+      }
+      if (head.sent) {
+        if (headSentAt == null) headSentAt = Date.now();
+        const status = await liquidsoapControl.djQueueStatus();
+        if (commitSatisfied({ headSent: true, queueStatus: status, sinceHeadSentMs: Date.now() - headSentAt })) {
+          return { pending: true, committed: true, waitedMs: Date.now() - t0 };
+        }
+      }
+      if (Date.now() + SKIP_POLL_INTERVAL_MS > deadline) break;
+      await sleep(SKIP_POLL_INTERVAL_MS);
+    }
+    return { pending: true, committed: false, waitedMs: Date.now() - t0 };
+  }
+
   // Speak something without queueing a track — for hourly time checks,
   // weather updates, station IDs, and auto DJ links.
   //
@@ -1360,6 +1426,7 @@ class Queue {
     if (boundaryCarriesTrackVoice(incoming, this.current?.track || null, {
       voiceAllowed: autoVoiceAllowed(),
       wavExists: path => existsSync(path),
+      nowMs: Date.now(),
     })) {
       this.log('scheduler',
         `Holding ${p.kind} — the track's own ${KIND_LABEL[incoming!.introKind || 'dj-speak'] || 'intro'} takes this boundary`);
@@ -1403,6 +1470,20 @@ class Queue {
     if (shouldDropStaleLink(item, predecessor)) {
       this.log('link-skip',
         `Dropped stale link before "${item.track?.title}" — it named "${item.linkPrev!.title}" but "${predecessor?.title || 'another track'}" actually played first`);
+      this.persist();
+      return;
+    }
+    // Stale-CLOCK safety-net, the same trade one line up (#1314). A link is
+    // only stamped with linkClockAt when the generator handed the model a time
+    // to speak; if this seam lands far from that forecast — the pick missed the
+    // slot it was written for and aired at the end of an auto.m3u filler
+    // instead — the line names a time that has been and gone. The audio is
+    // already cut, so drop it.
+    if (linkClockDrifted(item.linkClockAt, Date.now())) {
+      const driftSec = Math.round((Date.now() - item.linkClockAt!) / 1000);
+      this.log('link-skip',
+        `Dropped link before "${item.track?.title}" — written to air at ${new Date(item.linkClockAt!).toISOString()}, `
+        + `but this seam is ${Math.abs(driftSec)}s ${driftSec > 0 ? 'later' : 'earlier'}, so any clock it states is wrong`);
       this.persist();
       return;
     }

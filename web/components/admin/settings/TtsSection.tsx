@@ -3,6 +3,7 @@
 import type { ChangeEvent, ReactNode } from 'react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { AsyncResultGeneration, runManagedKeyProbe } from '../../../lib/managedKeyProbe';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
@@ -321,6 +322,95 @@ function FishAudioSettingsField({
   );
 }
 
+// Quick-add names for the servers operators actually run. These are hints, not
+// a schema — a compatibility server accepts whatever its own implementation
+// defines, which is exactly why the field is free-form (issue #1317).
+const COMPAT_PARAM_SUGGESTIONS: { key: string; value: string; note: string }[] = [
+  { key: 'temperature', value: '0.8', note: 'Chatterbox · variation' },
+  { key: 'seed', value: '0', note: 'Chatterbox · repeatability' },
+  { key: 'exaggeration', value: '0.5', note: 'Chatterbox · intensity' },
+  { key: 'cfg_weight', value: '0.5', note: 'Chatterbox · pacing' },
+];
+
+const COMPAT_PARAM_MAX = 20;
+
+function CompatParamsField({ form, setForm }: { form: FormState; setForm: FormUpdater }) {
+  const rows = form.tts.cloud.compatParams;
+  const setRows = (next: CloudTtsCfg['compatParams']) =>
+    setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, compatParams: next } } }));
+  const used = new Set(rows.map(r => r.key.trim()));
+  return (
+    <div className="field mt-4">
+      <Label>Extra generation parameters</Label>
+      <div className="field-hint mb-2 max-w-[620px]">
+        Sent as extra fields in every <code>/audio/speech</code> request, for
+        knobs your server supports but the OpenAI API doesn’t define —
+        Chatterbox’s <code>temperature</code> and <code>seed</code>, for
+        instance. Values are read as JSON when they look like it
+        (<code>0.8</code>, <code>42</code>, <code>true</code>) and sent as text
+        otherwise. <code>model</code>, <code>voice</code>, <code>input</code>{' '}
+        and <code>speed</code> are set by SUB/WAVE and can’t be overridden here.
+      </div>
+      <div className="flex flex-col gap-2">
+        {rows.map((row, idx) => (
+          <div
+            key={idx}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[220px_220px_auto] sm:justify-start"
+          >
+            <Input
+              aria-label="Parameter name"
+              value={row.key}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setRows(rows.map((r, i) => i === idx ? { ...r, key: e.target.value } : r))}
+              placeholder="name (e.g. temperature)"
+              maxLength={60}
+              className="min-w-0"
+            />
+            <Input
+              aria-label="Parameter value"
+              value={row.value}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setRows(rows.map((r, i) => i === idx ? { ...r, value: e.target.value } : r))}
+              placeholder="value (e.g. 0.8)"
+              maxLength={400}
+              className="col-start-1 row-start-2 min-w-0 sm:col-start-2 sm:row-start-1"
+            />
+            <Btn
+              sm
+              title="Remove parameter"
+              className="col-start-2 row-start-1 size-9 shrink-0 sm:col-start-3 sm:size-auto"
+              onClick={() => setRows(rows.filter((_, i) => i !== idx))}
+            >
+              <Trash2 size={12} />
+            </Btn>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Btn
+          className="min-h-9 sm:min-h-0"
+          disabled={rows.length >= COMPAT_PARAM_MAX}
+          onClick={() => setRows([...rows, { key: '', value: '' }])}
+        >
+          Add parameter
+        </Btn>
+        {COMPAT_PARAM_SUGGESTIONS.filter(s => !used.has(s.key)).map(s => (
+          <Btn
+            key={s.key}
+            sm
+            title={s.note}
+            className="min-h-9 sm:min-h-0"
+            disabled={rows.length >= COMPAT_PARAM_MAX}
+            onClick={() => setRows([...rows, { key: s.key, value: s.value }])}
+          >
+            + {s.key}
+          </Btn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Chatterbox and PocketTTS both live in the optional `tts-heavy` sidecar, so the
 // setup path is identical; only the engine label and the legacy build-arg differ.
 function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'PocketTTS'; buildArg: string }) {
@@ -495,6 +585,14 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     : { ...available, cloud: providerCloudReady };
   const ENGINE_LABELS: Record<string, string> = { piper: 'Piper', kokoro: 'Kokoro', chatterbox: 'Chatterbox', 'pocket-tts': 'PocketTTS', cloud: 'Cloud', remote: 'Remote' };
 
+  // Send (and dirty-check) what the controller will actually store: trimmed,
+  // with untouched blank rows dropped. Otherwise an operator who presses "Add
+  // parameter" and saves leaves the form permanently dirty against a saved list
+  // that never contained the empty row.
+  const effectiveCompatParams = form.tts.cloud.compatParams
+    .map(p => ({ key: p.key.trim(), value: p.value.trim() }))
+    .filter(p => p.key || p.value);
+
   const save = async () => {
     // Managed-provider keys must land first: Fish voice discovery reads the saved
     // process secret, so an empty undiscovered Fish voice would fail the settings
@@ -539,6 +637,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           temperature: form.tts.cloud.temperature,
           topP: form.tts.cloud.topP,
           latency: form.tts.cloud.latency,
+          compatParams: effectiveCompatParams,
           // Authenticated compatibility servers use their own scoped slot.
           // Keep writing the compatibility-owned legacy slot for older
           // controllers while also populating the dedicated upstream slot.
@@ -607,6 +706,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     temperature?: number;
     topP?: number;
     latency?: 'low' | 'normal' | 'balanced';
+    compatParams?: { key?: string; value?: string }[];
   };
   const savedTts: {
     enabled?: boolean;
@@ -630,6 +730,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const savedRemoteUrl: string = savedTts.remote?.url || '';
   const savedEngineLabel = ENGINE_LABELS[savedEngine] || savedEngine;
   const formEngineLabel = ENGINE_LABELS[form.tts.defaultEngine] || form.tts.defaultEngine;
+
+  const compatParamsDirty = JSON.stringify(effectiveCompatParams)
+    !== JSON.stringify((savedCloud.compatParams || []).map(p => ({ key: String(p?.key ?? ''), value: String(p?.value ?? '') })));
 
   const savedGainDb: Record<string, number> = savedTts.gainDb || {};
   // Absent reads as 0 unity.
@@ -664,6 +767,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || form.tts.cloud.voiceStyle !== (savedCloud.voiceStyle ?? ELEVENLABS_VS_DEFAULTS.voiceStyle)
     || form.tts.cloud.voiceSimilarityBoost !== (savedCloud.voiceSimilarityBoost ?? ELEVENLABS_VS_DEFAULTS.voiceSimilarityBoost)
     || form.tts.cloud.voiceUseSpeakerBoost !== (savedCloud.voiceUseSpeakerBoost ?? ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost)
+    || compatParamsDirty
     || form.tts.cloud.temperature !== (savedCloud.temperature ?? FISH_TTS_DEFAULTS.temperature)
     || form.tts.cloud.topP !== (savedCloud.topP ?? FISH_TTS_DEFAULTS.topP)
     || form.tts.cloud.latency !== (savedCloud.latency ?? FISH_TTS_DEFAULTS.latency)
@@ -1266,6 +1370,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <ElevenLabsVoiceSettingsField form={form} setForm={setForm} />
               )}
               {isFish && <FishAudioSettingsField form={form} setForm={setForm} />}
+              {isCompat && <CompatParamsField form={form} setForm={setForm} />}
             </div>
           </div>
           );

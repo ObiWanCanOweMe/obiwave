@@ -29,6 +29,7 @@ import {
   SCRIPT_LENGTHS,
   SHOWS_LIMIT,
   SHOW_ENERGY,
+  SHOW_VOCALS,
   SHOW_FILTER_VALUES_MAX,
   SHOW_MOODS,
   SHOW_TOPIC_MAX,
@@ -48,6 +49,7 @@ import {
   coerceGuestPersonaIds,
   coercePlaylistIds,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowGenres,
   coerceShowMoods,
   emptyWeek,
@@ -309,7 +311,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     // A stale id (a retired built-in like the old "sunset"/"neon" palettes,
     // renamed in 58c3782b, or a custom theme file deleted under our feet) is
     // DROPPED to "" rather than throwing — same tolerance as the lenient load
-    // path and the serve-time getTheme() fallback. Throwing here bricked EVERY
+    // path and the serve-time fallback in GET /themes. Throwing here bricked EVERY
     // shows/schedule save and full restore for any install still carrying one
     // retired id on one show, because update() re-validates the whole array
     // (issue #917 is the theme.active twin of this). Self-heals: the dead id
@@ -352,6 +354,15 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
       }
     }
     const energies = coerceShowEnergies({ energies: rawEnergies });
+    // One value, not a list — instrumental and vocal are mutually exclusive and
+    // wanting both is wanting neither. Absent/'' is no constraint, so an
+    // existing show round-trips unchanged.
+    if (item.vocals != null && item.vocals !== '') {
+      if (typeof item.vocals !== 'string' || !SHOW_VOCALS.includes(item.vocals)) {
+        throw new Error(`shows[${i}].vocals must be '' or one of: ${SHOW_VOCALS.join(', ')}`);
+      }
+    }
+    const vocals = coerceShowVocals(item);
     // Opt-in hard filter across every set music constraint — mood, genre, era,
     // energy (vs the default soft leans). Boolean, defaults OFF. The legacy
     // genre-only `genreStrict` is deliberately NOT carried over (see the load
@@ -474,7 +485,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('s_');
     if (seen.has(id)) id = mintId('s_');
     seen.add(id);
-    return { id, name, topic, personaId: item.personaId, guestPersonaIds, banter, programme, segmentSkill, moods, themeId, genres, eras, energies, filtersStrict, maxTrackSeconds, playlistIds, playlistStrict, excludedPlaylistIds };
+    return { id, name, topic, personaId: item.personaId, guestPersonaIds, banter, programme, segmentSkill, moods, themeId, genres, eras, energies, vocals, filtersStrict, maxTrackSeconds, playlistIds, playlistStrict, excludedPlaylistIds };
   });
 }
 

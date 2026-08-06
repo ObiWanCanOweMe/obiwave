@@ -9,10 +9,13 @@ import type { BlockRef, Track } from './types';
 // Never-play wording, shared by the row badge, the row action and its tooltip so the
 // operator reads the same scope word everywhere.
 export function blockedByLabel(ref: BlockRef): string {
+  if (ref.kind === 'rule') return `rule "${ref.label}"${ref.seasonal ? ' (out of season)' : ''}`;
   return ref.name ? `${ref.type} "${ref.name}"` : `this ${ref.type}`;
 }
 
 // Spells out the blast radius: unblocking an artist lets their whole catalogue back.
+// Rule refs never get this — a rule can block hundreds of rows, so the row action
+// points at the Blocked tab instead of offering a one-click mass unblock.
 export function unblockLabel(ref: BlockRef): string {
   return `Unblock ${blockedByLabel(ref)}`;
 }

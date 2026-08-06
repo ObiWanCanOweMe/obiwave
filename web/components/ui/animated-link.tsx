@@ -14,7 +14,6 @@ export interface AnimatedLinkProps
   variant?: AnimatedLinkVariant;
   className?: string;
 }
-
 function isExternal(href: string): boolean {
   return /^(https?:|mailto:|tel:)/.test(href);
 }
@@ -102,5 +101,3 @@ export function AnimatedLink({
     </Link>
   );
 }
-
-export default AnimatedLink;

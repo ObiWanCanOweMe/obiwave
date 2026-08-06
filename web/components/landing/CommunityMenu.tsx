@@ -16,9 +16,9 @@ import {
 // deliberately absent — it's a directory rather than something you install, and
 // five items made the panel taller than the masthead it hangs from.
 const COMMUNITY = [
-  { href: '/skills', tag: 'The Exchange', title: 'Skills', blurb: 'Segments for your DJ.' },
-  { href: '/personas', tag: 'The Green Room', title: 'Personas', blurb: 'DJs for your booth.' },
-  { href: '/shows', tag: 'The Programme Guide', title: 'Shows', blurb: 'Slots for your grid.' },
+  { href: '/skills', tag: 'The Exchange', title: 'Skills', blurb: 'Segments to teach your DJ.' },
+  { href: '/personas', tag: 'The Green Room', title: 'Personas', blurb: 'DJs to book for your booth.' },
+  { href: '/shows', tag: 'The Programme Guide', title: 'Shows', blurb: 'Slots to fill your grid.' },
   { href: '/apps', tag: 'The Receivers', title: 'Apps', blurb: 'Players, bots and clients.' },
 ] as const;
 

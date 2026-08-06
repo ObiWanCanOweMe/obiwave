@@ -12,7 +12,6 @@ import { fetchWithTimeout } from '../../../util/fetch-timeout.js';
 
 export const FISH_API_ORIGIN = 'https://api.fish.audio';
 export const FISH_DEFAULT_MODEL = 's2.1-pro';
-export const FISH_MODELS = ['s2.1-pro', 's2.1-pro-free'] as const;
 export const FISH_LATENCIES = ['low', 'normal', 'balanced'] as const;
 
 const DEFAULT_TIMEOUT_MS = 60_000;

@@ -11,6 +11,7 @@ import { Card, Btn, Seg } from './ui';
 import { llmProviderLabel } from './llm/providerMeta';
 import TaggingPanel, { num } from './LibraryTaggingPanel';
 import type {
+  AnalysisFailure,
   Coverage,
   TaggerState,
   LibraryStatsLite,
@@ -45,6 +46,7 @@ import { Tabs } from './library/Tabs';
 import { BrowseFilters } from './library/BrowseFilters';
 import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
+import { BlockRulesCard } from './library/BlockRulesCard';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
 import {
@@ -66,6 +68,8 @@ export default function LibraryPanel() {
   const trackModeRef = useRef(trackMode);
   trackModeRef.current = trackMode;
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  // null = not fetched yet (the panel shows "Loading…"); [] = fetched, empty.
+  const [failures, setFailures] = useState<AnalysisFailure[] | null>(null);
   const [tagger, setTagger] = useState<TaggerState | null>(null);
   const [libStats, setLibStats] = useState<LibraryStatsLite | null>(null);
   const [batch, setBatch] = useState<Batch>('500');
@@ -226,6 +230,32 @@ export default function LibraryPanel() {
       setCoverage((await r.json()) as Coverage);
     } catch { /* transient */ }
   }, [adminFetch, ready]);
+
+  // Per-track analysis failures (#1300 bug 3c). Fetched on demand, never
+  // polled: `coverage.analysisFailed` already says whether there is anything to
+  // look at, and on a healthy station the answer is zero forever.
+  const loadFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures?limit=200');
+      if (!r.ok) return;
+      const j = (await r.json()) as { failures?: AnalysisFailure[] };
+      setFailures(j.failures || []);
+    } catch { /* transient */ }
+  }, [adminFetch, ready]);
+
+  // Forget the failure history so the next run retries these tracks — the
+  // operator's move after fixing the cause. Refreshes coverage so the banner
+  // (driven by the count, not the list) goes away.
+  const clearFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures/clear', { method: 'POST' });
+      if (!r.ok) return;
+      setFailures([]);
+      loadCoverage();
+    } catch { /* transient */ }
+  }, [adminFetch, ready, loadCoverage]);
 
   // Fast loop: just the tagger snapshot, so a 3s running poll doesn't drag the
   // whole heavy /settings body across each time.
@@ -849,8 +879,11 @@ export default function LibraryPanel() {
   };
 
   // Lifts whichever entry matched this row — possibly an album or artist block
-  // made from a different row entirely.
+  // made from a different row entirely. Rule refs never reach here (TrackTable
+  // offers no one-click unblock for them — a rule can block hundreds of rows),
+  // so the guard is a type-level formality.
   const unblockRow = async (track: Track, ref: BlockRef) => {
+    if (ref.kind === 'rule') return;
     setBlocking(track.id);
     try {
       await removeEntry(ref);
@@ -1386,6 +1419,9 @@ export default function LibraryPanel() {
         budgetMode={budgetMode}
         llmLabel={llmLabel}
         embedLabel={embedLabel}
+        failures={failures}
+        onLoadFailures={loadFailures}
+        onClearFailures={clearFailures}
       />
 
       <Tabs tab={tab} setTab={setTab} />
@@ -1499,15 +1535,21 @@ export default function LibraryPanel() {
       )}
 
       {tab === 'blocked' && (
-        <BlockedTab
-          entries={blockedEntries}
-          loading={blockedLoading}
-          unblocking={unblocking}
-          bulkBusy={bulkBusy}
-          onUnblock={unblockEntry}
-          onBulkUnblock={bulkUnblock}
-          onRefresh={loadBlocked}
-        />
+        <>
+          {/* Attribute rules above the id entries — one "why won't this air"
+              surface, two kinds of block. Self-contained; after a rule change
+              only the row marks on the other tabs need re-stamping. */}
+          <BlockRulesCard onChanged={() => { void recheckBlocked(); }} />
+          <BlockedTab
+            entries={blockedEntries}
+            loading={blockedLoading}
+            unblocking={unblocking}
+            bulkBusy={bulkBusy}
+            onUnblock={unblockEntry}
+            onBulkUnblock={bulkUnblock}
+            onRefresh={loadBlocked}
+          />
+        </>
       )}
 
       {tab === 'history' && (

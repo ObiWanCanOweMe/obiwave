@@ -82,7 +82,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             <p className="mt-1.5 text-[12px] leading-[1.55] text-muted">
               {enabled
                 ? 'When on, your DJ can reach for these and mix them under its voice during a break.'
-                : 'Off — your DJ never reaches for a stinger. Your library stays as it is.'}
+                : 'Off — your DJ never reaches for a stinger. Your library stays put.'}
             </p>
           </div>
           <Seg
@@ -201,7 +201,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             </div>
           </div>
           <div className="grid gap-1.5">
-            <Label>Description</Label>
+            <Label>Description · optional</Label>
             <Input
               value={sfxForm.description}
               maxLength={200}
@@ -252,7 +252,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
               value={importDesc}
               maxLength={200}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setImportDesc(e.target.value)}
-              placeholder="When should the agent reach for this?"
+              placeholder="Your DJ reads this to decide when the effect fits a line"
             />
           </div>
           <input

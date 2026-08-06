@@ -49,6 +49,13 @@ end
 np_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/now-playing")
 jingle_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/jingle")
 bed_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/bed")
+starve_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/starve")
+
+# MUSIC STARVE GUARD (#1300 bug 7) — the latch only. Declared up here because
+# the jingles gate reads it from a thunk at line ~962, long before the tick
+# that drives it can be registered (the tick needs idle_mode, defined ~1214).
+# Same lazy-thunk pattern bed_on_air already uses.
+music_starved = ref(false)
 
 # ---------------------------------------------------------------------------
 # RUNTIME SETTINGS — written by the controller at startup, read here.
@@ -959,7 +966,7 @@ music =
     )
     # A bed on air makes jingles unavailable (see bed_on_air above) so the
     # rotate can't split a bed from the song it ramps into.
-    jingles = source.available(jingles, {not bed_on_air()})
+    jingles = source.available(jingles, {not bed_on_air() and not music_starved()})
     rotate(
       weights=[1, jingle_ratio()],  # 1 jingle for every N music tracks (settings.json)
       [jingles, music]
@@ -1113,6 +1120,93 @@ voice = mic_chain(amplify(override="liq_amplify", 1., edge_fade(voice_queue)))
 intro = mic_chain(amplify(override="liq_amplify", 1., edge_fade(intro_queue)))
 
 # ---------------------------------------------------------------------------
+# SAFETY — fallback to the emergency loop when the source dies
+# ---------------------------------------------------------------------------
+# If the source dies, play a static "technical difficulties" loop. This is the
+# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
+# broadcast never has nothing to pull.
+#
+# POSITION IS LOAD-BEARING (#1300 bug 7). This MUST stay ABOVE **both** the
+# studio-bed `add` below AND the three `smooth_add` ducking layers below that.
+# They are the same trap wearing two hats: `add` is ready whenever ANY of its
+# inputs is ready, so anything mixed into the music chain makes that chain look
+# alive even while the music is starved, and a fallback placed BELOW the mix can
+# only ever select index 0.
+#   * STUDIO BED — the bed is `mksafe(single(bed_path))`, and `mksafe` makes it
+#     INFALLIBLE, i.e. ready forever. With `bed_enabled = true` (a documented
+#     one-line source edit, see below) a guard under that `add` is dead code
+#     again, and the operator who flipped the flag gets silent dead air with no
+#     hint of why.
+#   * DUCKING — the stdlib implements smooth_add as
+#       add(normalize=false, [normal, fallback(track_sensitive=false, [special, blank()])])
+#     — that inner fallback falls through to `blank()`, so the special leg is
+#     ALWAYS ready and the whole duck stack reports ready regardless of `normal`.
+# This guard lived at the bottom of the chain for its whole life and was dead
+# code the entire time; when the starve guard started gating jingles off, that
+# turned "stingers forever" into digital silence forever: measured on
+# subwave-aio-heavy, output at -91.0 dB with the fallback down there versus
+# -3.0 dB with it up here — i.e. the loop actually airs.
+#
+# It also has to stay BELOW `music_meta` and the jingle rotate, so now-playing
+# metadata and jingle counting are untouched; and being above the ducking is
+# what lets the DJ talk over the emergency loop exactly as over music.
+#
+# The ~1s fade-in on the emergency branch is NOT a debounce, and must never be
+# turned into one. `track_sensitive=false` means this switches the instant
+# `music` reports not-ready, and now that it can actually fire it fires on brief
+# real gaps too: a cold boot before auto.m3u resolves (measured: a ~100-200ms
+# stab of the loop at mixer start) and the odd track seam where dj_queue and
+# auto_playlist are both momentarily unready (auto_playlist entries are
+# whole-file `subhttp:` downloads, so a slow Navidrome widens that window).
+# DELAYING the switch would be the wrong fix — a dead-air guard that waits
+# before firing is a guard that doesn't fire, which is exactly the bug class
+# repaired above. So fire immediately and ramp the LEVEL instead: a sub-second
+# stab stays inaudible, a genuine starve is at full level in about a second, and
+# the guard's timing is untouched. The music branch keeps the stdlib's identity
+# transition because coming BACK from the loop must be instant — a recovered
+# station fading up over its own first second of music is a second bug, not a
+# nicety.
+#
+# It takes BOTH fades below to cover both cases, so don't delete either:
+#   * `transitions` fires only when switching FROM one child TO another, and
+#     `switch` applies NO transition to its FIRST selection (measured on 2.4.5:
+#     the log reads "Switch to emergency." at boot and "Switch to emergency with
+#     transition." every time after). Boot is precisely the first selection.
+#   * so `emergency` also carries a one-shot fade of its own. fade.in defaults
+#     to track_sensitive=false, which memoises the ramp to the source's first
+#     frame EVER — right for the cold boot, useless for every later starve,
+#     because a looping single never reaches a fresh track boundary. The fade.in
+#     operator registers on_track/on_metadata/on_frame callbacks on the emergency
+#     single itself; unlike dj_transition's fades on per-track sources, these
+#     callbacks don't collect and walk on every frame the loop produces. One per
+#     switch; CPU cost only while emergency airs. Not a blocker; escape hatch is
+#     static fade.scale + mkfade-ref (stdlib idiom).
+# The two compose: at boot the child's own fade ramps; on every later switch the
+# transition wraps a fresh ramp around an inner fade already sitting at unity.
+# Measured post-fix (100 ms RMS windows): boot -38.5 dB -> -9.0 dB over 1.0s;
+# mid-run starve -32.6 dB -> -9.0 dB over 1.0s; recovery a single-window step
+# back to music with no ramp; unchanged after 43 switches in one process.
+EMERGENCY_FADE_SEC = 1.0
+emergency = single("/sounds/emergency.mp3")
+# The `: source` casts drop fade.in's extra methods (fade_duration etc.), which
+# otherwise refuse to unify with the plain source the identity transition and
+# the `music` child are — a type error, not a style choice.
+emergency = (fade.in(duration=EMERGENCY_FADE_SEC, emergency) : source)
+music =
+  fallback(
+    id="music_safety",
+    track_sensitive=false,
+    transitions=[
+      # to music — identity, i.e. the stdlib default. No fade on the way back.
+      fun (_, back_to_music) -> back_to_music,
+      # to emergency — ramp up over EMERGENCY_FADE_SEC.
+      fun (_, to_emergency) ->
+        (fade.in(duration=EMERGENCY_FADE_SEC, to_emergency) : source)
+    ],
+    [music, emergency]
+  )
+
+# ---------------------------------------------------------------------------
 # STUDIO BED — low-level room tone, mixed in BEFORE voice ducking so
 # smooth_add ducks it with the music (otherwise it competes with the voice).
 # ---------------------------------------------------------------------------
@@ -1121,6 +1215,11 @@ bed_path = "/sounds/bed.mp3"
 
 # Studio bed disabled — the looping ambient bed was audible/annoying under the
 # DJ's voice during links. Flip back to `true` to restore it.
+#
+# Flipping it is safe for the dead-air guard ONLY because the guard now sits
+# ABOVE this block, on `music`. `mksafe` below makes the bed infallible, so this
+# `add` is permanently ready — build the guard from `music_bus` instead of
+# `music` and turning this flag on silently disarms it (#1300 bug 7).
 bed_enabled = false
 
 music_bus =
@@ -1185,15 +1284,16 @@ radio = smooth_add(
 # NOTE: the jingle rotate lives up on the raw pre-cross music source — see
 # the JINGLES block above music_meta for why it cannot sit here.
 
-# ---------------------------------------------------------------------------
-# SAFETY — fallback to the emergency loop when the source dies
-# ---------------------------------------------------------------------------
-
-# If the source dies, play a static "technical difficulties" loop. This is the
-# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
-# broadcast never has nothing to pull.
-emergency = single("/sounds/emergency.mp3")
-radio = fallback(track_sensitive=false, [radio, emergency])
+# NOTE: the emergency dead-air fallback used to sit HERE, and never once fired
+# (#1300 bug 7). Everything from `ducked` down is a `smooth_add`, and smooth_add
+# is always ready — the stdlib gives its `special` input a `blank()` fallthrough
+# and mixes with `add`, which is ready if any input is. A fallback below that
+# stack can only ever select index 0. It has been moved ABOVE the duck layers
+# AND above the studio-bed `add` (which has the same always-ready property when
+# `bed_enabled` is on, via `mksafe`), onto `music` (id="music_safety") — see the
+# SAFETY block up there. Do not add a second one down here: a fallback that
+# LOOKS like a dead-air guard but structurally cannot fire is exactly what
+# caused this bug.
 
 # ---------------------------------------------------------------------------
 # IDLE GATE — silence the programme while nobody is listening
@@ -1218,6 +1318,117 @@ radio = switch(
 # starves Icecast (/stream.mp3 404s) — measured in ANY position, so
 # reordering doesn't help. The emergency single already covers a dead source;
 # don't reintroduce it.
+
+# ---------------------------------------------------------------------------
+# MUSIC STARVE GUARD (#1300 bug 7)
+# ---------------------------------------------------------------------------
+# `rotate` skips unavailable sources, so with the music chain starved
+# (Navidrome unreachable, auto.m3u empty or exhausted) the jingle rotate above
+# serves stingers back to back forever — and the `emergency` fallback CANNOT
+# see it, because `radio` is still available: it is producing jingles. Measured
+# on 2.4.5 with an empty auto.m3u: music_ready=false, jingles_ready=true,
+# radio_ready=true. That is the bug in one line.
+#
+# So sample the PRE-rotate chain (music_meta — the same handle on_metadata
+# uses) and, once it has been starved for a sustained window, make jingles
+# unavailable. The rotate empties, `radio` goes unavailable, and the emergency
+# single fires exactly as it was always meant to.
+#
+# The window is not just a false-positive guard, it IS the "a jingle may cover
+# a brief hiccup" behaviour: the chain is legitimately not-ready at a track
+# boundary while a request resolves (the controller bounds that at
+# SKIP_COMMIT_WAIT_MS = 20s), so a blip is still papered over by a stinger and
+# only a sustained outage escalates. Recovery is unconditional: any tick that
+# sees the source ready clears the latch, no restart.
+#
+# Suppressed while the idle gate holds the programme frozen for an empty room —
+# "the music source is starved" is not a meaningful claim about a station
+# nobody is listening to. Entering idle clears the latch outright, so the first
+# listener back gets a full fresh window rather than a stale verdict.
+STARVE_GRACE_SEC = 30.0
+STARVE_SAMPLE_SEC = 1.0
+
+# The heartbeat below refreshes `at` while the outage lasts. It does NOT need to
+# run at the sample rate: the consumer only asks that the marker be younger than
+# STARVE_MARKER_STALE_MS (60s, controller/src/broadcast/music-starve-pure.ts).
+# At 1.0s that is ~3,600 atomic rewrites an hour — ~28,800 over an eight-hour
+# overnight outage — on a state dir that is typically a Docker bind mount and is
+# sometimes an SD card or a spinning array. 10s keeps a 6x margin on the stale
+# threshold. EDGE writes (latch, recovery, startup) stay immediate: they change
+# the state, and the operator UI should see that on the next poll, not up to ten
+# seconds later.
+STARVE_HEARTBEAT_SEC = 10.0
+
+starved_for = ref(0.0)
+starved_since = ref(0.0)
+last_marker_write = ref(0.0)
+
+# NEVER let this raise. An uncaught exception inside a thread.run callback kills
+# that thread PERMANENTLY — the guard would freeze at whatever it last latched,
+# worst case the emergency loop forever with no path back. Observed directly
+# while developing this (an EACCES on the write killed the tick outright), and
+# the realistic trigger is the same unwritable state mount ensure_tmp_dir
+# already defends against. Reporting must not share a failure domain with the
+# guard itself.
+def write_starve_marker(starved, since) =
+  # Stamped for EVERY write, edge or heartbeat, so an edge write also restarts
+  # the heartbeat window rather than being followed by a redundant one a second
+  # later. Set before the write so a throwing write still spaces out its retries.
+  last_marker_write := time()
+  try
+    file.write(
+      data=json.stringify(compact=true, {
+        starved = starved,
+        since = since,
+        at = time()
+      }),
+      atomic=true,
+      temp_dir=starve_tmp_dir,
+      "#{state_dir}/music-starved.json"
+    )
+  catch err do
+    log(label="subwave", "music-starved.json write failed (#{err})")
+  end
+end
+
+# Publish the healthy state at startup so a working station has the file.
+write_starve_marker(false, 0.0)
+
+thread.run(every=STARVE_SAMPLE_SEC, fun () -> begin
+  if idle_mode() then
+    starved_for := 0.0
+    if music_starved() then
+      music_starved := false
+      write_starve_marker(false, 0.0)
+    end
+  elsif source.is_ready(music_meta) then
+    starved_for := 0.0
+    if music_starved() then
+      music_starved := false
+      log(label="subwave", "music source recovered - jingle rotate re-armed")
+      write_starve_marker(false, 0.0)
+    end
+  else
+    starved_for := starved_for() + STARVE_SAMPLE_SEC
+    if music_starved() then
+      # Heartbeat: refreshes `at` so the controller can tell a live outage from
+      # a marker left behind by a mixer that died mid-outage. Throttled to
+      # STARVE_HEARTBEAT_SEC — see the constant for why the sample rate is the
+      # wrong write rate.
+      if time() - last_marker_write() >= STARVE_HEARTBEAT_SEC then
+        write_starve_marker(true, starved_since())
+      end
+    elsif starved_for() >= STARVE_GRACE_SEC then
+      music_starved := true
+      starved_since := time()
+      log(
+        label="subwave",
+        "MUSIC SOURCE STARVED for #{starved_for()}s - jingles gated off, emergency loop takes over"
+      )
+      write_starve_marker(true, starved_since())
+    end
+  end
+end)
 
 # ---------------------------------------------------------------------------
 # BROADCAST BUS — masters preserved; the brick-wall limiter is the ONLY
@@ -1673,6 +1884,29 @@ server.register(
     log("Skip requested via server command")
     radio.skip()
     "OK"
+  end
+)
+
+# What a skip would air next from dj_queue: "ready" (a resolved request is
+# waiting — the fallback will pick it), "resolving" (pushed but still
+# downloading; a skip now would fall through to auto.m3u), "empty". The
+# controller polls this before issuing `skip` so an operator skip airs the
+# committed pick rather than a random auto.m3u fill (#1300 bug 6). A request
+# already popped for boundary prefetch is in neither state here — same
+# blind spot dj_queue_remove documents — and reads as "empty", which the
+# caller treats as keep-waiting, never as proof of an idle queue.
+server.register(
+  "dj_queue_status",
+  description="Report the pending dj_queue state: ready / resolving / empty",
+  usage="dj_queue_status",
+  fun(_) -> begin
+    q = dj_queue.queue()
+    if list.length(q) == 0 then
+      "empty"
+    else
+      ready = list.filter(fun(r) -> request.status(r) == "ready", q)
+      if list.length(ready) > 0 then "ready" else "resolving" end
+    end
   end
 )
 

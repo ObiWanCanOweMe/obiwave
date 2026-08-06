@@ -6,7 +6,7 @@ import StationFooter from '@/components/landing/StationFooter';
 export const metadata: Metadata = {
   title: 'SUB/WAVE — Community Personas',
   description:
-    'The community persona catalog for SUB/WAVE — DJ identities shared by other stations, installable from any station&rsquo;s admin console.',
+    'The community persona catalog for SUB/WAVE: DJ identities other operators wrote, installable from any station’s admin console.',
 };
 
 // Shared chrome for the /personas showcase: masthead, full-width broadsheet

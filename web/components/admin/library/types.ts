@@ -58,11 +58,12 @@ export interface UntaggedResponse { rows: Track[]; nextCursor: string | null }
 // snapshots taken at block time, so rendering needs no Navidrome re-lookup.
 export type BlockType = 'track' | 'album' | 'artist';
 
-export interface BlockRef {
-  type: BlockType;
-  id: string;
-  name: string | null;
-}
+// What blocks a row: an id entry or an attribute rule (#1300 FR 1). `kind` is
+// optional on the entry variant because an older controller omits it — treat
+// absent as 'entry'; `ref.kind === 'rule'` is the discriminant either way.
+export type BlockRef =
+  | { kind?: 'entry'; type: BlockType; id: string; name: string | null }
+  | { kind: 'rule'; field: RuleField; id: string; label: string; seasonal: boolean };
 
 export interface BlockEntry {
   type: BlockType;
@@ -71,6 +72,32 @@ export interface BlockEntry {
   artist: string | null;
   album: string | null;
   addedAt: string;
+}
+
+// Rule entries — attribute/tag predicates beside the id entries, with an
+// optional seasonal allow-window and show scope. Server shape from
+// music/blocklist-rules.ts; `active`/`matchCount` are the listing stats
+// GET /library/blocklist stamps per rule.
+export type RuleField = 'genre' | 'tag' | 'mood' | 'artist' | 'album' | 'title' | 'playlist';
+
+export interface SeasonWindow {
+  from: { month: number; day: number };
+  to: { month: number; day: number };
+}
+
+export interface BlockRule {
+  id: string;
+  label: string;
+  field: RuleField;
+  values: string[];
+  season: SeasonWindow | null;
+  showIds: string[];
+  addedAt: string;
+}
+
+export interface BlockRuleStat extends BlockRule {
+  active: boolean;
+  matchCount: number;
 }
 
 // GET /library/history. Title/artist/album are air-time snapshots.

@@ -45,6 +45,7 @@ import type { SignInResult } from '../../lib/adminAuth';
 import { useStationFeed } from '../../hooks/useStationFeed';
 import SignInForm from './SignInForm';
 import NavidromeBanner from './NavidromeBanner';
+import MusicStarvedBanner from './MusicStarvedBanner';
 import StationSwitcher from './StationSwitcher';
 import OdometerNumber from '../OdometerNumber';
 import BoothBuddy from '../BoothBuddy';
@@ -256,6 +257,8 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
   const router = useRouter();
   const { auth, needsAuth, hydrated, signIn, signOut, adminFetch } = useAdminAuth();
   const fullBleed = !!pathname && FULL_BLEED_ROUTES.some(r => pathname.startsWith(r));
+  // Navidrome down raises the starve banner too; show only the specific one.
+  const [navidromeOk, setNavidromeOk] = useState(true);
 
   const handleSignIn = useCallback(
     async (user: string, pass: string): Promise<SignInResult> => {
@@ -321,7 +324,8 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
         <AdminSidebar pathname={pathname} onSignOut={signOut} />
         <SidebarInset className="min-w-0 bg-transparent">
           <TopBar pathname={pathname} />
-          <NavidromeBanner adminFetch={adminFetch} />
+          <NavidromeBanner adminFetch={adminFetch} onStatus={setNavidromeOk} />
+          <MusicStarvedBanner adminFetch={adminFetch} suppressed={!navidromeOk} />
           <div
             className={
               fullBleed

@@ -20,6 +20,7 @@ import { deriveVocalFromLyrics, clipRangesToTail, type LyricVocalResult } from '
 import { runAudioMoodPass } from './audio-moods.js';
 import { reportProgress, makeEventLogger } from './tagger-progress.js';
 import { quietGateDecision, type QuietState } from './analyze-quiet-pure.js';
+import { backfillDecision, failureCountsAgainstTrack, SYSTEMIC_FAILURE_RUN } from './analyze-capability.js';
 import { probeListenerCount } from '../broadcast/listeners.js';
 
 // Structured status events for the panel, mirrored to the terse `[analyze] …`
@@ -226,13 +227,32 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   // wouldn't be rebuilt this pass). Only run vocal when the backend can actually
   // produce it (a sidecar without Demucs reports vocalActivityAvailable===false).
   const vocalWanted = opts.vocalBackfill ?? vocalBackfillDefault();
-  const vocalBackfill = vocalWanted && analyzer.vocalActivityAvailable() !== false;
+  const vocalDecision = backfillDecision({
+    dimension: 'vocal',
+    wanted: vocalWanted,
+    capable: analyzer.vocalActivityAvailable(),
+    error: analyzer.vocalActivityError(),
+    backend,
+  });
+  const vocalBackfill = vocalDecision.widen;
   // Stem cache (feature: stem-blend transitions): when the operator opted in
   // and the backend has Demucs, every analysed track also persists its head/
   // tail stems (the worker shares one separation with vocal detection, so
   // this is near-free compute — the spend is disk, LRU-swept below).
-  const stemCache = settings.get()?.audio?.stemCache === true
-    && analyzer.vocalActivityAvailable() !== false;
+  // Same three-way capability question as audio and vocal, so it gets the same
+  // answer from the same place. The stem cache rides Demucs, so a Demucs that
+  // failed to LOAD lands on the same `capable: false` a lean image does — and
+  // the old hard-coded message here told that operator to "use the heavy
+  // analyzer image", which is the dead-end advice this whole decision exists to
+  // stop, left standing in the one widening that hadn't been converted.
+  const stemDecision = backfillDecision({
+    dimension: 'stem',
+    wanted: settings.get()?.audio?.stemCache === true,
+    capable: analyzer.vocalActivityAvailable(),
+    error: analyzer.vocalActivityError(),
+    backend,
+  });
+  const stemCache = stemDecision.widen;
 
   // A re-scan re-analyse is scoped to the tracks that were ALREADY analysed —
   // snapshot them before the clear wipes the bpm marker. A raw --re-analyze
@@ -264,13 +284,24 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   // previously-analysed set) and re-embeds CLAP for those via embed:true — so it
   // must NOT widen, or it'd pull the whole library back in (every track looks
   // vector-less right after the clear).
-  // ...and ONLY when the backend can actually emit CLAP vectors. A lean sidecar
-  // (WITH_CLAP=0) never fills the vector column, so widening would re-analyse
-  // every already-analysed track on every run for a guaranteed no-vector — the
-  // same churn the vocal gate below prevents. `false` = definitively not built
-  // → skip; `null` (local backend / not yet probed) keeps today's behaviour.
+  // ...and ONLY when the backend can actually emit CLAP vectors. A backend that
+  // can't never fills the vector column, so widening would re-analyse every
+  // already-analysed track on every run for a guaranteed no-vector — the same
+  // churn the vocal gate below prevents. The `false` there used to mean exactly
+  // one thing (a lean image) and got exactly one message; a heavy image whose
+  // weights fail to DOWNLOAD lands on the same false and needs the opposite
+  // advice, so both the gate and its wording now come from the pure
+  // backfillDecision (analyze-capability.ts). `null` (local backend / not yet
+  // probed) still widens — unknown is not a no.
   const audioWanted = opts.audioBackfill ?? audioBackfillDefault();
-  const audioBackfill = audioWanted && analyzer.audioEmbeddingAvailable() !== false;
+  const audioDecision = backfillDecision({
+    dimension: 'audio',
+    wanted: audioWanted,
+    capable: analyzer.audioEmbeddingAvailable(),
+    error: analyzer.audioEmbeddingError(),
+    backend,
+  });
+  const audioBackfill = audioDecision.widen;
   if (audioBackfill && !reAnalyzeScope) {
     const seen = new Set(bpmIds);
     const audioIds = db.unanalysedAudioIds(cap).filter(id => !seen.has(id));
@@ -278,8 +309,10 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     if (audioIds.length > 0) {
       console.log(`[analyze] audio backfill: +${ids.length - bpmIds.length} already-analysed tracks missing an audio vector`);
     }
-  } else if (audioWanted && !reAnalyzeScope) {
-    console.log('[analyze] audio backfill skipped — backend has no CLAP (switch to the heavy analyzer/AIO image to enable sounds-like vectors)');
+  } else if (audioDecision.notice && !reAnalyzeScope) {
+    // Warn-level when the model is present but broken: that's a fault the
+    // operator can clear, unlike a lean image, which is just a build choice.
+    logEvent(analyzer.audioEmbeddingError() ? 'warning' : 'info', audioDecision.notice);
   }
 
   // Vocal backfill: same idea for tracks missing vocal-activity ranges. The
@@ -310,11 +343,11 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     if (ids.length > before) {
       console.log(`[analyze] vocal backfill: +${ids.length - before} tracks missing vocal-activity ranges`);
     }
-  } else if (vocalWanted && !reAnalyzeScope) {
-    // Only warn when widening was actually attempted (not under a fixed re-scan
-    // scope, where the per-track vocal flag handles the rebuild and capability is
-    // surfaced in the admin UI instead).
-    console.log('[analyze] vocal backfill skipped — backend has no Demucs (build tts-heavy WITH_DEMUCS=1 to enable vocal ranges)');
+  } else if (vocalDecision.notice && !reAnalyzeScope) {
+    // Only say this when widening was actually attempted (not under a fixed
+    // re-scan scope, where the per-track vocal flag handles the rebuild and
+    // capability is surfaced in the admin UI instead).
+    logEvent(analyzer.vocalActivityError() ? 'warning' : 'info', vocalDecision.notice);
   }
 
   // Stem backfill: the fourth widening (after CLAP vectors, vocal ranges and
@@ -386,8 +419,23 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
         );
       }
     }
-  } else if (settings.get()?.audio?.stemCache === true && !reAnalyzeScope) {
-    console.log('[analyze] stem backfill skipped — backend has no Demucs (use the heavy analyzer image to cache stems)');
+  } else if (stemDecision.notice && !reAnalyzeScope) {
+    // Warn-level when Demucs is present but broken, info when the image simply
+    // wasn't built with it — same split as audio and vocal above.
+    logEvent(analyzer.vocalActivityError() ? 'warning' : 'info', stemDecision.notice);
+  }
+
+  // Say how many tracks the scope is deliberately leaving out. Silence here is
+  // what made the old behaviour so confusing in reverse: "all tracks current"
+  // is true of a library with 90 files that can never be analysed, and reads as
+  // a clean bill of health.
+  const excludedFailures = db.analysisFailedCount();
+  if (excludedFailures > 0) {
+    logEvent(
+      'warning',
+      `${excludedFailures} track${excludedFailures === 1 ? '' : 's'} excluded after ` +
+        `${db.MAX_ANALYSIS_FAILURES} failed attempts — see Library → analysis failures for the reasons`,
+    );
   }
 
   if (ids.length === 0) {
@@ -402,6 +450,30 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
 
   let analyzed = 0;
   let failed = 0;
+  // Failures since the last success in THIS pass — the signal that separates a
+  // bad file from a bad pass (see failureCountsAgainstTrack).
+  let consecutiveFailures = 0;
+  // Failure stamps held back until the pass proves it deserves to hand them
+  // out. A throw inside the systemic window MIGHT be evidence about the file —
+  // it depends on how the run ends, which is only known later: the next
+  // success flushes the buffer (a scattered bad file still gets its stamp on
+  // the pass it failed), the guard tripping discards it. Stamping eagerly and
+  // revoking on the trip would also work, but the revoke would have to
+  // subtract exactly what this pass added on top of counts earlier passes
+  // earned; withholding the write is the version with nothing to un-do.
+  let pendingFailureStamps: Array<{ id: string; reason: string }> = [];
+  const flushFailureStamps = () => {
+    for (const f of pendingFailureStamps) {
+      try {
+        db.recordAnalysisFailure(f.id, f.reason);
+      } catch (stampErr: any) {
+        // Never let bookkeeping end the pass — the old behaviour (retry
+        // forever) is a better failure than stopping the run.
+        console.error(`[analyze] ${f.id} failure stamp failed: ${stampErr?.message || stampErr}`);
+      }
+    }
+    pendingFailureStamps = [];
+  };
   let audioEmbedded = 0;
   let vocalAnalyzed = 0;
   // Quiet-times gate (#1099). The toggle itself is re-read from disk on every
@@ -606,10 +678,50 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
         }
       }
       analyzed += 1;
+      // A success is the evidence that the pass itself is healthy — so the
+      // failures buffered since the last one were about their FILES after all,
+      // and their stamps land now. The run the systemic guard counts starts
+      // again from here.
+      flushFailureStamps();
+      consecutiveFailures = 0;
     } catch (err: any) {
       failed += 1;
-      // Leave the row NULL so the next run retries it; don't stamp a version.
-      console.error(`[analyze] ${id} failed: ${err?.message || err}`);
+      consecutiveFailures += 1;
+      // The analysis columns stay NULL so the next run retries — but record
+      // WHY, and count it. Without the stamp a permanently unanalysable track
+      // (a corrupt file, a library row whose file is gone) is indistinguishable
+      // from one that has never been attempted, so it re-enters the scope on
+      // every pass forever and nothing anywhere can name it. After
+      // MAX_ANALYSIS_FAILURES consecutive failures the exclusion in the scope
+      // queries drops it, and the admin list is where it goes to be seen.
+      //
+      // ...but ONLY while the throw is evidence about the file. Past a run of
+      // SYSTEMIC_FAILURE_RUN with no success in between, the shared cause is
+      // the pass, not the track — Navidrome gone (isAvailable() gates the pass
+      // on the ANALYZER being up, never on the music backend), the sidecar
+      // dying mid-run, a mount that went away — and counting those would
+      // sentence up to a whole batch to the exclusion list over three such
+      // passes, recoverable only by hand. Which is why stamps are BUFFERED
+      // (pendingFailureStamps) rather than written here: a persistent outage
+      // used to still stamp the five tracks in front of the guard on every
+      // pass, sentencing the scope in id order five tracks per three passes —
+      // and an excluded track can't self-heal, because the success that would
+      // clear its count is exactly what exclusion prevents.
+      const reason = String(err?.message || err);
+      console.error(`[analyze] ${id} failed: ${reason}`);
+      if (failureCountsAgainstTrack(consecutiveFailures)) {
+        pendingFailureStamps.push({ id, reason });
+      } else if (consecutiveFailures === SYSTEMIC_FAILURE_RUN + 1) {
+        logEvent(
+          'warning',
+          `${SYSTEMIC_FAILURE_RUN + 1} tracks in a row failed to analyse — treating this as a fault ` +
+            'in the pass rather than the files (is the music backend reachable?), so these failures ' +
+            'are not counted against any track until one analyses successfully again',
+        );
+        // The leading run's buffered stamps go with the verdict — the trip is
+        // the moment they stopped being evidence about the files.
+        pendingFailureStamps = [];
+      }
     } finally {
       // Drop this track's temp file (best-effort) regardless of outcome.
       if (localPath) await rm(localPath, { force: true }).catch(() => {});
@@ -625,6 +737,12 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
       });
     }
   }
+
+  // A trailing run of failures shorter than the systemic threshold never met
+  // the success that would have flushed it — but nothing proved the pass
+  // unhealthy either, so those stamps land (matching what an eager write would
+  // have done). A run that DID trip the guard already emptied the buffer.
+  flushFailureStamps();
 
   // Best-effort sweep of the staging dir in case a prefetch left an orphan
   // (e.g. a download that resolved after its analyze slot already errored).

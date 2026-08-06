@@ -102,6 +102,10 @@ export function get(songId: string): any {
     genre: t.genre,
     moods: t.moods,
     audioMoods: t.audioMoods,
+    // Last.fm enrichment tags — show-filter.trackAllTags' any-namespace union
+    // (blocklist `tag` rules) resolves them through this projection for
+    // Subsonic-sourced rows; before this line the field was silently dropped.
+    lastfmTags: t.lastfmTags,
     energy: t.energy,
     source: t.source,
     confidence: t.confidence,
@@ -192,10 +196,6 @@ export function set(songId: string, data: any) {
 
 export function has(songId: string): boolean {
   return loaded ? db.hasTags(songId) : false;
-}
-
-export function allTaggedIds(): string[] {
-  return loaded ? db.allTaggedIds() : [];
 }
 
 // COUNT(*) of tagged tracks — for callers that only need the tally (e.g. the
@@ -475,6 +475,16 @@ export function stats() {
     // model out from under an existing index.
     embeddingMeta: db.getEmbeddingMeta(),
   };
+}
+
+// How many tracks have had a vocal pass at all (vocal_ranges_json NOT NULL,
+// where a stored "[]" — analysed instrumental — counts as done). Deliberately
+// NOT folded into stats(): it's an extra COUNT that only the vocal show filter
+// needs, and only when a show actually pins one, so the callers that ask for it
+// pay for it. Zero here means the whole dimension has no coverage.
+export function vocalAnalyzedCount(): number {
+  if (!loaded) return 0;
+  try { return db.vocalAnalyzedCount(); } catch { return 0; }
 }
 
 // Re-export the filter contract — admin Library browse panel calls this.

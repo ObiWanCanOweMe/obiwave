@@ -10,7 +10,7 @@ import { pageMeta } from '@/lib/seo';
 export const metadata = pageMeta({
   title: 'SUB/WAVE — Apps',
   description:
-    'Apps and integrations built for SUB/WAVE stations — players, bots, terminal clients, MCP servers and more. Browse what the community has made, or submit your own.',
+    'Apps and integrations built for SUB/WAVE stations: players, bots, terminal clients, MCP servers and more. Browse what the community has made, or submit your own.',
   path: '/apps',
 });
 
@@ -87,10 +87,10 @@ export default function AppsIndex() {
         <p className="bs-eyebrow">THE RECEIVERS</p>
         <h1>Apps.</h1>
         <p>
-          A station speaks a plain, open API, so anyone can build a way to listen to it —
-          or a way to boss it around. Here&rsquo;s what people have made: players, bots,
-          terminal clients, integrations, and skins for the player it already ships with.
-          Take one home, or add your own.
+          A station speaks a plain, open API, so anyone can build a way to listen to it, or a
+          way to boss it around. Here&rsquo;s what people have made: players, bots, terminal
+          clients, integrations, and skins for the player it already ships with. Take one
+          home, or add your own.
         </p>
       </header>
 

@@ -9,7 +9,7 @@ import { showSubmitUrl } from '@/lib/repo';
 export const metadata = pageMeta({
   title: 'SUB/WAVE — Community Shows',
   description:
-    'The community show catalog — produced-show templates shared by other stations. Browse them here, then install any from your station&rsquo;s admin console.',
+    'The community show catalog: show templates other operators built and sent in, with the topic brief and music filters that steer each one. Install any from your own admin console.',
   path: '/shows',
 });
 
@@ -44,8 +44,8 @@ async function ShowsGrid({ shows }: { shows: Promise<CommunityShow[]> }) {
   if (list.length === 0) {
     return (
       <p className="bs-news-empty">
-        No community shows to show yet — the catalog may still be loading, or this station
-        hasn&rsquo;t shipped one. Be the first to{' '}
+        Nothing in the show catalog yet, or this station hasn&rsquo;t caught up with it. Be the
+        first to{' '}
         <AnimatedLink href={SUBMIT_URL} className="bs-link">
           share a show
         </AnimatedLink>
@@ -75,10 +75,11 @@ export default function CommunityShowsIndex() {
         <p className="bs-eyebrow">THE PROGRAMME GUIDE</p>
         <h1>Community Shows.</h1>
         <p>
-          A show is a produced slot — a topic brief plus the music filters that steer what
-          plays under it, and a few mode knobs like banter and produced episodes. These are
-          shared by the community and ship with every station. Browse them here, then install
-          the ones you like from your own admin console.
+          A show is a slot on the grid: a topic brief for the DJ, plus the music filters that
+          decide what plays under it. Produced mode airs it as a full episode, with an intro
+          at the top, a feature every hour and a sign-off at the end. Banter puts guest
+          co-hosts on the mic together. Every one below came from another operator, and they
+          ship with every station.
         </p>
       </header>
 
@@ -87,7 +88,7 @@ export default function CommunityShowsIndex() {
       </Suspense>
 
       <div className="bs-station-cta">
-        <p className="bs-station-cta-copy">Built a show worth sharing? Add it to the catalog.</p>
+        <p className="bs-station-cta-copy">Built a show that works? Add it to the guide.</p>
         <AnimatedLink href={SUBMIT_URL} variant="arrow" className="bs-station-cta-link">
           Share a show
         </AnimatedLink>
@@ -101,9 +102,9 @@ export default function CommunityShowsIndex() {
       </Suspense>
 
       <p className="bs-stations-report">
-        Installing is a two-tap job in your station&rsquo;s admin: open{' '}
-        <strong>Shows → Community</strong>, then <strong>Install</strong>. Every show arrives
-        ready to place on your grid — bind it to a persona and a time slot on your own terms.
+        To install, open <strong>Shows → Community</strong> in your station&rsquo;s admin and hit{' '}
+        <strong>Install</strong>. Every show lands unscheduled, so you pick the persona who
+        hosts it and the hours it runs.
       </p>
     </article>
   );

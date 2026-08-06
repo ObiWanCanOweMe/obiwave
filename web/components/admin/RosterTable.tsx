@@ -25,7 +25,6 @@ export interface RosterColumn<R> {
   sortAria?: 'ascending' | 'other';
   render: (row: R) => ReactNode;
 }
-
 export interface RosterTableProps<R> {
   cols: RosterColumn<R>[];
   rows: R[];
@@ -157,5 +156,3 @@ export function RosterTable<R>({
     </div>
   );
 }
-
-export default RosterTable;

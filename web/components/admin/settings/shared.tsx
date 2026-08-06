@@ -52,6 +52,11 @@ export interface CloudTtsCfg {
   temperature: number;
   topP: number;
   latency: 'low' | 'normal' | 'balanced';
+  // Free-form extra request-body fields for openai-compatible servers (issue
+  // #1317) — Chatterbox's temperature/seed/exaggeration and friends. Kept as
+  // text on both sides; the controller coerces each value to its JSON type at
+  // send time (settings/compat-params.ts).
+  compatParams: { key: string; value: string }[];
 }
 
 // The single client-side copy, read by both form hydration and the dirty-check.

@@ -6,7 +6,7 @@ import StationFooter from '@/components/landing/StationFooter';
 export const metadata: Metadata = {
   title: 'SUB/WAVE — Community Skills',
   description:
-    'The community skill catalog for SUB/WAVE — prompt-only DJ segments shared by other stations, installable from any station&rsquo;s admin console.',
+    'The community skill catalog for SUB/WAVE: prompt-only DJ segments other operators wrote, installable from any station’s admin console.',
 };
 
 // Shared chrome for the /skills showcase: masthead, full-width broadsheet

@@ -33,6 +33,9 @@ const FORM = {
       temperature: 0.7,
       topP: 0.7,
       latency: 'normal',
+      // v1.5 makes compatibility parameters part of the normalized Cloud TTS
+      // form. SettingsPanel always supplies an array, including on upgrades.
+      compatParams: [],
     },
     remote: { url: '' },
     gainDb: Object.fromEntries(ENGINE_IDS.map(id => [id, 0])),

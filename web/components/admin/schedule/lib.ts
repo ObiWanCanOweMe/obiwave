@@ -93,10 +93,6 @@ export function dayName(day: number): string {
   return DAYS.find(d => d.key === day)?.name ?? '';
 }
 
-export function dayLabel(day: number): string {
-  return DAYS.find(d => d.key === day)?.label ?? '';
-}
-
 /** '06' — board-card style hour. 24 stays '24' so a day-end reads as a close. */
 export function hh(h: number): string {
   return String(h).padStart(2, '0');

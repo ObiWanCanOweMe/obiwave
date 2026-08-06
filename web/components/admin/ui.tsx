@@ -5,8 +5,7 @@
    resolve to the admin-scoped rules in globals.css. Btn / Seg / Toggle wrap
    shadcn primitives while keeping the original prop API. */
 
-import type { CSSProperties, ReactNode, MouseEvent, Ref } from 'react';
-import { useLayoutEffect, useRef } from 'react';
+import type { ReactNode, MouseEvent, Ref } from 'react';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/button';
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
@@ -17,7 +16,6 @@ export interface EyebrowProps {
   children?: ReactNode;
   className?: string;
 }
-
 export function Eyebrow({ children, className }: EyebrowProps) {
   return <span className={cn('eyebrow text-muted', className)}>{children}</span>;
 }
@@ -244,62 +242,4 @@ export function Metric({ n, l, accent }: MetricProps) {
       <div className="l">{l}</div>
     </div>
   );
-}
-
-export interface WaveProps {
-  bars?: number;
-  seed?: number;
-  h?: number;
-  tone?: string;
-  maxHeight?: number;
-}
-
-/* Stable seeded pseudo-random waveform bars. Heights are set via DOM
-   mutation in useLayoutEffect because Tailwind can't express per-element
-   dynamic pixel values without inline `style`. */
-export function Wave({ bars = 60, seed = 1, h = 60, tone = '', maxHeight }: WaveProps) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const heights: number[] = [];
-  let x = seed * 9301 + 49297;
-  for (let i = 0; i < bars; i++) {
-    x = (x * 9301 + 49297) % 233280;
-    heights.push(Math.round(8 + (x / 233280) * (h - 8)));
-  }
-
-  useLayoutEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    const max = maxHeight ?? h;
-    root.style.setProperty('--wave-h', `${h}px`);
-    root.style.setProperty('--wave-max-h', `${max}px`);
-    const spans = root.querySelectorAll<HTMLSpanElement>(':scope > span');
-    spans.forEach((span, i) => {
-      const bar = heights[i];
-      if (bar != null) span.style.height = `${bar}px`;
-    });
-  });
-
-  return (
-    <div
-      ref={ref}
-      className={cn(
-        'wave h-[var(--wave-h)] max-h-[var(--wave-max-h)]',
-        tone,
-      )}
-    >
-      {heights.map((_, i) => <span key={i} />)}
-    </div>
-  );
-}
-
-/* Turns a `CSSProperties`-shaped object into an inline `style` prop. Only for
-   values Tailwind can't encode (computed colours, geometry); routing them
-   through here keeps the lint allow-list scoped to truly dynamic styles. */
-export function styleVars(vars: Record<string, string | number | undefined>): CSSProperties {
-  const out: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(vars)) {
-    if (v == null || v === '') continue;
-    out[k] = v;
-  }
-  return out as CSSProperties;
 }

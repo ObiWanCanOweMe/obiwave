@@ -15,7 +15,7 @@ import * as library from '../../../music/library.js';
 import * as embeddings from '../../../music/embeddings.js';
 import * as analyzer from '../../../music/analyzer.js';
 import { filterPickerCandidates, durationSeconds } from '../../../music/recency.js';
-import { applyStrictLocks } from '../../../music/show-filter.js';
+import { applyStrictLocks, type VocalMode } from '../../../music/show-filter.js';
 import { shuffle } from '../../../util/shuffle.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../../util/pick-seed.js';
 import { searchWeb, searchReady } from '../../../skills/web-search.js';
@@ -107,6 +107,7 @@ export function buildPickerTools({
   eraLock = null,
   moodLock = null,
   energyLock = null,
+  vocalLock = null,
   playlistLock = null,
   playlistTracks = null,
   excludedIds = null,
@@ -139,6 +140,7 @@ export function buildPickerTools({
   // Hard energy-band constraint for a strict show — any-of list: candidates
   // are filtered to the analysed bands (onlyEnergy — HARD, unknowns dropped).
   energyLock?: string[] | null;
+  vocalLock?: VocalMode | null;
   // The active sonic journey's current waypoint vector (broadcast/dj-agent.ts).
   // When present, the tracksTowardJourney tool below is registered, closing
   // over it — the agent never sees the raw vector, only the tracks near it.
@@ -189,7 +191,7 @@ export function buildPickerTools({
     // library has no such tags) so an un-analysed library can't starve every
     // tool for the whole show.
     let pool = applyStrictLocks(shuffle((list || []) as any[]), {
-      genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock,
+      genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
     }, { starve: true });
     // Strict playlist: HARD-intersect with the lock set, with NO never-starve to
     // off-playlist (a playlist is an exact set, so a tool with no overlap simply
@@ -231,7 +233,7 @@ export function buildPickerTools({
   // them makes "matches exist but were filtered" a real cause the note should
   // name, not just recency (steering the model to its other results this round
   // — there is no second discovery step to retry in; see COMMIT_AFTER_STEPS).
-  const hasStrictLock = !!(genreLock?.length || eraLock?.length || moodLock?.length || energyLock?.length || playlistLock || excludedIds);
+  const hasStrictLock = !!(genreLock?.length || eraLock?.length || moodLock?.length || energyLock?.length || vocalLock || playlistLock || excludedIds);
   // The seed clause rides HERE as well as on the schema field (#1247): this is
   // the message sitting in the model's context at the exact moment it fails, and
   // "never invent a song id" is literally satisfied by echoing the on-air id
