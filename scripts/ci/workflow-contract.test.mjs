@@ -15,10 +15,14 @@ const webLock = JSON.parse(
 );
 const publish = await readFile(new URL('../../.github/workflows/publish-images.yml', import.meta.url), 'utf8');
 const scan = await readFile(new URL('../../.github/workflows/scan-images.yml', import.meta.url), 'utf8');
-const recovery = await readFile(
+const recoveryV13 = await readFile(
   new URL('../../.github/workflows/recover-v1.3.0-obiwave.2.yml', import.meta.url),
   'utf8',
 );
+const recoveryV15 = await readFile(
+  new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
+  'utf8',
+).catch(() => '');
 const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
@@ -146,68 +150,27 @@ function stepRun(job, stepName) {
   return `${script.join('\n')}\n`;
 }
 
-test('Caddy owns the listener-auth namespace before the general API proxy', () => {
-  for (const caddyfile of caddyfiles) {
-    const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
-    const listenerMatcherIndex = caddyfile.indexOf(listenerMatcher);
-    const apiProxyIndex = caddyfile.indexOf('handle_path /api/*');
+function assertRecoveryWorkflow(workflow, { tag, manifest }) {
+  assert.match(workflow, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /workflow_dispatch:[\s\S]*?inputs:/);
 
-    assert.ok(listenerMatcherIndex >= 0, 'missing listener-auth namespace matcher');
-    assert.ok(apiProxyIndex > listenerMatcherIndex, 'listener-auth matcher must precede the general API proxy');
-  }
-});
-
-test('recovery contract rejects alternate permission and deploy-environment forms', () => {
-  for (const [mutation, expected] of [
-    [recovery.replace('permissions:\n  contents: read', 'permissions: write-all'), /block form/],
-    [recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'), /block form/],
-    [
-      recovery.replace(
-        '  deploy-production:',
-        '  permission-mutation:\n    "permissions": "write-all"\n  deploy-production:',
-      ),
-      /block form/,
-    ],
-    [
-      recovery.replace(
-        '  deploy-production:',
-        '  permission-mutation:\n    permissions:\n      actions: "write"\n  deploy-production:',
-      ),
-      /unexpected write permissions/,
-    ],
-  ]) {
-    assert.throws(() => assertRecoveryPermissions(mutation), expected);
-  }
-
-  const deploy = jobBlock(recovery, 'deploy-production');
-  for (const mutation of [
-    `${deploy.replace('    environment: production', '    env: inherited\n    environment: production')}`,
-    `${deploy.replace('    environment: production', '    env: {PORTAINER_URL: leaked}\n    environment: production')}`,
-    `${deploy.replace('    environment: production', '    "env": {PORTAINER_URL: leaked}\n    environment: production')}`,
-  ]) {
-    assert.throws(() => assertNoJobEnv(mutation), /deploy environment must be step-scoped/);
-  }
-});
-
-test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
-  assert.match(recovery, /^on:\n  workflow_dispatch:\s*$/m);
-  assert.doesNotMatch(recovery, /workflow_dispatch:[\s\S]*?inputs:/);
-
-  const defaultPermissions = recovery.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
+  const defaultPermissions = workflow.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
   assert.ok(defaultPermissions, 'missing default workflow permissions');
   assert.match(defaultPermissions, /^  contents: read$/m);
-  assertRecoveryPermissions(recovery);
+  assertRecoveryPermissions(workflow);
+  assert.match(
+    workflow,
+    new RegExp(`^concurrency:\\n  group: recover-${tag.replaceAll('.', '\\.')}\\n  cancel-in-progress: false$`, 'm'),
+  );
 
-  const validate = jobBlock(recovery, 'validate');
-  const policy = jobBlock(recovery, 'vulnerability-policy');
-  const deploy = jobBlock(recovery, 'deploy-production');
+  const validate = jobBlock(workflow, 'validate');
+  const policy = jobBlock(workflow, 'vulnerability-policy');
+  const deploy = jobBlock(workflow, 'deploy-production');
   assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
   assert.deepEqual(jobNeeds(policy), ['validate']);
   assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
-  assert.match(
-    policy,
-    /^    with:\n      release_tag: v1\.3\.0-obiwave\.2\n      recovery_manifest: security\/releases\/v1\.3\.0-obiwave\.2\.json$/m,
-  );
+  assert.match(policy, new RegExp(`release_tag: ${tag.replaceAll('.', '\\.')}\\n`));
+  assert.match(policy, new RegExp(`recovery_manifest: ${manifest.replaceAll('.', '\\.')}\\n`));
   assert.match(
     policy,
     /^    permissions:\n      contents: read\n      packages: read\n      security-events: write$/m,
@@ -226,7 +189,7 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
     PORTAINER_API_KEY: '${{ secrets.PORTAINER_API_KEY }}',
     PORTAINER_STACK_ID: '${{ vars.PORTAINER_STACK_ID }}',
     PORTAINER_ENDPOINT_ID: '${{ vars.PORTAINER_ENDPOINT_ID }}',
-    SUBWAVE_RELEASE_TAG: 'v1.3.0-obiwave.2',
+    SUBWAVE_RELEASE_TAG: tag,
     SUBWAVE_HEALTH_URL: '${{ vars.SUBWAVE_HEALTH_URL }}',
     SUBWAVE_STREAM_URL: '${{ vars.SUBWAVE_STREAM_URL }}',
     SUBWAVE_STREAM_PASSWORD: '${{ secrets.SUBWAVE_STREAM_PASSWORD }}',
@@ -235,7 +198,89 @@ test('the .2 recovery is fixed-identity, policy-gated, and protected', () => {
     [...deploy.matchAll(/^\s+run: ([^\n]+)$/gm)].map(([, command]) => command),
     ['node scripts/deploy/portainer-release.mjs'],
   );
-  assert.doesNotMatch(recovery, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
+  assert.doesNotMatch(workflow, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);
+}
+
+test('Caddy owns the listener-auth namespace before the general API proxy', () => {
+  for (const caddyfile of caddyfiles) {
+    const listenerMatcher = '@listener_auth_internal path /api/listener-auth /api/listener-auth/*';
+    const listenerMatcherIndex = caddyfile.indexOf(listenerMatcher);
+    const apiProxyIndex = caddyfile.indexOf('handle_path /api/*');
+
+    assert.ok(listenerMatcherIndex >= 0, 'missing listener-auth namespace matcher');
+    assert.ok(apiProxyIndex > listenerMatcherIndex, 'listener-auth matcher must precede the general API proxy');
+  }
+});
+
+test('recovery contract rejects alternate permission and deploy-environment forms', () => {
+  for (const recovery of [recoveryV13, recoveryV15]) {
+    for (const [mutation, expected] of [
+      [recovery.replace('permissions:\n  contents: read', 'permissions: write-all'), /block form/],
+      [recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'), /block form/],
+      [
+        recovery.replace(
+          '  deploy-production:',
+          '  permission-mutation:\n    "permissions": "write-all"\n  deploy-production:',
+        ),
+        /block form/,
+      ],
+      [
+        recovery.replace(
+          '  deploy-production:',
+          '  permission-mutation:\n    permissions:\n      actions: "write"\n  deploy-production:',
+        ),
+        /unexpected write permissions/,
+      ],
+    ]) {
+      assert.throws(() => assertRecoveryPermissions(mutation), expected);
+    }
+
+    const deploy = jobBlock(recovery, 'deploy-production');
+    for (const mutation of [
+      `${deploy.replace('    environment: production', '    env: inherited\n    environment: production')}`,
+      `${deploy.replace('    environment: production', '    env: {PORTAINER_URL: leaked}\n    environment: production')}`,
+      `${deploy.replace('    environment: production', '    "env": {PORTAINER_URL: leaked}\n    environment: production')}`,
+    ]) {
+      assert.throws(() => assertNoJobEnv(mutation), /deploy environment must be step-scoped/);
+    }
+  }
+});
+
+test('both one-release recoveries are fixed-identity, policy-gated, and protected', () => {
+  assertRecoveryWorkflow(recoveryV13, {
+    tag: 'v1.3.0-obiwave.2',
+    manifest: 'security/releases/v1.3.0-obiwave.2.json',
+  });
+  assertRecoveryWorkflow(recoveryV15, {
+    tag: 'v1.5.0-obiwave.1',
+    manifest: 'security/releases/v1.5.0-obiwave.1.json',
+  });
+});
+
+test('both recovery contracts reject identity, authorization, and deployment-gate mutations', () => {
+  for (const [workflow, identity] of [
+    [recoveryV13, {
+      tag: 'v1.3.0-obiwave.2',
+      manifest: 'security/releases/v1.3.0-obiwave.2.json',
+    }],
+    [recoveryV15, {
+      tag: 'v1.5.0-obiwave.1',
+      manifest: 'security/releases/v1.5.0-obiwave.1.json',
+    }],
+  ]) {
+    assertRecoveryWorkflow(workflow, identity);
+    for (const mutation of [
+      (value) => value.replace(/release_tag: v[^\n]+/, 'release_tag: v9.9.9-obiwave.9'),
+      (value) => value.replace(/recovery_manifest: security\/releases\/[^\n]+/, 'recovery_manifest: security/releases/foreign.json'),
+      (value) => `${value}\n# forbidden\n# docker push ghcr.io/example/image\n`,
+      (value) => value.replace('needs: [validate, vulnerability-policy]', 'needs: [validate]'),
+      (value) => value.replace('    environment: production', '    env: inherited\n    environment: production'),
+      (value) => value.replace('      security-events: write', '      actions: write'),
+      (value) => value.replace('    environment: production', '    environment: staging'),
+    ]) {
+      assert.throws(() => assertRecoveryWorkflow(mutation(workflow), identity));
+    }
+  }
 });
 
 test('scanner resolve-tag executes recovery validation as valid Bash', async () => {
