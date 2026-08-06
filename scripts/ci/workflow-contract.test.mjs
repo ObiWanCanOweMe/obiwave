@@ -150,9 +150,42 @@ function stepRun(job, stepName) {
   return `${script.join('\n')}\n`;
 }
 
+function topLevelBlockLines(workflow, key) {
+  const lines = workflow.split('\n');
+  const keyIndexes = lines.flatMap((line, index) => line === `${key}:` ? [index] : []);
+  assert.equal(keyIndexes.length, 1, `expected exactly one top-level ${key} block`);
+  const [keyIndex] = keyIndexes;
+  const block = [];
+  for (const line of lines.slice(keyIndex + 1)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    if (!line.startsWith(' ')) break;
+    block.push(line);
+  }
+  return block;
+}
+
+function foldedStepCommand(step) {
+  const lines = step.split('\n');
+  const runIndex = lines.findIndex((line) => line === '        run: >-');
+  assert.notEqual(runIndex, -1, 'missing folded step command');
+  const command = [];
+  for (const line of lines.slice(runIndex + 1)) {
+    if (!line.trim()) continue;
+    const indent = line.match(/^ */)[0].length;
+    if (indent <= 8) break;
+    assert.ok(indent >= 10, 'invalid folded step command indentation');
+    command.push(line.trim());
+  }
+  assert.ok(command.length > 0, 'empty folded step command');
+  return command.join(' ');
+}
+
 function assertRecoveryWorkflow(workflow, { tag, manifest }) {
-  assert.match(workflow, /^on:\n  workflow_dispatch:\s*$/m);
-  assert.doesNotMatch(workflow, /workflow_dispatch:[\s\S]*?inputs:/);
+  assert.deepEqual(
+    topLevelBlockLines(workflow, 'on'),
+    ['  workflow_dispatch:'],
+    'workflow_dispatch must be the only recovery trigger',
+  );
 
   const defaultPermissions = workflow.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
   assert.ok(defaultPermissions, 'missing default workflow permissions');
@@ -167,6 +200,12 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   const policy = jobBlock(workflow, 'vulnerability-policy');
   const deploy = jobBlock(workflow, 'deploy-production');
   assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
+  const validationStep = stepBlock(validate, 'Verify immutable recovery artifacts');
+  assert.deepEqual(stepEnv(validationStep), { GH_TOKEN: '${{ github.token }}' });
+  assert.equal(
+    foldedStepCommand(validationStep),
+    `node scripts/release/recovery-manifest.mjs verify-all --manifest ${manifest} --scanner security/trivy-scanner.json --repository ObiWanCanOweMe/obiwave`,
+  );
   assert.deepEqual(jobNeeds(policy), ['validate']);
   assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
   assert.match(policy, new RegExp(`release_tag: ${tag.replaceAll('.', '\\.')}\\n`));
@@ -255,6 +294,50 @@ test('both one-release recoveries are fixed-identity, policy-gated, and protecte
     tag: 'v1.5.0-obiwave.1',
     manifest: 'security/releases/v1.5.0-obiwave.1.json',
   });
+});
+
+test('recovery contracts reject every trigger beyond manual dispatch', () => {
+  for (const [workflow, identity] of [
+    [recoveryV13, {
+      tag: 'v1.3.0-obiwave.2',
+      manifest: 'security/releases/v1.3.0-obiwave.2.json',
+    }],
+    [recoveryV15, {
+      tag: 'v1.5.0-obiwave.1',
+      manifest: 'security/releases/v1.5.0-obiwave.1.json',
+    }],
+  ]) {
+    for (const extraTrigger of [
+      '  push:',
+      "  schedule:\n    - cron: '0 0 * * *'",
+      '  workflow_call:',
+    ]) {
+      const mutation = workflow.replace(
+        '  workflow_dispatch:',
+        `  workflow_dispatch:\n${extraTrigger}`,
+      );
+      assert.throws(() => assertRecoveryWorkflow(mutation, identity));
+    }
+  }
+});
+
+test('recovery contracts reject a bypassed immutable-artifact validation step', () => {
+  for (const [workflow, identity] of [
+    [recoveryV13, {
+      tag: 'v1.3.0-obiwave.2',
+      manifest: 'security/releases/v1.3.0-obiwave.2.json',
+    }],
+    [recoveryV15, {
+      tag: 'v1.5.0-obiwave.1',
+      manifest: 'security/releases/v1.5.0-obiwave.1.json',
+    }],
+  ]) {
+    const mutation = workflow.replace(
+      '          node scripts/release/recovery-manifest.mjs verify-all',
+      '          echo validation-bypassed',
+    );
+    assert.throws(() => assertRecoveryWorkflow(mutation, identity));
+  }
 });
 
 test('both recovery contracts reject identity, authorization, and deployment-gate mutations', () => {
