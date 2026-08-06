@@ -625,7 +625,7 @@ async function main() {
     }
   });
   await test('native-strategy providers get room to seed, refine, cross-check', () => {
-    for (const provider of ['openai', 'anthropic', 'google', 'deepseek', 'openrouter', 'requesty', 'gateway']) {
+    for (const provider of ['openai', 'litellm', 'anthropic', 'google', 'deepseek', 'openrouter', 'requesty', 'gateway']) {
       assert.equal(discoveryStepsFor({ provider }), 3, provider);
       assert.equal(gatedMaxStepsFor({ provider }), 4, provider);
     }

@@ -144,6 +144,7 @@ const CAPS: Record<string, ProviderCapabilities> = {
     objectStrategy: 'native',
     repeatPenaltyApplies: false,
     reasoningLevel: NONE,
+    discoverySteps: NATIVE_DISCOVERY_STEPS,
   },
   // locca serves local llama.cpp GGUF models — the SAME model class as Ollama,
   // not a cloud endpoint. Under native Output.object + auto tool_choice they emit
