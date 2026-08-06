@@ -105,6 +105,20 @@ function detectBrowserSupport(): BrowserSupport {
 // can also reach it).
 export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: UsePlayerOptions = {}): Player {
   const { apiUrl, streams } = useStationOrigin();
+  // Callers may derive enablement inline from a feed snapshot. Normalize it on
+  // scalar flags so an equivalent fresh object cannot retrigger preference
+  // hydration after that hydration's own state updates.
+  const stableStreamEnablement = useMemo<StreamEnablement>(() => ({
+    mp3: streamEnablement.mp3,
+    opus: streamEnablement.opus,
+    aac: streamEnablement.aac,
+    flac: streamEnablement.flac,
+  }), [
+    streamEnablement.mp3,
+    streamEnablement.opus,
+    streamEnablement.aac,
+    streamEnablement.flac,
+  ]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioListenerCleanupRef = useRef<(() => void) | null>(null);
   // SSR + first render use the MP3 URL so server and client markup agree; the
@@ -205,12 +219,12 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     return () => clearTimeout(id);
   }, [volume]);
 
-  const formatHydrationKey = JSON.stringify([apiUrl, streamEnablement, streams, [...failedFormatsRef.current].sort()]);
+  const formatHydrationKey = JSON.stringify([apiUrl, stableStreamEnablement, streams, [...failedFormatsRef.current].sort()]);
   const hydrateFormatPreference = useCallback(() => {
     const support = detectBrowserSupport();
     const resolved = resolveFormatPreference(
       loadFormatPreference(localStorage, apiUrl),
-      streamEnablement,
+      stableStreamEnablement,
       support,
       streams,
       failedFormatsRef.current,
@@ -222,7 +236,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     setStreamUrl(resolved.streamUrl);
     formatHydrationKeyRef.current = formatHydrationKey;
     return resolved;
-  }, [apiUrl, formatHydrationKey, streamEnablement, streams]);
+  }, [apiUrl, formatHydrationKey, stableStreamEnablement, streams]);
   useEffect(() => {
     const previousFormat = activeFormatRef.current;
     const previousUrl = streamUrlRef.current;
@@ -233,11 +247,11 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   }, [hydrateFormatPreference, switchLiveStream]);
 
   const effectiveEnablement = useMemo<StreamEnablement>(() => ({
-    mp3: streamEnablement.mp3,
-    opus: streamEnablement.opus && streams.opus !== null,
-    aac: streamEnablement.aac && streams.aac !== null,
-    flac: streamEnablement.flac && streams.flac !== null,
-  }), [streamEnablement, streams]);
+    mp3: stableStreamEnablement.mp3,
+    opus: stableStreamEnablement.opus && streams.opus !== null,
+    aac: stableStreamEnablement.aac && streams.aac !== null,
+    flac: stableStreamEnablement.flac && streams.flac !== null,
+  }), [stableStreamEnablement, streams]);
   const availability = availabilityFor(effectiveEnablement, browserSupport, failedFormatsRef.current);
 
   const selectFormat = (next: AudioFormat) => {

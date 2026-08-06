@@ -103,6 +103,16 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   // the poll reads the latest player-owned selection.
   const activeFormatRef = useRef<AudioFormat>('mp3');
   const feed = useStationFeed({ activeFormat: activeFormatRef });
+  const opusEnabled = feed.stream?.opusEnabled === true;
+  const aacEnabled = feed.stream?.aacEnabled === true;
+  const flacEnabled = feed.stream?.flacEnabled === true;
+  // streamEnablementFor returns a plain object. Keep it stable across player-
+  // owned state updates so usePlayer's preference hydration runs only when the
+  // station actually changes an advertised mount.
+  const streamEnablement = useMemo(
+    () => streamEnablementFor({ opusEnabled, aacEnabled, flacEnabled }),
+    [opusEnabled, aacEnabled, flacEnabled],
+  );
   const {
     audioRef,
     audioElementRef,
@@ -119,7 +129,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     availability,
     selectFormat,
     formatFailure,
-  } = usePlayer({ streamEnablement: streamEnablementFor(feed.stream) });
+  } = usePlayer({ streamEnablement });
   activeFormatRef.current = format;
 
   // Only an explicit false is offline — see PlayerAudio.offline.
