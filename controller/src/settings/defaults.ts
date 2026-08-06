@@ -378,6 +378,27 @@ export const DEFAULTS = {
     // so a capable model still calls the tool; misses fall back to the pool
     // picker. Leave on 'required' unless you hit that crash.
     toolChoice: 'required',
+    // How many DISCOVERY rounds the DJ agent gets before it must commit its pick
+    // (`done`). 0 (the default) follows the provider capability table — 1 for
+    // the forced-tool providers (ollama, openai-compatible, locca), 3 for the
+    // rest; see discoveryStepsFor() in llm/internal/provider/capabilities.ts.
+    // Set 1–5 to override.
+    //
+    // The override exists because the descriptor keys off the PROVIDER and can't
+    // know which model that provider is serving, and the two failure directions
+    // are opposite. RAISE it (2–3) when a capable model sits behind a
+    // forced-tool provider — a good local model on llama.cpp/vLLM gets one
+    // cornered round it doesn't need, and a seed tool that comes back empty then
+    // leaves it with nothing to commit. LOWER it to 1 when a cloud model wanders
+    // across its three rounds, or simply to cut tokens: every extra round is a
+    // separate billable call counting against dailyTokenCap, and all rounds share
+    // the one agentTimeoutMs deadline with the recovery legs behind them.
+    //
+    // Raising it never buys extra attempts at `done` — the step cap is derived
+    // as budget + 1, so the run still commits once and then hands off to the
+    // recovery cascade. The picker prompt follows this number too, so the model
+    // is told how many rounds it actually has.
+    discoverySteps: 0,
     // Ollama context window (num_ctx), local Ollama only. Ollama's own default
     // is 4096, but the session DJ agent feeds ~8k+ (the 40-turn session window
     // + tool schemas + discovery results), so the default silently truncates
@@ -415,7 +436,7 @@ export const DEFAULTS = {
     // a DESCRIBED track ("the song from the new Dune movie") via web search, then
     // matches it against the local library. Off by default: it needs a web-search
     // provider (settings.search) and costs a web round-trip + a small extraction
-    // call per use. No-op unless searchReady() — see llm/internal/tools/picker-tools.ts.
+    // call per use. No-op unless searchReady() — see llm/internal/tools/picker/tools/identify-requested-track.ts.
     requestWebResolve: false,
     // Hard wall-clock ceiling (ms) on a single DJ-agent generation (track
     // picks and listener requests). Enforced by withDeadline in llm/sdk.ts;
@@ -487,6 +508,9 @@ export const DEFAULTS = {
       toolChoice: 'required',
       numCtx: 16384,
       repeatPenalty: 1.15,
+      // Per-leg like toolChoice/numCtx above: the backup may be a different
+      // provider running a different model, so it resolves its own budget.
+      discoverySteps: 0,
     },
   },
   // Embedding-propagated library tagger (music/tag-library.ts).

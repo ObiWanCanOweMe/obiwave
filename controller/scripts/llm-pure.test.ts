@@ -12,7 +12,7 @@ import { generateText, APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, isFishS21Model, cloudExpressionCueFamily, snapV3Stability, modelTolerant, schemaHint, clipText, soulBrief, SOUL_BRIEF_MAX, renderTerminalPrompt, messageText } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
-import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice } from '../src/llm/internal/provider/capabilities.js';
+import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice, discoveryStepsFor, gatedMaxStepsFor, runDiscoverySteps, DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../src/llm/internal/provider/capabilities.js';
 import { agentPlan } from '../src/llm/internal/strategy/plan.js';
 import { introBudgetPhrase, enforceIntroBudget } from '../src/llm/internal/prompts/intro-budget.js';
 import { embeddingBaseUrl } from '../src/llm/internal/provider/embedding.js';
@@ -606,6 +606,67 @@ async function main() {
     assert.equal(agentPlan({ provider: 'openai-compatible' }, {}, 3), 'done-tool');
     assert.equal(agentPlan({ provider: 'openai' }, null, 3), 'free-text');
     assert.equal(agentPlan({ provider: 'ollama' }, null, 0), 'free-text');
+  });
+
+  // ---- per-provider discovery budget (the tool-loop's shape) ----
+  // The commit point used to be a global COMMIT_AFTER_STEPS = 1, set by the
+  // weakest provider and applied to every model. It is a capability now. These
+  // assertions are the guard on that split: the forced-tool providers must keep
+  // the single cornered call byte-for-byte, and the derived cap must always
+  // leave EXACTLY ONE forced-`done` step whatever the budget.
+  console.log('discoveryStepsFor / gatedMaxStepsFor (loop shape):');
+  await test('forced-tool providers keep the historical single discovery call', () => {
+    // These three ignore toolChoice with several tools visible and emit
+    // schema-valid objects without exploring — the one-call corner is what
+    // holds them. Widening any of these re-opens the middle-step failure window.
+    for (const provider of ['ollama', 'openai-compatible', 'locca']) {
+      assert.equal(discoveryStepsFor({ provider }), 1, provider);
+      assert.equal(gatedMaxStepsFor({ provider }), 2, provider);
+    }
+  });
+  await test('native-strategy providers get room to seed, refine, cross-check', () => {
+    for (const provider of ['openai', 'litellm', 'anthropic', 'google', 'deepseek', 'openrouter', 'requesty', 'gateway']) {
+      assert.equal(discoveryStepsFor({ provider }), 3, provider);
+      assert.equal(gatedMaxStepsFor({ provider }), 4, provider);
+    }
+  });
+  await test('an unknown provider falls to the conservative floor, not the wide budget', () => {
+    // DEFAULT_CAPS declares no budget: absent must mean 1, never "unbounded".
+    assert.equal(discoveryStepsFor({ provider: 'not-a-provider' }), DISCOVERY_STEPS_MIN);
+    assert.equal(discoveryStepsFor({}), DISCOVERY_STEPS_MIN);
+    assert.equal(discoveryStepsFor(undefined), DISCOVERY_STEPS_MIN);
+  });
+  await test('the derived cap always leaves exactly one forced-done step', () => {
+    // The GLM invariant: extra `done` steps grow an "I already declined" trail
+    // and make compliance worse, so however tall discovery gets, the main run
+    // commits once and hands off to the recovery cascade.
+    for (const provider of ['ollama', 'openai', 'anthropic', 'locca', 'gateway', 'nonsense']) {
+      assert.equal(
+        gatedMaxStepsFor({ provider }) - discoveryStepsFor({ provider }), 1,
+        `${provider} must leave exactly one done step`);
+    }
+  });
+  await test('the budget is clamped, so a bad descriptor edit cannot corner or run away', () => {
+    // A zero/negative budget would force `done` at step 0 with an empty `seen`
+    // map — the model could only fabricate an id. Every real descriptor sits
+    // inside the band, so the clamp is the backstop, not the mechanism.
+    for (const provider of Object.keys({ ollama: 0, openai: 0, anthropic: 0, google: 0, deepseek: 0, openrouter: 0, requesty: 0, gateway: 0, locca: 0, 'openai-compatible': 0 })) {
+      const n = discoveryStepsFor({ provider });
+      assert.ok(n >= DISCOVERY_STEPS_MIN && n <= DISCOVERY_STEPS_MAX, `${provider} budget ${n} out of band`);
+      assert.equal(Number.isInteger(n), true, `${provider} budget must be a whole step count`);
+    }
+  });
+  await test('the per-provider budget reaches only agents that opt in', () => {
+    // The widening was designed and tested for the pick/request agents; a
+    // caller's pinned step cap can be load-bearing (the segment director's
+    // maxSteps: 2 in skills/_agent.ts was measured burning the full
+    // agentTimeoutMs when its loop silently grew). An agent that doesn't opt
+    // in must resolve the historical single step on EVERY provider — including
+    // the wide native ones and even over an operator override.
+    for (const cfg of [{ provider: 'anthropic' }, { provider: 'openai' }, { provider: 'ollama' }, { provider: 'anthropic', discoverySteps: 5 }]) {
+      assert.equal(runDiscoverySteps(cfg, false), DISCOVERY_STEPS_MIN, JSON.stringify(cfg));
+      assert.equal(runDiscoverySteps(cfg, true), discoveryStepsFor(cfg), JSON.stringify(cfg));
+    }
   });
 
   // ---- Terminal single-turn collapse (issue #1157) ----

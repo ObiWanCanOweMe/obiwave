@@ -10,7 +10,7 @@ import { cn } from '../../lib/cn';
 import { Button } from '../ui/button';
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
 import { Switch } from '../ui/switch';
-import { Badge } from '../ui/badge';
+import { Badge, badgeVariants } from '../ui/badge';
 
 export interface EyebrowProps {
   children?: ReactNode;
@@ -57,20 +57,67 @@ export interface PillProps {
   className?: string;
   onClick?: () => void;
   title?: string;
+  /* Toggle state for a pill used as an on/off chip. Set it and the pill
+     reports aria-pressed; leave it off for pills that fire a plain action. */
+  pressed?: boolean;
+  /* Unavailable, but still worth finding — a chip past a selection cap, or one
+     frozen while a save is in flight. Keep passing `onClick`: the pill swallows
+     it. Dropping the handler instead would fall back to the Badge <span> and
+     take the chip out of the tab order entirely, which is what this prop
+     exists to avoid. */
+  disabled?: boolean;
 }
 
 /* Tag pill over shadcn Badge. `tone` ∈ ink | accent | solid (default =
-   muted outline); `dot` prepends a small currentColor dot. */
-export function Pill({ children, tone, dot, className, onClick, title }: PillProps) {
-  return (
-    <Badge
-      variant={tone || 'default'}
-      className={cn(onClick && 'cursor-pointer', className)}
-      onClick={onClick}
-      title={title}
-    >
+   muted outline); `dot` prepends a small currentColor dot.
+
+   With `onClick` this renders a real <button> rather than a clickable Badge.
+   Badge is a <span>, so an onClick pill was reachable by mouse only — no tab
+   stop, no Enter/Space, and nothing announcing it as actionable. That made
+   every chip-style multi-select in the admin (webhook events, show genres,
+   skill toggles) keyboard-dead. `type="button"` is load-bearing for the panels
+   that DO sit inside a <form>: without it a chip click submits the form.
+
+   Without `onClick` the Badge path is unchanged, so the ~87 read-only pills
+   render exactly as before. */
+export function Pill({ children, tone, dot, className, onClick, title, pressed, disabled }: PillProps) {
+  const content = (
+    <>
       {dot && <span className="size-1.5 rounded-full bg-current" />}
       {children}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        /* text-start only to match the Badge <span> exactly: a <button> centres
+           its text by default. The pill is inline-flex so this changes nothing
+           visually today — it keeps the two paths provably style-identical. */
+        className={cn(
+          badgeVariants({ variant: tone || 'default' }),
+          disabled ? 'cursor-default' : 'cursor-pointer',
+          'text-start',
+          className,
+        )}
+        /* aria-disabled, NOT the `disabled` attribute. A disabled <button> is
+           removed from the tab order, so a keyboard user cannot land on it to
+           hear WHY it is unavailable — for a chip past a selection cap that is
+           the whole message. aria-disabled announces the state and keeps the
+           tab stop, so the handler has to refuse the click itself: the element
+           is still natively clickable, by pointer and by Enter/Space alike. */
+        onClick={disabled ? undefined : onClick}
+        title={title}
+        aria-pressed={pressed}
+        aria-disabled={disabled || undefined}
+      >
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Badge variant={tone || 'default'} className={className} title={title}>
+      {content}
     </Badge>
   );
 }

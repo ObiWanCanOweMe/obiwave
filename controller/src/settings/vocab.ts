@@ -6,6 +6,7 @@
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
 import { randomBytes } from 'node:crypto';
+import { DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../llm/internal/provider/capabilities.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -341,14 +342,38 @@ export function clampMaxOutputTokens(raw: unknown, def: number): number {
   return Math.min(MAX_OUTPUT_TOKENS_MAX, Math.max(MAX_OUTPUT_TOKENS_MIN, n));
 }
 
+// Operator override for the DJ agent's discovery-round budget. 0 is a
+// first-class value meaning "off — follow the provider capability table", so it
+// passes through unclamped; any other value is floored into the harness's own
+// band. Non-numeric/NaN falls back to `def`. Same 0-means-auto shape as
+// clampMaxOutputTokens above.
+//
+// The band is imported from the harness rather than restated here: it is a
+// property of the tool loop (a 0 budget corners the model at step 0 with an
+// empty candidate set; an unbounded one eats the shared deadline the recovery
+// legs need), and a second copy of the numbers would be free to drift from the
+// clamp discoveryStepsFor() applies. This is the one place settings reaches past
+// an `llm/` barrel: capabilities.ts imports nothing, while the llm/provider.js
+// barrel pulls in registry.ts, which imports settings — a cycle.
+export function clampDiscoverySteps(raw: unknown, def: number): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
+  const n = Math.floor(raw);
+  if (n <= 0) return 0;
+  return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, n));
+}
+
 // Count-based hard no-repeat window (distinct plays). Floored to an integer in
-// [0, 290]: 0 disables; the 290 ceiling stays under the 300-entry _recentPlays
-// cap so the requested window is never silently truncated by a too-short
-// sidecar. Library-size clamping happens separately at use time
-// (effectiveNoRepeatWindow). Non-numeric/NaN falls back to `def`.
+// [0, 1000]: 0 disables. The ceiling stays under the _recentPlays sidecar cap
+// (config.queue.recentPlaysMax) so the requested window is never silently
+// truncated by a too-short sidecar — 1000 against a 2500-entry cap. It was 290
+// against a 300-entry cap, which is under a day of airtime even maxed out and
+// far too short a memory for a 10k–50k library; the sidecar was sized up with
+// the ceiling, so it stays honestly suppliable. Library-size clamping happens
+// separately at use time (effectiveNoRepeatWindow). Non-numeric/NaN falls back
+// to `def`.
 export function clampNoRepeatWindow(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
-  return Math.min(290, Math.max(0, Math.floor(raw)));
+  return Math.min(1000, Math.max(0, Math.floor(raw)));
 }
 
 // Validate + apply the connection fields shared by the primary LLM leg and its
@@ -426,6 +451,10 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
   }
   if (l.repeatPenalty !== undefined) {
     target.repeatPenalty = clampRepeatPenalty(Number(l.repeatPenalty), target.repeatPenalty as number);
+  }
+  // Discovery-round budget. 0 = follow the provider capability table.
+  if (l.discoverySteps !== undefined) {
+    target.discoverySteps = clampDiscoverySteps(Number(l.discoverySteps), target.discoverySteps as number);
   }
   // Forced-tool tool_choice: 'required' (default) or 'auto'. Only those two are
   // legal; anything else is a config error. See forcedToolChoice() / issue #570.
@@ -864,7 +893,6 @@ export const SHOW_FILTER_VALUES_MAX = 15;
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
 export const SKILLS_PER_PERSONA_LIMIT = 64;
-export const WEBHOOKS_LIMIT = 16;
 // Prompt-template library (djPrompts). Text bounds match the historical
 // single-djPrompt rule — keep them in lockstep with PROMPT_MIN/PROMPT_MAX in
 // web/components/admin/personas/constants.ts.
@@ -930,15 +958,15 @@ export function coercePlaylistIds(raw: unknown): string[] {
 // non-adjacent decades ("90s + 2010s") — inexpressible as a single range.
 export type EraWindow = { fromYear: number | null; toYear: number | null };
 
-// One outbound-webhook entry (settings.webhooks). Shared by the DEFAULTS seed,
-// the lenient load-time normalizer, and the strict update() validator.
-export interface Webhook {
-  id: string;
-  url: string;
-  events: string[];
-  enabled: boolean;
-  authHeader: string;
-}
+// Webhook shape + event list now live in the shared schema, which the web form
+// runs too (controller/src/schemas/webhook.ts). Re-exported here so the many
+// existing importers of `Webhook` / `WEBHOOK_EVENTS` from vocab keep working.
+export {
+  WEBHOOK_EVENTS,
+  WEBHOOKS_LIMIT,
+  type Webhook,
+  type WebhookEvent,
+} from '../schemas/webhook.js';
 
 // One saved DJ prompt-template library entry (settings.djPrompts).
 export interface DjPromptEntry {
@@ -1076,16 +1104,6 @@ export function coerceExcludedPlaylistIds(raw: unknown): string[] {
   }
   return out;
 }
-
-// Event names the outbound webhook fan-out can subscribe to. Kept in sync
-// with broadcast/webhooks.ts WEBHOOK_EVENTS — duplicated here so settings.ts
-// has no runtime dependency on the broadcast module.
-export const WEBHOOK_EVENTS = [
-  'track.play',
-  'dj.say',
-  'dj.link',
-  'request.received',
-];
 
 export function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;

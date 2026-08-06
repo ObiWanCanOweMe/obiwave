@@ -16,8 +16,10 @@
 // All payloads carry `event` (one of the above) and `t` (ISO timestamp).
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
 import * as settings from '../settings.js';
 import { WEBHOOK_EVENTS, fireTest } from '../broadcast/webhooks.js';
+import { webhooksPatchSchema } from '../schemas/webhook.js';
 
 export const router = express.Router();
 
@@ -36,7 +38,7 @@ router.get('/webhooks', requireAdmin, async (req, res) => {
   }
 });
 
-router.post('/webhooks', requireAdmin, async (req, res) => {
+router.post('/webhooks', requireAdmin, validateBody(webhooksPatchSchema), async (req, res) => {
   // The UI sends the whole list back. settings.update() validates the array
   // strictly and replaces it atomically — same pattern as personas/shows.
   // Both fields are optional so the gate toggle can save on its own without

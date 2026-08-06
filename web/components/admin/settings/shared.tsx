@@ -114,6 +114,7 @@ export interface LlmFallbackForm {
   repeatPenalty: number;
   providerBaseUrls: Record<string, string>;
   reasoning: boolean;
+  discoverySteps: number;
 }
 
 export interface LlmForm {
@@ -135,6 +136,8 @@ export interface LlmForm {
   budgetSoftPct: number;
   exemptRequests: boolean;
   maxOutputTokens: number;
+  // 0 = auto (follow the provider capability table); 1-5 overrides it.
+  discoverySteps: number;
   fallback: LlmFallbackForm;
 }
 

@@ -14,6 +14,8 @@ import * as dj from '../llm/dj.js';
 import * as library from '../music/library.js';
 import * as settings from '../settings.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type VocalMode } from '../music/show-filter.js';
+import { freshnessBiasedOrder } from '../music/airing.js';
+import { recencyWindowsForLibrary } from '../music/recency.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
@@ -34,9 +36,16 @@ import * as stemCacheStore from '../music/stem-cache.js';
 import * as stemBlendStore from './stem-blend.js';
 import * as doctor from '../doctor.js';
 
-const TARGET_POOL = 30;
+// Pool size: 40 (was 30). The old non-show weights summed to 32 > 30 and
+// take() hard-stops at the target, so the random top-up below was structurally
+// unreachable on any station with mood tags, a mood playlist and starred
+// tracks — the coast NEVER sampled the library at large. 40 fits every source
+// including the dedicated exploration slot, and a longer coast loop is itself
+// variety (~2.5h of audio per refresh instead of ~2h).
+const TARGET_POOL = 40;
 const MOOD_WEIGHT = 12;          // up to this many mood-tagged tracks per pool
 const PLAYLIST_WEIGHT = 6;       // mood-matched Navidrome playlists
+const EXPLORE_WEIGHT = 8;        // reserved library-wide random / unaired slot
 const RECENT_WEIGHT = 4;         // recently-added albums
 const FREQUENT_WEIGHT = 4;       // frequent / scrobble-favourite albums
 const STARRED_WEIGHT = 6;        // hand-starred tracks
@@ -44,12 +53,13 @@ const AUTO_MAX_PER_ARTIST = 2;   // cap any one artist's share of the fallback p
 // When a scheduled show pins a genre/era, a dedicated Navidrome-genre source
 // becomes the dominant pool contributor and the off-genre sources shrink by
 // SHOW_NARROW_FACTOR so the show's genre/era actually fills the fallback (#629).
-const SHOW_GENRE_WEIGHT = 14;        // dedicated show-genre source (soft lean)
-const SHOW_GENRE_STRICT_WEIGHT = 24; // strict: this source carries most of the pool
+// Bumped with TARGET_POOL so a show's share of the pool stays ~constant.
+const SHOW_GENRE_WEIGHT = 18;        // dedicated show-genre source (soft lean)
+const SHOW_GENRE_STRICT_WEIGHT = 32; // strict: this source carries most of the pool
 // A show anchored to Navidrome playlist(s): the union becomes the dominant
 // fallback source (soft) or — after the strict end-filter — the whole pool.
-const SHOW_PLAYLIST_WEIGHT = 14;        // dedicated show-playlist source (soft)
-const SHOW_PLAYLIST_STRICT_WEIGHT = 24; // strict: this source carries the pool
+const SHOW_PLAYLIST_WEIGHT = 18;        // dedicated show-playlist source (soft)
+const SHOW_PLAYLIST_STRICT_WEIGHT = 32; // strict: this source carries the pool
 const SHOW_NARROW_FACTOR = 0.5;      // shrink mood/playlist/recent/etc. for shows
 // In-flight Navidrome queries when the show-genre source fans out across a
 // multi-genre show (up to SHOW_FILTER_VALUES_MAX values x 2 fetches each).
@@ -80,12 +90,20 @@ export async function refreshAutoPlaylist() {
 async function refreshAutoPlaylistInner() {
   const ctx = await getFullContext();
   const mood = ctx.dominantMood;
-  // Match the auto-DJ picker's window (dj-agent.pickViaAgent) — 12h. Keyed by
-  // BOTH id and lowercased `title|artist`: a library with duplicate copies of a
-  // song holds N Subsonic ids for it, so an id-only recency filter lets copies
+  // Match the auto-DJ picker's window (dj-agent.pickViaAgent) — the same
+  // library-scaled recencyWindowsForLibrary figure, not a fixed 12h, so the
+  // coast and the live picker agree on what "recent" means. Keyed by BOTH id
+  // and lowercased `title|artist`: a library with duplicate copies of a song
+  // holds N Subsonic ids for it, so an id-only recency filter lets copies
   // #2..N sail into the fallback and re-air a just-played track (issue #874).
   // Mirrors collect() in the picker's tool layer.
-  const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(12);
+  await library.load();
+  const libStats = library.stats();
+  // The MIRROR size, not `total` (TAGGED tracks only) — same reading the two
+  // pick paths use, so the coast's window matches theirs on an untagged library
+  // too rather than reading a 50k catalogue as an empty one.
+  const windows = recencyWindowsForLibrary(libStats.distinctArtists, libStats.mirrorTotal || libStats.total);
+  const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(windows.trackHours);
 
   // The fallback is what airs when the live AI picks pause (e.g. pause-when-empty
   // with zero listeners). When a show is scheduled for this hour, the fallback
@@ -178,8 +196,6 @@ async function refreshAutoPlaylistInner() {
   const fromSource = builder.fromSource;
   const take = builder.take;
 
-  await library.load();
-
   // 0. Dedicated show-genre / era source — the dominant contributor whenever a
   // show pins a genre or a year window. Both Navidrome queries filter server-side,
   // so this source is inherently genre/era-pure (no never-starve pollution). Soft
@@ -209,7 +225,9 @@ async function refreshAutoPlaylistInner() {
           toYear: span.toYear ?? undefined,
         }));
         if (genreName) {
-          const g = await subsonic.getSongsByGenre(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
+          // Sampled: a random page of the genre rather than the same
+          // server-ordered head every refresh (see getSongsByGenreSampled).
+          const g = await subsonic.getSongsByGenreSampled(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
           const ranged = inYearRange(g, eras);
           got.push(...(ranged.length ? ranged : g));
         }
@@ -222,7 +240,9 @@ async function refreshAutoPlaylistInner() {
       // Genre/era are server-side native here; enforce() adds the strict
       // mood/energy filters on top (no-op in soft mode).
       const leaned = enforce(preferEnergy(exact.length ? exact : collected, showEnergies));
-      take('show-genre', shuffle(leaned), strict ? SHOW_GENRE_STRICT_WEIGHT : SHOW_GENRE_WEIGHT);
+      // neverStarve: this is the coast's only in-genre contributor and the
+      // strict end-pass never-starves on an empty in-filter set — see TakeOpts.
+      take('show-genre', shuffle(leaned), strict ? SHOW_GENRE_STRICT_WEIGHT : SHOW_GENRE_WEIGHT, { neverStarve: true });
     } catch (err) {
       queue.log('error', `Show-genre fetch failed: ${err.message}`);
     }
@@ -233,7 +253,10 @@ async function refreshAutoPlaylistInner() {
   // fill the pool before the (shrunk) discovery sources. In strict mode the
   // whole pool is filtered to these ids at the end, so this is the universe.
   if (hasPlaylist) {
-    take('show-playlist', shuffle(playlistPool!.tracks), strictPlaylist ? SHOW_PLAYLIST_STRICT_WEIGHT : SHOW_PLAYLIST_WEIGHT);
+    // neverStarve: on a strict-playlist show this source IS the coast's
+    // universe, and the end-filter below never-starves to the full pool when
+    // nothing in-playlist survived — see TakeOpts.
+    take('show-playlist', shuffle(playlistPool!.tracks), strictPlaylist ? SHOW_PLAYLIST_STRICT_WEIGHT : SHOW_PLAYLIST_WEIGHT, { neverStarve: true });
   }
 
   // 1. Mood-tagged from the LLM-built library (only if tagger has run). A
@@ -275,6 +298,22 @@ async function refreshAutoPlaylistInner() {
     }
   }
 
+  // 2b. Exploration slot — a reserved library-wide draw, freshness-ordered
+  // (music/airing.ts) so never-aired tracks lead. Unconditional (unlike the
+  // thin-pool top-up at the bottom, which the old 32-summed weights made
+  // unreachable): the coast is exactly where an unexplored library should
+  // surface, since nothing here costs an LLM call. Skipped for a strict
+  // playlist show (random can't be playlist-filtered); the strict music-filter
+  // end-pass below still drops any off-filter draw on strict shows.
+  if (!strictPlaylist) {
+    try {
+      const wide = await subsonic.getRandomSongs({ size: EXPLORE_WEIGHT * 3 });
+      take('explore', enforce(freshnessBiasedOrder(wide, library.lastAiredInfo(), Date.now())), nz(EXPLORE_WEIGHT));
+    } catch (err) {
+      queue.log('error', `Explore fetch failed: ${err.message}`);
+    }
+  }
+
   // 3. Recently-added albums — surfaces new music without any tagging.
   try {
     const recentAlbums = await subsonic.getRecentlyAddedAlbums({ size: 8 });
@@ -284,9 +323,14 @@ async function refreshAutoPlaylistInner() {
     queue.log('error', `Recent-albums fetch failed: ${err.message}`);
   }
 
-  // 4. Frequent albums — Navidrome's scrobble-backed favourites.
+  // 4. Frequent albums — Navidrome's scrobble-backed favourites. The window
+  // rotates (offset 0/8/16 per refresh): the counts are fed by the station's
+  // own plays, so the offset-less top-8 was a positive-feedback loop pinning
+  // the same albums into every coast. An empty deep window falls back to the top.
   try {
-    const freqAlbums = await subsonic.getFrequentAlbums({ size: 8 });
+    const freqOffset = Math.floor(Math.random() * 3) * 8;
+    let freqAlbums = await subsonic.getFrequentAlbums({ size: 8, offset: freqOffset });
+    if (!freqAlbums.length && freqOffset > 0) freqAlbums = await subsonic.getFrequentAlbums({ size: 8 });
     const tracks = await tracksFromAlbums(shuffle(freqAlbums).slice(0, 4), 2, FREQUENT_WEIGHT * 2);
     take('frequent', enforce(tracks), nz(FREQUENT_WEIGHT));
   } catch (err) {
@@ -370,7 +414,7 @@ async function refreshAutoPlaylistInner() {
   }
 
   // Excluded playlists (blocklist): drop every track from a blocklisted
-  // playlist. The pick paths (picker.ts / picker-tools.ts) apply this as a HARD
+  // playlist. The pick paths (picker.ts / the picker/ tools) apply this as a HARD
   // filter — an empty pool there just skips the LLM pick and coasts on this
   // auto.m3u. This IS that coast, the last dead-air guard, so it mirrors the
   // strict-playlist block above: never-starve if the blocklist would empty the

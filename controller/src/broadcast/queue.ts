@@ -199,9 +199,11 @@ class Queue {
       try {
         const arr = JSON.parse(readFileSync(config.queue.recentPlaysFile, 'utf8'));
         if (Array.isArray(arr)) {
-          // Drop anything older than 48h on boot — keeps the file from
-          // ballooning if the cap was raised between restarts.
-          const cutoff = Date.now() - 48 * 3_600_000;
+          // Drop anything older than 96h on boot — keeps the file from
+          // ballooning if the cap was raised between restarts, while holding
+          // enough history to supply a maxed count-based no-repeat window
+          // (clampNoRepeatWindow: up to 1000 distinct ≈ 2-3 days of air).
+          const cutoff = Date.now() - 96 * 3_600_000;
           this._recentPlays = arr
             .filter((p: RecentPlay) => p && p.endedAt && new Date(p.endedAt).getTime() > cutoff)
             .slice(0, config.queue.recentPlaysMax);
@@ -218,7 +220,7 @@ class Queue {
     // sidecar's reach. The events log has every track.play and is durable.
     this.backfillRecentPlaysFromEvents();
     this.log('scheduler',
-      `Recent-plays loaded: ${this._recentPlays.length} entries (last 24h)`);
+      `Recent-plays loaded: ${this._recentPlays.length} entries (up to 96h)`);
   }
 
   // Read the last 24h of track.play events from state/logs/events-*.jsonl
@@ -1104,7 +1106,7 @@ class Queue {
         // Hard length cap (#447 max-track-length): stamp a cue_out so Liquidsoap
         // cuts an over-length autonomous pick mid-air. Explicit listener requests
         // (requestedBy set) stay exempt — a requested long mix plays in full,
-        // mirroring the request path's selection-cap exemption in picker-tools.
+        // mirroring the request path's selection-cap exemption in the picker tools.
         // Beds: if this item's link would outlast the song's own intro, push an
         // instrumental bed into dj_queue AHEAD of the track. The DJ then talks
         // over the bed and the track ramps in under the closing words, instead
@@ -1611,7 +1613,7 @@ class Queue {
       const endedAt = new Date().toISOString();
       this.history.unshift({ ...this.current, endedAt });
       this.history = this.history.slice(0, 50);
-      // Append to the rolling 24h sidecar used by the picker's recents window.
+      // Append to the rolling 96h sidecar used by the picker's recents window.
       // history is in-memory only and capped at 50 (~3h of plays) — too short
       // to catch the 2-3h repeat interval we've seen on the live station.
       const t = this.current.track;
@@ -2105,7 +2107,7 @@ class Queue {
   // repeats. Returns BOTH ids and `title|artist` keys, because the boot
   // backfill (in recover()) reads from events-*.jsonl which lacks track ids;
   // a key-based fallback lets backfilled entries still block repeats. Walks
-  // the rolling 24h sidecar (`_recentPlays`) newest-first to the cutoff and
+  // the rolling 96h sidecar (`_recentPlays`) newest-first to the cutoff and
   // also includes the current track so a mid-song pick can't re-pick it.
   recentlyPlayed(hours = 12) {
     const cutoff = Date.now() - hours * 3_600_000;

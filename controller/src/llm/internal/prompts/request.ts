@@ -151,7 +151,7 @@ export async function matchRequest(
 // snippets as the only evidence. Returns null when the snippets don't pin down
 // a single song — a wrong guess sends the library search confidently in the
 // wrong direction, so we never guess. Backs the request-only
-// `identifyRequestedTrack` tool (llm/internal/tools/picker-tools.ts), which then
+// `identifyRequestedTrack` tool (llm/internal/tools/picker/tools/identify-requested-track.ts), which then
 // resolves the result against the LOCAL library — this never returns a track id.
 const IDENTIFY_SCHEMA = z.object({
   title: z.string().nullable().describe('the one specific song title the description points to, or null if the web text does not pin down a single song'),
