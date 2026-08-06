@@ -20,8 +20,10 @@ export const EXPECTED_IMAGES = Object.freeze([
 ]);
 
 export const CANONICAL_IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
-export const PINNED_CUDA_IMAGE_DIGEST =
-  'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+export const PINNED_CUDA_IMAGE_DIGESTS = Object.freeze({
+  'v1.3.0-obiwave.2': 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72',
+  'v1.5.0-obiwave.1': 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2',
+});
 
 const POLICY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH']);
 const ACCEPTANCE_FIELDS = Object.freeze([
@@ -158,7 +160,7 @@ function validateScanStatus(image, status, expectedImageRef, violations) {
   }
 }
 
-function normalizeReport(image, entry, expectedImageRef, violations) {
+function normalizeReport(image, entry, expectedImageRef, pinnedCudaDigest, violations) {
   if (!isObject(entry)) {
     addViolation(violations, 'malformed-report', `${image}: report entry must be an object`);
     return [];
@@ -210,8 +212,8 @@ function normalizeReport(image, entry, expectedImageRef, violations) {
     );
   }
 
-  if (image === 'subwave-analyzer-cuda') {
-    const expectedRepoDigest = `${CANONICAL_IMAGE_NAMESPACE}/${image}@${PINNED_CUDA_IMAGE_DIGEST}`;
+  if (image === 'subwave-analyzer-cuda' && pinnedCudaDigest) {
+    const expectedRepoDigest = `${CANONICAL_IMAGE_NAMESPACE}/${image}@${pinnedCudaDigest}`;
     const repoDigests = isObject(report.Metadata) ? report.Metadata.RepoDigests : undefined;
     if (!Array.isArray(repoDigests) || !repoDigests.includes(expectedRepoDigest)) {
       addViolation(
@@ -527,6 +529,14 @@ export function validateReports({ reports, acceptance, expectedImages, tag, now 
   }
   if (Number.isNaN(validationNow.getTime())) throw new TypeError('now must be a valid date');
   parseForkTag(tag);
+  const pinnedCudaDigest = PINNED_CUDA_IMAGE_DIGESTS[tag];
+  if (!pinnedCudaDigest) {
+    addViolation(
+      violations,
+      'unsupported-cuda-release',
+      `subwave-analyzer-cuda: no pinned repository digest for ${tag}`,
+    );
+  }
   if (!isObject(reports)) {
     addViolation(violations, 'malformed-reports', 'reports must be an object keyed by image');
   }
@@ -544,7 +554,13 @@ export function validateReports({ reports, acceptance, expectedImages, tag, now 
       continue;
     }
     findings.push(
-      ...normalizeReport(image, reportMap[image], canonicalImageRef(image, tag), violations),
+      ...normalizeReport(
+        image,
+        reportMap[image],
+        canonicalImageRef(image, tag),
+        pinnedCudaDigest,
+        violations,
+      ),
     );
   }
 
