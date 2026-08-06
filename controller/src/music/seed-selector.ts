@@ -288,4 +288,3 @@ function sqDist(a: number[], b: number[]): number {
   }
   return s;
 }
-

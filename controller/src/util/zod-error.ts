@@ -7,7 +7,7 @@
 //
 // Neutral on purpose: BOTH middleware/validate.ts (route boundary) and
 // settings/validate.ts (the persistence chokepoint update() reaches from backup
-// restore and PUT /settings) import from here. Importing middleware/ into
+// restore and POST /settings) import from here. Importing middleware/ into
 // settings/ would invert the dependency direction, so neither owns it.
 import type { ZodError } from 'zod';
 

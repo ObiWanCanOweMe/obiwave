@@ -220,7 +220,7 @@ class Queue {
     // sidecar's reach. The events log has every track.play and is durable.
     this.backfillRecentPlaysFromEvents();
     this.log('scheduler',
-      `Recent-plays loaded: ${this._recentPlays.length} entries (last 24h)`);
+      `Recent-plays loaded: ${this._recentPlays.length} entries (up to 96h)`);
   }
 
   // Read the last 24h of track.play events from state/logs/events-*.jsonl
@@ -1613,7 +1613,7 @@ class Queue {
       const endedAt = new Date().toISOString();
       this.history.unshift({ ...this.current, endedAt });
       this.history = this.history.slice(0, 50);
-      // Append to the rolling 24h sidecar used by the picker's recents window.
+      // Append to the rolling 96h sidecar used by the picker's recents window.
       // history is in-memory only and capped at 50 (~3h of plays) — too short
       // to catch the 2-3h repeat interval we've seen on the live station.
       const t = this.current.track;
@@ -2107,7 +2107,7 @@ class Queue {
   // repeats. Returns BOTH ids and `title|artist` keys, because the boot
   // backfill (in recover()) reads from events-*.jsonl which lacks track ids;
   // a key-based fallback lets backfilled entries still block repeats. Walks
-  // the rolling 24h sidecar (`_recentPlays`) newest-first to the cutoff and
+  // the rolling 96h sidecar (`_recentPlays`) newest-first to the cutoff and
   // also includes the current track so a mid-song pick can't re-pick it.
   recentlyPlayed(hours = 12) {
     const cutoff = Date.now() - hours * 3_600_000;

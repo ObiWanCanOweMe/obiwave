@@ -547,7 +547,7 @@ export function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | n
 // sentinel back unchanged.
 //
 // The failure path matters as much as the success path: update() is reached by
-// callers that never touch POST /webhooks (backup restore, PUT /settings), and
+// callers that never touch POST /webhooks (backup restore, POST /settings), and
 // both do `res.status(400).json({ error: err.message })`. A raw ZodError's
 // .message is a pretty-printed JSON array of issue objects, so safeParse +
 // firstMessage is what keeps a bad restore reading as one readable line instead
