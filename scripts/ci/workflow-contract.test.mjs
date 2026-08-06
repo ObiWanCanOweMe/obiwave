@@ -180,11 +180,47 @@ function foldedStepCommand(step) {
   return command.join(' ');
 }
 
+function recoveryJobNames(workflow) {
+  return topLevelBlockLines(workflow, 'jobs')
+    .filter((line) => line.match(/^  \S/))
+    .map((line) => {
+      const match = line.match(/^  ((?:"[^"]*"|'[^']*'|[^:\s]+))\s*:\s*$/);
+      assert.ok(match, 'recovery jobs must use block mappings');
+      return yamlScalar(match[1]);
+    });
+}
+
+function jobStepHeaders(job) {
+  return job.split('\n').flatMap((line) => {
+    const match = line.match(/^      - (.+)$/);
+    return match ? [match[1]] : [];
+  });
+}
+
+function assertNoGatedPathBypass(job, jobName) {
+  const bypassKey = '(?:if|continue-on-error|"if"|"continue-on-error"|\'if\'|\'continue-on-error\')';
+  assert.doesNotMatch(
+    job,
+    new RegExp(`^    ${bypassKey}\\s*:`, 'm'),
+    `${jobName} must not bypass its job gate`,
+  );
+  assert.doesNotMatch(
+    job,
+    new RegExp(`^        ${bypassKey}\\s*:`, 'm'),
+    `${jobName} steps must fail closed`,
+  );
+}
+
 function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   assert.deepEqual(
     topLevelBlockLines(workflow, 'on'),
     ['  workflow_dispatch:'],
     'workflow_dispatch must be the only recovery trigger',
+  );
+  assert.deepEqual(
+    recoveryJobNames(workflow),
+    ['validate', 'vulnerability-policy', 'deploy-production'],
+    'recovery workflow must contain only the approved gated jobs',
   );
 
   const defaultPermissions = workflow.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1];
@@ -199,6 +235,26 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   const validate = jobBlock(workflow, 'validate');
   const policy = jobBlock(workflow, 'vulnerability-policy');
   const deploy = jobBlock(workflow, 'deploy-production');
+  for (const [jobName, job] of [
+    ['validate', validate],
+    ['vulnerability-policy', policy],
+    ['deploy-production', deploy],
+  ]) {
+    assertNoGatedPathBypass(job, jobName);
+  }
+  assert.deepEqual(jobStepHeaders(validate), [
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'uses: docker/setup-buildx-action@v4',
+    'uses: docker/login-action@v4',
+    'name: Verify immutable recovery artifacts',
+  ]);
+  assert.deepEqual(jobStepHeaders(policy), []);
+  assert.deepEqual(jobStepHeaders(deploy), [
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'name: Deploy immutable release through Portainer',
+  ]);
   assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
   const validationStep = stepBlock(validate, 'Verify immutable recovery artifacts');
   assert.deepEqual(stepEnv(validationStep), { GH_TOKEN: '${{ github.token }}' });
@@ -339,6 +395,53 @@ test('recovery contracts reject a bypassed immutable-artifact validation step', 
     assert.throws(() => assertRecoveryWorkflow(mutation, identity));
   }
 });
+
+for (const [bypassName, mutateWorkflow] of [
+  [
+    'an always-running production deployment',
+    (workflow) => workflow.replace(
+      '  deploy-production:\n',
+      '  deploy-production:\n    if: always()\n',
+    ),
+  ],
+  [
+    'a skipped immutable-artifact preflight',
+    (workflow) => workflow.replace(
+      '      - name: Verify immutable recovery artifacts\n',
+      '      - name: Verify immutable recovery artifacts\n        if: false\n',
+    ),
+  ],
+  [
+    'a non-blocking immutable-artifact preflight',
+    (workflow) => workflow.replace(
+      '      - name: Verify immutable recovery artifacts\n',
+      '      - name: Verify immutable recovery artifacts\n        continue-on-error: true\n',
+    ),
+  ],
+  [
+    'an extra ungated production deployment job',
+    (workflow) => {
+      const releaseTag = workflow.match(/^          SUBWAVE_RELEASE_TAG: ([^\n]+)$/m)?.[1];
+      assert.ok(releaseTag, 'missing fixed recovery release tag');
+      return `${workflow}\n  ungated-production-deploy:\n    runs-on: ubuntu-latest\n    environment: production\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: '22'\n      - name: Deploy without policy gate\n        env:\n          PORTAINER_URL: \${{ vars.PORTAINER_URL }}\n          PORTAINER_API_KEY: \${{ secrets.PORTAINER_API_KEY }}\n          PORTAINER_STACK_ID: \${{ vars.PORTAINER_STACK_ID }}\n          PORTAINER_ENDPOINT_ID: \${{ vars.PORTAINER_ENDPOINT_ID }}\n          SUBWAVE_RELEASE_TAG: ${releaseTag}\n          SUBWAVE_HEALTH_URL: \${{ vars.SUBWAVE_HEALTH_URL }}\n          SUBWAVE_STREAM_URL: \${{ vars.SUBWAVE_STREAM_URL }}\n          SUBWAVE_STREAM_PASSWORD: \${{ secrets.SUBWAVE_STREAM_PASSWORD }}\n        run: node scripts/deploy/portainer-release.mjs\n`;
+    },
+  ],
+]) {
+  test(`recovery contracts reject ${bypassName}`, () => {
+    for (const [workflow, identity] of [
+      [recoveryV13, {
+        tag: 'v1.3.0-obiwave.2',
+        manifest: 'security/releases/v1.3.0-obiwave.2.json',
+      }],
+      [recoveryV15, {
+        tag: 'v1.5.0-obiwave.1',
+        manifest: 'security/releases/v1.5.0-obiwave.1.json',
+      }],
+    ]) {
+      assert.throws(() => assertRecoveryWorkflow(mutateWorkflow(workflow), identity));
+    }
+  });
+}
 
 test('both recovery contracts reject identity, authorization, and deployment-gate mutations', () => {
   for (const [workflow, identity] of [
