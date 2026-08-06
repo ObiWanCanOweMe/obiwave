@@ -105,10 +105,10 @@
       "package": "libharfbuzz0b",
       "installedVersion": "6.0.0+dfsg-3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-25193"
     },
     {
@@ -136,10 +136,10 @@
       "package": "libldap-2.5-0",
       "installedVersion": "2.5.13+dfsg-5",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-2953"
     },
     {
@@ -166,10 +166,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-39616"
     },
     {
@@ -196,10 +196,10 @@
       "package": "libmfx1",
       "installedVersion": "22.5.4-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-45221"
     },
     {
@@ -228,10 +228,10 @@
       "package": "zlib1g",
       "installedVersion": "1:1.2.13.dfsg-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-45853"
     },
     {
@@ -258,10 +258,10 @@
       "package": "libtiff6",
       "installedVersion": "4.5.0-6+deb12u4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-52355"
     },
     {
@@ -288,10 +288,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2023-6879"
     },
     {
@@ -318,10 +318,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2024-23775"
     },
     {
@@ -351,10 +351,10 @@
       "package": "setuptools",
       "installedVersion": "70.3.0",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-47273"
     },
     {
@@ -381,10 +381,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-47917"
     },
     {
@@ -411,10 +411,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-48965"
     },
     {
@@ -441,10 +441,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-52496"
     },
     {
@@ -471,10 +471,10 @@
       "package": "libexpat1",
       "installedVersion": "2.5.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-59375"
     },
     {
@@ -572,10 +572,10 @@
       "package": "libncursesw6",
       "installedVersion": "6.4-4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-69720"
     },
     {
@@ -620,10 +620,10 @@
       "package": "libtinfo6",
       "installedVersion": "6.4-4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-69720"
     },
     {
@@ -668,10 +668,10 @@
       "package": "ncurses-base",
       "installedVersion": "6.4-4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-69720"
     },
     {
@@ -716,10 +716,10 @@
       "package": "ncurses-bin",
       "installedVersion": "6.4-4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-69720"
     },
     {
@@ -762,10 +762,10 @@
       "package": "libjxl0.7",
       "installedVersion": "0.7.0-10+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-70103"
     },
     {
@@ -793,10 +793,10 @@
       "package": "libsqlite3-0",
       "installedVersion": "3.40.1-2+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2025-7458"
     },
     {
@@ -823,10 +823,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-0966"
     },
     {
@@ -999,10 +999,10 @@
       "package": "curl",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-12064"
     },
     {
@@ -1062,10 +1062,10 @@
       "package": "libcurl4",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-12064"
     },
     {
@@ -1108,10 +1108,10 @@
       "package": "libtiff6",
       "installedVersion": "4.5.0-6+deb12u4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-12912"
     },
     {
@@ -1140,10 +1140,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-13221"
     },
     {
@@ -1331,10 +1331,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-15370"
     },
     {
@@ -1345,10 +1345,10 @@
       "package": "jaraco.context",
       "installedVersion": "5.3.0",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-23949"
     },
     {
@@ -1374,10 +1374,10 @@
       "package": "wheel",
       "installedVersion": "0.45.1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-24049"
     },
     {
@@ -1420,10 +1420,10 @@
       "package": "libexpat1",
       "installedVersion": "2.5.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-25210"
     },
     {
@@ -1466,10 +1466,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-25835"
     },
     {
@@ -1512,10 +1512,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-34872"
     },
     {
@@ -1558,10 +1558,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-34873"
     },
     {
@@ -1604,10 +1604,10 @@
       "package": "libmbedcrypto7",
       "installedVersion": "2.28.3-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-34875"
     },
     {
@@ -1704,10 +1704,10 @@
       "package": "libtiff6",
       "installedVersion": "4.5.0-6+deb12u4",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-36849"
     },
     {
@@ -1750,10 +1750,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-3731"
     },
     {
@@ -1781,10 +1781,10 @@
       "package": "libsndfile1",
       "installedVersion": "1.2.0-1+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-37555"
     },
     {
@@ -1829,10 +1829,10 @@
       "package": "gzip",
       "installedVersion": "1.12-1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-41992"
     },
     {
@@ -1877,10 +1877,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-42496"
     },
     {
@@ -1925,10 +1925,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-42497"
     },
     {
@@ -1999,10 +1999,10 @@
       "package": "libexpat1",
       "installedVersion": "2.5.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-45186"
     },
     {
@@ -2073,10 +2073,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-48962"
     },
     {
@@ -2135,10 +2135,10 @@
       "package": "bsdutils",
       "installedVersion": "1:2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2183,10 +2183,10 @@
       "package": "libblkid1",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2247,10 +2247,10 @@
       "package": "libmount1",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2295,10 +2295,10 @@
       "package": "libsmartcols1",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2343,10 +2343,10 @@
       "package": "libuuid1",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2407,10 +2407,10 @@
       "package": "mount",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2455,10 +2455,10 @@
       "package": "util-linux",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2503,10 +2503,10 @@
       "package": "util-linux-extra",
       "installedVersion": "2.38.1-5+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-53615"
     },
     {
@@ -2549,10 +2549,10 @@
       "package": "libacl1",
       "installedVersion": "2.3.1-3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-54369"
     },
     {
@@ -2596,10 +2596,10 @@
       "package": "libssh2-1",
       "installedVersion": "1.10.0-3+b1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-55199"
     },
     {
@@ -2627,10 +2627,10 @@
       "package": "libssh2-1",
       "installedVersion": "1.10.0-3+b1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-55200"
     },
     {
@@ -2657,10 +2657,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-56208"
     },
     {
@@ -2687,10 +2687,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-56209"
     },
     {
@@ -2717,10 +2717,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-56210"
     },
     {
@@ -2747,10 +2747,10 @@
       "package": "libaom3",
       "installedVersion": "3.6.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-56211"
     },
     {
@@ -2777,10 +2777,10 @@
       "package": "libexpat1",
       "installedVersion": "2.5.0-1+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-56408"
     },
     {
@@ -2809,10 +2809,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-57432"
     },
     {
@@ -2857,10 +2857,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-57433"
     },
     {
@@ -2903,10 +2903,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58010"
     },
     {
@@ -2949,10 +2949,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58011"
     },
     {
@@ -2995,10 +2995,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58012"
     },
     {
@@ -3041,10 +3041,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58013"
     },
     {
@@ -3087,10 +3087,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58014"
     },
     {
@@ -3133,10 +3133,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58015"
     },
     {
@@ -3179,10 +3179,10 @@
       "package": "libglib2.0-0",
       "installedVersion": "2.74.6-2+deb12u9",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58016"
     },
     {
@@ -3225,10 +3225,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3255,10 +3255,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3285,10 +3285,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3315,10 +3315,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3345,10 +3345,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3375,10 +3375,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3405,10 +3405,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3435,10 +3435,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3465,10 +3465,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-58049"
     },
     {
@@ -3553,10 +3553,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-59847"
     },
     {
@@ -3583,10 +3583,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-59849"
     },
     {
@@ -3613,10 +3613,10 @@
       "package": "libssh-gcrypt-4",
       "installedVersion": "0.10.6-0+deb12u2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-59850"
     },
     {
@@ -3644,10 +3644,10 @@
       "package": "curl",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-6276"
     },
     {
@@ -3675,10 +3675,10 @@
       "package": "libcurl4",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-6276"
     },
     {
@@ -3705,10 +3705,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3735,10 +3735,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3765,10 +3765,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3795,10 +3795,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3825,10 +3825,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3855,10 +3855,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3885,10 +3885,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3915,10 +3915,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3945,10 +3945,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64831"
     },
     {
@@ -3975,10 +3975,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4005,10 +4005,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4035,10 +4035,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4065,10 +4065,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4095,10 +4095,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4125,10 +4125,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4155,10 +4155,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4185,10 +4185,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4215,10 +4215,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64834"
     },
     {
@@ -4245,10 +4245,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4275,10 +4275,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4305,10 +4305,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4335,10 +4335,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4365,10 +4365,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4395,10 +4395,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4425,10 +4425,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4455,10 +4455,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4485,10 +4485,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-64835"
     },
     {
@@ -4515,10 +4515,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4545,10 +4545,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4575,10 +4575,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4605,10 +4605,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4635,10 +4635,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4665,10 +4665,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4695,10 +4695,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4725,10 +4725,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4755,10 +4755,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66036"
     },
     {
@@ -4785,10 +4785,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4815,10 +4815,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4845,10 +4845,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4875,10 +4875,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4905,10 +4905,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4935,10 +4935,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4965,10 +4965,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -4995,10 +4995,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -5025,10 +5025,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66039"
     },
     {
@@ -5055,10 +5055,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5085,10 +5085,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5115,10 +5115,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5145,10 +5145,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5175,10 +5175,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5205,10 +5205,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5235,10 +5235,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5265,10 +5265,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5295,10 +5295,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
     },
     {
@@ -5325,10 +5325,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5355,10 +5355,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5385,10 +5385,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5415,10 +5415,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5445,10 +5445,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5475,10 +5475,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5505,10 +5505,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5535,10 +5535,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5565,10 +5565,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
@@ -5611,10 +5611,10 @@
       "package": "libxml2",
       "installedVersion": "2.9.14+dfsg-1.3~deb12u6",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-6653"
     },
     {
@@ -5820,10 +5820,10 @@
       "package": "libssh2-1",
       "installedVersion": "1.10.0-3+b1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-7598"
     },
     {
@@ -5851,10 +5851,10 @@
       "package": "curl",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8286"
     },
     {
@@ -5914,10 +5914,10 @@
       "package": "libcurl4",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8286"
     },
     {
@@ -5962,10 +5962,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8376"
     },
     {
@@ -6008,10 +6008,10 @@
       "package": "ffmpeg",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6038,10 +6038,10 @@
       "package": "libavcodec59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6068,10 +6068,10 @@
       "package": "libavdevice59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6098,10 +6098,10 @@
       "package": "libavfilter8",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6128,10 +6128,10 @@
       "package": "libavformat59",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6158,10 +6158,10 @@
       "package": "libavutil57",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6188,10 +6188,10 @@
       "package": "libpostproc56",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6218,10 +6218,10 @@
       "package": "libswresample4",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6248,10 +6248,10 @@
       "package": "libswscale6",
       "installedVersion": "7:5.1.9-0+deb12u1",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8461"
     },
     {
@@ -6279,10 +6279,10 @@
       "package": "curl",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8927"
     },
     {
@@ -6342,10 +6342,10 @@
       "package": "libcurl4",
       "installedVersion": "7.88.1-10+deb12u15",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8927"
     },
     {
@@ -6390,10 +6390,10 @@
       "package": "perl-base",
       "installedVersion": "5.36.0-7+deb12u3",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-9538"
     },
     {
@@ -6439,10 +6439,10 @@
       "package": "msgpack",
       "installedVersion": "1.1.2",
       "disposition": "upstream-mirror",
-      "justification": "This image is the exact immutable upstream CUDA mirror required for the release; its canonical repository manifest digest remains sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72 and SUB/WAVE does not rebuild or mutate its contents.",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
       "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
+      "approvedOn": "2026-08-05",
+      "expiresOn": "2026-11-03",
       "tracking": "https://github.com/advisories/GHSA-6v7p-g79w-8964"
     }
   ]

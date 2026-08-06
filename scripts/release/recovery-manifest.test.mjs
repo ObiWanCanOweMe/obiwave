@@ -14,7 +14,7 @@ const scannerConfig = {
   imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
 };
 
-function exactManifest() {
+function exactV13Manifest() {
   return {
     schemaVersion: 1,
     releaseTag: 'v1.3.0-obiwave.2',
@@ -38,28 +38,80 @@ function exactManifest() {
   };
 }
 
-function rejects(label, mutate) {
-  test(`rejects ${label}`, () => {
-    const manifest = exactManifest();
-    mutate(manifest);
-    assert.throws(
-      () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
-      /Recovery manifest invalid:/,
-    );
-  });
+function exactV15Manifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.5.0-obiwave.1',
+    sourceCommit: 'fe269a1e632fe6f886ac987f641f41326e1392e0',
+    scanner: {
+      version: '0.67.2',
+      imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+    },
+    images: [
+      { name: 'subwave-caddy', digest: 'sha256:cdf89341b5a0c5c31493f6b2653b45631aac6e184148af8a46db02ff3072f235' },
+      { name: 'subwave-broadcast', digest: 'sha256:32eb3d4c2a4146e31f37a389bc4d3b8309d3f13bf31edf5e7bf3a687f96ad5d0' },
+      { name: 'subwave-controller', digest: 'sha256:5aa26e9be46fdb2d733e7da2c74af63bbfeb7630575cae6bcbf0bf7c9b29ee55' },
+      { name: 'subwave-web', digest: 'sha256:f2f635a3b9d581db1478a74e5dfddbdae6faa31bb4b7694c7e03095915130008' },
+      { name: 'subwave-aio', digest: 'sha256:f745b4ae1133af9e77f1006ccf2ca219a6df0243451b4e633c143f0b6cc1ab8a' },
+      { name: 'subwave-aio-heavy', digest: 'sha256:2d37d9c15e88b90523c437e8330c7245050f92a2eefc513ac6a556ca7c68a90b' },
+      { name: 'subwave-tts-heavy', digest: 'sha256:41a6be4327f9f321b0993da4bac93a6359e440c1c26f7af52b663bcb083a3784' },
+      { name: 'subwave-analyzer', digest: 'sha256:ec22ae65a95f60d070414b2fa73a7ec481190d66355426ce1cdbfdb142ef9f2c' },
+      { name: 'subwave-analyzer-heavy', digest: 'sha256:290e2cd443bcee737fc4806f77384f172858e133f4fc0c0292195be9d53c9c5c' },
+      { name: 'subwave-analyzer-cuda', digest: 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2' },
+    ],
+  };
 }
 
-test('accepts the exact .2 identity and all ten images', () => {
-  const value = manifestModule.validateRecoveryManifest({ manifest: exactManifest(), scannerConfig });
-  assert.equal(value.releaseTag, 'v1.3.0-obiwave.2');
-  assert.equal(value.sourceCommit, '41c8a329670f99c3b440a468adbb9fe2d900a4fe');
-  assert.equal(value.images.length, 10);
-  assert.ok(Object.isFrozen(value));
-  assert.ok(Object.isFrozen(value.images));
+function rejects(label, mutate) {
+  for (const [release, exactManifest] of [
+    ['v1.3', exactV13Manifest],
+    ['v1.5', exactV15Manifest],
+  ]) {
+    test(`rejects ${label} for ${release}`, () => {
+      const manifest = exactManifest();
+      mutate(manifest);
+      assert.throws(
+        () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
+        /Recovery manifest invalid:/,
+      );
+    });
+  }
+}
+
+test('accepts each literal approved recovery identity', () => {
+  for (const [manifest, tag, source] of [
+    [exactV13Manifest(), 'v1.3.0-obiwave.2', '41c8a329670f99c3b440a468adbb9fe2d900a4fe'],
+    [exactV15Manifest(), 'v1.5.0-obiwave.1', 'fe269a1e632fe6f886ac987f641f41326e1392e0'],
+  ]) {
+    const value = manifestModule.validateRecoveryManifest({ manifest, scannerConfig });
+    assert.equal(value.releaseTag, tag);
+    assert.equal(value.sourceCommit, source);
+    assert.equal(value.images.length, 10);
+    assert.ok(Object.isFrozen(value));
+    assert.ok(Object.isFrozen(value.images));
+  }
+});
+
+test('rejects a valid manifest assembled from cross-release identity parts', () => {
+  const manifest = exactV15Manifest();
+  manifest.sourceCommit = exactV13Manifest().sourceCommit;
+  assert.throws(
+    () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
+    /Recovery manifest invalid:/,
+  );
+});
+
+test('rejects an unsupported recovery tag even when its manifest is internally consistent', () => {
+  const manifest = exactV15Manifest();
+  manifest.releaseTag = 'v1.6.0-obiwave.1';
+  assert.throws(
+    () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
+    /releaseTag is not approved/,
+  );
 });
 
 test('returns canonical and digest-qualified references', () => {
-  assert.deepEqual(manifestModule.recoveryImage(exactManifest(), 'subwave-web'), {
+  assert.deepEqual(manifestModule.recoveryImage(exactV13Manifest(), 'subwave-web'), {
     image: 'subwave-web',
     tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2',
     pullRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f',
@@ -73,15 +125,20 @@ rejects('a wrong scanner version', (manifest) => { manifest.scanner.version = '0
 rejects('a wrong scanner image', (manifest) => {
   manifest.scanner.imageRef = 'aquasec/trivy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 });
-test('rejects scanner-config disagreement', () => {
-  assert.throws(
-    () => manifestModule.validateRecoveryManifest({
-      manifest: exactManifest(),
-      scannerConfig: { ...scannerConfig, version: '0.68.0' },
-    }),
-    /Recovery manifest invalid:/,
-  );
-});
+for (const [release, exactManifest] of [
+  ['v1.3', exactV13Manifest],
+  ['v1.5', exactV15Manifest],
+]) {
+  test(`rejects scanner-config disagreement for ${release}`, () => {
+    assert.throws(
+      () => manifestModule.validateRecoveryManifest({
+        manifest: exactManifest(),
+        scannerConfig: { ...scannerConfig, version: '0.68.0' },
+      }),
+      /Recovery manifest invalid:/,
+    );
+  });
+}
 rejects('a foreign image namespace', (manifest) => { manifest.images[0].name = 'ghcr.io/foreign/subwave-caddy'; });
 rejects('an uppercase digest', (manifest) => { manifest.images[0].digest = `sha256:${'A'.repeat(64)}`; });
 rejects('a malformed digest', (manifest) => { manifest.images[0].digest = 'sha256:abc'; });
@@ -98,13 +155,13 @@ rejects('an unexpected manifest key', (manifest) => { manifest.unexpected = true
 
 test('rejects an unknown image lookup', () => {
   assert.throws(
-    () => manifestModule.recoveryImage(exactManifest(), 'subwave-surprise'),
+    () => manifestModule.recoveryImage(exactV13Manifest(), 'subwave-surprise'),
     /Recovery manifest has no image: subwave-surprise/,
   );
 });
 
 function digestOutput(name) {
-  return JSON.stringify(exactManifest().images.find((image) => image.name === name).digest);
+  return JSON.stringify(exactV13Manifest().images.find((image) => image.name === name).digest);
 }
 
 function preflightRunner(overrides = {}) {
@@ -126,7 +183,7 @@ function preflightRunner(overrides = {}) {
 test('verifies one image with the exact inspected digest', () => {
   const { calls, run } = preflightRunner();
   assert.deepEqual(manifestModule.verifyRecoveryImage({
-    manifest: exactManifest(), imageName: 'subwave-web', run,
+    manifest: exactV13Manifest(), imageName: 'subwave-web', run,
   }), {
     image: 'subwave-web',
     digest: 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f',
@@ -141,7 +198,7 @@ test('verifies one image with the exact inspected digest', () => {
 test('fails a single-image inspection whose digest differs', () => {
   const { run } = preflightRunner({ 'subwave-web': JSON.stringify(`sha256:${'a'.repeat(64)}`) });
   assert.throws(
-    () => manifestModule.verifyRecoveryImage({ manifest: exactManifest(), imageName: 'subwave-web', run }),
+    () => manifestModule.verifyRecoveryImage({ manifest: exactV13Manifest(), imageName: 'subwave-web', run }),
     /Recovery image digest mismatch: subwave-web/,
   );
 });
@@ -149,7 +206,7 @@ test('fails a single-image inspection whose digest differs', () => {
 test('fails a single-image inspection with malformed output', () => {
   const { run } = preflightRunner({ 'subwave-web': 'not-json' });
   assert.throws(
-    () => manifestModule.verifyRecoveryImage({ manifest: exactManifest(), imageName: 'subwave-web', run }),
+    () => manifestModule.verifyRecoveryImage({ manifest: exactV13Manifest(), imageName: 'subwave-web', run }),
     /Recovery image inspection returned an invalid digest/,
   );
 });
@@ -157,7 +214,7 @@ test('fails a single-image inspection with malformed output', () => {
 test('sanitizes a single-image child process failure', () => {
   assert.throws(
     () => manifestModule.verifyRecoveryImage({
-      manifest: exactManifest(),
+      manifest: exactV13Manifest(),
       imageName: 'subwave-web',
       run() { throw new Error('registry password leaked here'); },
     }),
@@ -168,7 +225,7 @@ test('sanitizes a single-image child process failure', () => {
 test('preflight runs the exact tag, release, image, and scanner checks', () => {
   const { calls, run } = preflightRunner();
   const result = manifestModule.verifyRecoveryPreflight({
-    manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run,
+    manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run,
   });
   assert.deepEqual(result, {
     tag: 'v1.3.0-obiwave.2',
@@ -207,7 +264,7 @@ test('preflight runs the exact tag, release, image, and scanner checks', () => {
 test('preflight rejects a tag that resolves to another source commit', () => {
   const { run } = preflightRunner({ git: `${'a'.repeat(40)}\n` });
   assert.throws(
-    () => manifestModule.verifyRecoveryPreflight({ manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
+    () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery release tag source mismatch/,
   );
 });
@@ -215,7 +272,7 @@ test('preflight rejects a tag that resolves to another source commit', () => {
 test('preflight rejects release metadata pointing at another source commit', () => {
   const { run } = preflightRunner({ release: JSON.stringify({ tagName: 'v1.3.0-obiwave.2', targetCommitish: 'a'.repeat(40) }) });
   assert.throws(
-    () => manifestModule.verifyRecoveryPreflight({ manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
+    () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery GitHub release source mismatch/,
   );
 });
@@ -226,7 +283,7 @@ test('preflight rejects release metadata for another tag', () => {
     targetCommitish: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
   }) });
   assert.throws(
-    () => manifestModule.verifyRecoveryPreflight({ manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
+    () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery GitHub release source mismatch/,
   );
 });
@@ -234,7 +291,7 @@ test('preflight rejects release metadata for another tag', () => {
 test('preflight rejects any image whose inspected digest differs', () => {
   const { run } = preflightRunner({ 'subwave-controller': JSON.stringify(`sha256:${'a'.repeat(64)}`) });
   assert.throws(
-    () => manifestModule.verifyRecoveryPreflight({ manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
+    () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery image digest mismatch: subwave-controller/,
   );
 });
@@ -242,7 +299,7 @@ test('preflight rejects any image whose inspected digest differs', () => {
 test('preflight rejects a scanner reporting another version', () => {
   const { run } = preflightRunner({ scanner: 'Version: 0.68.0\n' });
   assert.throws(
-    () => manifestModule.verifyRecoveryPreflight({ manifest: exactManifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
+    () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery scanner version mismatch/,
   );
 });

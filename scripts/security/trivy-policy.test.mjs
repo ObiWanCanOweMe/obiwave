@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -16,20 +16,28 @@ import {
 const execFileAsync = promisify(execFile);
 
 const NOW = new Date('2026-08-04T12:00:00.000Z');
-const TAG = 'v1.3.0-obiwave.2';
+const V13_TAG = 'v1.3.0-obiwave.2';
+const V15_TAG = 'v1.5.0-obiwave.1';
+const TAG = V13_TAG;
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
-const PINNED_CUDA_IMAGE_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
+const V15_CUDA_DIGEST = 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
+const checkedInAcceptance = JSON.parse(
+  await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
+);
+const CUDA_ACCEPTANCE_JUSTIFICATION =
+  'This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.';
 
-function imageRef(image) {
-  return `${IMAGE_NAMESPACE}/${image}:${TAG}`;
+function imageRef(image, tag = V13_TAG) {
+  return `${IMAGE_NAMESPACE}/${image}:${tag}`;
 }
 
-function scanStatus(image, overrides = {}) {
+function scanStatus(image, overrides = {}, tag = V13_TAG) {
   return {
     schemaVersion: 1,
     image,
-    imageRef: imageRef(image),
+    imageRef: imageRef(image, tag),
     scanner: 'trivy',
     scannerVersion: '0.67.2',
     scanners: ['vuln'],
@@ -39,19 +47,21 @@ function scanStatus(image, overrides = {}) {
   };
 }
 
-function trivyReport(image, vulnerabilities = [], overrides = {}) {
+function trivyReport(image, vulnerabilities = [], overrides = {}, options = {}) {
+  const tag = options.tag ?? V13_TAG;
+  const cudaDigest = options.cudaDigest ?? V13_CUDA_DIGEST;
   return {
     SchemaVersion: 2,
-    ArtifactName: imageRef(image),
+    ArtifactName: imageRef(image, tag),
     ArtifactType: 'container_image',
     Metadata: {
       ImageID: image === 'subwave-analyzer-cuda'
         ? CUDA_PLATFORM_IMAGE_ID
         : `sha256:${'a'.repeat(64)}`,
-      RepoTags: [imageRef(image)],
+      RepoTags: [imageRef(image, tag)],
       RepoDigests: [
         `${IMAGE_NAMESPACE}/${image}@${image === 'subwave-analyzer-cuda'
-          ? PINNED_CUDA_IMAGE_DIGEST
+          ? cudaDigest
           : `sha256:${'b'.repeat(64)}`}`,
       ],
     },
@@ -78,15 +88,17 @@ function finding(overrides = {}) {
   };
 }
 
-function reportEntry(image, vulnerabilities = []) {
+function reportEntry(image, vulnerabilities = [], options = {}) {
   return {
-    status: scanStatus(image),
-    report: trivyReport(image, vulnerabilities),
+    status: scanStatus(image, {}, options.tag),
+    report: trivyReport(image, vulnerabilities, {}, options),
   };
 }
 
-function cleanReports() {
-  return Object.fromEntries(EXPECTED_IMAGES.map((image) => [image, reportEntry(image)]));
+function cleanReports(options = {}) {
+  return Object.fromEntries(
+    EXPECTED_IMAGES.map((image) => [image, reportEntry(image, [], options)]),
+  );
 }
 
 function manifest(acceptances = [], overrides = {}) {
@@ -126,6 +138,24 @@ function validationError(options) {
 function violationCodes(error) {
   return error.violations.map(({ code }) => code);
 }
+
+test('checked-in CUDA mirror acceptances carry the reviewed release-aware statement', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    record.disposition === 'upstream-mirror' &&
+    record.images.length === 1 &&
+    record.images[0] === 'subwave-analyzer-cuda');
+
+  assert.equal(records.length, 160);
+  for (const record of records) {
+    assert.equal(record.justification, CUDA_ACCEPTANCE_JUSTIFICATION);
+    assert.equal(record.approvedOn, '2026-08-05');
+    assert.equal(record.expiresOn, '2026-11-03');
+  }
+  assert.equal(
+    checkedInAcceptance.acceptances.filter((record) => record.disposition === 'upstream-mirror').length,
+    160,
+  );
+});
 
 test('clean ten-image matrix returns a deterministic empty summary', () => {
   const summary = validateReports({
@@ -504,12 +534,12 @@ test('the CUDA mirror report must carry the policy-pinned repository digest', ()
   });
 
   assert.deepEqual(violationCodes(error), ['cuda-digest-mismatch']);
-  assert.match(error.message, new RegExp(PINNED_CUDA_IMAGE_DIGEST));
+  assert.match(error.message, new RegExp(V13_CUDA_DIGEST));
 });
 
 test('a CUDA platform image ID cannot substitute for the pinned repository digest', () => {
   const reports = cleanReports();
-  reports['subwave-analyzer-cuda'].report.Metadata.ImageID = PINNED_CUDA_IMAGE_DIGEST;
+  reports['subwave-analyzer-cuda'].report.Metadata.ImageID = V13_CUDA_DIGEST;
   reports['subwave-analyzer-cuda'].report.Metadata.RepoDigests = [];
 
   const error = validationError({
@@ -521,6 +551,50 @@ test('a CUDA platform image ID cannot substitute for the pinned repository diges
 
   assert.deepEqual(violationCodes(error), ['cuda-digest-mismatch']);
   assert.match(error.message, /repository digest/);
+});
+
+test('each supported release accepts only its pinned CUDA repository digest', () => {
+  for (const [tag, cudaDigest] of [
+    [V13_TAG, V13_CUDA_DIGEST],
+    [V15_TAG, V15_CUDA_DIGEST],
+  ]) {
+    const summary = validateReports({
+      tag,
+      reports: cleanReports({ tag, cudaDigest }),
+      acceptance: manifest(),
+      expectedImages: EXPECTED_IMAGES,
+      now: NOW,
+    });
+    assert.equal(summary.imageCount, 10);
+  }
+});
+
+test('cross-release CUDA digests fail closed', () => {
+  for (const [tag, cudaDigest] of [
+    [V13_TAG, V15_CUDA_DIGEST],
+    [V15_TAG, V13_CUDA_DIGEST],
+  ]) {
+    const error = validationError({
+      tag,
+      reports: cleanReports({ tag, cudaDigest }),
+      acceptance: manifest(),
+      expectedImages: EXPECTED_IMAGES,
+      now: NOW,
+    });
+    assert.ok(violationCodes(error).includes('cuda-digest-mismatch'));
+  }
+});
+
+test('an unknown fork release tag cannot bypass CUDA identity policy', () => {
+  const tag = 'v1.6.0-obiwave.1';
+  const error = validationError({
+    tag,
+    reports: cleanReports({ tag, cudaDigest: V15_CUDA_DIGEST }),
+    acceptance: manifest(),
+    expectedImages: EXPECTED_IMAGES,
+    now: NOW,
+  });
+  assert.ok(violationCodes(error).includes('unsupported-cuda-release'));
 });
 
 test('no-fix cannot accept a finding for which the scanner reports a fix', () => {
