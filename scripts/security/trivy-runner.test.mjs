@@ -449,7 +449,7 @@ test('runCli translates real recovery arguments and loads the checked-in scanner
 });
 
 test('runCli loads sealed recovery evidence only when both approved manifest paths are supplied', async () => {
-  const sealedPath = 'security/releases/runtime-v1.6.0-obiwave.1.json';
+  const sealedPath = `security/releases/runtime-v1.6.0-obiwave.1-${process.pid}.json`;
   const common = [
     '--scanner', 'security/trivy-scanner.json',
     '--image-name', 'subwave-web',
