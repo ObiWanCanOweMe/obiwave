@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile, readdir, readFile, writeFile } from 'node:fs/promises';
 
 import { CANONICAL_IMAGE_NAMESPACE, EXPECTED_IMAGES } from '../security/trivy-policy.mjs';
 
@@ -41,6 +41,23 @@ const APPROVED_RECOVERIES = Object.freeze({
     ]),
   }),
 });
+const APPROVED_PARTIAL_RECOVERIES = Object.freeze({
+  'v1.6.0-obiwave.1': Object.freeze({
+    sourceCommit: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+    images: Object.freeze([
+      Object.freeze({ name: 'subwave-caddy', action: 'build' }),
+      Object.freeze({ name: 'subwave-broadcast', action: 'preserve', digest: 'sha256:a623e516992ade44d83ac72c231d2ecc278eb71c613d04212936a5ec03237c2f' }),
+      Object.freeze({ name: 'subwave-controller', action: 'preserve', digest: 'sha256:fe765d8f9a491012c33c6828686cb350aa2e6f84acffd170fc038b4be93c614f' }),
+      Object.freeze({ name: 'subwave-web', action: 'build' }),
+      Object.freeze({ name: 'subwave-aio', action: 'preserve', digest: 'sha256:6d1c79424e19348653f929f0687582984d46fc964cdc388a49a03d58b8d3b1fe' }),
+      Object.freeze({ name: 'subwave-aio-heavy', action: 'build' }),
+      Object.freeze({ name: 'subwave-tts-heavy', action: 'build' }),
+      Object.freeze({ name: 'subwave-analyzer', action: 'preserve', digest: 'sha256:4d4aaac6121f24699b3de79c00572afe87fd7c971b8b02c81c6bec12c7e1a1c9' }),
+      Object.freeze({ name: 'subwave-analyzer-heavy', action: 'build' }),
+      Object.freeze({ name: 'subwave-analyzer-cuda', action: 'preserve', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' }),
+    ]),
+  }),
+});
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -62,6 +79,167 @@ function freezeManifest(manifest) {
     scanner: Object.freeze({ ...manifest.scanner }),
     images: Object.freeze(manifest.images.map((image) => Object.freeze({ ...image }))),
   });
+}
+
+function freezePartialManifest(manifest) {
+  return Object.freeze({
+    schemaVersion: manifest.schemaVersion,
+    kind: manifest.kind,
+    releaseTag: manifest.releaseTag,
+    sourceCommit: manifest.sourceCommit,
+    scanner: Object.freeze({ ...manifest.scanner }),
+    images: Object.freeze(manifest.images.map((image) => Object.freeze({ ...image }))),
+  });
+}
+
+function validateScanner(scanner, scannerConfig) {
+  if (!hasExactKeys(scanner, ['version', 'imageRef'])) {
+    fail('scanner keys must be version and imageRef');
+  }
+  if (scanner.version !== SCANNER_VERSION || scanner.imageRef !== SCANNER_IMAGE) {
+    fail('scanner must match the pinned recovery scanner');
+  }
+  if (!hasExactKeys(scannerConfig, ['schemaVersion', 'version', 'imageRef'])) {
+    fail('scanner config keys must be schemaVersion, version, and imageRef');
+  }
+  if (
+    scannerConfig.schemaVersion !== 1 ||
+    scannerConfig.version !== scanner.version ||
+    scannerConfig.imageRef !== scanner.imageRef
+  ) {
+    fail('scanner config must equal the recovery scanner');
+  }
+}
+
+export function validatePartialRecoveryManifest({ manifest, scannerConfig }) {
+  if (!hasExactKeys(manifest, ['schemaVersion', 'kind', 'releaseTag', 'sourceCommit', 'scanner', 'images'])) {
+    fail('partial manifest keys must be schemaVersion, kind, releaseTag, sourceCommit, scanner, and images');
+  }
+  if (manifest.schemaVersion !== 2 || manifest.kind !== 'partial-publication-recovery') {
+    fail('partial manifest must be schema version 2 partial-publication-recovery');
+  }
+  const approvedRecovery = APPROVED_PARTIAL_RECOVERIES[manifest.releaseTag];
+  if (!approvedRecovery) fail('partial releaseTag is not approved');
+  if (manifest.sourceCommit !== approvedRecovery.sourceCommit || !SHA.test(manifest.sourceCommit)) {
+    fail(`sourceCommit must equal ${approvedRecovery.sourceCommit}`);
+  }
+  validateScanner(manifest.scanner, scannerConfig);
+  if (!Array.isArray(manifest.images) || manifest.images.length !== approvedRecovery.images.length) {
+    fail(`images must contain exactly ${approvedRecovery.images.length} entries`);
+  }
+  for (const [index, entry] of manifest.images.entries()) {
+    const approved = approvedRecovery.images[index];
+    const expectedKeys = approved.action === 'preserve' ? ['name', 'action', 'digest'] : ['name', 'action'];
+    if (!hasExactKeys(entry, expectedKeys)) fail(`partial image ${index} has invalid keys`);
+    if (entry.name !== approved.name || entry.name !== EXPECTED_IMAGES[index]) {
+      fail(`image ${index} must equal ${approved.name}`);
+    }
+    if (entry.action !== approved.action) fail(`image ${entry.name} action is not approved`);
+    if (approved.action === 'preserve' && (!DIGEST.test(entry.digest) || entry.digest !== approved.digest)) {
+      fail(`image ${entry.name} digest is not approved`);
+    }
+  }
+  return freezePartialManifest(manifest);
+}
+
+export async function loadPartialRecoveryManifest({ manifestPath, scannerPath }) {
+  let manifest;
+  let scannerConfig;
+  try {
+    [manifest, scannerConfig] = await Promise.all([
+      readFile(manifestPath, 'utf8').then(JSON.parse),
+      readFile(scannerPath, 'utf8').then(JSON.parse),
+    ]);
+  } catch {
+    throw new Error('Partial recovery manifest files could not be read as JSON');
+  }
+  return validatePartialRecoveryManifest({ manifest, scannerConfig });
+}
+
+function sealedManifestFromEvidence(partialManifest, buildDigests, registryDigests) {
+  if (!isObject(buildDigests)) fail('build digests must be an object');
+  if (!isObject(registryDigests)) fail('registry digests must be an object');
+  const buildImages = partialManifest.images.filter(({ action }) => action === 'build');
+  const buildNames = buildImages.map(({ name }) => name);
+  const registryNames = Object.keys(registryDigests);
+  if (Object.keys(buildDigests).length !== buildNames.length || !buildNames.every((name) => Object.hasOwn(buildDigests, name))) {
+    fail('build digest evidence must contain exactly the approved build images');
+  }
+  if (registryNames.length !== EXPECTED_IMAGES.length || !registryNames.every((name, index) => name === EXPECTED_IMAGES[index])) {
+    fail('registry digest evidence must contain every image in canonical order');
+  }
+  return {
+    schemaVersion: 1,
+    releaseTag: partialManifest.releaseTag,
+    sourceCommit: partialManifest.sourceCommit,
+    scanner: { ...partialManifest.scanner },
+    images: partialManifest.images.map((entry) => {
+      const expectedDigest = entry.action === 'build' ? buildDigests[entry.name] : entry.digest;
+      const registryDigest = registryDigests[entry.name];
+      if (!DIGEST.test(expectedDigest)) fail(`image ${entry.name} has an invalid digest`);
+      if (registryDigest !== expectedDigest || !DIGEST.test(registryDigest)) {
+        fail(`registry digest does not match approved evidence: ${entry.name}`);
+      }
+      return { name: entry.name, digest: expectedDigest };
+    }),
+  };
+}
+
+export function sealRecoveryManifest({ partialManifest, buildDigests, registryDigests }) {
+  const validatedPartial = validatePartialRecoveryManifest({
+    manifest: partialManifest,
+    scannerConfig: { schemaVersion: 1, version: SCANNER_VERSION, imageRef: SCANNER_IMAGE },
+  });
+  return freezeManifest(sealedManifestFromEvidence(validatedPartial, buildDigests, registryDigests));
+}
+
+export function validateSealedRecoveryManifest({ manifest, partialManifest, scannerConfig }) {
+  const validatedPartial = validatePartialRecoveryManifest({ manifest: partialManifest, scannerConfig });
+  if (!hasExactKeys(manifest, ['schemaVersion', 'releaseTag', 'sourceCommit', 'scanner', 'images'])) {
+    fail('sealed manifest keys must be schemaVersion, releaseTag, sourceCommit, scanner, and images');
+  }
+  if (manifest.schemaVersion !== 1) fail('sealed schemaVersion must equal 1');
+  if (manifest.releaseTag !== validatedPartial.releaseTag || manifest.sourceCommit !== validatedPartial.sourceCommit) {
+    fail('sealed release identity must match the approved partial recovery');
+  }
+  validateScanner(manifest.scanner, scannerConfig);
+  if (
+    manifest.scanner.version !== validatedPartial.scanner.version ||
+    manifest.scanner.imageRef !== validatedPartial.scanner.imageRef
+  ) {
+    fail('sealed scanner must match the approved partial recovery');
+  }
+  if (!Array.isArray(manifest.images) || manifest.images.length !== validatedPartial.images.length) {
+    fail(`sealed images must contain exactly ${validatedPartial.images.length} entries`);
+  }
+  for (const [index, entry] of manifest.images.entries()) {
+    const partialEntry = validatedPartial.images[index];
+    if (!hasExactKeys(entry, ['name', 'digest'])) fail(`sealed image ${index} keys must be name and digest`);
+    if (entry.name !== partialEntry.name || entry.name !== EXPECTED_IMAGES[index]) {
+      fail(`sealed image ${index} must equal ${partialEntry.name}`);
+    }
+    if (!DIGEST.test(entry.digest)) fail(`sealed image ${entry.name} must have a lowercase sha256 digest`);
+    if (partialEntry.action === 'preserve' && entry.digest !== partialEntry.digest) {
+      fail(`sealed image ${entry.name} digest must preserve the approved value`);
+    }
+  }
+  return freezeManifest(manifest);
+}
+
+export async function loadSealedRecoveryManifest({ manifestPath, partialManifestPath, scannerPath }) {
+  let manifest;
+  let partialManifest;
+  let scannerConfig;
+  try {
+    [manifest, partialManifest, scannerConfig] = await Promise.all([
+      readFile(manifestPath, 'utf8').then(JSON.parse),
+      readFile(partialManifestPath, 'utf8').then(JSON.parse),
+      readFile(scannerPath, 'utf8').then(JSON.parse),
+    ]);
+  } catch {
+    throw new Error('Sealed recovery manifest files could not be read as JSON');
+  }
+  return validateSealedRecoveryManifest({ manifest, partialManifest, scannerConfig });
 }
 
 export function validateRecoveryManifest({ manifest, scannerConfig }) {
@@ -173,6 +351,24 @@ function parseRelease(output) {
   return value;
 }
 
+function parsePublicRelease(output) {
+  let value;
+  try {
+    value = JSON.parse(requireOutput(output, 'GitHub release'));
+  } catch (error) {
+    if (error.message.startsWith('Recovery ')) throw error;
+    throw new Error('Recovery GitHub release returned invalid JSON');
+  }
+  if (
+    !hasExactKeys(value, ['tagName', 'targetCommitish', 'isDraft', 'isPrerelease']) ||
+    typeof value.tagName !== 'string' || typeof value.targetCommitish !== 'string' ||
+    typeof value.isDraft !== 'boolean' || typeof value.isPrerelease !== 'boolean'
+  ) {
+    throw new Error('Recovery GitHub release returned invalid metadata');
+  }
+  return value;
+}
+
 function parseScannerVersion(output) {
   const match = /^Version:\s+(\d+\.\d+\.\d+)\s*$/.exec(requireOutput(output, 'scanner version'));
   if (!match) throw new Error('Recovery scanner returned an invalid version');
@@ -227,12 +423,123 @@ export function verifyRecoveryPreflight({ manifest, repository, run = commandRun
   return Object.freeze({ tag: manifest.releaseTag, source: tagCommit, scannerVersion, images: Object.freeze(images) });
 }
 
+function partialRecoveryTag(manifest, imageName) {
+  const entry = manifest.images.find(({ name }) => name === imageName);
+  if (!entry) throw new Error(`Partial recovery manifest has no image: ${imageName}`);
+  return `${CANONICAL_IMAGE_NAMESPACE}/${entry.name}:${manifest.releaseTag}`;
+}
+
+export function verifyPartialRecoveryPreflight({ manifest, repository, run = commandRunner }) {
+  if (typeof repository !== 'string' || repository.trim() === '') {
+    throw new Error('Recovery repository is required');
+  }
+  const partial = validatePartialRecoveryManifest({
+    manifest,
+    scannerConfig: { schemaVersion: 1, version: SCANNER_VERSION, imageRef: SCANNER_IMAGE },
+  });
+  const tagCommit = requireOutput(
+    runCommand(run, 'git', ['rev-parse', `${partial.releaseTag}^{commit}`], 'release tag'),
+    'release tag',
+  );
+  if (tagCommit !== partial.sourceCommit) throw new Error('Recovery release tag source mismatch');
+  const release = parsePublicRelease(runCommand(run, 'gh', [
+    'release', 'view', partial.releaseTag, '--repo', repository,
+    '--json', 'tagName,targetCommitish,isDraft,isPrerelease',
+  ], 'GitHub release'));
+  if (release.tagName !== partial.releaseTag || release.targetCommitish !== partial.sourceCommit) {
+    throw new Error('Recovery GitHub release source mismatch');
+  }
+  if (release.isDraft || release.isPrerelease) throw new Error('Recovery GitHub release is not public');
+  const images = partial.images
+    .filter(({ action }) => action === 'preserve')
+    .map((entry) => {
+      const tagRef = partialRecoveryTag(partial, entry.name);
+      const digest = parseDigest(runCommand(run, 'docker', [
+        'buildx', 'imagetools', 'inspect', tagRef,
+        '--format', '{{json .Manifest.Digest}}',
+      ], 'image inspection'));
+      if (digest !== entry.digest) throw new Error(`Recovery image digest mismatch: ${entry.name}`);
+      return Object.freeze({ image: entry.name, digest });
+    });
+  const scannerVersion = parseScannerVersion(runCommand(
+    run,
+    'docker',
+    ['run', '--rm', partial.scanner.imageRef, '--version'],
+    'scanner version',
+  ));
+  if (scannerVersion !== partial.scanner.version) throw new Error('Recovery scanner version mismatch');
+  return Object.freeze({ tag: partial.releaseTag, source: tagCommit, scannerVersion, images: Object.freeze(images) });
+}
+
+async function readBuildDigestRecords(directory) {
+  let files;
+  try {
+    files = await readdir(directory, { withFileTypes: true });
+  } catch {
+    throw new Error('Recovery build digest records could not be read');
+  }
+  if (files.length !== 5 || files.some((file) => !file.isFile() || !file.name.endsWith('.json'))) {
+    throw new Error('Recovery build digest records must contain exactly five JSON files');
+  }
+  const records = {};
+  for (const file of files) {
+    let record;
+    try {
+      record = JSON.parse(await readFile(`${directory}/${file.name}`, 'utf8'));
+    } catch {
+      throw new Error('Recovery build digest record is not valid JSON');
+    }
+    if (!hasExactKeys(record, ['image', 'digest']) || typeof record.image !== 'string' || !DIGEST.test(record.digest) || Object.hasOwn(records, record.image)) {
+      throw new Error('Recovery build digest record is invalid');
+    }
+    records[record.image] = record.digest;
+  }
+  return records;
+}
+
+function inspectRegistryDigests(partialManifest, run = commandRunner) {
+  return Object.fromEntries(partialManifest.images.map((entry) => {
+    const tagRef = partialRecoveryTag(partialManifest, entry.name);
+    const digest = parseDigest(runCommand(run, 'docker', [
+      'buildx', 'imagetools', 'inspect', tagRef,
+      '--format', '{{json .Manifest.Digest}}',
+    ], 'image inspection'));
+    return [entry.name, digest];
+  }));
+}
+
+function parseSealedManifestEnvironment(partialManifest, scannerConfig) {
+  const encoded = process.env.SEALED_RECOVERY_MANIFEST_B64;
+  if (typeof encoded !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('Recovery sealed manifest environment is invalid');
+  }
+  let text;
+  let manifest;
+  try {
+    text = Buffer.from(encoded, 'base64').toString('utf8');
+    if (Buffer.from(text, 'utf8').toString('base64') !== encoded) throw new Error('not canonical');
+    manifest = JSON.parse(text);
+  } catch {
+    throw new Error('Recovery sealed manifest environment is invalid');
+  }
+  return validateSealedRecoveryManifest({ manifest, partialManifest, scannerConfig });
+}
+
+async function writeSealedManifest(outputPath, manifest) {
+  try {
+    await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch {
+    throw new Error('Recovery sealed manifest could not be written');
+  }
+}
+
 function parseCli(argv) {
   const [command, ...rest] = argv;
-  if (!['validate', 'verify-all', 'verify-image', 'image'].includes(command)) {
-    throw new Error('Recovery command must be validate, verify-all, verify-image, or image');
+  const commands = ['validate', 'verify-all', 'verify-image', 'image', 'validate-partial', 'verify-partial', 'seal', 'materialize-sealed', 'sealed-image'];
+  if (!commands.includes(command)) {
+    throw new Error('Recovery command is not recognized');
   }
-  const allowed = new Set(['manifest', 'scanner', 'repository', 'image']);
+  const allowed = new Set(['manifest', 'scanner', 'repository', 'image', 'partial-manifest', 'build-digests', 'output']);
   const values = {};
   for (let index = 0; index < rest.length; index += 2) {
     const flag = rest[index];
@@ -242,15 +549,19 @@ function parseCli(argv) {
     }
     values[flag.slice(2)] = value;
   }
-  if (!values.manifest || !values.scanner) throw new Error('Recovery command requires --manifest and --scanner');
-  if (command === 'validate' && (values.repository || values.image)) {
-    throw new Error('validate does not accept --repository or --image');
-  }
-  if (command === 'verify-all' && (!values.repository || values.image)) {
-    throw new Error('verify-all requires --repository and does not accept --image');
-  }
-  if (!['validate', 'verify-all'].includes(command) && (!values.image || values.repository)) {
-    throw new Error(`${command} requires --image and does not accept --repository`);
+  const required = {
+    validate: ['manifest', 'scanner'],
+    'verify-all': ['manifest', 'scanner', 'repository'],
+    'verify-image': ['manifest', 'scanner', 'image'],
+    image: ['manifest', 'scanner', 'image'],
+    'validate-partial': ['manifest', 'scanner'],
+    'verify-partial': ['manifest', 'scanner', 'repository'],
+    seal: ['manifest', 'scanner', 'build-digests', 'output'],
+    'materialize-sealed': ['manifest', 'scanner', 'output'],
+    'sealed-image': ['manifest', 'scanner', 'partial-manifest', 'image'],
+  }[command];
+  if (Object.keys(values).length !== required.length || required.some((name) => !values[name])) {
+    throw new Error('Recovery command arguments are invalid');
   }
   return { command, values };
 }
@@ -265,17 +576,55 @@ async function writeImageOutput(image) {
 
 export async function runCli(argv = process.argv.slice(2)) {
   const { command, values } = parseCli(argv);
-  const manifest = await loadRecoveryManifest({ manifestPath: values.manifest, scannerPath: values.scanner });
-  if (command === 'validate') return;
-  if (command === 'verify-all') {
-    process.stdout.write(`${JSON.stringify(verifyRecoveryPreflight({ manifest, repository: values.repository }))}\n`);
+  if (['validate', 'verify-all', 'verify-image', 'image'].includes(command)) {
+    const manifest = await loadRecoveryManifest({ manifestPath: values.manifest, scannerPath: values.scanner });
+    if (command === 'validate') return;
+    if (command === 'verify-all') {
+      process.stdout.write(`${JSON.stringify(verifyRecoveryPreflight({ manifest, repository: values.repository }))}\n`);
+      return;
+    }
+    if (command === 'verify-image') {
+      process.stdout.write(`${JSON.stringify(verifyRecoveryImage({ manifest, imageName: values.image }))}\n`);
+      return;
+    }
+    await writeImageOutput(recoveryImage(manifest, values.image));
     return;
   }
-  if (command === 'verify-image') {
-    process.stdout.write(`${JSON.stringify(verifyRecoveryImage({ manifest, imageName: values.image }))}\n`);
+  if (command === 'sealed-image') {
+    const sealed = await loadSealedRecoveryManifest({
+      manifestPath: values.manifest,
+      partialManifestPath: values['partial-manifest'],
+      scannerPath: values.scanner,
+    });
+    await writeImageOutput(recoveryImage(sealed, values.image));
     return;
   }
-  await writeImageOutput(recoveryImage(manifest, values.image));
+  const partialManifest = await loadPartialRecoveryManifest({ manifestPath: values.manifest, scannerPath: values.scanner });
+  if (command === 'validate-partial') return;
+  if (command === 'verify-partial') {
+    process.stdout.write(`${JSON.stringify(verifyPartialRecoveryPreflight({ manifest: partialManifest, repository: values.repository }))}\n`);
+    return;
+  }
+  if (command === 'seal') {
+    const buildDigests = await readBuildDigestRecords(values['build-digests']);
+    const sealed = sealRecoveryManifest({
+      partialManifest,
+      buildDigests,
+      registryDigests: inspectRegistryDigests(partialManifest),
+    });
+    await writeSealedManifest(values.output, sealed);
+    if (!process.env.GITHUB_OUTPUT) throw new Error('Recovery seal requires GITHUB_OUTPUT');
+    await appendFile(process.env.GITHUB_OUTPUT, `manifest_b64=${Buffer.from(JSON.stringify(sealed)).toString('base64')}\n`);
+    return;
+  }
+  if (command === 'materialize-sealed') {
+    await writeSealedManifest(values.output, parseSealedManifestEnvironment(partialManifest, {
+      schemaVersion: 1,
+      version: SCANNER_VERSION,
+      imageRef: SCANNER_IMAGE,
+    }));
+    return;
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
