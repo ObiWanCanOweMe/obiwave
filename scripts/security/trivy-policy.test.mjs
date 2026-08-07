@@ -30,6 +30,10 @@ const checkedInAcceptance = JSON.parse(
 );
 const CUDA_ACCEPTANCE_JUSTIFICATION =
   'This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.';
+const CURL_8458_ID = 'CVE-2026-8458';
+const CURL_8458_TRACKING = 'https://curl.se/docs/CVE-2026-8458.html';
+const CURL_8458_UNREACHABLE =
+  'The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.';
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -144,6 +148,7 @@ function violationCodes(error) {
 test('checked-in CUDA mirror acceptances carry the reviewed release-aware statement', () => {
   const records = checkedInAcceptance.acceptances.filter((record) =>
     record.disposition === 'upstream-mirror' &&
+    record.vulnerabilityId !== CURL_8458_ID &&
     record.images.length === 1 &&
     record.images[0] === 'subwave-analyzer-cuda');
 
@@ -155,8 +160,45 @@ test('checked-in CUDA mirror acceptances carry the reviewed release-aware statem
   }
   assert.equal(
     checkedInAcceptance.acceptances.filter((record) => record.disposition === 'upstream-mirror').length,
-    160,
+    162,
   );
+});
+
+test('checked-in CVE-2026-8458 acceptances are time-bounded to the reviewed curl scopes', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    record.vulnerabilityId === CURL_8458_ID);
+
+  assert.equal(records.length, 7);
+  assert.deepEqual(
+    records.map(({ package: packageName, installedVersion, disposition, images }) => ({
+      package: packageName,
+      installedVersion,
+      disposition,
+      images,
+    })),
+    [
+      { package: 'curl', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
+      { package: 'libcurl3t64-gnutls', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
+      { package: 'libcurl4t64', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
+      { package: 'curl', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
+      { package: 'libcurl4', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
+      { package: 'curl', installedVersion: '7.88.1-10+deb12u15', disposition: 'upstream-mirror', images: ['subwave-analyzer-cuda'] },
+      { package: 'libcurl4', installedVersion: '7.88.1-10+deb12u15', disposition: 'upstream-mirror', images: ['subwave-analyzer-cuda'] },
+    ],
+  );
+
+  for (const record of records) {
+    assert.equal(record.owner, 'SUB/WAVE maintainers');
+    assert.equal(record.approvedOn, '2026-08-07');
+    assert.equal(record.expiresOn, '2026-11-05');
+    assert.equal(record.tracking, CURL_8458_TRACKING);
+    assert.equal(
+      record.justification,
+      record.disposition === 'unreachable'
+        ? CURL_8458_UNREACHABLE
+        : CUDA_ACCEPTANCE_JUSTIFICATION,
+    );
+  }
 });
 
 test('clean ten-image matrix returns a deterministic empty summary', () => {

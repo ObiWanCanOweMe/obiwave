@@ -23,6 +23,10 @@ const recoveryV15 = await readFile(
   new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
   'utf8',
 ).catch(() => '');
+const finalizeV16 = await readFile(
+  new URL('../../.github/workflows/finalize-v1.6.0-obiwave.1.yml', import.meta.url),
+  'utf8',
+);
 const recoveryV16 = await readFile(
   new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -246,6 +250,23 @@ const RECOVERY_V16_IMAGES = Object.freeze([
   'subwave-aio-heavy',
   'subwave-tts-heavy',
   'subwave-analyzer-heavy',
+]);
+const RECOVERY_WORKFLOWS = Object.freeze([
+  Object.freeze({
+    workflow: recoveryV13,
+    tag: 'v1.3.0-obiwave.2',
+    manifest: 'security/releases/v1.3.0-obiwave.2.json',
+  }),
+  Object.freeze({
+    workflow: recoveryV15,
+    tag: 'v1.5.0-obiwave.1',
+    manifest: 'security/releases/v1.5.0-obiwave.1.json',
+  }),
+  Object.freeze({
+    workflow: finalizeV16,
+    tag: 'v1.6.0-obiwave.1',
+    manifest: 'security/releases/v1.6.0-obiwave.1.json',
+  }),
 ]);
 
 function assertExactJobPermissions(job, expected) {
@@ -561,6 +582,11 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     'uses: docker/login-action@v4',
     'name: Verify immutable recovery artifacts',
   ]);
+  assert.match(
+    validate,
+    /^      - uses: actions\/checkout@v5\n        with:\n          fetch-depth: 0$/m,
+    'validation checkout must fetch the release tag history',
+  );
   assert.deepEqual(jobStepHeaders(policy), []);
   assert.deepEqual(jobStepHeaders(deploy), [
     'uses: actions/checkout@v5',
@@ -620,7 +646,7 @@ test('Caddy owns the listener-auth namespace before the general API proxy', () =
 });
 
 test('recovery contract rejects alternate permission and deploy-environment forms', () => {
-  for (const recovery of [recoveryV13, recoveryV15]) {
+  for (const { workflow: recovery } of RECOVERY_WORKFLOWS) {
     for (const [mutation, expected] of [
       [recovery.replace('permissions:\n  contents: read', 'permissions: write-all'), /block form/],
       [recovery.replace('permissions:\n  contents: read', 'permissions: {contents: read}'), /block form/],
@@ -653,28 +679,15 @@ test('recovery contract rejects alternate permission and deploy-environment form
   }
 });
 
-test('both one-release recoveries are fixed-identity, policy-gated, and protected', () => {
-  assertRecoveryWorkflow(recoveryV13, {
-    tag: 'v1.3.0-obiwave.2',
-    manifest: 'security/releases/v1.3.0-obiwave.2.json',
-  });
-  assertRecoveryWorkflow(recoveryV15, {
-    tag: 'v1.5.0-obiwave.1',
-    manifest: 'security/releases/v1.5.0-obiwave.1.json',
-  });
+test('one-release recovery contracts are fixed-identity, policy-gated, and protected', () => {
+  for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
+    assertRecoveryWorkflow(workflow, { tag, manifest });
+  }
 });
 
 test('recovery contracts reject every trigger beyond manual dispatch', () => {
-  for (const [workflow, identity] of [
-    [recoveryV13, {
-      tag: 'v1.3.0-obiwave.2',
-      manifest: 'security/releases/v1.3.0-obiwave.2.json',
-    }],
-    [recoveryV15, {
-      tag: 'v1.5.0-obiwave.1',
-      manifest: 'security/releases/v1.5.0-obiwave.1.json',
-    }],
-  ]) {
+  for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
+    const identity = { tag, manifest };
     for (const extraTrigger of [
       '  push:',
       "  schedule:\n    - cron: '0 0 * * *'",
@@ -690,16 +703,8 @@ test('recovery contracts reject every trigger beyond manual dispatch', () => {
 });
 
 test('recovery contracts reject a bypassed immutable-artifact validation step', () => {
-  for (const [workflow, identity] of [
-    [recoveryV13, {
-      tag: 'v1.3.0-obiwave.2',
-      manifest: 'security/releases/v1.3.0-obiwave.2.json',
-    }],
-    [recoveryV15, {
-      tag: 'v1.5.0-obiwave.1',
-      manifest: 'security/releases/v1.5.0-obiwave.1.json',
-    }],
-  ]) {
+  for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
+    const identity = { tag, manifest };
     const mutation = workflow.replace(
       '          node scripts/release/recovery-manifest.mjs verify-all',
       '          echo validation-bypassed',
@@ -740,32 +745,16 @@ for (const [bypassName, mutateWorkflow] of [
   ],
 ]) {
   test(`recovery contracts reject ${bypassName}`, () => {
-    for (const [workflow, identity] of [
-      [recoveryV13, {
-        tag: 'v1.3.0-obiwave.2',
-        manifest: 'security/releases/v1.3.0-obiwave.2.json',
-      }],
-      [recoveryV15, {
-        tag: 'v1.5.0-obiwave.1',
-        manifest: 'security/releases/v1.5.0-obiwave.1.json',
-      }],
-    ]) {
+    for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
+      const identity = { tag, manifest };
       assert.throws(() => assertRecoveryWorkflow(mutateWorkflow(workflow), identity));
     }
   });
 }
 
-test('both recovery contracts reject identity, authorization, and deployment-gate mutations', () => {
-  for (const [workflow, identity] of [
-    [recoveryV13, {
-      tag: 'v1.3.0-obiwave.2',
-      manifest: 'security/releases/v1.3.0-obiwave.2.json',
-    }],
-    [recoveryV15, {
-      tag: 'v1.5.0-obiwave.1',
-      manifest: 'security/releases/v1.5.0-obiwave.1.json',
-    }],
-  ]) {
+test('recovery contracts reject identity, authorization, and deployment-gate mutations', () => {
+  for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
+    const identity = { tag, manifest };
     assertRecoveryWorkflow(workflow, identity);
     for (const mutation of [
       (value) => value.replace(/release_tag: v[^\n]+/, 'release_tag: v9.9.9-obiwave.9'),
@@ -775,6 +764,7 @@ test('both recovery contracts reject identity, authorization, and deployment-gat
       (value) => value.replace('    environment: production', '    env: inherited\n    environment: production'),
       (value) => value.replace('      security-events: write', '      actions: write'),
       (value) => value.replace('    environment: production', '    environment: staging'),
+      (value) => value.replace('          fetch-depth: 0', '          fetch-depth: 1'),
     ]) {
       assert.throws(() => assertRecoveryWorkflow(mutation(workflow), identity));
     }
