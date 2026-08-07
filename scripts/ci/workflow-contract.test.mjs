@@ -803,6 +803,26 @@ test('image scans invoke the local pinned scanner runner for JSON and SARIF', ()
   assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format sarif/);
 });
 
+test('JSON and SARIF scanner invocations include tag and digest-qualified pull references', () => {
+  const scanJob = jobBlock(scan, 'scan');
+  for (const stepName of [
+    'Scan ${{ matrix.image }} for policy JSON',
+    'Scan ${{ matrix.image }} for SARIF',
+  ]) {
+    const stepStart = scanJob.indexOf(`      - name: ${stepName}`);
+    assert.notEqual(stepStart, -1, `missing ${stepName} step`);
+    const nextStep = scanJob.indexOf('\n      - ', stepStart + 1);
+    const step = scanJob.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+    assert.equal(stepEnv(step).TAG_REF, '${{ steps.refs.outputs.tag_ref }}');
+    assert.equal(stepEnv(step).PULL_REF, '${{ steps.refs.outputs.pull_ref }}');
+
+    const command = stepRun(scanJob, stepName);
+    assert.match(command, /--tag-ref "\$TAG_REF"/);
+    assert.match(command, /recovery_args\+=\(--pull-ref "\$PULL_REF"\)/);
+    assert.match(command, /"\$\{recovery_args\[@\]\}"/);
+  }
+});
+
 test('sealed manifest workflow-call inputs are optional transport values', () => {
   assert.match(
     scan,
