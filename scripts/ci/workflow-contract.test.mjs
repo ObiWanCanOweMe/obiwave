@@ -23,6 +23,10 @@ const recoveryV15 = await readFile(
   new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
   'utf8',
 ).catch(() => '');
+const recoveryV16 = await readFile(
+  new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
+  'utf8',
+).catch(() => '');
 const recoveryV16Partial = JSON.parse(await readFile(
   new URL('../../security/releases/v1.6.0-obiwave.1.partial.json', import.meta.url),
   'utf8',
@@ -232,6 +236,220 @@ function assertNoGatedPathBypass(job, jobName) {
     `${jobName} steps must fail closed`,
   );
 }
+
+const RECOVERY_V16_TAG = 'v1.6.0-obiwave.1';
+const RECOVERY_V16_SOURCE = '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787';
+const RECOVERY_V16_PARTIAL = 'security/releases/v1.6.0-obiwave.1.partial.json';
+const RECOVERY_V16_IMAGES = Object.freeze([
+  'subwave-caddy',
+  'subwave-web',
+  'subwave-aio-heavy',
+  'subwave-tts-heavy',
+  'subwave-analyzer-heavy',
+]);
+
+function assertExactJobPermissions(job, expected) {
+  const declarations = permissionDeclarations(job);
+  assert.equal(declarations.length, 1, 'job must declare exactly one permissions block');
+  assert.deepEqual(
+    permissionEntries(job).map(({ key, value }) => [key, value]),
+    Object.entries(expected),
+  );
+}
+
+function assertSelectiveRecoveryV16(workflow) {
+  assert.deepEqual(topLevelBlockLines(workflow, 'on'), ['  workflow_dispatch:']);
+  assert.deepEqual(recoveryJobNames(workflow), [
+    'validate',
+    'release-gate',
+    'build',
+    'seal',
+    'vulnerability-policy',
+    'deploy-production',
+  ]);
+  assert.equal(
+    workflow.match(/^permissions:\n((?:  [^\n]+\n?)*)/m)?.[1],
+    '  contents: read\n',
+  );
+  assert.match(
+    workflow,
+    /^concurrency:\n  group: recover-v1\.6\.0-obiwave\.1\n  cancel-in-progress: false$/m,
+  );
+  assert.doesNotMatch(workflow, /\$\{\{\s*inputs\./);
+
+  const validate = jobBlock(workflow, 'validate');
+  const releaseGate = jobBlock(workflow, 'release-gate');
+  const build = jobBlock(workflow, 'build');
+  const seal = jobBlock(workflow, 'seal');
+  const policy = jobBlock(workflow, 'vulnerability-policy');
+  const deploy = jobBlock(workflow, 'deploy-production');
+
+  assertExactJobPermissions(validate, { contents: 'read', packages: 'read' });
+  assertExactJobPermissions(build, { contents: 'read', packages: 'write' });
+  assertExactJobPermissions(seal, { contents: 'read', packages: 'read' });
+  assertExactJobPermissions(policy, {
+    contents: 'read',
+    packages: 'read',
+    'security-events': 'write',
+  });
+  assert.equal(permissionDeclarations(releaseGate).length, 0);
+  assert.equal(permissionDeclarations(deploy).length, 0);
+
+  assert.match(releaseGate, /^    uses: \.\/\.github\/workflows\/ci\.yml$/m);
+  assert.match(releaseGate, new RegExp(`^      checkout_ref: ${RECOVERY_V16_SOURCE}$`, 'm'));
+  assert.deepEqual(jobNeeds(build), ['validate', 'release-gate']);
+  assert.deepEqual(jobNeeds(seal), ['validate', 'release-gate', 'build']);
+  assert.deepEqual(jobNeeds(policy), ['validate', 'release-gate', 'build', 'seal']);
+  assert.deepEqual(jobNeeds(deploy), [
+    'validate',
+    'release-gate',
+    'build',
+    'seal',
+    'vulnerability-policy',
+  ]);
+
+  const buildMatrix = build.match(
+    /^      matrix:\n        include:\n([\s\S]*?)(?=^    steps:)/m,
+  )?.[1];
+  assert.ok(buildMatrix, 'missing selective build matrix');
+  assert.equal(buildMatrix, [
+    '          - image: subwave-caddy',
+    '            dockerfile: docker/Dockerfile.caddy',
+    '            platforms: linux/amd64,linux/arm64',
+    '          - image: subwave-web',
+    '            dockerfile: web/Dockerfile',
+    '            platforms: linux/amd64,linux/arm64',
+    '          - image: subwave-aio-heavy',
+    '            dockerfile: docker/Dockerfile.aio',
+    '            platforms: linux/amd64',
+    '            build_args: |',
+    '              WITH_CLAP=1',
+    '              WITH_DEMUCS=1',
+    '          - image: subwave-tts-heavy',
+    '            dockerfile: docker/Dockerfile.tts-heavy',
+    '            platforms: linux/amd64',
+    '          - image: subwave-analyzer-heavy',
+    '            dockerfile: docker/Dockerfile.analyzer',
+    '            platforms: linux/amd64',
+    '            build_args: |',
+    '              WITH_CLAP=1',
+    '              WITH_DEMUCS=1',
+    '',
+  ].join('\n'));
+
+  const validationStep = stepBlock(validate, 'Verify partial recovery identity');
+  assert.match(validate, /uses: actions\/checkout@v5\n        with:\n          fetch-depth: 0/);
+  assert.match(validate, /uses: docker\/login-action@v4[\s\S]*?registry: ghcr\.io/);
+  assert.equal(
+    foldedStepCommand(validationStep),
+    `node scripts/release/recovery-manifest.mjs verify-partial --manifest ${RECOVERY_V16_PARTIAL} --scanner security/trivy-scanner.json --repository ObiWanCanOweMe/obiwave`,
+  );
+  const validateAbsence = stepRun(validate, 'Prove selective build tags are absent');
+  assert.equal((validateAbsence.match(/assert-image-tag-absent\.mjs/g) ?? []).length, 5);
+  for (const image of RECOVERY_V16_IMAGES) {
+    assert.equal(
+      (validateAbsence.match(new RegExp(`ghcr\\.io/obiwancanoweme/${image}:${RECOVERY_V16_TAG.replaceAll('.', '\\.')}`, 'g')) ?? []).length,
+      1,
+    );
+  }
+
+  assert.equal(
+    (build.match(new RegExp(`ref: ${RECOVERY_V16_SOURCE}`, 'g')) ?? []).length,
+    1,
+  );
+  assert.match(build, /uses: docker\/setup-qemu-action@v4/);
+  assert.match(build, /uses: docker\/setup-buildx-action@v4/);
+  assert.match(build, /uses: docker\/login-action@v4[\s\S]*?registry: ghcr\.io/);
+  const repeatAbsenceIndex = build.indexOf('      - name: Reconfirm immutable tag absence');
+  const buildActionIndex = build.indexOf('      - id: build');
+  assert.ok(repeatAbsenceIndex >= 0 && buildActionIndex > repeatAbsenceIndex);
+  assert.doesNotMatch(build.slice(repeatAbsenceIndex, buildActionIndex), /\n      - /);
+  assert.match(
+    stepRun(build, 'Reconfirm immutable tag absence'),
+    /node scripts\/ci\/assert-image-tag-absent\.mjs "ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:v1\.6\.0-obiwave\.1"/,
+  );
+  assert.match(build, /^          context: \.$/m);
+  assert.match(build, /^          file: \$\{\{ matrix\.dockerfile \}\}$/m);
+  assert.match(build, /^          push: true$/m);
+  assert.match(build, /^          tags: ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:v1\.6\.0-obiwave\.1$/m);
+  assert.match(build, /^            org\.opencontainers\.image\.version=v1\.6\.0-obiwave\.1$/m);
+  assert.match(build, /^            org\.opencontainers\.image\.revision=87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787$/m);
+
+  const record = stepBlock(build, 'Record immutable build digest');
+  assert.deepEqual(stepEnv(record), {
+    IMAGE: '${{ matrix.image }}',
+    DIGEST: '${{ steps.build.outputs.digest }}',
+    OUTPUT_PATH: '${{ runner.temp }}/${{ matrix.image }}.json',
+  });
+  const recordCommand = stepRun(build, 'Record immutable build digest');
+  assert.match(recordCommand, /\^subwave-\[a-z0-9-\]\+\$/);
+  assert.match(recordCommand, /\^sha256:\[a-f0-9\]\{64\}\$/);
+  assert.match(recordCommand, /writeFileSync\(process\.env\.OUTPUT_PATH/);
+  assert.match(build, /name: recovery-build-digest-\$\{\{ matrix\.image \}\}/);
+  assert.match(build, /path: \$\{\{ runner\.temp \}\}\/\$\{\{ matrix\.image \}\}\.json/);
+
+  assert.match(seal, /pattern: recovery-build-digest-\*/);
+  assert.match(seal, /merge-multiple: true/);
+  assert.match(seal, /node scripts\/release\/recovery-manifest\.mjs seal/);
+  assert.match(seal, /name: v1\.6\.0-obiwave\.1-recovery-manifest/);
+  assert.match(seal, /^      manifest_b64: \$\{\{ steps\.seal\.outputs\.manifest_b64 \}\}$/m);
+  assert.match(seal, /manifest\.images\.length !== 10/);
+  assert.match(seal, /manifest\.images\.map\(\(\{ name, digest \}\)/);
+  assert.match(seal, /GITHUB_STEP_SUMMARY/);
+  const manifestArtifact = stepBlock(seal, 'Upload sealed recovery manifest');
+  assert.match(manifestArtifact, /^        uses: actions\/upload-artifact@v4$/m);
+  assert.match(manifestArtifact, /path: \$\{\{ runner\.temp \}\}\/v1\.6\.0-obiwave\.1-recovery-manifest\.json/);
+
+  assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
+  assert.match(policy, /^      release_tag: v1\.6\.0-obiwave\.1$/m);
+  assert.match(policy, /^      partial_recovery_manifest: security\/releases\/v1\.6\.0-obiwave\.1\.partial\.json$/m);
+  assert.match(policy, /^      sealed_recovery_manifest_b64: \$\{\{ needs\.seal\.outputs\.manifest_b64 \}\}$/m);
+  assert.equal((workflow.match(/needs\.seal\.outputs\.manifest_b64/g) ?? []).length, 1);
+
+  assert.equal(jobScalar(deploy, 'environment'), 'production');
+  assert.match(deploy, /^    concurrency:\n      group: subwave-production\n      cancel-in-progress: false$/m);
+  assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
+  const deployStep = stepBlock(deploy, 'Deploy immutable release through Portainer');
+  assert.equal(stepEnv(deployStep).SUBWAVE_RELEASE_TAG, RECOVERY_V16_TAG);
+  assert.match(deployStep, /^        run: node scripts\/deploy\/portainer-release\.mjs$/m);
+
+  for (const [jobName, job] of [
+    ['validate', validate],
+    ['release-gate', releaseGate],
+    ['build', build],
+    ['seal', seal],
+    ['vulnerability-policy', policy],
+    ['deploy-production', deploy],
+  ]) {
+    assertNoGatedPathBypass(job, jobName);
+  }
+  assert.doesNotMatch(workflow, /continue-on-error/);
+  assert.doesNotMatch(workflow, /\bdocker\s+tag\b|\bgh\s+release\s+create\b|\b(?:docker|gh)\s+[^\n]*(?:delete|rm)\b/i);
+  for (const [, tag] of workflow.matchAll(/ghcr\.io\/obiwancanoweme\/[^\s"']+:([^\s"']+)/g)) {
+    assert.equal(tag, RECOVERY_V16_TAG, 'alternate public image tag is forbidden');
+  }
+}
+
+test('v1.6 recovery selectively publishes, seals, scans, and deploys the partial publication', () => {
+  assertSelectiveRecoveryV16(recoveryV16);
+});
+
+test('v1.6 recovery rejects immutable-tag and gate bypass mutations', () => {
+  assertSelectiveRecoveryV16(recoveryV16);
+  for (const mutation of [
+    recoveryV16.replace('needs: [validate, release-gate]', 'needs: [validate]'),
+    recoveryV16.replace('    environment: production', '    environment: staging'),
+    recoveryV16.replaceAll('v1.6.0-obiwave.1', 'latest'),
+    `${recoveryV16}\n# docker tag source target\n`,
+    `${recoveryV16}\n# gh release create v1.6.0-obiwave.1\n`,
+    recoveryV16.replace(
+      '      - id: build',
+      '      - name: Bypass\n        run: true\n      - id: build',
+    ),
+  ]) {
+    assert.throws(() => assertSelectiveRecoveryV16(mutation));
+  }
+});
 
 function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   assert.deepEqual(

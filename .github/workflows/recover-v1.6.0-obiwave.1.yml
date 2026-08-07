@@ -1,0 +1,236 @@
+name: Recover v1.6.0-obiwave.1 partial publication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recover-v1.6.0-obiwave.1
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify partial recovery identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release/recovery-manifest.mjs verify-partial
+          --manifest security/releases/v1.6.0-obiwave.1.partial.json
+          --scanner security/trivy-scanner.json
+          --repository ObiWanCanOweMe/obiwave
+      - name: Prove selective build tags are absent
+        run: |
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/subwave-caddy:v1.6.0-obiwave.1"
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1"
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/subwave-aio-heavy:v1.6.0-obiwave.1"
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.6.0-obiwave.1"
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/subwave-analyzer-heavy:v1.6.0-obiwave.1"
+
+  release-gate:
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: 87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787
+
+  build:
+    needs: [validate, release-gate]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: subwave-caddy
+            dockerfile: docker/Dockerfile.caddy
+            platforms: linux/amd64,linux/arm64
+          - image: subwave-web
+            dockerfile: web/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: subwave-aio-heavy
+            dockerfile: docker/Dockerfile.aio
+            platforms: linux/amd64
+            build_args: |
+              WITH_CLAP=1
+              WITH_DEMUCS=1
+          - image: subwave-tts-heavy
+            dockerfile: docker/Dockerfile.tts-heavy
+            platforms: linux/amd64
+          - image: subwave-analyzer-heavy
+            dockerfile: docker/Dockerfile.analyzer
+            platforms: linux/amd64
+            build_args: |
+              WITH_CLAP=1
+              WITH_DEMUCS=1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reconfirm immutable tag absence
+        run: |
+          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          build-args: |
+            ${{ matrix.build_args }}
+            SUBWAVE_BUILD_VERSION=v1.6.0-obiwave.1
+          push: true
+          tags: ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1
+          labels: |
+            org.opencontainers.image.version=v1.6.0-obiwave.1
+            org.opencontainers.image.revision=87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787
+          cache-from: type=gha,scope=recover-v1.6.0-obiwave.1-${{ matrix.image }}
+          cache-to: type=gha,scope=recover-v1.6.0-obiwave.1-${{ matrix.image }},mode=max
+      - name: Record immutable build digest
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          OUTPUT_PATH: ${{ runner.temp }}/${{ matrix.image }}.json
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+
+          const record = { image: process.env.IMAGE, digest: process.env.DIGEST };
+          if (!/^subwave-[a-z0-9-]+$/.test(record.image)
+            || !/^sha256:[a-f0-9]{64}$/.test(record.digest)) {
+            throw new Error('Build digest record is invalid');
+          }
+          writeFileSync(process.env.OUTPUT_PATH, `${JSON.stringify(record)}\n`);
+          NODE
+      - name: Upload immutable build digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-build-digest-${{ matrix.image }}
+          path: ${{ runner.temp }}/${{ matrix.image }}.json
+          if-no-files-found: error
+
+  seal:
+    needs: [validate, release-gate, build]
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    outputs:
+      manifest_b64: ${{ steps.seal.outputs.manifest_b64 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: recovery-build-digest-*
+          path: ${{ runner.temp }}/recovery-build-digests
+          merge-multiple: true
+      - id: seal
+        name: Seal recovery manifest
+        run: |
+          node scripts/release/recovery-manifest.mjs seal \
+            --manifest security/releases/v1.6.0-obiwave.1.partial.json \
+            --scanner security/trivy-scanner.json \
+            --build-digests "${{ runner.temp }}/recovery-build-digests" \
+            --output "${{ runner.temp }}/v1.6.0-obiwave.1-recovery-manifest.json"
+      - name: Summarize sealed recovery manifest
+        env:
+          MANIFEST_PATH: ${{ runner.temp }}/v1.6.0-obiwave.1-recovery-manifest.json
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const manifest = JSON.parse(readFileSync(process.env.MANIFEST_PATH, 'utf8'));
+          if (manifest.releaseTag !== 'v1.6.0-obiwave.1'
+            || manifest.sourceCommit !== '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787'
+            || !Array.isArray(manifest.images)
+            || manifest.images.length !== 10) {
+            throw new Error('Sealed recovery summary identity is invalid');
+          }
+          const lines = [
+            '## Sealed partial-publication recovery',
+            `- Release: \`${manifest.releaseTag}\``,
+            `- Source: \`${manifest.sourceCommit}\``,
+            '',
+            '### Immutable images',
+            ...manifest.images.map(({ name, digest }) => `- \`${name}\`: \`${digest}\``),
+            '',
+          ];
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+          NODE
+      - name: Upload sealed recovery manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1.6.0-obiwave.1-recovery-manifest
+          path: ${{ runner.temp }}/v1.6.0-obiwave.1-recovery-manifest.json
+          if-no-files-found: error
+
+  vulnerability-policy:
+    needs: [validate, release-gate, build, seal]
+    uses: ./.github/workflows/scan-images.yml
+    with:
+      release_tag: v1.6.0-obiwave.1
+      partial_recovery_manifest: security/releases/v1.6.0-obiwave.1.partial.json
+      sealed_recovery_manifest_b64: ${{ needs.seal.outputs.manifest_b64 }}
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+  deploy-production:
+    needs: [validate, release-gate, build, seal, vulnerability-policy]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: subwave-production
+      cancel-in-progress: false
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Deploy immutable release through Portainer
+        env:
+          PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
+          PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
+          SUBWAVE_RELEASE_TAG: v1.6.0-obiwave.1
+          SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
+          SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
+          SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
+        run: node scripts/deploy/portainer-release.mjs
