@@ -4,6 +4,7 @@
 import type { KindSpec } from './types.js';
 import { pickNextTrack } from '../../../src/llm/dj.js';
 import { djAgent } from '../../../src/llm/sdk.js';
+import { agentStrategyOptions } from '../../../src/llm/agent.js';
 import { pickSystem, pickSchema, pickerAgent } from '../../../src/broadcast/dj-agent.js';
 import {
   benchContext, candidateSet, recentPlays, pickerToolsSynthetic,
@@ -31,9 +32,6 @@ function poolScenario(name: string, shape: Parameters<typeof candidateSet>[0], e
   };
 }
 
-const agentDeadlineMs = () =>
-  typeof (pickerAgent as any).timeoutMs === 'function' ? (pickerAgent as any).timeoutMs() : (pickerAgent as any).timeoutMs;
-
 function agentScenario(name: string, messages: () => any[]) {
   return {
     name,
@@ -44,8 +42,7 @@ function agentScenario(name: string, messages: () => any[]) {
         messages: messages(),
         tools,
         schema: pickSchema(),
-        maxSteps: (pickerAgent as any).maxSteps,
-        timeoutMs: agentDeadlineMs(),
+        ...agentStrategyOptions(pickerAgent),
         kind: 'djAgentPick',
       });
       return { object: result.object, toolCount: (result.toolCalls || []).length, seen };

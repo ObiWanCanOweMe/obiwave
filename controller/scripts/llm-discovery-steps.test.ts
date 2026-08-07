@@ -172,3 +172,22 @@ test('the prompt promises the MINIMUM across the legs that could run', async () 
   });
   assert.equal(promptDiscoverySteps(), 3);
 });
+
+test('direct benchmark options preserve the live agents provider discovery budget', async () => {
+  const agentApi = await import('../src/llm/agent.js') as Record<string, any>;
+  assert.equal(typeof agentApi.agentStrategyOptions, 'function', 'public parity helper exists');
+
+  const { pickerAgent, requestAgent } = await import('../src/broadcast/dj-agent/agents.js');
+  const { directorAgent } = await import('../src/skills/_agent.js');
+  const { runDiscoverySteps } = await import('../src/llm/internal/provider/capabilities.js');
+
+  const pickerOptions = agentApi.agentStrategyOptions(pickerAgent);
+  const requestOptions = agentApi.agentStrategyOptions(requestAgent);
+  const directorOptions = agentApi.agentStrategyOptions(directorAgent);
+
+  assert.equal(pickerOptions.providerDiscoveryBudget, true);
+  assert.equal(requestOptions.providerDiscoveryBudget, true);
+  assert.equal(runDiscoverySteps({ provider: 'litellm' }, pickerOptions.providerDiscoveryBudget), 3);
+  assert.equal(runDiscoverySteps({ provider: 'litellm' }, requestOptions.providerDiscoveryBudget), 3);
+  assert.equal(runDiscoverySteps({ provider: 'litellm' }, directorOptions.providerDiscoveryBudget), 1);
+});

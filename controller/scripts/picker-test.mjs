@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { tool } from 'ai';
 import * as settings from '../src/settings.js';
 import { djAgent } from '../src/llm/sdk.js';
+import { agentStrategyOptions } from '../src/llm/agent.js';
 import { pickSystem, pickSchema, pickerAgent } from '../src/broadcast/dj-agent.js';
 
 const FAKE_SONGS = [
@@ -152,6 +153,7 @@ async function runOnce(label, messagesMode) {
       schema: pickSchema(),
       // Mirror the live picker call site (dj-agent.js pickViaAgent).
       // maxSteps/timeoutMs overridable via argv for tuning runs.
+      ...agentStrategyOptions(pickerAgent),
       maxSteps: TEST_MAX_STEPS,
       timeoutMs: TEST_TIMEOUT_MS,
       kind: 'pickerTest',
