@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "releaseTag": "v1.6.0-obiwave.3",
+  "sourceCommit": "47a76f4cb5b45a26307ba4ebfcf7c77f66405492",
+  "scanner": {
+    "version": "0.67.2",
+    "imageRef": "aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08"
+  },
+  "images": [
+    { "name": "subwave-caddy", "digest": "sha256:201ac36144dd5aac2053ec6558c7a5af56befb8539de248d16a5afa2e4e523f4" },
+    { "name": "subwave-broadcast", "digest": "sha256:516403e48ce839ddd36d09dd7f9f141b727aff56bfe293dfc0874e28c4f79d6b" },
+    { "name": "subwave-controller", "digest": "sha256:540b4ee5e147e874a85c1e191f4195cc6c11d71f995951d985f98da9ce056997" },
+    { "name": "subwave-web", "digest": "sha256:fe1da1ce8bf418953a080b9372985cedd8eab7cfbf007b145e8de2c4dda9eef8" },
+    { "name": "subwave-aio", "digest": "sha256:8ac05fc188da2fa10d11b108775a3d41b14baa76b120a8fbec76e2c8bdc4317c" },
+    { "name": "subwave-aio-heavy", "digest": "sha256:9bc62cda75bbfeea18ab4e3b7a1c2292c86cfa4034b8a336ac722daa3a67230e" },
+    { "name": "subwave-tts-heavy", "digest": "sha256:8c87ff0b738f839ffe7cc9235bca318ce2fb9f6a2630b6ba0be306a988eec8f9" },
+    { "name": "subwave-analyzer", "digest": "sha256:3dc8f420425e48768b0ab6d733aa3e47d5d883e067632dc6483ed0f4d5a1798f" },
+    { "name": "subwave-analyzer-heavy", "digest": "sha256:5141e66cf1f953f6a4c7c4e753c86ed1556da7912d860369a069f7d9eafe1d15" },
+    { "name": "subwave-analyzer-cuda", "digest": "sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341" }
+  ]
+}

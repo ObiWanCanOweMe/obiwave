@@ -31,6 +31,10 @@ const finalizeV16Revision2 = await readFile(
   new URL('../../.github/workflows/finalize-v1.6.0-obiwave.2.yml', import.meta.url),
   'utf8',
 );
+const finalizeV16Revision3 = await readFile(
+  new URL('../../.github/workflows/finalize-v1.6.0-obiwave.3.yml', import.meta.url),
+  'utf8',
+);
 const recoveryV16 = await readFile(
   new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -275,6 +279,11 @@ const RECOVERY_WORKFLOWS = Object.freeze([
     workflow: finalizeV16Revision2,
     tag: 'v1.6.0-obiwave.2',
     manifest: 'security/releases/v1.6.0-obiwave.2.json',
+  }),
+  Object.freeze({
+    workflow: finalizeV16Revision3,
+    tag: 'v1.6.0-obiwave.3',
+    manifest: 'security/releases/v1.6.0-obiwave.3.json',
   }),
 ]);
 
@@ -554,7 +563,10 @@ test('v1.6 recovery rejects immutable-tag and gate bypass mutations', () => {
 });
 
 function assertRecoveryWorkflow(workflow, { tag, manifest }) {
-  const deployRechecksIdentity = tag === 'v1.6.0-obiwave.2';
+  const deployRechecksIdentity = [
+    'v1.6.0-obiwave.2',
+    'v1.6.0-obiwave.3',
+  ].includes(tag);
   assert.deepEqual(
     topLevelBlockLines(workflow, 'on'),
     ['  workflow_dispatch:'],
