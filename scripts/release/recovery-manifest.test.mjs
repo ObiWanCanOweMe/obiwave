@@ -86,6 +86,30 @@ function exactV16Manifest() {
   };
 }
 
+function exactV16Revision2Manifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.6.0-obiwave.2',
+    sourceCommit: '28076250da60844457973794933b5af3b82fa1dc',
+    scanner: {
+      version: '0.67.2',
+      imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+    },
+    images: [
+      { name: 'subwave-caddy', digest: 'sha256:03315a161f65eb17c1d31de1b01e5b3754a7fdf7e37f85fa90df7a6a13ab416d' },
+      { name: 'subwave-broadcast', digest: 'sha256:da1347715f0830ef089dba511e750752340220103e25fb2d7c62d081c39af270' },
+      { name: 'subwave-controller', digest: 'sha256:3735c284f0c10e59e691c3d3605e741cfbde266850bb11cd9315699dcd81592e' },
+      { name: 'subwave-web', digest: 'sha256:5cced33d7555185218bed805997e6547ae4b8bc978aaf35f828713ddc518a6c3' },
+      { name: 'subwave-aio', digest: 'sha256:f3b54ec397d032cf551fffb70275d9a4e2fe3c810a6389075846e5cbbb2c9ca5' },
+      { name: 'subwave-aio-heavy', digest: 'sha256:d75e67787e3e409e69ba312218a993dda15b0f8bebc4ef2ee3dd2b302a27ab49' },
+      { name: 'subwave-tts-heavy', digest: 'sha256:0243b5ba48aa771d31036597c8c9c8f834f1bd5db8f6ce5b5584df76dd80e4fa' },
+      { name: 'subwave-analyzer', digest: 'sha256:e72b6d318c652d1dd3938087b83e4c9251f3d9cc401d0a3cd2f833e49ebca1ea' },
+      { name: 'subwave-analyzer-heavy', digest: 'sha256:ddc2dcc05de5f35fe38897417e7cddc47a70ff72856766321baac5c70d3a1cf7' },
+      { name: 'subwave-analyzer-cuda', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' },
+    ],
+  };
+}
+
 function exactV16PartialManifest() {
   return {
     schemaVersion: 2,
@@ -238,7 +262,8 @@ function rejects(label, mutate) {
   for (const [release, exactManifest] of [
     ['v1.3', exactV13Manifest],
     ['v1.5', exactV15Manifest],
-    ['v1.6', exactV16Manifest],
+    ['v1.6 revision 1', exactV16Manifest],
+    ['v1.6 revision 2', exactV16Revision2Manifest],
   ]) {
     test(`rejects ${label} for ${release}`, () => {
       const manifest = exactManifest();
@@ -256,6 +281,7 @@ test('accepts each literal approved recovery identity', () => {
     [exactV13Manifest(), 'v1.3.0-obiwave.2', '41c8a329670f99c3b440a468adbb9fe2d900a4fe'],
     [exactV15Manifest(), 'v1.5.0-obiwave.1', 'fe269a1e632fe6f886ac987f641f41326e1392e0'],
     [exactV16Manifest(), 'v1.6.0-obiwave.1', '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787'],
+    [exactV16Revision2Manifest(), 'v1.6.0-obiwave.2', '28076250da60844457973794933b5af3b82fa1dc'],
   ]) {
     const value = manifestModule.validateRecoveryManifest({ manifest, scannerConfig });
     assert.equal(value.releaseTag, tag);
@@ -297,6 +323,12 @@ test('returns canonical and digest-qualified references', () => {
     pullRef: 'ghcr.io/obiwancanoweme/subwave-caddy:v1.6.0-obiwave.1@sha256:2721393a1eb3080e4dc6114893ac6a0472a258b8e32654f1b2a9c63a926c050f',
     digest: 'sha256:2721393a1eb3080e4dc6114893ac6a0472a258b8e32654f1b2a9c63a926c050f',
   });
+  assert.deepEqual(manifestModule.recoveryImage(exactV16Revision2Manifest(), 'subwave-analyzer-cuda'), {
+    image: 'subwave-analyzer-cuda',
+    tagRef: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.6.0-obiwave.2',
+    pullRef: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.6.0-obiwave.2@sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
+    digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
+  });
 });
 
 rejects('a wrong fork tag', (manifest) => { manifest.releaseTag = 'v1.3.0'; });
@@ -308,7 +340,8 @@ rejects('a wrong scanner image', (manifest) => {
 for (const [release, exactManifest] of [
   ['v1.3', exactV13Manifest],
   ['v1.5', exactV15Manifest],
-  ['v1.6', exactV16Manifest],
+  ['v1.6 revision 1', exactV16Manifest],
+  ['v1.6 revision 2', exactV16Revision2Manifest],
 ]) {
   test(`rejects scanner-config disagreement for ${release}`, () => {
     assert.throws(
@@ -490,6 +523,9 @@ const manifestPath = fileURLToPath(new URL('../../security/releases/v1.3.0-obiwa
 const v16ManifestPath = fileURLToPath(
   new URL('../../security/releases/v1.6.0-obiwave.1.json', import.meta.url),
 );
+const v16Revision2ManifestPath = fileURLToPath(
+  new URL('../../security/releases/v1.6.0-obiwave.2.json', import.meta.url),
+);
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
 function runImageCli(extra = [], env = process.env) {
@@ -519,6 +555,17 @@ test('validate CLI accepts the checked-in v1.6 recovery identity', () => {
     scriptPath,
     'validate',
     '--manifest', v16ManifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('validate CLI accepts the checked-in v1.6 revision 2 recovery identity', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', v16Revision2ManifestPath,
     '--scanner', scannerPath,
   ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
