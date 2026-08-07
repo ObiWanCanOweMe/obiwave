@@ -20,12 +20,14 @@ const V13_TAG = 'v1.3.0-obiwave.2';
 const V15_TAG = 'v1.5.0-obiwave.1';
 const V16_TAG = 'v1.6.0-obiwave.1';
 const V16_REVISION_2_TAG = 'v1.6.0-obiwave.2';
+const V16_REVISION_3_TAG = 'v1.6.0-obiwave.3';
 const TAG = V13_TAG;
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
 const V15_CUDA_DIGEST = 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2';
 const V16_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V16_REVISION_2_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
+const V16_REVISION_3_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
 const checkedInAcceptance = JSON.parse(
   await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
@@ -664,6 +666,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
     [V15_TAG, V15_CUDA_DIGEST],
     [V16_TAG, V16_CUDA_DIGEST],
     [V16_REVISION_2_TAG, V16_REVISION_2_CUDA_DIGEST],
+    [V16_REVISION_3_TAG, V16_REVISION_3_CUDA_DIGEST],
   ]) {
     const summary = validateReports({
       tag,
@@ -686,6 +689,8 @@ test('cross-release CUDA digests fail closed', () => {
     [V16_TAG, V15_CUDA_DIGEST],
     [V16_REVISION_2_TAG, V13_CUDA_DIGEST],
     [V16_REVISION_2_TAG, V15_CUDA_DIGEST],
+    [V16_REVISION_3_TAG, V13_CUDA_DIGEST],
+    [V16_REVISION_3_TAG, V15_CUDA_DIGEST],
   ]) {
     const error = validationError({
       tag,
