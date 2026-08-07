@@ -26,8 +26,10 @@ and probes while normal DJ calls continue to succeed.
 
 ## Design
 
-`resolveLiteLlmRouteConfig()` already classifies a URL as trusted when it is a
-saved LiteLLM provider endpoint. For that branch, resolve the token with
+Two route paths resolve LiteLLM connections. `resolveCustomConnection()` in
+`model-discovery.ts` binds credentials to the saved discovery endpoint;
+`resolveLiteLlmRouteConfig()` in `llm.ts` does the same for compatibility
+probes. In each saved-endpoint branch, resolve the token with
 `effectiveLiteLlmApiKey({ apiKey: settings.llmKeyFor('litellm') })`. This keeps
 the established order: saved provider token, then `LITELLM_API_KEY`, then
 `OPENAI_API_KEY`.
@@ -40,9 +42,9 @@ token as before.
 
 Extend `controller/scripts/litellm-routes.test.ts` with the missing production
 shape: a saved LiteLLM URL, no saved provider token, no environment base URL,
-and an `OPENAI_API_KEY` token. The mounted `/settings/llm/models` route must send
-that token to the saved gateway. Existing changed-origin assertions remain the
-security regression coverage.
+and an `OPENAI_API_KEY` token. The mounted `/settings/llm/models` and
+`/settings/llm/probe-compat` routes must send that token to the saved gateway.
+Existing changed-origin assertions remain the security regression coverage.
 
 Verify the focused route test, the complete controller test suite, lint, and
 typecheck. After deployment, verify authenticated live discovery returns a

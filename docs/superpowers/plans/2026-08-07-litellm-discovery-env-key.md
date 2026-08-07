@@ -21,15 +21,16 @@
 
 **Files:**
 - Modify: `controller/scripts/litellm-routes.test.ts`
+- Modify: `controller/src/routes/settings/model-discovery.ts:110-150`
 - Modify: `controller/src/routes/settings/llm.ts:370-390`
 
 **Interfaces:**
-- Consumes: `effectiveLiteLlmApiKey(cfg, env?)`, `settings.llmKeyFor(provider)`, and `savedProviderEndpoints(provider)`.
-- Produces: `resolveLiteLlmRouteConfig()` returning the saved LiteLLM URL with the effective environment bearer when no saved bearer exists.
+- Consumes: `effectiveLiteLlmApiKey(cfg, env?)`, `settings.llmKeyFor(provider)`, and the saved-endpoint binding checks in both route resolvers.
+- Produces: discovery and probe resolvers returning the saved LiteLLM URL with the effective environment bearer when no saved bearer exists.
 
 - [ ] **Step 1: Add the failing mounted-route regression**
 
-Add a route-test phase that clears `LITELLM_API_BASE` and `LITELLM_API_KEY`, sets `OPENAI_API_KEY` to `openai-environment-token`, saves `primary.baseUrl` with an empty LiteLLM provider token, calls model discovery, and asserts:
+Add a route-test phase that clears `LITELLM_API_BASE` and `LITELLM_API_KEY`, sets `OPENAI_API_KEY` to `openai-environment-token`, saves `primary.baseUrl` with an empty LiteLLM provider token, then calls model discovery and the compatibility probe. Assert each mounted route sends `Bearer openai-environment-token` to the saved gateway.
 
 ```ts
 assert.deepEqual(primary.requests.at(-1), {
@@ -50,11 +51,22 @@ cd controller
 npx tsx scripts/litellm-routes.test.ts
 ```
 
-Expected: FAIL because the saved URL request has an empty authorization header instead of `Bearer openai-environment-token`.
+Expected first failure: model discovery sends an empty authorization header instead of `Bearer openai-environment-token`. After fixing discovery, the same test must fail at the probe assertion for the same reason.
 
 - [ ] **Step 3: Implement the minimal trusted-endpoint fallback**
 
-Change only the saved-endpoint branch:
+For chat model discovery, resolve the saved LiteLLM token through the shared
+environment-aware helper while the connection is still bound to `savedBase`:
+
+```ts
+const inlineKey = savedBase ? settings.llmKeyFor(input.provider) : '';
+savedKey = input.provider === 'litellm' && savedBase
+  ? effectiveLiteLlmApiKey({ apiKey: inlineKey })
+  : inlineKey;
+```
+
+Run the focused test and confirm discovery advances to the still-failing probe
+assertion. Then change only the probe's saved-endpoint branch:
 
 ```ts
 if (!apiKey && savedProviderEndpoints('litellm').has(baseUrl)) {
@@ -83,7 +95,7 @@ Expected: all commands exit 0; route test confirms the environment token reaches
 - [ ] **Step 5: Commit the fix**
 
 ```bash
-git add controller/scripts/litellm-routes.test.ts controller/src/routes/settings/llm.ts
+git add controller/scripts/litellm-routes.test.ts controller/src/routes/settings/model-discovery.ts controller/src/routes/settings/llm.ts
 git commit -m "fix: authenticate saved LiteLLM discovery URLs"
 ```
 
