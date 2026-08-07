@@ -367,20 +367,6 @@ function parseDigest(output) {
   return value;
 }
 
-function parseRelease(output) {
-  let value;
-  try {
-    value = JSON.parse(requireOutput(output, 'GitHub release'));
-  } catch (error) {
-    if (error.message.startsWith('Recovery ')) throw error;
-    throw new Error('Recovery GitHub release returned invalid JSON');
-  }
-  if (!hasExactKeys(value, ['tagName', 'targetCommitish']) || typeof value.tagName !== 'string' || typeof value.targetCommitish !== 'string') {
-    throw new Error('Recovery GitHub release returned invalid metadata');
-  }
-  return value;
-}
-
 function parsePublicRelease(output) {
   let value;
   try {
@@ -425,13 +411,14 @@ export function verifyRecoveryPreflight({ manifest, repository, run = commandRun
   );
   if (tagCommit !== manifest.sourceCommit) throw new Error('Recovery release tag source mismatch');
 
-  const release = parseRelease(runCommand(run, 'gh', [
+  const release = parsePublicRelease(runCommand(run, 'gh', [
     'release', 'view', manifest.releaseTag, '--repo', repository,
-    '--json', 'tagName,targetCommitish',
+    '--json', 'tagName,targetCommitish,isDraft,isPrerelease',
   ], 'GitHub release'));
   if (release.tagName !== manifest.releaseTag || release.targetCommitish !== manifest.sourceCommit) {
     throw new Error('Recovery GitHub release source mismatch');
   }
+  if (release.isDraft || release.isPrerelease) throw new Error('Recovery GitHub release is not public');
 
   const images = manifest.images.map((entry) => {
     const { tagRef } = recoveryImage(manifest, entry.name);

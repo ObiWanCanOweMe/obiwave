@@ -554,6 +554,7 @@ test('v1.6 recovery rejects immutable-tag and gate bypass mutations', () => {
 });
 
 function assertRecoveryWorkflow(workflow, { tag, manifest }) {
+  const deployRechecksIdentity = tag === 'v1.6.0-obiwave.2';
   assert.deepEqual(
     topLevelBlockLines(workflow, 'on'),
     ['  workflow_dispatch:'],
@@ -600,6 +601,11 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   assert.deepEqual(jobStepHeaders(deploy), [
     'uses: actions/checkout@v5',
     'uses: actions/setup-node@v5',
+    ...(deployRechecksIdentity ? [
+      'uses: docker/setup-buildx-action@v4',
+      'uses: docker/login-action@v4',
+      'name: Reverify immutable recovery artifacts',
+    ] : []),
     'name: Deploy immutable release through Portainer',
   ]);
   assert.match(validate, /^    permissions:\n      contents: read\n      packages: read$/m);
@@ -625,6 +631,20 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   );
   assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
   assertNoJobEnv(deploy);
+  if (deployRechecksIdentity) {
+    assertExactJobPermissions(deploy, { contents: 'read', packages: 'read' });
+    assert.match(
+      deploy,
+      /^      - uses: actions\/checkout@v5\n        with:\n          fetch-depth: 0$/m,
+      'deployment recheck must fetch the release tag history',
+    );
+    const recheckStep = stepBlock(deploy, 'Reverify immutable recovery artifacts');
+    assert.deepEqual(stepEnv(recheckStep), { GH_TOKEN: '${{ github.token }}' });
+    assert.equal(
+      foldedStepCommand(recheckStep),
+      `node scripts/release/recovery-manifest.mjs verify-all --manifest ${manifest} --scanner security/trivy-scanner.json --repository ObiWanCanOweMe/obiwave`,
+    );
+  }
   const deployStep = stepBlock(deploy, 'Deploy immutable release through Portainer');
   assert.deepEqual(stepEnv(deployStep), {
     PORTAINER_URL: '${{ vars.PORTAINER_URL }}',
@@ -637,7 +657,9 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     SUBWAVE_STREAM_PASSWORD: '${{ secrets.SUBWAVE_STREAM_PASSWORD }}',
   });
   assert.deepEqual(
-    [...deploy.matchAll(/^\s+run: ([^\n]+)$/gm)].map(([, command]) => command),
+    [...deploy.matchAll(/^\s+run: ([^\n]+)$/gm)]
+      .map(([, command]) => command)
+      .filter((command) => command !== '>-'),
     ['node scripts/deploy/portainer-release.mjs'],
   );
   assert.doesNotMatch(workflow, /\b(?:docker\s+(?:build|push|tag)|gh\s+release\s+create)\b/);

@@ -386,6 +386,8 @@ function preflightRunner(overrides = {}) {
     if (command === 'gh') return overrides.release ?? JSON.stringify({
       tagName: 'v1.3.0-obiwave.2',
       targetCommitish: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
+      isDraft: false,
+      isPrerelease: false,
     });
     if (args[0] === 'run') return overrides.scanner ?? 'Version: 0.67.2\n';
     const image = args[3].split('/').at(-1).split(':')[0];
@@ -460,7 +462,7 @@ test('preflight runs the exact tag, release, image, and scanner checks', () => {
   });
   assert.deepEqual(calls, [
     { command: 'git', args: ['rev-parse', 'v1.3.0-obiwave.2^{commit}'] },
-    { command: 'gh', args: ['release', 'view', 'v1.3.0-obiwave.2', '--repo', 'ObiWanCanOweMe/obiwave', '--json', 'tagName,targetCommitish'] },
+    { command: 'gh', args: ['release', 'view', 'v1.3.0-obiwave.2', '--repo', 'ObiWanCanOweMe/obiwave', '--json', 'tagName,targetCommitish,isDraft,isPrerelease'] },
     { command: 'docker', args: ['buildx', 'imagetools', 'inspect', 'ghcr.io/obiwancanoweme/subwave-caddy:v1.3.0-obiwave.2', '--format', '{{json .Manifest.Digest}}'] },
     { command: 'docker', args: ['buildx', 'imagetools', 'inspect', 'ghcr.io/obiwancanoweme/subwave-broadcast:v1.3.0-obiwave.2', '--format', '{{json .Manifest.Digest}}'] },
     { command: 'docker', args: ['buildx', 'imagetools', 'inspect', 'ghcr.io/obiwancanoweme/subwave-controller:v1.3.0-obiwave.2', '--format', '{{json .Manifest.Digest}}'] },
@@ -484,7 +486,9 @@ test('preflight rejects a tag that resolves to another source commit', () => {
 });
 
 test('preflight rejects release metadata pointing at another source commit', () => {
-  const { run } = preflightRunner({ release: JSON.stringify({ tagName: 'v1.3.0-obiwave.2', targetCommitish: 'a'.repeat(40) }) });
+  const { run } = preflightRunner({ release: JSON.stringify({
+    tagName: 'v1.3.0-obiwave.2', targetCommitish: 'a'.repeat(40), isDraft: false, isPrerelease: false,
+  }) });
   assert.throws(
     () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery GitHub release source mismatch/,
@@ -495,12 +499,33 @@ test('preflight rejects release metadata for another tag', () => {
   const { run } = preflightRunner({ release: JSON.stringify({
     tagName: 'v1.3.0-obiwave.1',
     targetCommitish: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
+    isDraft: false,
+    isPrerelease: false,
   }) });
   assert.throws(
     () => manifestModule.verifyRecoveryPreflight({ manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run }),
     /Recovery GitHub release source mismatch/,
   );
 });
+
+for (const releaseState of [
+  { isDraft: true, isPrerelease: false },
+  { isDraft: false, isPrerelease: true },
+]) {
+  test(`preflight rejects a non-public GitHub release (${JSON.stringify(releaseState)})`, () => {
+    const { run } = preflightRunner({ release: JSON.stringify({
+      tagName: 'v1.3.0-obiwave.2',
+      targetCommitish: '41c8a329670f99c3b440a468adbb9fe2d900a4fe',
+      ...releaseState,
+    }) });
+    assert.throws(
+      () => manifestModule.verifyRecoveryPreflight({
+        manifest: exactV13Manifest(), repository: 'ObiWanCanOweMe/obiwave', run,
+      }),
+      /Recovery GitHub release is not public/,
+    );
+  });
+}
 
 test('preflight rejects any image whose inspected digest differs', () => {
   const { run } = preflightRunner({ 'subwave-controller': JSON.stringify(`sha256:${'a'.repeat(64)}`) });
