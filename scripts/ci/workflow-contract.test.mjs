@@ -284,6 +284,44 @@ function assertSelectiveRecoveryV16(workflow) {
   const policy = jobBlock(workflow, 'vulnerability-policy');
   const deploy = jobBlock(workflow, 'deploy-production');
 
+  assert.deepEqual(jobStepHeaders(validate), [
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'uses: docker/setup-buildx-action@v4',
+    'uses: docker/login-action@v4',
+    'name: Verify partial recovery identity',
+    'name: Prove selective build tags are absent',
+  ]);
+  assert.deepEqual(jobStepHeaders(releaseGate), []);
+  assert.deepEqual(jobStepHeaders(build), [
+    'uses: actions/checkout@v5',
+    'uses: docker/setup-qemu-action@v4',
+    'uses: docker/setup-buildx-action@v4',
+    'uses: docker/login-action@v4',
+    'name: Reconfirm immutable tag absence',
+    'id: build',
+    'name: Record immutable build digest',
+    'name: Upload immutable build digest',
+  ]);
+  assert.deepEqual(jobStepHeaders(seal), [
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'uses: docker/setup-buildx-action@v4',
+    'uses: docker/login-action@v4',
+    'uses: actions/download-artifact@v4',
+    'id: seal',
+    'name: Summarize sealed recovery manifest',
+    'name: Upload sealed recovery manifest',
+  ]);
+  assert.deepEqual(jobStepHeaders(policy), []);
+  assert.deepEqual(jobStepHeaders(deploy), [
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'name: Deploy immutable release through Portainer',
+  ]);
+  assert.match(build, /^      - id: build\n        uses: docker\/build-push-action@v7$/m);
+  assert.match(seal, /^      - id: seal\n        name: Seal recovery manifest\n        run: \|$/m);
+
   assertExactJobPermissions(validate, { contents: 'read', packages: 'read' });
   assertExactJobPermissions(build, { contents: 'read', packages: 'write' });
   assertExactJobPermissions(seal, { contents: 'read', packages: 'read' });
@@ -387,12 +425,17 @@ function assertSelectiveRecoveryV16(workflow) {
   assert.match(recordCommand, /writeFileSync\(process\.env\.OUTPUT_PATH/);
   assert.match(build, /name: recovery-build-digest-\$\{\{ matrix\.image \}\}/);
   assert.match(build, /path: \$\{\{ runner\.temp \}\}\/\$\{\{ matrix\.image \}\}\.json/);
+  const buildArtifact = stepBlock(build, 'Upload immutable build digest');
+  assert.match(buildArtifact, /^        uses: actions\/upload-artifact@v4$/m);
 
   assert.match(seal, /pattern: recovery-build-digest-\*/);
   assert.match(seal, /merge-multiple: true/);
   assert.match(seal, /node scripts\/release\/recovery-manifest\.mjs seal/);
   assert.match(seal, /name: v1\.6\.0-obiwave\.1-recovery-manifest/);
-  assert.match(seal, /^      manifest_b64: \$\{\{ steps\.seal\.outputs\.manifest_b64 \}\}$/m);
+  assert.equal(
+    seal.match(/^    outputs:\n((?:      [^\n]+\n?)*)/m)?.[1],
+    '      manifest_b64: ${{ steps.seal.outputs.manifest_b64 }}\n',
+  );
   assert.match(seal, /manifest\.images\.length !== 10/);
   assert.match(seal, /manifest\.images\.map\(\(\{ name, digest \}\)/);
   assert.match(seal, /GITHUB_STEP_SUMMARY/);
@@ -425,6 +468,11 @@ function assertSelectiveRecoveryV16(workflow) {
   }
   assert.doesNotMatch(workflow, /continue-on-error/);
   assert.doesNotMatch(workflow, /\bdocker\s+tag\b|\bgh\s+release\s+create\b|\b(?:docker|gh)\s+[^\n]*(?:delete|rm)\b/i);
+  const normalizedCommands = workflow.replace(/\\\n\s*/g, ' ');
+  assert.doesNotMatch(
+    normalizedCommands,
+    /\bgh\s+workflow\s+run\b|\/actions\/workflows\/[^\s"']+\/dispatches\b|\bdocker\s+push\b|\bdocker\s+(?:build|buildx\s+build)\b[^\n]*(?:^|\s)(?:-t|--tag)(?:\s|=)|\bdocker\s+buildx\s+imagetools\s+create\b[^\n]*\s--tag(?:\s|=)/im,
+  );
   for (const [, tag] of workflow.matchAll(/ghcr\.io\/obiwancanoweme\/[^\s"']+:([^\s"']+)/g)) {
     assert.equal(tag, RECOVERY_V16_TAG, 'alternate public image tag is forbidden');
   }
@@ -442,6 +490,30 @@ test('v1.6 recovery rejects immutable-tag and gate bypass mutations', () => {
     recoveryV16.replaceAll('v1.6.0-obiwave.1', 'latest'),
     `${recoveryV16}\n# docker tag source target\n`,
     `${recoveryV16}\n# gh release create v1.6.0-obiwave.1\n`,
+    recoveryV16.replace(
+      '      - name: Verify partial recovery identity',
+      '      - name: Dispatch another workflow\n        run: gh workflow run publish-images.yml\n      - name: Verify partial recovery identity',
+    ),
+    recoveryV16.replace(
+      '      - name: Reconfirm immutable tag absence',
+      '      - name: Retag an image\n        run: docker buildx imagetools create --tag ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1 source\n      - name: Reconfirm immutable tag absence',
+    ),
+    recoveryV16.replace(
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"',
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"\n          docker push ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1',
+    ),
+    recoveryV16.replace(
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"',
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"\n          docker build -t ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1 .',
+    ),
+    recoveryV16.replace(
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"',
+      '          node scripts/ci/assert-image-tag-absent.mjs "ghcr.io/obiwancanoweme/${{ matrix.image }}:v1.6.0-obiwave.1"\n          gh api --method POST repos/ObiWanCanOweMe/obiwave/actions/workflows/publish-images.yml/dispatches',
+    ),
+    recoveryV16.replace(
+      '      manifest_b64: ${{ steps.seal.outputs.manifest_b64 }}',
+      '      manifest_b64: ${{ steps.seal.outputs.manifest_b64 }}\n      manifest_path: /tmp/recovery.json',
+    ),
     recoveryV16.replace(
       '      - id: build',
       '      - name: Bypass\n        run: true\n      - id: build',
