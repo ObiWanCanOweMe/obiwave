@@ -6554,6 +6554,771 @@
       "approvedOn": "2026-08-05",
       "expiresOn": "2026-11-03",
       "tracking": "https://github.com/advisories/GHSA-6v7p-g79w-8964"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "ffmpeg",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavcodec59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavdevice59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavfilter8",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavformat59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavutil57",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libpostproc56",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswresample4",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64830",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswscale6",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64830"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "ffmpeg",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavcodec59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavdevice59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavfilter8",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavformat59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavutil57",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libpostproc56",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswresample4",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64832",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswscale6",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64832"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "ffmpeg",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavcodec59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavdevice59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavfilter8",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavformat59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavutil57",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libpostproc56",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswresample4",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-64833",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswscale6",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-64833"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "ffmpeg",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavcodec59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavdevice59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavfilter8",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavformat59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavutil57",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libpostproc56",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswresample4",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70628",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswscale6",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70628"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "ffmpeg",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavcodec59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavdevice59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavfilter8",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavformat59",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libavutil57",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libpostproc56",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswresample4",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-70632",
+      "images": [
+        "subwave-controller",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy",
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libswscale6",
+      "installedVersion": "7:5.1.9-0+deb12u1",
+      "disposition": "no-fix",
+      "justification": "Debian’s security tracker marks Bookworm ffmpeg 7:5.1.9-0+deb12u1 vulnerable and unfixed; Trivy fans the same source issue across this exact binary package in the listed images. SUB/WAVE has no public media-upload surface: analyzer inputs come from the operator-controlled Navidrome library, controller imports require admin authentication, and the analyzer sidecar is internal. Acceptance is short-lived pending a Debian security update.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-09-06",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
     }
   ]
 }
