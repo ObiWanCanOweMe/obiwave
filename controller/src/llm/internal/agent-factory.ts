@@ -68,6 +68,26 @@ export interface DjAgentInstance<TArgs = Record<string, any>, TExtras = any> {
   run(args: TArgs & { messages: any[] }): Promise<AgentRunResult<TExtras>>;
 }
 
+export interface AgentStrategyOptions {
+  maxSteps: number | undefined;
+  timeoutMs: number | undefined;
+  temperature: number | undefined;
+  maxOutputTokens: number | undefined;
+  providerDiscoveryBudget: boolean;
+}
+
+export function agentStrategyOptions<TArgs, TExtras>(
+  agent: DjAgentInstance<TArgs, TExtras>,
+): AgentStrategyOptions {
+  return {
+    maxSteps: agent.maxSteps,
+    timeoutMs: agent.timeoutMs,
+    temperature: agent.temperature,
+    maxOutputTokens: agent.maxOutputTokens,
+    providerDiscoveryBudget: agent.providerDiscoveryBudget,
+  };
+}
+
 function resolveTimeout(t: number | (() => number) | undefined): number | undefined {
   return typeof t === 'function' ? t() : t;
 }

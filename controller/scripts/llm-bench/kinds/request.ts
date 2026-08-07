@@ -4,6 +4,7 @@
 import type { KindSpec } from './types.js';
 import { matchRequest } from '../../../src/llm/dj.js';
 import { djAgent } from '../../../src/llm/sdk.js';
+import { agentStrategyOptions } from '../../../src/llm/agent.js';
 import { requestSystem, requestSchema, requestAgent } from '../../../src/broadcast/dj-agent.js';
 import { checkSpokenLine, checkAck } from '../rules.js';
 import { pickerToolsSynthetic, requestMessages, CURRENT_TRACK } from '../fixtures.js';
@@ -17,9 +18,6 @@ const MOODS = new Set([
 // a title/artist lookup — the schema routes them to `mood`).
 const VIBE_WORDS = /calm|overcast|chill|mellow|cosy|cozy|moody|vibe|relax/i;
 
-const agentDeadlineMs = () =>
-  typeof (requestAgent as any).timeoutMs === 'function' ? (requestAgent as any).timeoutMs() : (requestAgent as any).timeoutMs;
-
 function agentScenario(name: string, requestText: string, check: (out: any) => string[]) {
   return {
     name,
@@ -30,8 +28,7 @@ function agentScenario(name: string, requestText: string, check: (out: any) => s
         messages: requestMessages(requestText),
         tools,
         schema: requestSchema(),
-        maxSteps: (requestAgent as any).maxSteps,
-        timeoutMs: agentDeadlineMs(),
+        ...agentStrategyOptions(requestAgent),
         kind: 'djAgentRequest',
       });
       return { object: result.object, seen };
