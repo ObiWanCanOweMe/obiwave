@@ -62,6 +62,30 @@ function exactV15Manifest() {
   };
 }
 
+function exactV16Manifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.6.0-obiwave.1',
+    sourceCommit: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+    scanner: {
+      version: '0.67.2',
+      imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+    },
+    images: [
+      { name: 'subwave-caddy', digest: 'sha256:2721393a1eb3080e4dc6114893ac6a0472a258b8e32654f1b2a9c63a926c050f' },
+      { name: 'subwave-broadcast', digest: 'sha256:a623e516992ade44d83ac72c231d2ecc278eb71c613d04212936a5ec03237c2f' },
+      { name: 'subwave-controller', digest: 'sha256:fe765d8f9a491012c33c6828686cb350aa2e6f84acffd170fc038b4be93c614f' },
+      { name: 'subwave-web', digest: 'sha256:0c6e1f925433dfb23c76022209eee614ffae0559a53e0b4b49e4f0c22a169c44' },
+      { name: 'subwave-aio', digest: 'sha256:6d1c79424e19348653f929f0687582984d46fc964cdc388a49a03d58b8d3b1fe' },
+      { name: 'subwave-aio-heavy', digest: 'sha256:8da2822e6e0053228442e1d379b4ef208858f9ab9f1863e4737db545c408d0b4' },
+      { name: 'subwave-tts-heavy', digest: 'sha256:8e783b7067cfa172feca4cbc88d4d5100af29ee1d663db28d18aad42fec3bd15' },
+      { name: 'subwave-analyzer', digest: 'sha256:4d4aaac6121f24699b3de79c00572afe87fd7c971b8b02c81c6bec12c7e1a1c9' },
+      { name: 'subwave-analyzer-heavy', digest: 'sha256:9b058fd453db1811d2ff1928092b9e52320d62b0defa377baebeeb3a0da1a7ca' },
+      { name: 'subwave-analyzer-cuda', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' },
+    ],
+  };
+}
+
 function exactV16PartialManifest() {
   return {
     schemaVersion: 2,
@@ -214,6 +238,7 @@ function rejects(label, mutate) {
   for (const [release, exactManifest] of [
     ['v1.3', exactV13Manifest],
     ['v1.5', exactV15Manifest],
+    ['v1.6', exactV16Manifest],
   ]) {
     test(`rejects ${label} for ${release}`, () => {
       const manifest = exactManifest();
@@ -230,6 +255,7 @@ test('accepts each literal approved recovery identity', () => {
   for (const [manifest, tag, source] of [
     [exactV13Manifest(), 'v1.3.0-obiwave.2', '41c8a329670f99c3b440a468adbb9fe2d900a4fe'],
     [exactV15Manifest(), 'v1.5.0-obiwave.1', 'fe269a1e632fe6f886ac987f641f41326e1392e0'],
+    [exactV16Manifest(), 'v1.6.0-obiwave.1', '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787'],
   ]) {
     const value = manifestModule.validateRecoveryManifest({ manifest, scannerConfig });
     assert.equal(value.releaseTag, tag);
@@ -251,7 +277,7 @@ test('rejects a valid manifest assembled from cross-release identity parts', () 
 
 test('rejects an unsupported recovery tag even when its manifest is internally consistent', () => {
   const manifest = exactV15Manifest();
-  manifest.releaseTag = 'v1.6.0-obiwave.1';
+  manifest.releaseTag = 'v1.7.0-obiwave.1';
   assert.throws(
     () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
     /releaseTag is not approved/,
@@ -265,6 +291,12 @@ test('returns canonical and digest-qualified references', () => {
     pullRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.3.0-obiwave.2@sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f',
     digest: 'sha256:2caee389ca4aa09c3ecf1e57d31eb5b1248d6ddf5b4908511a908ce42e48008f',
   });
+  assert.deepEqual(manifestModule.recoveryImage(exactV16Manifest(), 'subwave-caddy'), {
+    image: 'subwave-caddy',
+    tagRef: 'ghcr.io/obiwancanoweme/subwave-caddy:v1.6.0-obiwave.1',
+    pullRef: 'ghcr.io/obiwancanoweme/subwave-caddy:v1.6.0-obiwave.1@sha256:2721393a1eb3080e4dc6114893ac6a0472a258b8e32654f1b2a9c63a926c050f',
+    digest: 'sha256:2721393a1eb3080e4dc6114893ac6a0472a258b8e32654f1b2a9c63a926c050f',
+  });
 });
 
 rejects('a wrong fork tag', (manifest) => { manifest.releaseTag = 'v1.3.0'; });
@@ -276,6 +308,7 @@ rejects('a wrong scanner image', (manifest) => {
 for (const [release, exactManifest] of [
   ['v1.3', exactV13Manifest],
   ['v1.5', exactV15Manifest],
+  ['v1.6', exactV16Manifest],
 ]) {
   test(`rejects scanner-config disagreement for ${release}`, () => {
     assert.throws(
@@ -454,6 +487,9 @@ test('preflight rejects a scanner reporting another version', () => {
 
 const scriptPath = fileURLToPath(new URL('./recovery-manifest.mjs', import.meta.url));
 const manifestPath = fileURLToPath(new URL('../../security/releases/v1.3.0-obiwave.2.json', import.meta.url));
+const v16ManifestPath = fileURLToPath(
+  new URL('../../security/releases/v1.6.0-obiwave.1.json', import.meta.url),
+);
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
 function runImageCli(extra = [], env = process.env) {
@@ -472,6 +508,17 @@ test('validate CLI accepts the exact manifest without external preflight', () =>
     scriptPath,
     'validate',
     '--manifest', manifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('validate CLI accepts the checked-in v1.6 recovery identity', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', v16ManifestPath,
     '--scanner', scannerPath,
   ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
