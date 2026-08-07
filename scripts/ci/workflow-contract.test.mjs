@@ -582,6 +582,11 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     'uses: docker/login-action@v4',
     'name: Verify immutable recovery artifacts',
   ]);
+  assert.match(
+    validate,
+    /^      - uses: actions\/checkout@v5\n        with:\n          fetch-depth: 0$/m,
+    'validation checkout must fetch the release tag history',
+  );
   assert.deepEqual(jobStepHeaders(policy), []);
   assert.deepEqual(jobStepHeaders(deploy), [
     'uses: actions/checkout@v5',
@@ -759,6 +764,7 @@ test('recovery contracts reject identity, authorization, and deployment-gate mut
       (value) => value.replace('    environment: production', '    env: inherited\n    environment: production'),
       (value) => value.replace('      security-events: write', '      actions: write'),
       (value) => value.replace('    environment: production', '    environment: staging'),
+      (value) => value.replace('          fetch-depth: 0', '          fetch-depth: 1'),
     ]) {
       assert.throws(() => assertRecoveryWorkflow(mutation(workflow), identity));
     }
