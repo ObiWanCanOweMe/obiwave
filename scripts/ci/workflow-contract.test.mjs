@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,28 @@ const recoveryV15 = await readFile(
   new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
   'utf8',
 ).catch(() => '');
+const recoveryV16Partial = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.6.0-obiwave.1.partial.json', import.meta.url),
+  'utf8',
+));
+const recoveryV16BuildDigests = Object.freeze({
+  'subwave-caddy': `sha256:${'1'.repeat(64)}`,
+  'subwave-web': `sha256:${'2'.repeat(64)}`,
+  'subwave-aio-heavy': `sha256:${'3'.repeat(64)}`,
+  'subwave-tts-heavy': `sha256:${'4'.repeat(64)}`,
+  'subwave-analyzer-heavy': `sha256:${'5'.repeat(64)}`,
+});
+const sealedRecoveryV16 = Object.freeze({
+  schemaVersion: 1,
+  releaseTag: recoveryV16Partial.releaseTag,
+  sourceCommit: recoveryV16Partial.sourceCommit,
+  scanner: recoveryV16Partial.scanner,
+  images: recoveryV16Partial.images.map((image) => Object.freeze({
+    name: image.name,
+    digest: image.action === 'preserve' ? image.digest : recoveryV16BuildDigests[image.name],
+  })),
+});
+const sealedRecoveryV16B64 = Buffer.from(JSON.stringify(sealedRecoveryV16)).toString('base64');
 const cutRelease = await readFile(
   new URL('../../.github/workflows/cut-fork-release.yml', import.meta.url),
   'utf8',
@@ -469,26 +491,103 @@ test('both recovery contracts reject identity, authorization, and deployment-gat
   }
 });
 
-test('scanner resolve-tag executes recovery validation as valid Bash', async () => {
+async function runResolveTag(env) {
+  const repository = fileURLToPath(new URL('../..', import.meta.url));
   const directory = await mkdtemp(join(tmpdir(), 'subwave-resolve-tag-'));
   const outputPath = join(directory, 'github-output');
+  const runtimePath = env.SEALED_RECOVERY_MANIFEST_B64
+    && /^v\d+\.\d+\.\d+-obiwave\.\d+$/.test(env.REQUESTED_TAG)
+    ? join(repository, 'security/releases', `runtime-${env.REQUESTED_TAG}.json`)
+    : null;
+  const previousRuntime = runtimePath
+    ? await readFile(runtimePath).then((contents) => ({ exists: true, contents }), () => ({ exists: false }))
+    : null;
   try {
     const result = spawnSync('bash', ['-e'], {
-      cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      cwd: repository,
       encoding: 'utf8',
       input: stepRun(jobBlock(scan, 'resolve-tag'), 'Resolve and validate release tag'),
       env: {
         ...process.env,
         GITHUB_EVENT_NAME: 'workflow_call',
         GITHUB_OUTPUT: outputPath,
-        RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
-        REQUESTED_TAG: 'v1.3.0-obiwave.2',
+        RECOVERY_MANIFEST: '',
+        PARTIAL_RECOVERY_MANIFEST: '',
+        SEALED_RECOVERY_MANIFEST_B64: '',
+        ...env,
       },
     });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(await readFile(outputPath, 'utf8'), /^tag=v1\.3\.0-obiwave\.2$/m);
+    const output = await readFile(outputPath, 'utf8').catch(() => '');
+    return { result, output };
   } finally {
     await rm(directory, { recursive: true, force: true });
+    if (runtimePath && previousRuntime.exists) {
+      await writeFile(runtimePath, previousRuntime.contents);
+    } else if (runtimePath) {
+      await rm(runtimePath, { force: true });
+    }
+  }
+}
+
+test('scanner resolve-tag executes static recovery validation as valid Bash', async () => {
+  const { result, output } = await runResolveTag({
+    RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
+    REQUESTED_TAG: 'v1.3.0-obiwave.2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(output, /^tag=v1\.3\.0-obiwave\.2$/m);
+  assert.match(output, /^recovery_mode=static$/m);
+  assert.match(output, /^recovery_manifest=security\/releases\/v1\.3\.0-obiwave\.2\.json$/m);
+});
+
+test('scanner resolve-tag materializes and validates a sealed manifest as valid Bash', async () => {
+  const { result, output } = await runResolveTag({
+    PARTIAL_RECOVERY_MANIFEST: 'security/releases/v1.6.0-obiwave.1.partial.json',
+    REQUESTED_TAG: 'v1.6.0-obiwave.1',
+    SEALED_RECOVERY_MANIFEST_B64: sealedRecoveryV16B64,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(output, /^tag=v1\.6\.0-obiwave\.1$/m);
+  assert.match(output, /^recovery_mode=sealed$/m);
+  assert.match(output, /^recovery_manifest=security\/releases\/runtime-v1\.6\.0-obiwave\.1\.json$/m);
+  assert.match(output, /^partial_recovery_manifest=security\/releases\/v1\.6\.0-obiwave\.1\.partial\.json$/m);
+  assert.doesNotMatch(output, new RegExp(sealedRecoveryV16B64));
+});
+
+test('sealed manifest resolution rejects mixed, incomplete, escaped, and mismatched recovery inputs', async () => {
+  for (const env of [
+    {
+      RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
+      PARTIAL_RECOVERY_MANIFEST: 'security/releases/v1.6.0-obiwave.1.partial.json',
+      REQUESTED_TAG: 'v1.6.0-obiwave.1',
+      SEALED_RECOVERY_MANIFEST_B64: sealedRecoveryV16B64,
+    },
+    {
+      PARTIAL_RECOVERY_MANIFEST: 'security/releases/v1.6.0-obiwave.1.partial.json',
+      REQUESTED_TAG: 'v1.6.0-obiwave.1',
+    },
+    {
+      REQUESTED_TAG: 'v1.6.0-obiwave.1',
+      SEALED_RECOVERY_MANIFEST_B64: sealedRecoveryV16B64,
+    },
+    {
+      PARTIAL_RECOVERY_MANIFEST: '../security/releases/v1.6.0-obiwave.1.partial.json',
+      REQUESTED_TAG: 'v1.6.0-obiwave.1',
+      SEALED_RECOVERY_MANIFEST_B64: sealedRecoveryV16B64,
+    },
+    {
+      RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
+      REQUESTED_TAG: 'v1.5.0-obiwave.1',
+    },
+    {
+      PARTIAL_RECOVERY_MANIFEST: 'security/releases/v1.6.0-obiwave.1.partial.json',
+      REQUESTED_TAG: 'v1.5.0-obiwave.1',
+      SEALED_RECOVERY_MANIFEST_B64: sealedRecoveryV16B64,
+    },
+  ]) {
+    const { result, output } = await runResolveTag(env);
+    assert.notEqual(result.status, 0, `unexpected recovery acceptance:\n${output}`);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}${output}`, new RegExp(sealedRecoveryV16B64));
   }
 });
 
@@ -512,6 +611,21 @@ test('official JavaScript actions use the Node 24 runtime', async () => {
 test('CI remains unfiltered and reusable while sparing tag runs from cancellation', () => {
   assert.match(ci, /on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+workflow_call:/);
   assert.match(ci, /cancel-in-progress:.*pull_request.*refs\/tags/);
+});
+
+test('reusable CI declares an optional checkout ref', () => {
+  assert.match(
+    ci,
+    /workflow_call:\s*\n\s+inputs:\s*\n\s+checkout_ref:\s*\n\s+description: Optional source commit or ref to test\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
+  );
+});
+
+test('every reusable CI job uses the release-source checkout ref', () => {
+  assert.equal((ci.match(/uses: actions\/checkout@v5/g) ?? []).length, 3);
+  assert.equal(
+    (ci.match(/uses: actions\/checkout@v5\s*\n\s+with:\s*\n\s+ref: \$\{\{ inputs\.checkout_ref \|\| github\.sha \}\}/g) ?? []).length,
+    3,
+  );
 });
 
 test('consolidated CI verifies the generated theme-token mirror', () => {
@@ -615,6 +729,7 @@ test('CLI asset drift watches the analyzer GPU overlay', () => {
 
 test('release publication waits for the reusable CI gate', () => {
   assert.match(publish, /release-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
+  assert.doesNotMatch(jobBlock(publish, 'release-gate'), /^    with:/m);
   assert.match(publish, /build:\s*\n\s+needs: \[validate, release-gate, tag-preflight\]/);
   assert.match(publish, /vulnerability-policy:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
   assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
@@ -688,10 +803,65 @@ test('image scans invoke the local pinned scanner runner for JSON and SARIF', ()
   assert.match(scanJob, /node scripts\/security\/trivy-runner\.mjs[\s\S]*?--format sarif/);
 });
 
-test('recovery input is transferred through the environment, never interpolated into Bash', () => {
+test('sealed manifest workflow-call inputs are optional transport values', () => {
+  assert.match(
+    scan,
+    /partial_recovery_manifest:\s*\n\s+description: Approved repository-relative partial recovery manifest\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string\s*\n\s+sealed_recovery_manifest_b64:\s*\n\s+description: Base64 sealed recovery manifest from an upstream job\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
+  );
+});
+
+test('recovery inputs are transferred through the environment, never interpolated into Bash', () => {
   const resolveJob = scan.slice(scan.indexOf('  resolve-tag:'), scan.indexOf('  scan:'));
-  assert.match(resolveJob, /env:\s*\n\s+REQUESTED_TAG: \$\{\{ inputs\.release_tag \}\}\s*\n\s+RECOVERY_MANIFEST: \$\{\{ inputs\.recovery_manifest \}\}/);
-  assert.doesNotMatch(resolveJob, /RECOVERY_MANIFEST="\$\{\{ inputs\.recovery_manifest \}\}"/);
+  const resolveStep = stepBlock(resolveJob, 'Resolve and validate release tag');
+  assert.deepEqual(stepEnv(resolveStep), {
+    REQUESTED_TAG: '${{ inputs.release_tag }}',
+    RECOVERY_MANIFEST: '${{ inputs.recovery_manifest }}',
+    PARTIAL_RECOVERY_MANIFEST: '${{ inputs.partial_recovery_manifest }}',
+    SEALED_RECOVERY_MANIFEST_B64: '${{ inputs.sealed_recovery_manifest_b64 }}',
+  });
+  assert.doesNotMatch(stepRun(resolveJob, 'Resolve and validate release tag'), /\$\{\{ inputs\./);
+
+  const outputs = resolveJob.slice(resolveJob.indexOf('    outputs:'), resolveJob.indexOf('    steps:'));
+  assert.match(outputs, /^      recovery_mode: \$\{\{ steps\.resolve\.outputs\.recovery_mode \}\}$/m);
+  assert.match(outputs, /^      recovery_manifest: \$\{\{ steps\.resolve\.outputs\.recovery_manifest \}\}$/m);
+  assert.match(outputs, /^      partial_recovery_manifest: \$\{\{ steps\.resolve\.outputs\.partial_recovery_manifest \}\}$/m);
+  assert.doesNotMatch(outputs, /sealed_recovery_manifest_b64/i);
+});
+
+test('every scan matrix job materializes the sealed manifest before resolving immutable refs', () => {
+  const scanJob = jobBlock(scan, 'scan');
+  const materializeStep = stepBlock(scanJob, 'Materialize sealed recovery manifest');
+  const refsStep = stepBlock(scanJob, 'Resolve immutable image references');
+  assert.ok(
+    scanJob.indexOf('      - name: Materialize sealed recovery manifest')
+      < scanJob.indexOf('      - name: Resolve immutable image references'),
+  );
+  assert.deepEqual(stepEnv(materializeStep), {
+    PARTIAL_RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.partial_recovery_manifest }}',
+    RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.recovery_manifest }}',
+    RECOVERY_MODE: '${{ needs.resolve-tag.outputs.recovery_mode }}',
+    SEALED_RECOVERY_MANIFEST_B64: '${{ inputs.sealed_recovery_manifest_b64 }}',
+  });
+  assert.match(
+    stepRun(scanJob, 'Materialize sealed recovery manifest'),
+    /materialize-sealed[\s\S]*--manifest "\$PARTIAL_RECOVERY_MANIFEST"[\s\S]*--output "\$RECOVERY_MANIFEST"/,
+  );
+  assert.doesNotMatch(stepRun(scanJob, 'Materialize sealed recovery manifest'), /\$\{\{ inputs\./);
+  assert.match(
+    stepRun(scanJob, 'Resolve immutable image references'),
+    /sealed-image[\s\S]*--manifest "\$RECOVERY_MANIFEST"[\s\S]*--partial-manifest "\$PARTIAL_RECOVERY_MANIFEST"/,
+  );
+  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /--image "\$IMAGE"/);
+  assert.deepEqual(stepEnv(refsStep), {
+    IMAGE: '${{ matrix.image }}',
+    RELEASE_TAG: '${{ needs.resolve-tag.outputs.tag }}',
+    RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.recovery_manifest }}',
+    PARTIAL_RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.partial_recovery_manifest }}',
+    RECOVERY_MODE: '${{ needs.resolve-tag.outputs.recovery_mode }}',
+  });
+
+  assert.equal((scanJob.match(/--partial-recovery-manifest "\$PARTIAL_RECOVERY_MANIFEST"/g) ?? []).length, 2);
+  assert.equal((scanJob.match(/--recovery-manifest "\$RECOVERY_MANIFEST"/g) ?? []).length, 2);
 });
 
 test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
