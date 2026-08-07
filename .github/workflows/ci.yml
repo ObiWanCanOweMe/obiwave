@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
   workflow_call:
+    inputs:
+      checkout_ref:
+        description: Optional source commit or ref to test
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -35,6 +41,8 @@ jobs:
         working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - uses: actions/setup-node@v5
         with:
@@ -90,6 +98,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - uses: actions/setup-node@v5
         with:
@@ -133,6 +143,8 @@ jobs:
               WITH_DEMUCS=0
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - uses: docker/setup-buildx-action@v4
 

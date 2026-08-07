@@ -7,9 +7,12 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  loadPartialRecoveryManifest,
   loadRecoveryManifest,
+  loadSealedRecoveryManifest,
   recoveryImage,
   validateRecoveryManifest,
+  validateSealedRecoveryManifest,
   verifyRecoveryImage,
 } from '../release/recovery-manifest.mjs';
 
@@ -136,9 +139,13 @@ function resolveWorkspaceBindings(output, cacheDirectory) {
   };
 }
 
-function verifyRecovery({ recovery, scanner, image, run }) {
+function verifyRecovery({ recovery, partialRecovery, scanner, image, run }) {
   try {
-    validateRecoveryManifest({ manifest: recovery, scannerConfig: scanner });
+    if (partialRecovery === undefined) {
+      validateRecoveryManifest({ manifest: recovery, scannerConfig: scanner });
+    } else {
+      validateSealedRecoveryManifest({ manifest: recovery, partialManifest: partialRecovery, scannerConfig: scanner });
+    }
     const expected = recoveryImage(recovery, image.image);
     if (expected.tagRef !== image.tagRef || expected.pullRef !== image.pullRef || expected.digest !== image.digest) {
       throw new Error('Recovery image identity does not match the manifest');
@@ -151,12 +158,15 @@ function verifyRecovery({ recovery, scanner, image, run }) {
   }
 }
 
-export function runTrivyScan({ scanner, image, format, output, cacheDirectory, recovery, run = commandRunner }) {
+export function runTrivyScan({ scanner, image, format, output, cacheDirectory, recovery, partialRecovery, run = commandRunner }) {
   validateOptions({ scanner, image, format, output, cacheDirectory, run });
+  if (partialRecovery !== undefined && recovery === undefined) {
+    throw new Error('Trivy partial recovery manifest requires a sealed recovery manifest');
+  }
   const bindings = resolveWorkspaceBindings(output, cacheDirectory);
   let target = image;
   if (recovery !== undefined) {
-    target = verifyRecovery({ recovery, scanner, image, run });
+    target = verifyRecovery({ recovery, partialRecovery, scanner, image, run });
     checkedRun(run, 'docker', ['pull', target.pullRef], 'pull');
     checkedRun(run, 'docker', ['tag', target.pullRef, target.tagRef], 'tag');
     checkedRun(run, 'docker', ['image', 'inspect', target.tagRef], 'local image inspection');
@@ -174,12 +184,12 @@ export function runTrivyScan({ scanner, image, format, output, cacheDirectory, r
     '--format', format, '--output', output, target.tagRef,
   ], 'scanner');
 
-  if (recovery !== undefined) verifyRecovery({ recovery, scanner, image: target, run });
+  if (recovery !== undefined) verifyRecovery({ recovery, partialRecovery, scanner, image: target, run });
   return Object.freeze({ image: target.tagRef, format, output });
 }
 
 function parseCli(argv) {
-  const allowed = new Set(['scanner', 'image-name', 'tag-ref', 'pull-ref', 'format', 'output', 'cache-directory', 'recovery-manifest']);
+  const allowed = new Set(['scanner', 'image-name', 'tag-ref', 'pull-ref', 'format', 'output', 'cache-directory', 'recovery-manifest', 'partial-recovery-manifest']);
   const values = {};
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -191,8 +201,13 @@ function parseCli(argv) {
   for (const name of ['scanner', 'image-name', 'tag-ref', 'format', 'output', 'cache-directory']) {
     if (!values[name]) throw new Error(`Trivy command requires --${name}`);
   }
-  if (values['recovery-manifest'] && !/^security\/releases\/[A-Za-z0-9._-]+\.json$/.test(values['recovery-manifest'])) {
-    throw new Error('Recovery manifest must be a repository-relative path below security/releases');
+  for (const name of ['recovery-manifest', 'partial-recovery-manifest']) {
+    if (values[name] && !/^security\/releases\/[A-Za-z0-9._-]+\.json$/.test(values[name])) {
+      throw new Error('Recovery manifest must be a repository-relative path below security/releases');
+    }
+  }
+  if (values['partial-recovery-manifest'] && !values['recovery-manifest']) {
+    throw new Error('Trivy partial recovery manifest requires --recovery-manifest');
   }
   if (!values['recovery-manifest'] && values['pull-ref']) throw new Error('Trivy command accepts --pull-ref only with --recovery-manifest');
   if (values['recovery-manifest'] && !values['pull-ref']) throw new Error('Trivy recovery command requires --pull-ref');
@@ -219,6 +234,22 @@ async function loadCliRecoveryManifest(manifestPath, scannerPath) {
   }
 }
 
+async function loadCliSealedRecoveryManifest(manifestPath, partialManifestPath, scannerPath) {
+  try {
+    return await loadSealedRecoveryManifest({ manifestPath, partialManifestPath, scannerPath });
+  } catch {
+    throw new Error('Recovery manifest could not be loaded');
+  }
+}
+
+async function loadCliPartialRecoveryManifest(manifestPath, scannerPath) {
+  try {
+    return await loadPartialRecoveryManifest({ manifestPath, scannerPath });
+  } catch {
+    throw new Error('Recovery manifest could not be loaded');
+  }
+}
+
 export async function runCli(argv = process.argv.slice(2), { run = commandRunner } = {}) {
   const values = parseCli(argv);
   const scanner = await loadScannerConfig(values.scanner);
@@ -228,7 +259,14 @@ export async function runCli(argv = process.argv.slice(2), { run = commandRunner
     ...(values['pull-ref'] ? { pullRef: values['pull-ref'], digest: values['pull-ref'].slice(values['pull-ref'].lastIndexOf('@') + 1) } : {}),
   };
   const recovery = values['recovery-manifest']
-    ? await loadCliRecoveryManifest(values['recovery-manifest'], values.scanner)
+    ? values['partial-recovery-manifest']
+      ? await loadCliSealedRecoveryManifest(
+        values['recovery-manifest'], values['partial-recovery-manifest'], values.scanner,
+      )
+      : await loadCliRecoveryManifest(values['recovery-manifest'], values.scanner)
+    : undefined;
+  const partialRecovery = values['partial-recovery-manifest']
+    ? await loadCliPartialRecoveryManifest(values['partial-recovery-manifest'], values.scanner)
     : undefined;
   const result = runTrivyScan({
     scanner,
@@ -237,6 +275,7 @@ export async function runCli(argv = process.argv.slice(2), { run = commandRunner
     output: `/workspace/${values.output}`,
     cacheDirectory: `/workspace/${values['cache-directory']}`,
     recovery,
+    partialRecovery,
     run,
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);

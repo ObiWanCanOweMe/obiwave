@@ -15,6 +15,16 @@ on:
         required: false
         default: ''
         type: string
+      partial_recovery_manifest:
+        description: Approved repository-relative partial recovery manifest
+        required: false
+        default: ''
+        type: string
+      sealed_recovery_manifest_b64:
+        description: Base64 sealed recovery manifest from an upstream job
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
@@ -41,7 +51,9 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       scanner_image: ${{ steps.resolve.outputs.scanner_image }}
       scanner_version: ${{ steps.resolve.outputs.scanner_version }}
+      recovery_mode: ${{ steps.resolve.outputs.recovery_mode }}
       recovery_manifest: ${{ steps.resolve.outputs.recovery_manifest }}
+      partial_recovery_manifest: ${{ steps.resolve.outputs.partial_recovery_manifest }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -55,6 +67,8 @@ jobs:
         env:
           REQUESTED_TAG: ${{ inputs.release_tag }}
           RECOVERY_MANIFEST: ${{ inputs.recovery_manifest }}
+          PARTIAL_RECOVERY_MANIFEST: ${{ inputs.partial_recovery_manifest }}
+          SEALED_RECOVERY_MANIFEST_B64: ${{ inputs.sealed_recovery_manifest_b64 }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             RELEASE_TAG="$(git tag --list 'v*-obiwave.*' --sort=-version:refname | head -1)"
@@ -62,6 +76,20 @@ jobs:
             RELEASE_TAG="$REQUESTED_TAG"
           fi
           RELEASE_TAG="$RELEASE_TAG" node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
+
+          if [[ -n "$RECOVERY_MANIFEST" && ( -n "$PARTIAL_RECOVERY_MANIFEST" || -n "$SEALED_RECOVERY_MANIFEST_B64" ) ]]; then
+            echo 'recovery_manifest is mutually exclusive with sealed recovery inputs' >&2
+            exit 1
+          fi
+          if [[ -n "$PARTIAL_RECOVERY_MANIFEST" && -z "$SEALED_RECOVERY_MANIFEST_B64" ]] \
+            || [[ -z "$PARTIAL_RECOVERY_MANIFEST" && -n "$SEALED_RECOVERY_MANIFEST_B64" ]]; then
+            echo 'partial_recovery_manifest and sealed_recovery_manifest_b64 must be supplied together' >&2
+            exit 1
+          fi
+
+          RECOVERY_MODE=none
+          RESOLVED_RECOVERY_MANIFEST=''
+          RESOLVED_PARTIAL_RECOVERY_MANIFEST=''
           if [[ -n "$RECOVERY_MANIFEST" ]]; then
             [[ "$RECOVERY_MANIFEST" =~ ^security/releases/[A-Za-z0-9._-]+\.json$ ]] || {
               echo 'recovery_manifest must be repository-relative below security/releases/' >&2
@@ -70,6 +98,34 @@ jobs:
             node scripts/release/recovery-manifest.mjs validate \
               --manifest "$RECOVERY_MANIFEST" \
               --scanner security/trivy-scanner.json
+            MANIFEST_PATH="$RECOVERY_MANIFEST" EXPECTED_RELEASE_TAG="$RELEASE_TAG" node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(process.env.MANIFEST_PATH, 'utf8'));
+          if (manifest.releaseTag !== process.env.EXPECTED_RELEASE_TAG) {
+            throw new Error('recovery manifest release tag does not match the requested tag');
+          }
+          NODE
+            RECOVERY_MODE=static
+            RESOLVED_RECOVERY_MANIFEST="$RECOVERY_MANIFEST"
+          elif [[ -n "$PARTIAL_RECOVERY_MANIFEST" ]]; then
+            [[ "$PARTIAL_RECOVERY_MANIFEST" =~ ^security/releases/[A-Za-z0-9._-]+\.json$ ]] || {
+              echo 'partial_recovery_manifest must be repository-relative below security/releases/' >&2
+              exit 1
+            }
+            RESOLVED_RECOVERY_MANIFEST="security/releases/runtime-$RELEASE_TAG.json"
+            node scripts/release/recovery-manifest.mjs materialize-sealed \
+              --manifest "$PARTIAL_RECOVERY_MANIFEST" \
+              --scanner security/trivy-scanner.json \
+              --output "$RESOLVED_RECOVERY_MANIFEST"
+            MANIFEST_PATH="$RESOLVED_RECOVERY_MANIFEST" EXPECTED_RELEASE_TAG="$RELEASE_TAG" node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(process.env.MANIFEST_PATH, 'utf8'));
+          if (manifest.releaseTag !== process.env.EXPECTED_RELEASE_TAG) {
+            throw new Error('sealed recovery manifest release tag does not match the requested tag');
+          }
+          NODE
+            RECOVERY_MODE=sealed
+            RESOLVED_PARTIAL_RECOVERY_MANIFEST="$PARTIAL_RECOVERY_MANIFEST"
           fi
           node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
           import { readFile } from 'node:fs/promises';
@@ -85,7 +141,9 @@ jobs:
           console.log(`scanner_version=${scanner.version}`);
           NODE
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "recovery_manifest=$RECOVERY_MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "recovery_mode=$RECOVERY_MODE" >> "$GITHUB_OUTPUT"
+          echo "recovery_manifest=$RESOLVED_RECOVERY_MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "partial_recovery_manifest=$RESOLVED_PARTIAL_RECOVERY_MANIFEST" >> "$GITHUB_OUTPUT"
 
   scan:
     needs: resolve-tag
@@ -118,38 +176,77 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Materialize sealed recovery manifest
+        if: needs.resolve-tag.outputs.recovery_mode == 'sealed'
+        env:
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
+          SEALED_RECOVERY_MANIFEST_B64: ${{ inputs.sealed_recovery_manifest_b64 }}
+        run: |
+          [[ "$RECOVERY_MODE" == 'sealed' ]]
+          node scripts/release/recovery-manifest.mjs materialize-sealed \
+            --manifest "$PARTIAL_RECOVERY_MANIFEST" \
+            --scanner security/trivy-scanner.json \
+            --output "$RECOVERY_MANIFEST"
+
       - name: Resolve immutable image references
         id: refs
         env:
           IMAGE: ${{ matrix.image }}
           RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
           RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
         run: |
-          if [[ -n "$RECOVERY_MANIFEST" ]]; then
+          if [[ "$RECOVERY_MODE" == 'static' ]]; then
             node scripts/release/recovery-manifest.mjs image \
               --manifest "$RECOVERY_MANIFEST" \
               --scanner security/trivy-scanner.json \
-              --image "$IMAGE" >> "$GITHUB_OUTPUT"
-          else
+              --image "$IMAGE"
+          elif [[ "$RECOVERY_MODE" == 'sealed' ]]; then
+            node scripts/release/recovery-manifest.mjs sealed-image \
+              --manifest "$RECOVERY_MANIFEST" \
+              --partial-manifest "$PARTIAL_RECOVERY_MANIFEST" \
+              --scanner security/trivy-scanner.json \
+              --image "$IMAGE"
+          elif [[ "$RECOVERY_MODE" == 'none' ]]; then
             echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo 'unrecognized recovery mode' >&2
+            exit 1
           fi
 
       - name: Scan ${{ matrix.image }} for policy JSON
         id: json-scan
         continue-on-error: true
         env:
+          IMAGE: ${{ matrix.image }}
+          TAG_REF: ${{ steps.refs.outputs.tag_ref }}
+          PULL_REF: ${{ steps.refs.outputs.pull_ref }}
           RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
         run: |
           recovery_args=()
-          if [[ -n "$RECOVERY_MANIFEST" ]]; then
-            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST" --pull-ref "${{ steps.refs.outputs.pull_ref }}")
+          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST")
+          fi
+          if [[ "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args+=(--partial-recovery-manifest "$PARTIAL_RECOVERY_MANIFEST")
+          elif [[ "$RECOVERY_MODE" != 'none' && "$RECOVERY_MODE" != 'static' ]]; then
+            echo 'unrecognized recovery mode' >&2
+            exit 1
+          fi
+          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \
             --scanner security/trivy-scanner.json \
-            --image-name "${{ matrix.image }}" \
-            --tag-ref "${{ steps.refs.outputs.tag_ref }}" \
+            --image-name "$IMAGE" \
+            --tag-ref "$TAG_REF" \
             --format json \
-            --output "${{ matrix.image }}.json" \
+            --output "$IMAGE.json" \
             --cache-directory .tmp/trivy-cache \
             "${recovery_args[@]}"
 
@@ -200,18 +297,32 @@ jobs:
       - name: Scan ${{ matrix.image }} for SARIF
         continue-on-error: true
         env:
+          IMAGE: ${{ matrix.image }}
+          TAG_REF: ${{ steps.refs.outputs.tag_ref }}
+          PULL_REF: ${{ steps.refs.outputs.pull_ref }}
           RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
         run: |
           recovery_args=()
-          if [[ -n "$RECOVERY_MANIFEST" ]]; then
-            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST" --pull-ref "${{ steps.refs.outputs.pull_ref }}")
+          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args=(--recovery-manifest "$RECOVERY_MANIFEST")
+          fi
+          if [[ "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args+=(--partial-recovery-manifest "$PARTIAL_RECOVERY_MANIFEST")
+          elif [[ "$RECOVERY_MODE" != 'none' && "$RECOVERY_MODE" != 'static' ]]; then
+            echo 'unrecognized recovery mode' >&2
+            exit 1
+          fi
+          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+            recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \
             --scanner security/trivy-scanner.json \
-            --image-name "${{ matrix.image }}" \
-            --tag-ref "${{ steps.refs.outputs.tag_ref }}" \
+            --image-name "$IMAGE" \
+            --tag-ref "$TAG_REF" \
             --format sarif \
-            --output "trivy-${{ matrix.image }}.sarif" \
+            --output "trivy-$IMAGE.sarif" \
             --cache-directory .tmp/trivy-cache \
             "${recovery_args[@]}"
 

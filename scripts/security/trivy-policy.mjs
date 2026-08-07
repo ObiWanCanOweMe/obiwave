@@ -23,6 +23,7 @@ export const CANONICAL_IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 export const PINNED_CUDA_IMAGE_DIGESTS = Object.freeze({
   'v1.3.0-obiwave.2': 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72',
   'v1.5.0-obiwave.1': 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2',
+  'v1.6.0-obiwave.1': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
 });
 
 const POLICY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH']);

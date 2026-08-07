@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,6 +61,154 @@ function exactV15Manifest() {
     ],
   };
 }
+
+function exactV16PartialManifest() {
+  return {
+    schemaVersion: 2,
+    kind: 'partial-publication-recovery',
+    releaseTag: 'v1.6.0-obiwave.1',
+    sourceCommit: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+    scanner: { version: scannerConfig.version, imageRef: scannerConfig.imageRef },
+    images: [
+      { name: 'subwave-caddy', action: 'build' },
+      { name: 'subwave-broadcast', action: 'preserve', digest: 'sha256:a623e516992ade44d83ac72c231d2ecc278eb71c613d04212936a5ec03237c2f' },
+      { name: 'subwave-controller', action: 'preserve', digest: 'sha256:fe765d8f9a491012c33c6828686cb350aa2e6f84acffd170fc038b4be93c614f' },
+      { name: 'subwave-web', action: 'build' },
+      { name: 'subwave-aio', action: 'preserve', digest: 'sha256:6d1c79424e19348653f929f0687582984d46fc964cdc388a49a03d58b8d3b1fe' },
+      { name: 'subwave-aio-heavy', action: 'build' },
+      { name: 'subwave-tts-heavy', action: 'build' },
+      { name: 'subwave-analyzer', action: 'preserve', digest: 'sha256:4d4aaac6121f24699b3de79c00572afe87fd7c971b8b02c81c6bec12c7e1a1c9' },
+      { name: 'subwave-analyzer-heavy', action: 'build' },
+      { name: 'subwave-analyzer-cuda', action: 'preserve', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' },
+    ],
+  };
+}
+
+test('accepts only the approved partial recovery identity', () => {
+  const value = manifestModule.validatePartialRecoveryManifest({
+    manifest: exactV16PartialManifest(), scannerConfig,
+  });
+  assert.equal(value.releaseTag, 'v1.6.0-obiwave.1');
+  assert.equal(value.images.filter((image) => image.action === 'build').length, 5);
+  assert.ok(Object.isFrozen(value));
+  assert.ok(Object.isFrozen(value.images));
+  assert.ok(Object.isFrozen(value.images[0]));
+});
+
+function rejectsPartial(label, mutate) {
+  test(`partial recovery rejects ${label}`, () => {
+    const manifest = exactV16PartialManifest();
+    mutate(manifest);
+    assert.throws(
+      () => manifestModule.validatePartialRecoveryManifest({ manifest, scannerConfig }),
+      /Recovery manifest invalid:/,
+    );
+  });
+}
+
+rejectsPartial('a changed source', (manifest) => { manifest.sourceCommit = 'a'.repeat(40); });
+rejectsPartial('a changed scanner', (manifest) => { manifest.scanner.version = '0.68.0'; });
+rejectsPartial('a changed action', (manifest) => { manifest.images[0].action = 'preserve'; });
+rejectsPartial('a changed preserved digest', (manifest) => { manifest.images[1].digest = `sha256:${'a'.repeat(64)}`; });
+rejectsPartial('out-of-order images', (manifest) => { [manifest.images[0], manifest.images[1]] = [manifest.images[1], manifest.images[0]]; });
+rejectsPartial('a missing image', (manifest) => { manifest.images.pop(); });
+rejectsPartial('an extra image', (manifest) => { manifest.images.push({ name: 'subwave-surprise', action: 'build' }); });
+rejectsPartial('a digest on a build image', (manifest) => { manifest.images[0].digest = `sha256:${'a'.repeat(64)}`; });
+rejectsPartial('a missing digest on a preserved image', (manifest) => { delete manifest.images[1].digest; });
+
+const buildDigests = Object.freeze({
+  'subwave-caddy': `sha256:${'1'.repeat(64)}`,
+  'subwave-web': `sha256:${'2'.repeat(64)}`,
+  'subwave-aio-heavy': `sha256:${'3'.repeat(64)}`,
+  'subwave-tts-heavy': `sha256:${'4'.repeat(64)}`,
+  'subwave-analyzer-heavy': `sha256:${'5'.repeat(64)}`,
+});
+
+function exactV16RegistryDigests() {
+  return Object.fromEntries(exactV16PartialManifest().images.map((image) => [
+    image.name,
+    image.action === 'build' ? buildDigests[image.name] : image.digest,
+  ]));
+}
+
+function exactV16SealedManifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.6.0-obiwave.1',
+    sourceCommit: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+    scanner: { version: scannerConfig.version, imageRef: scannerConfig.imageRef },
+    images: exactV16PartialManifest().images.map((image) => ({
+      name: image.name,
+      digest: image.action === 'build' ? buildDigests[image.name] : image.digest,
+    })),
+  };
+}
+
+test('seals partial recovery build and registry evidence into a canonical manifest', () => {
+  const sealed = manifestModule.sealRecoveryManifest({
+    partialManifest: exactV16PartialManifest(),
+    buildDigests,
+    registryDigests: exactV16RegistryDigests(),
+  });
+  assert.deepEqual(sealed, exactV16SealedManifest());
+  assert.ok(Object.isFrozen(sealed));
+  assert.ok(Object.isFrozen(sealed.images));
+  assert.ok(Object.isFrozen(sealed.images[0]));
+});
+
+test('validates a sealed recovery manifest against the approved partial identity', () => {
+  const sealed = manifestModule.validateSealedRecoveryManifest({
+    manifest: exactV16SealedManifest(),
+    partialManifest: exactV16PartialManifest(),
+    scannerConfig,
+  });
+  assert.deepEqual(sealed, exactV16SealedManifest());
+});
+
+function rejectsSeal(label, mutate) {
+  test(`seal rejects ${label}`, () => {
+    const input = {
+      partialManifest: exactV16PartialManifest(),
+      buildDigests: { ...buildDigests },
+      registryDigests: exactV16RegistryDigests(),
+    };
+    mutate(input);
+    assert.throws(
+      () => manifestModule.sealRecoveryManifest(input),
+      /Recovery manifest invalid:/,
+    );
+  });
+}
+
+rejectsSeal('missing build evidence', (input) => { delete input.buildDigests['subwave-web']; });
+rejectsSeal('extra build evidence', (input) => { input.buildDigests['subwave-surprise'] = `sha256:${'a'.repeat(64)}`; });
+rejectsSeal('a changed preserved digest', (input) => { input.registryDigests['subwave-broadcast'] = `sha256:${'a'.repeat(64)}`; });
+rejectsSeal('registry and build digest disagreement', (input) => { input.registryDigests['subwave-web'] = `sha256:${'a'.repeat(64)}`; });
+rejectsSeal('a malformed build digest', (input) => { input.buildDigests['subwave-web'] = 'sha256:bad'; });
+rejectsSeal('registry evidence in the wrong order', (input) => {
+  input.registryDigests = Object.fromEntries(Object.entries(input.registryDigests).reverse());
+});
+rejectsSeal('a foreign registry image', (input) => { input.registryDigests['subwave-surprise'] = `sha256:${'a'.repeat(64)}`; });
+
+function rejectsSealed(label, mutate) {
+  test(`sealed recovery rejects ${label}`, () => {
+    const manifest = exactV16SealedManifest();
+    mutate(manifest);
+    assert.throws(
+      () => manifestModule.validateSealedRecoveryManifest({
+        manifest,
+        partialManifest: exactV16PartialManifest(),
+        scannerConfig,
+      }),
+      /Recovery manifest invalid:/,
+    );
+  });
+}
+
+rejectsSealed('a changed preserved digest', (manifest) => { manifest.images[1].digest = `sha256:${'a'.repeat(64)}`; });
+rejectsSealed('a malformed build digest', (manifest) => { manifest.images[0].digest = 'sha256:bad'; });
+rejectsSealed('out-of-order images', (manifest) => { [manifest.images[0], manifest.images[1]] = [manifest.images[1], manifest.images[0]]; });
+rejectsSealed('a foreign image', (manifest) => { manifest.images[0].name = 'subwave-surprise'; });
 
 function rejects(label, mutate) {
   for (const [release, exactManifest] of [
@@ -368,5 +516,146 @@ test('CLI rejects duplicate and unknown arguments without echoing their values',
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Recovery command arguments are invalid/);
     assert.doesNotMatch(result.stderr, /secret-value/);
+  }
+});
+
+test('legacy CLI commands reject partial-recovery-only arguments', () => {
+  const result = runImageCli(['--partial-manifest', 'secret-value']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Recovery command arguments are invalid/);
+  assert.doesNotMatch(result.stderr, /secret-value/);
+});
+
+function partialPreflightRunner(overrides = {}) {
+  const calls = [];
+  const run = (command, args) => {
+    calls.push({ command, args });
+    if (command === 'git') return overrides.git ?? '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787\n';
+    if (command === 'gh') return overrides.release ?? JSON.stringify({
+      tagName: 'v1.6.0-obiwave.1',
+      targetCommitish: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+      isDraft: false,
+      isPrerelease: false,
+    });
+    if (args[0] === 'run') return overrides.scanner ?? 'Version: 0.67.2\n';
+    const image = args[3].split('/').at(-1).split(':')[0];
+    return overrides[image] ?? JSON.stringify(exactV16RegistryDigests()[image]);
+  };
+  return { calls, run };
+}
+
+test('partial recovery preflight checks release identity, preserved tags, and scanner', () => {
+  const { calls, run } = partialPreflightRunner();
+  const result = manifestModule.verifyPartialRecoveryPreflight({
+    manifest: exactV16PartialManifest(), repository: 'ObiWanCanOweMe/obiwave', run,
+  });
+  assert.deepEqual(result, {
+    tag: 'v1.6.0-obiwave.1',
+    source: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+    scannerVersion: '0.67.2',
+    images: [
+      { image: 'subwave-broadcast', digest: 'sha256:a623e516992ade44d83ac72c231d2ecc278eb71c613d04212936a5ec03237c2f' },
+      { image: 'subwave-controller', digest: 'sha256:fe765d8f9a491012c33c6828686cb350aa2e6f84acffd170fc038b4be93c614f' },
+      { image: 'subwave-aio', digest: 'sha256:6d1c79424e19348653f929f0687582984d46fc964cdc388a49a03d58b8d3b1fe' },
+      { image: 'subwave-analyzer', digest: 'sha256:4d4aaac6121f24699b3de79c00572afe87fd7c971b8b02c81c6bec12c7e1a1c9' },
+      { image: 'subwave-analyzer-cuda', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' },
+    ],
+  });
+  assert.deepEqual(calls.map(({ command, args }) => [command, args[0]]), [
+    ['git', 'rev-parse'], ['gh', 'release'],
+    ['docker', 'buildx'], ['docker', 'buildx'], ['docker', 'buildx'], ['docker', 'buildx'], ['docker', 'buildx'],
+    ['docker', 'run'],
+  ]);
+});
+
+test('partial recovery preflight rejects a non-public GitHub release', () => {
+  const { run } = partialPreflightRunner({ release: JSON.stringify({
+    tagName: 'v1.6.0-obiwave.1', targetCommitish: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787', isDraft: true, isPrerelease: false,
+  }) });
+  assert.throws(
+    () => manifestModule.verifyPartialRecoveryPreflight({
+      manifest: exactV16PartialManifest(), repository: 'ObiWanCanOweMe/obiwave', run,
+    }),
+    /Recovery GitHub release is not public/,
+  );
+});
+
+const partialManifestPath = fileURLToPath(new URL('../../security/releases/v1.6.0-obiwave.1.partial.json', import.meta.url));
+
+function runPartialCli(command, args = [], env = process.env) {
+  return spawnSync(process.execPath, [
+    scriptPath,
+    command,
+    '--manifest', partialManifestPath,
+    '--scanner', scannerPath,
+    ...args,
+  ], { encoding: 'utf8', env });
+}
+
+test('validate-partial CLI accepts the checked-in partial identity', () => {
+  const result = runPartialCli('validate-partial');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('materialize-sealed and sealed-image CLI strictly transport a sealed manifest', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'recovery-sealed-'));
+  const outputPath = join(directory, 'runtime.json');
+  try {
+    const encoded = Buffer.from(`${JSON.stringify(exactV16SealedManifest())}\n`).toString('base64');
+    const materialized = runPartialCli('materialize-sealed', ['--output', outputPath], {
+      ...process.env,
+      SEALED_RECOVERY_MANIFEST_B64: encoded,
+    });
+    assert.equal(materialized.status, 0, materialized.stderr);
+    assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), exactV16SealedManifest());
+    const image = spawnSync(process.execPath, [
+      scriptPath,
+      'sealed-image',
+      '--manifest', outputPath,
+      '--partial-manifest', partialManifestPath,
+      '--scanner', scannerPath,
+      '--image', 'subwave-web',
+    ], { encoding: 'utf8' });
+    assert.equal(image.status, 0, image.stderr);
+    assert.deepEqual(JSON.parse(image.stdout), {
+      image: 'subwave-web',
+      tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1',
+      pullRef: `ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1@${buildDigests['subwave-web']}`,
+      digest: buildDigests['subwave-web'],
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('seal CLI accepts exactly five build records and emits a base64 sealed manifest', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'recovery-seal-'));
+  const recordsDirectory = join(directory, 'records');
+  const binDirectory = join(directory, 'bin');
+  const outputPath = join(directory, 'runtime.json');
+  const githubOutput = join(directory, 'github-output');
+  try {
+    await mkdir(recordsDirectory);
+    await mkdir(binDirectory);
+    for (const [image, digest] of Object.entries(buildDigests)) {
+      await writeFile(join(recordsDirectory, `${image}.json`), `${JSON.stringify({ image, digest })}\n`);
+    }
+    const cases = Object.entries(exactV16RegistryDigests())
+      .map(([image, digest]) => `  *${image}:*) printf '%s\\n' '"${digest}"' ;;`)
+      .join('\n');
+    const dockerPath = join(binDirectory, 'docker');
+    await writeFile(dockerPath, `#!/bin/sh\ncase "$4" in\n${cases}\nesac\n`);
+    await chmod(dockerPath, 0o755);
+    const result = runPartialCli('seal', ['--build-digests', recordsDirectory, '--output', outputPath], {
+      ...process.env,
+      PATH: `${binDirectory}:${process.env.PATH}`,
+      GITHUB_OUTPUT: githubOutput,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(await readFile(outputPath, 'utf8')), exactV16SealedManifest());
+    assert.match(await readFile(githubOutput, 'utf8'), /^manifest_b64=[A-Za-z0-9+/=]+\n$/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

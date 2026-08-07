@@ -37,6 +37,49 @@ const exactRecovery = Object.freeze({
     Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72' }),
   ]),
 });
+const partialRecovery = Object.freeze({
+  schemaVersion: 2,
+  kind: 'partial-publication-recovery',
+  releaseTag: 'v1.6.0-obiwave.1',
+  sourceCommit: '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787',
+  scanner: Object.freeze({ version: '0.67.2', imageRef: scannerConfig.imageRef }),
+  images: Object.freeze([
+    Object.freeze({ name: 'subwave-caddy', action: 'build' }),
+    Object.freeze({ name: 'subwave-broadcast', action: 'preserve', digest: 'sha256:a623e516992ade44d83ac72c231d2ecc278eb71c613d04212936a5ec03237c2f' }),
+    Object.freeze({ name: 'subwave-controller', action: 'preserve', digest: 'sha256:fe765d8f9a491012c33c6828686cb350aa2e6f84acffd170fc038b4be93c614f' }),
+    Object.freeze({ name: 'subwave-web', action: 'build' }),
+    Object.freeze({ name: 'subwave-aio', action: 'preserve', digest: 'sha256:6d1c79424e19348653f929f0687582984d46fc964cdc388a49a03d58b8d3b1fe' }),
+    Object.freeze({ name: 'subwave-aio-heavy', action: 'build' }),
+    Object.freeze({ name: 'subwave-tts-heavy', action: 'build' }),
+    Object.freeze({ name: 'subwave-analyzer', action: 'preserve', digest: 'sha256:4d4aaac6121f24699b3de79c00572afe87fd7c971b8b02c81c6bec12c7e1a1c9' }),
+    Object.freeze({ name: 'subwave-analyzer-heavy', action: 'build' }),
+    Object.freeze({ name: 'subwave-analyzer-cuda', action: 'preserve', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' }),
+  ]),
+});
+const sealedRecovery = Object.freeze({
+  schemaVersion: 1,
+  releaseTag: partialRecovery.releaseTag,
+  sourceCommit: partialRecovery.sourceCommit,
+  scanner: partialRecovery.scanner,
+  images: Object.freeze([
+    Object.freeze({ name: 'subwave-caddy', digest: `sha256:${'a'.repeat(64)}` }),
+    Object.freeze({ name: 'subwave-broadcast', digest: partialRecovery.images[1].digest }),
+    Object.freeze({ name: 'subwave-controller', digest: partialRecovery.images[2].digest }),
+    Object.freeze({ name: 'subwave-web', digest }),
+    Object.freeze({ name: 'subwave-aio', digest: partialRecovery.images[4].digest }),
+    Object.freeze({ name: 'subwave-aio-heavy', digest: `sha256:${'c'.repeat(64)}` }),
+    Object.freeze({ name: 'subwave-tts-heavy', digest: `sha256:${'d'.repeat(64)}` }),
+    Object.freeze({ name: 'subwave-analyzer', digest: partialRecovery.images[7].digest }),
+    Object.freeze({ name: 'subwave-analyzer-heavy', digest: `sha256:${'e'.repeat(64)}` }),
+    Object.freeze({ name: 'subwave-analyzer-cuda', digest: partialRecovery.images[9].digest }),
+  ]),
+});
+const sealedImage = Object.freeze({
+  image: 'subwave-web',
+  tagRef: 'ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1',
+  pullRef: `ghcr.io/obiwancanoweme/subwave-web:v1.6.0-obiwave.1@${digest}`,
+  digest,
+});
 const workspace = process.cwd();
 const digestFormat = '{{json .Manifest.Digest}}';
 
@@ -77,7 +120,7 @@ async function rejected(callback) {
   assert.fail('expected callback to reject');
 }
 
-function scanCall(format, output, cacheDirectory) {
+function scanCall(format, output, cacheDirectory, image = recoveryImage) {
   return ['docker', [
     'run', '--rm',
     '--volume', '/var/run/docker.sock:/var/run/docker.sock',
@@ -85,7 +128,7 @@ function scanCall(format, output, cacheDirectory) {
     '--volume', `${workspace}${cacheDirectory.slice('/workspace'.length)}:/root/.cache/trivy`,
     scannerConfig.imageRef,
     'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
-    '--format', format, '--output', output, recoveryImage.tagRef,
+    '--format', format, '--output', output, image.tagRef,
   ]];
 }
 
@@ -100,6 +143,17 @@ function recoveryCalls(format = 'json', output = '/workspace/subwave-web.json', 
   ];
 }
 
+function sealedRecoveryCalls(output = '/workspace/subwave-web.json', cacheDirectory = '/workspace/.tmp/trivy-cache') {
+  return [
+    ['docker', ['buildx', 'imagetools', 'inspect', sealedImage.tagRef, '--format', digestFormat]],
+    ['docker', ['pull', sealedImage.pullRef]],
+    ['docker', ['tag', sealedImage.pullRef, sealedImage.tagRef]],
+    ['docker', ['image', 'inspect', sealedImage.tagRef]],
+    scanCall('json', output, cacheDirectory, sealedImage),
+    ['docker', ['buildx', 'imagetools', 'inspect', sealedImage.tagRef, '--format', digestFormat]],
+  ];
+}
+
 function recoveryOptions(run, overrides = {}) {
   return {
     scanner: scannerConfig,
@@ -108,6 +162,20 @@ function recoveryOptions(run, overrides = {}) {
     output: '/workspace/subwave-web.json',
     cacheDirectory: '/workspace/.tmp/trivy-cache',
     recovery: exactRecovery,
+    run,
+    ...overrides,
+  };
+}
+
+function sealedRecoveryOptions(run, overrides = {}) {
+  return {
+    scanner: scannerConfig,
+    image: sealedImage,
+    format: 'json',
+    output: '/workspace/subwave-web.json',
+    cacheDirectory: '/workspace/.tmp/trivy-cache',
+    recovery: sealedRecovery,
+    partialRecovery,
     run,
     ...overrides,
   };
@@ -143,6 +211,44 @@ test('uses the same pinned scanner command for SARIF output', () => {
     output: '/workspace/trivy-subwave-web.sarif',
   });
   assert.deepEqual(command.calls, recoveryCalls('sarif', '/workspace/trivy-subwave-web.sarif'));
+});
+
+test('scans a sealed recovery image only after pre- and post-scan digest verification', () => {
+  const command = runner(
+    success(JSON.stringify(digest)), success(), success(), success(), success(), success(JSON.stringify(digest)),
+  );
+
+  const result = runTrivyScan(sealedRecoveryOptions(command.run));
+
+  assert.deepEqual(result, {
+    image: sealedImage.tagRef,
+    format: 'json',
+    output: '/workspace/subwave-web.json',
+  });
+  assert.deepEqual(command.calls, sealedRecoveryCalls());
+});
+
+test('sealed recovery requires both sealed and partial manifest evidence before child processes run', () => {
+  for (const overrides of [
+    { recovery: sealedRecovery, partialRecovery: undefined },
+    { recovery: undefined, partialRecovery },
+  ]) {
+    const command = runner();
+    assert.throws(() => runTrivyScan(sealedRecoveryOptions(command.run, overrides)), /recovery/i);
+    assert.deepEqual(command.calls, []);
+  }
+});
+
+test('sealed recovery rejects changed remote digests and mismatched pull references before scanning', () => {
+  const changedDigest = runner(success(JSON.stringify(otherDigest)));
+  assert.throws(() => runTrivyScan(sealedRecoveryOptions(changedDigest.run)), /digest verification failed/i);
+  assert.deepEqual(changedDigest.calls, sealedRecoveryCalls().slice(0, 1));
+
+  const mismatchedPull = runner();
+  assert.throws(() => runTrivyScan(sealedRecoveryOptions(mismatchedPull.run, {
+    image: { ...sealedImage, pullRef: `${sealedImage.tagRef}@${otherDigest}`, digest: otherDigest },
+  })), /recovery image identity/i);
+  assert.deepEqual(mismatchedPull.calls, []);
 });
 
 test('scans a normal canonical tag without recovery pull or local retagging', () => {
@@ -340,6 +446,50 @@ test('runCli translates real recovery arguments and loads the checked-in scanner
     ['docker', ['run', '--rm', '--volume']],
     ['docker', ['buildx', 'imagetools', 'inspect']],
   ]);
+});
+
+test('runCli loads sealed recovery evidence only when both approved manifest paths are supplied', async () => {
+  const sealedPath = `security/releases/runtime-v1.6.0-obiwave.1-${process.pid}.json`;
+  const common = [
+    '--scanner', 'security/trivy-scanner.json',
+    '--image-name', 'subwave-web',
+    '--tag-ref', sealedImage.tagRef,
+    '--pull-ref', sealedImage.pullRef,
+    '--format', 'json',
+    '--output', 'sealed-runner-cli.json',
+    '--cache-directory', '.tmp/sealed-runner-cli-cache',
+  ];
+  await writeFile(sealedPath, `${JSON.stringify(sealedRecovery)}\n`);
+  try {
+    const command = runner(
+      success(JSON.stringify(digest)), success(), success(), success(), success(), success(JSON.stringify(digest)),
+    );
+    const result = await runCli([
+      ...common,
+      '--recovery-manifest', sealedPath,
+      '--partial-recovery-manifest', 'security/releases/v1.6.0-obiwave.1.partial.json',
+    ], { run: command.run });
+    assert.deepEqual(result, {
+      image: sealedImage.tagRef,
+      format: 'json',
+      output: '/workspace/sealed-runner-cli.json',
+    });
+    assert.deepEqual(command.calls, sealedRecoveryCalls('/workspace/sealed-runner-cli.json', '/workspace/.tmp/sealed-runner-cli-cache'));
+
+    const sealedOnly = await rejected(() => runCli([
+      ...common,
+      '--recovery-manifest', sealedPath,
+    ]));
+    assert.match(sealedOnly.message, /recovery manifest|partial recovery/i);
+
+    const partialOnly = await rejected(() => runCli([
+      ...common,
+      '--partial-recovery-manifest', 'security/releases/v1.6.0-obiwave.1.partial.json',
+    ]));
+    assert.match(partialOnly.message, /partial recovery|arguments/i);
+  } finally {
+    await rm(sealedPath, { force: true });
+  }
 });
 
 test('runCli sanitizes missing and malformed scanner and recovery files', async () => {
