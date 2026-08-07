@@ -815,6 +815,51 @@ test('release clearly flags an unverified rollback incident without sensitive ca
   assert.doesNotMatch(output, /do-not-print|headers=|response=|secret-previous-value/);
 });
 
+test('release reports sanitized target and rollback HTTP failures for operator diagnosis', async () => {
+  const logs = [];
+  const failure = new RollbackIncidentError({
+    targetVersion: 'v0.42.0-obiwave.1',
+    previousVersion: 'v0.41.0-obiwave.3',
+    deploymentError: new Error('Portainer stack update failed with HTTP 500'),
+    rollbackError: new Error('Portainer stack update failed with HTTP 409'),
+  });
+
+  await assert.rejects(runRelease({
+    env: releaseEnv(),
+    readFile: async () => newFile,
+    clientFactory: () => ({}),
+    deploy: async () => { throw failure; },
+    log: (message) => logs.push(message),
+  }), (error) => error === failure);
+
+  const output = logs.join('\n');
+  assert.match(output, /Target failure: Portainer stack update failed with HTTP 500/);
+  assert.match(output, /Rollback failure: Portainer stack update failed with HTTP 409/);
+});
+
+test('release redacts unrecognized target and rollback failure details', async () => {
+  const logs = [];
+  const failure = new RollbackIncidentError({
+    targetVersion: 'v0.42.0-obiwave.1',
+    previousVersion: 'v0.41.0-obiwave.3',
+    deploymentError: new Error('target token=do-not-print'),
+    rollbackError: new Error('rollback response=do-not-print'),
+  });
+
+  await assert.rejects(runRelease({
+    env: releaseEnv(),
+    readFile: async () => newFile,
+    clientFactory: () => ({}),
+    deploy: async () => { throw failure; },
+    log: (message) => logs.push(message),
+  }), (error) => error === failure);
+
+  const output = logs.join('\n');
+  assert.match(output, /Target failure: Error \(details redacted\)/);
+  assert.match(output, /Rollback failure: Error \(details redacted\)/);
+  assert.doesNotMatch(output, /do-not-print|token=|response=/);
+});
+
 test('release validation reports all missing required configuration before deployment work', async () => {
   let touchedDeployment = false;
 

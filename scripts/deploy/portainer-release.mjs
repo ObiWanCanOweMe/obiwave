@@ -44,6 +44,20 @@ function displayVersion(value) {
   }
 }
 
+function sanitizedFailure(error) {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const safeMessage = /^(?:Portainer [a-z][a-z ]{0,40} failed with HTTP [1-5][0-9]{2}|Portainer [a-z][a-z ]{0,40} timed out after [1-9][0-9]{0,8}ms)$/;
+  if (safeMessage.test(message)) return message;
+
+  const safeNames = new Set([
+    'DeploymentVerificationError',
+    'Error',
+    'PortainerRequestTimeoutError',
+  ]);
+  const name = safeNames.has(error?.name) ? error.name : 'Unknown failure';
+  return `${name} (details redacted)`;
+}
+
 export async function runRelease({
   env = process.env,
   readFile: readFileImpl = readFile,
@@ -86,6 +100,11 @@ export async function runRelease({
     } else if (error instanceof RollbackIncidentError) {
       const previous = displayVersion(error.previousVersion);
       log(`Target version: ${error.targetVersion}; previous version: ${previous}; ROLLBACK FAILED OR UNVERIFIED.`);
+      const [deploymentError, rollbackError] = error.cause instanceof AggregateError
+        ? error.cause.errors
+        : [];
+      log(`Target failure: ${sanitizedFailure(deploymentError)}`);
+      log(`Rollback failure: ${sanitizedFailure(rollbackError)}`);
       if (env.GITHUB_STEP_SUMMARY) {
         await appendFileImpl(
           env.GITHUB_STEP_SUMMARY,
