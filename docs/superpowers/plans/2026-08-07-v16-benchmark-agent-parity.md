@@ -48,7 +48,7 @@
 PATH="/opt/homebrew/opt/node@22/bin:$PATH" node --version
 PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm ci --no-audit --no-fund
 PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller ci --no-audit --no-fund
-PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx scripts/llm-discovery-steps.test.ts
+PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx controller/scripts/llm-discovery-steps.test.ts
 ```
 
 Expected: Node reports `v22.x`; both locked installs exit 0; the existing discovery-step test passes before modification.
@@ -85,7 +85,7 @@ This test catches removal or incorrect derivation of `providerDiscoveryBudget`: 
 Run:
 
 ```bash
-PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx scripts/llm-discovery-steps.test.ts
+PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx controller/scripts/llm-discovery-steps.test.ts
 ```
 
 Expected: exit non-zero with `public parity helper exists`, expected `function`, actual `undefined`. Existing cases before the new assertion must remain green.
@@ -164,7 +164,7 @@ Remove the now-redundant local `agentDeadlineMs` helpers and direct `maxSteps`/`
 Run:
 
 ```bash
-PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx scripts/llm-discovery-steps.test.ts
+PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm --prefix controller exec -- tsx controller/scripts/llm-discovery-steps.test.ts
 ```
 
 Expected: exit 0; every discovery-step case passes, including the new LiteLLM parity case.
