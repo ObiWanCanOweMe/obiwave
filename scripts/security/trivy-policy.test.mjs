@@ -36,6 +36,30 @@ const CURL_8458_ID = 'CVE-2026-8458';
 const CURL_8458_TRACKING = 'https://curl.se/docs/CVE-2026-8458.html';
 const CURL_8458_UNREACHABLE =
   'The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.';
+const FFMPEG_2026_IDS = [
+  'CVE-2026-64830',
+  'CVE-2026-64832',
+  'CVE-2026-64833',
+  'CVE-2026-70628',
+  'CVE-2026-70632',
+];
+const FFMPEG_BINARY_PACKAGES = [
+  'ffmpeg',
+  'libavcodec59',
+  'libavdevice59',
+  'libavfilter8',
+  'libavformat59',
+  'libavutil57',
+  'libpostproc56',
+  'libswresample4',
+  'libswscale6',
+];
+const FFMPEG_IMAGES = [
+  'subwave-controller',
+  'subwave-analyzer',
+  'subwave-analyzer-heavy',
+  'subwave-analyzer-cuda',
+];
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -200,6 +224,41 @@ test('checked-in CVE-2026-8458 acceptances are time-bounded to the reviewed curl
         ? CURL_8458_UNREACHABLE
         : CUDA_ACCEPTANCE_JUSTIFICATION,
     );
+  }
+});
+
+test('checked-in 2026 FFmpeg acceptances are exact, short-lived, and limited to media-processing images', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    FFMPEG_2026_IDS.includes(record.vulnerabilityId));
+
+  assert.equal(records.length, FFMPEG_2026_IDS.length * FFMPEG_BINARY_PACKAGES.length);
+  assert.deepEqual(
+    [...new Set(records.map((record) => record.vulnerabilityId))],
+    FFMPEG_2026_IDS,
+  );
+
+  for (const vulnerabilityId of FFMPEG_2026_IDS) {
+    assert.deepEqual(
+      records
+        .filter((record) => record.vulnerabilityId === vulnerabilityId)
+        .map((record) => record.package),
+      FFMPEG_BINARY_PACKAGES,
+    );
+  }
+
+  for (const record of records) {
+    assert.deepEqual(record.images, FFMPEG_IMAGES);
+    assert.equal(record.installedVersion, '7:5.1.9-0+deb12u1');
+    assert.equal(record.disposition, 'no-fix');
+    assert.equal(record.owner, 'SUB/WAVE maintainers');
+    assert.equal(record.approvedOn, '2026-08-07');
+    assert.equal(record.expiresOn, '2026-09-06');
+    assert.equal(
+      record.tracking,
+      `https://security-tracker.debian.org/tracker/${record.vulnerabilityId}`,
+    );
+    assert.match(record.justification, /no public media-upload surface/);
+    assert.match(record.justification, /short-lived pending a Debian security update/);
   }
 });
 
