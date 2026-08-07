@@ -126,7 +126,10 @@ function resolveCustomConnection(input: ModelDiscoveryInput): {
     savedBase = savedChatBase(leg, input.provider);
     savedOllama = input.provider === 'ollama' ? endpoint(saved.ollamaUrl) : '';
     savedProvider = savedBase || savedOllama ? input.provider : '';
-    savedKey = savedBase ? settings.llmKeyFor(input.provider) : '';
+    const inlineKey = savedBase ? settings.llmKeyFor(input.provider) : '';
+    savedKey = input.provider === 'litellm' && savedBase
+      ? effectiveLiteLlmApiKey({ apiKey: inlineKey })
+      : inlineKey;
   } else if (input.owner === 'embedding') {
     // Resolve the submitted provider, not only the currently selected one, so
     // unsaved switch-back discovery mirrors runtime provider precedence.

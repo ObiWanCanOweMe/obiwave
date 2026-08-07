@@ -56,6 +56,7 @@ const primary = await recordingGateway();
 const fallback = await recordingGateway();
 const onboarding = await recordingGateway();
 const environment = await recordingGateway();
+const savedEnvironment = await recordingGateway();
 const compatFallback = await recordingGateway();
 const unsavedLocca = await recordingGateway();
 const changedOrigin = await recordingGateway();
@@ -336,6 +337,48 @@ try {
     method: 'GET', url: '/v1/models', authorization: 'Bearer environment-only-token',
   });
 
+  // Production may save only the gateway URL while secrets.env supplies the
+  // legacy OPENAI_API_KEY fallback. Live inference supports this split source;
+  // discovery and probes must resolve the same trusted endpoint + token pair.
+  delete process.env.LITELLM_API_BASE;
+  delete process.env.LITELLM_API_KEY;
+  process.env.OPENAI_API_KEY = 'openai-environment-token';
+  await settings.update({
+    llm: {
+      provider: 'litellm',
+      model: 'vendor/model',
+      baseUrl: savedEnvironment.baseUrl,
+      apiKey: '',
+      fallback: { enabled: false },
+    },
+  });
+  const savedUrlEnvironmentKey = await post('/settings/llm/models', {
+    owner: 'chat', provider: 'litellm', leg: 'primary',
+  });
+  assert.equal((await savedUrlEnvironmentKey.json()).ok, true);
+  assert.deepEqual(savedEnvironment.requests.at(-1), {
+    method: 'GET', url: '/v1/models', authorization: 'Bearer openai-environment-token',
+  }, 'a saved LiteLLM URL uses the same environment-token fallback as live inference');
+
+  const savedUrlEnvironmentProbe = await post('/settings/llm/probe-compat', {
+    provider: 'litellm', leg: 'primary', model: 'vendor/model',
+  });
+  assert.equal((await savedUrlEnvironmentProbe.json()).ok, true);
+  assert.deepEqual(savedEnvironment.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer openai-environment-token',
+  }, 'a saved LiteLLM probe uses the same environment-token fallback as live inference');
+
+  const environmentKeyChangedUrl = await post('/settings/llm/probe-compat', {
+    provider: 'litellm',
+    leg: 'primary',
+    baseUrl: changedOrigin.baseUrl,
+    model: 'vendor/model',
+  });
+  assert.equal((await environmentKeyChangedUrl.json()).ok, true);
+  assert.deepEqual(changedOrigin.requests.at(-1), {
+    method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
+  }, 'an environment LiteLLM token must remain bound to a trusted endpoint');
+
   await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
   routeServer = undefined;
   console.log('✓ LiteLLM routes resolve authenticated primary, fallback, onboarding, and environment transports');
@@ -348,6 +391,7 @@ try {
     fallback.close(),
     onboarding.close(),
     environment.close(),
+    savedEnvironment.close(),
     compatFallback.close(),
     unsavedLocca.close(),
     changedOrigin.close(),

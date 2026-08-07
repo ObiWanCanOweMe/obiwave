@@ -378,7 +378,9 @@ async function resolveLiteLlmRouteConfig(input: {
   const baseUrl = suppliedBaseUrl || savedBaseUrl || environmentBaseUrl;
   let apiKey = suppliedApiKey;
   if (!apiKey && savedProviderEndpoints('litellm').has(baseUrl)) {
-    apiKey = settings.llmKeyFor('litellm');
+    apiKey = effectiveLiteLlmApiKey({
+      apiKey: settings.llmKeyFor('litellm'),
+    });
   }
   if (!apiKey && baseUrl === environmentBaseUrl) {
     apiKey = effectiveLiteLlmApiKey({});
