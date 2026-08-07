@@ -5985,6 +5985,116 @@
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-8376"
     },
     {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-broadcast",
+        "subwave-aio",
+        "subwave-aio-heavy"
+      ],
+      "package": "curl",
+      "installedVersion": "8.14.1-2+deb13u4",
+      "disposition": "unreachable",
+      "justification": "The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-broadcast",
+        "subwave-aio",
+        "subwave-aio-heavy"
+      ],
+      "package": "libcurl3t64-gnutls",
+      "installedVersion": "8.14.1-2+deb13u4",
+      "disposition": "unreachable",
+      "justification": "The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-broadcast",
+        "subwave-aio",
+        "subwave-aio-heavy"
+      ],
+      "package": "libcurl4t64",
+      "installedVersion": "8.14.1-2+deb13u4",
+      "disposition": "unreachable",
+      "justification": "The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-controller",
+        "subwave-tts-heavy",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy"
+      ],
+      "package": "curl",
+      "installedVersion": "7.88.1-10+deb12u15",
+      "disposition": "unreachable",
+      "justification": "The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-controller",
+        "subwave-tts-heavy",
+        "subwave-analyzer",
+        "subwave-analyzer-heavy"
+      ],
+      "package": "libcurl4",
+      "installedVersion": "7.88.1-10+deb12u15",
+      "disposition": "unreachable",
+      "justification": "The upstream advisory requires libcurl HTTP Negotiate connection reuse with different service names on the same host, port, and credentials; SUB/WAVE configures neither Negotiate nor CURLOPT_SERVICE_NAME/CURLOPT_PROXY_SERVICE_NAME, and the curl command-line tool used by the station is explicitly unaffected.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-analyzer-cuda"
+      ],
+      "package": "curl",
+      "installedVersion": "7.88.1-10+deb12u15",
+      "disposition": "upstream-mirror",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-8458",
+      "images": [
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libcurl4",
+      "installedVersion": "7.88.1-10+deb12u15",
+      "disposition": "upstream-mirror",
+      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-07",
+      "expiresOn": "2026-11-05",
+      "tracking": "https://curl.se/docs/CVE-2026-8458.html"
+    },
+    {
       "vulnerabilityId": "CVE-2026-8461",
       "images": [
         "subwave-controller",
