@@ -27,6 +27,10 @@ const finalizeV16 = await readFile(
   new URL('../../.github/workflows/finalize-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
 );
+const finalizeV16Revision2 = await readFile(
+  new URL('../../.github/workflows/finalize-v1.6.0-obiwave.2.yml', import.meta.url),
+  'utf8',
+);
 const recoveryV16 = await readFile(
   new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -266,6 +270,11 @@ const RECOVERY_WORKFLOWS = Object.freeze([
     workflow: finalizeV16,
     tag: 'v1.6.0-obiwave.1',
     manifest: 'security/releases/v1.6.0-obiwave.1.json',
+  }),
+  Object.freeze({
+    workflow: finalizeV16Revision2,
+    tag: 'v1.6.0-obiwave.2',
+    manifest: 'security/releases/v1.6.0-obiwave.2.json',
   }),
 ]);
 
