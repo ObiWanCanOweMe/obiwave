@@ -4,6 +4,7 @@ import {
   bulkEmbeddingBatchSize,
   bulkEmbeddingFailureMessage,
   commitBulkEmbeddingBatch,
+  safeEmbeddingFailureClass,
   withBulkEmbeddingRateLimit,
 } from '../src/music/embedding-bulk.js';
 import { isLocalEmbeddingProvider } from '../src/llm/provider.js';
@@ -44,6 +45,28 @@ await test('HTTP self-hosted openai-compatible endpoints retain the local bounde
   assert.equal(bulkEmbeddingBatchSize(25, local), 50);
 });
 
+await test('safe classifications unwrap SDK errors without exposing provider text', () => {
+  const wrapped: any = {
+    name: 'AI_RetryError',
+    lastError: Object.assign(new Error('token=do-not-print responseBody=secret'), {
+      statusCode: 503,
+    }),
+  };
+  const fixtures: Array<[unknown, string]> = [
+    [wrapped, 'HTTP 503'],
+    [{ cause: { code: 'ECONNRESET', message: 'api_key=do-not-print' } }, 'ECONNRESET'],
+    [{ name: 'TimeoutError', message: 'token=do-not-print' }, 'timeout'],
+    [new Error('api_key=do-not-print'), 'unclassified error'],
+  ];
+
+  for (const [error, expected] of fixtures) {
+    const classification = safeEmbeddingFailureClass(error);
+    assert.equal(classification, expected);
+    assert.equal(classification.includes('do-not-print'), false);
+    assert.equal(classification.includes('secret'), false);
+  }
+});
+
 await test('Retry-After 60 retries the identical request after a safety margin', async () => {
   const rateLimit: any = new Error('rate limit exceeded');
   rateLimit.statusCode = 429;
@@ -58,16 +81,22 @@ await test('Retry-After 60 retries the identical request after a safety margin',
   assert.equal(result, 'ok');
   assert.equal(calls, 2);
   assert.deepEqual(waits, [60_250]);
-  assert.deepEqual(notices, [{ seconds: 60, attempt: 1 }]);
+  assert.deepEqual(notices, [{
+    seconds: 60,
+    attempt: 1,
+    kind: 'rate-limit',
+    classification: 'HTTP 429',
+  }]);
   assert.equal(JSON.stringify(notices).includes('rate limit exceeded'), false);
 });
 
-await test('non-rate-limit and unusable delays fail immediately', async () => {
+await test('permanent errors and rate limits without a safe Retry-After fail immediately', async () => {
   for (const error of [
-    Object.assign(new Error('boom'), { statusCode: 500 }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: {} }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: { 'retry-after': '0' } }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: { 'retry-after': '66' } }),
+    Object.assign(new Error('api_key=do-not-print'), { statusCode: 400 }),
+    Object.assign(new Error('api_key=do-not-print'), { statusCode: 401 }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: {} }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: { 'retry-after': '0' } }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: { 'retry-after': '66' } }),
   ]) {
     let slept = false;
     await assert.rejects(() => withBulkEmbeddingRateLimit(
@@ -76,6 +105,41 @@ await test('non-rate-limit and unusable delays fail immediately', async () => {
     ));
     assert.equal(slept, false);
   }
+});
+
+await test('transient embedding failures retry three times with a bounded backoff', async () => {
+  const transient = Object.assign(new Error('responseBody=do-not-print'), { statusCode: 503 });
+  let calls = 0;
+  const waits: number[] = [];
+  const notices: unknown[] = [];
+  const result = await withBulkEmbeddingRateLimit(
+    async () => { calls += 1; if (calls < 4) throw transient; return 'ok'; },
+    { sleep: async ms => { waits.push(ms); }, onWait: notice => notices.push(notice) },
+  );
+  assert.equal(result, 'ok');
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [500, 1_500, 3_500]);
+  assert.deepEqual(notices, [
+    { seconds: 1, attempt: 1, kind: 'transient', classification: 'HTTP 503' },
+    { seconds: 2, attempt: 2, kind: 'transient', classification: 'HTTP 503' },
+    { seconds: 4, attempt: 3, kind: 'transient', classification: 'HTTP 503' },
+  ]);
+  assert.equal(JSON.stringify(notices).includes('do-not-print'), false);
+});
+
+await test('transient embedding failures throw after their bounded retry budget', async () => {
+  const transient = Object.assign(new Error('responseBody=do-not-print'), { statusCode: 503 });
+  let calls = 0;
+  const waits: number[] = [];
+  const notices: unknown[] = [];
+  await assert.rejects(() => withBulkEmbeddingRateLimit(
+    async () => { calls += 1; throw transient; },
+    { sleep: async ms => { waits.push(ms); }, onWait: notice => notices.push(notice) },
+  ));
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [500, 1_500, 3_500]);
+  assert.equal(notices.length, 3);
+  assert.equal(JSON.stringify(notices).includes('do-not-print'), false);
 });
 
 await test('fatal operator copy never contains the raw gateway error', () => {
