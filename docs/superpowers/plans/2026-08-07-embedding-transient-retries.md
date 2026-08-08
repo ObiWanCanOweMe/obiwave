@@ -141,6 +141,7 @@ git commit -m "fix: retry transient embedding failures"
 ### Task 2: Surface sanitized retry and terminal diagnostics
 
 **Files:**
+- Modify: `controller/src/music/embedding-bulk.ts`
 - Modify: `controller/src/music/tag-library/embed.ts`
 - Test: `controller/scripts/embedding-bulk.test.ts`
 
