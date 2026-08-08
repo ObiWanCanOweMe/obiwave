@@ -9,6 +9,8 @@ const SAFE_TRANSPORT_CODES = new Set([
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
   'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
 ]);
+const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MAX_EMBEDDING_ERROR_NODES = 4;
 
 export interface BulkEmbeddingWaitNotice {
   seconds: number;
@@ -48,31 +50,40 @@ function asEmbeddingError(value: unknown): EmbeddingError | null {
   return value != null && typeof value === 'object' ? value as EmbeddingError : null;
 }
 
-function unwrapEmbeddingError(error: unknown): EmbeddingError | null {
+function embeddingErrorChain(error: unknown): EmbeddingError[] {
   const seen = new Set<object>();
+  const chain: EmbeddingError[] = [];
   let current = asEmbeddingError(error);
-  for (let depth = 0; current && depth < 4; depth += 1) {
-    if (seen.has(current)) return current;
+  while (current && chain.length < MAX_EMBEDDING_ERROR_NODES && !seen.has(current)) {
     seen.add(current);
+    chain.push(current);
     const lastError = asEmbeddingError(current.lastError);
     const errors = Array.isArray(current.errors) ? current.errors : [];
     const finalError = asEmbeddingError(errors.at(-1));
     const cause = asEmbeddingError(current.cause);
-    const next = lastError ?? finalError ?? cause;
-    if (!next || seen.has(next)) return current;
-    current = next;
+    current = lastError ?? finalError ?? cause;
   }
-  return current;
+  return chain;
+}
+
+function explicitEmbeddingHttpStatus(error: unknown): number | null {
+  for (const err of embeddingErrorChain(error)) {
+    const status = err.statusCode ?? err.status;
+    if (typeof status === 'number' && Number.isInteger(status)) return status;
+  }
+  return null;
 }
 
 export function safeEmbeddingFailureClass(error: unknown): string {
-  const err = unwrapEmbeddingError(error);
-  const status = err?.statusCode ?? err?.status;
-  if (typeof status === 'number' && Number.isInteger(status)) return `HTTP ${status}`;
-  const code = err?.code;
-  if (typeof code === 'string' && SAFE_TRANSPORT_CODES.has(code)) return code;
-  const name = err?.name;
-  if (name === 'AbortError' || name === 'TimeoutError') return 'timeout';
+  const chain = embeddingErrorChain(error);
+  const status = explicitEmbeddingHttpStatus(error);
+  if (status != null) return `HTTP ${status}`;
+  for (const err of chain) {
+    if (typeof err.code === 'string' && SAFE_TRANSPORT_CODES.has(err.code)) return err.code;
+  }
+  for (const err of chain) {
+    if (err.name === 'AbortError' || err.name === 'TimeoutError') return 'timeout';
+  }
   return 'unclassified error';
 }
 
@@ -99,9 +110,11 @@ export async function withBulkEmbeddingRateLimit<T>(
     try {
       return await request();
     } catch (err) {
+      const transient = isTransient(err as Parameters<typeof isTransient>[0]);
+      const status = explicitEmbeddingHttpStatus(err);
       const hinted = usableRateLimitDelay(err);
       if (isRateLimited(err as Parameters<typeof isRateLimited>[0])) {
-        if (hinted == null) throw err;
+        if (!transient || hinted == null) throw err;
         if (rateLimitWaits >= MAX_CONSECUTIVE_RATE_LIMIT_WAITS) throw err;
         rateLimitWaits += 1;
         options.onWait?.({
@@ -113,7 +126,8 @@ export async function withBulkEmbeddingRateLimit<T>(
         await sleep(hinted + BULK_RETRY_SAFETY_MS);
         continue;
       }
-      if (!isTransient(err as Parameters<typeof isTransient>[0])
+      if ((status != null && !TRANSIENT_HTTP_STATUSES.has(status))
+        || !transient
         || transientWaits >= TRANSIENT_RETRY_DELAYS_MS.length) throw err;
       const delay = TRANSIENT_RETRY_DELAYS_MS[transientWaits];
       transientWaits += 1;
