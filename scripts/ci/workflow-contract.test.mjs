@@ -35,6 +35,14 @@ const finalizeV16Revision3 = await readFile(
   new URL('../../.github/workflows/finalize-v1.6.0-obiwave.3.yml', import.meta.url),
   'utf8',
 );
+const finalizeV16Revision4 = await readFile(
+  new URL('../../.github/workflows/finalize-v1.6.0-obiwave.4.yml', import.meta.url),
+  'utf8',
+);
+const recoveryV16Revision4Manifest = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.6.0-obiwave.4.json', import.meta.url),
+  'utf8',
+));
 const recoveryV16 = await readFile(
   new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -284,6 +292,11 @@ const RECOVERY_WORKFLOWS = Object.freeze([
     workflow: finalizeV16Revision3,
     tag: 'v1.6.0-obiwave.3',
     manifest: 'security/releases/v1.6.0-obiwave.3.json',
+  }),
+  Object.freeze({
+    workflow: finalizeV16Revision4,
+    tag: 'v1.6.0-obiwave.4',
+    manifest: 'security/releases/v1.6.0-obiwave.4.json',
   }),
 ]);
 
@@ -566,6 +579,7 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   const deployRechecksIdentity = [
     'v1.6.0-obiwave.2',
     'v1.6.0-obiwave.3',
+    'v1.6.0-obiwave.4',
   ].includes(tag);
   assert.deepEqual(
     topLevelBlockLines(workflow, 'on'),
@@ -726,6 +740,12 @@ test('one-release recovery contracts are fixed-identity, policy-gated, and prote
   for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
     assertRecoveryWorkflow(workflow, { tag, manifest });
   }
+});
+
+test('v1.6.0-obiwave.4 workflow and immutable manifest share the fixed release identity', () => {
+  assert.equal(recoveryV16Revision4Manifest.releaseTag, 'v1.6.0-obiwave.4');
+  assert.match(finalizeV16Revision4, /^      release_tag: v1\.6\.0-obiwave\.4$/m);
+  assert.match(finalizeV16Revision4, /^          SUBWAVE_RELEASE_TAG: v1\.6\.0-obiwave\.4$/m);
 });
 
 test('recovery contracts reject every trigger beyond manual dispatch', () => {
