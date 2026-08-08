@@ -26,6 +26,7 @@ export const PINNED_CUDA_IMAGE_DIGESTS = Object.freeze({
   'v1.6.0-obiwave.1': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
   'v1.6.0-obiwave.2': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
   'v1.6.0-obiwave.3': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
+  'v1.6.0-obiwave.4': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
 });
 
 const POLICY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH']);
