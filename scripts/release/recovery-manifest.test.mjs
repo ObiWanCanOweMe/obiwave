@@ -134,6 +134,30 @@ function exactV16Revision3Manifest() {
   };
 }
 
+function exactV16Revision4Manifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.6.0-obiwave.4',
+    sourceCommit: 'b96ef42c6a014ecf96964809a42370ad5e6954ea',
+    scanner: {
+      version: '0.67.2',
+      imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+    },
+    images: [
+      { name: 'subwave-caddy', digest: 'sha256:94362b8a08bbaa4d4b34eb20cbf6c4aef786fb5ab9d306b3d11b0a8fbb5ad4d1' },
+      { name: 'subwave-broadcast', digest: 'sha256:9611d7b063a70cc96f94f02d4ba2574724f748c4bdca40a4c1d58dcfab75d459' },
+      { name: 'subwave-controller', digest: 'sha256:9069bd7362c4c8cad3554ddfc4d82f7dcabac25d52337b276f3c72721c3a0d98' },
+      { name: 'subwave-web', digest: 'sha256:8404a8d593bcff6866ab8ea8aa5f63dcae46963997ac08adf797e6b8fb67fc61' },
+      { name: 'subwave-aio', digest: 'sha256:4448bcb829f93c3f537bf75b9b4a341f02ee10bc057201f1e8cdd4fe49391955' },
+      { name: 'subwave-aio-heavy', digest: 'sha256:31aa0db54828e4a402ac1d3439bb0e2a5358921ca8ce0b0a8764affaffbb01a4' },
+      { name: 'subwave-tts-heavy', digest: 'sha256:5f54595798f04ac2869ab51d56859da5d678add3f217d8046a3f216a6a2fd0a4' },
+      { name: 'subwave-analyzer', digest: 'sha256:cc368beaa0913e8359edac0bc9cadc20853e0f3b78aff4e5361f518662388594' },
+      { name: 'subwave-analyzer-heavy', digest: 'sha256:7765bccbb8ab223cb40856419d702ba091904e7a34a317fd1fc6a201a8b0f082' },
+      { name: 'subwave-analyzer-cuda', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' },
+    ],
+  };
+}
+
 function exactV16PartialManifest() {
   return {
     schemaVersion: 2,
@@ -289,6 +313,7 @@ function rejects(label, mutate) {
     ['v1.6 revision 1', exactV16Manifest],
     ['v1.6 revision 2', exactV16Revision2Manifest],
     ['v1.6 revision 3', exactV16Revision3Manifest],
+    ['v1.6 revision 4', exactV16Revision4Manifest],
   ]) {
     test(`rejects ${label} for ${release}`, () => {
       const manifest = exactManifest();
@@ -308,6 +333,7 @@ test('accepts each literal approved recovery identity', () => {
     [exactV16Manifest(), 'v1.6.0-obiwave.1', '87fd6e1398f2f8d204d7ed6c7d86ef2e6e2ed787'],
     [exactV16Revision2Manifest(), 'v1.6.0-obiwave.2', '28076250da60844457973794933b5af3b82fa1dc'],
     [exactV16Revision3Manifest(), 'v1.6.0-obiwave.3', '47a76f4cb5b45a26307ba4ebfcf7c77f66405492'],
+    [exactV16Revision4Manifest(), 'v1.6.0-obiwave.4', 'b96ef42c6a014ecf96964809a42370ad5e6954ea'],
   ]) {
     const value = manifestModule.validateRecoveryManifest({ manifest, scannerConfig });
     assert.equal(value.releaseTag, tag);
@@ -369,6 +395,7 @@ for (const [release, exactManifest] of [
   ['v1.6 revision 1', exactV16Manifest],
   ['v1.6 revision 2', exactV16Revision2Manifest],
   ['v1.6 revision 3', exactV16Revision3Manifest],
+  ['v1.6 revision 4', exactV16Revision4Manifest],
 ]) {
   test(`rejects scanner-config disagreement for ${release}`, () => {
     assert.throws(
@@ -581,6 +608,9 @@ const v16Revision2ManifestPath = fileURLToPath(
 const v16Revision3ManifestPath = fileURLToPath(
   new URL('../../security/releases/v1.6.0-obiwave.3.json', import.meta.url),
 );
+const v16Revision4ManifestPath = fileURLToPath(
+  new URL('../../security/releases/v1.6.0-obiwave.4.json', import.meta.url),
+);
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
 function runImageCli(extra = [], env = process.env) {
@@ -632,6 +662,17 @@ test('validate CLI accepts the checked-in v1.6 revision 3 recovery identity', ()
     scriptPath,
     'validate',
     '--manifest', v16Revision3ManifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('validate CLI accepts the checked-in v1.6 revision 4 recovery identity', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', v16Revision4ManifestPath,
     '--scanner', scannerPath,
   ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
