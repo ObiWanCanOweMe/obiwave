@@ -148,9 +148,18 @@ await test('fatal operator copy never contains the raw gateway error', () => {
     responseHeaders: { 'retry-after': '120' },
   });
   const message = bulkEmbeddingFailureMessage(error);
-  assert.equal(message, 'Embedding service rate limit could not be safely retried');
+  assert.equal(message, 'Embedding service rate limit could not be safely retried (HTTP 429)');
   assert.equal(message.includes('secret'), false);
   assert.equal(message.includes('api_key'), false);
+});
+
+await test('fatal operator copy includes only the safe transient classification', () => {
+  const message = bulkEmbeddingFailureMessage(Object.assign(
+    new Error('token=do-not-print'),
+    { statusCode: 503 },
+  ));
+  assert.equal(message, 'Embedding service request failed (HTTP 503)');
+  assert.equal(message.includes('do-not-print'), false);
 });
 
 await test('a permanently throttled batch stops after three waits', async () => {
@@ -168,11 +177,8 @@ await test('a permanently throttled batch stops after three waits', async () => 
   assert.equal(sleeps, 3);
 });
 
-await test('a throttled cloud batch advances progress once, only after all upserts', async () => {
-  const rateLimit: any = Object.assign(new Error('rate limit'), {
-    statusCode: 429,
-    responseHeaders: { 'retry-after': '1' },
-  });
+await test('a transiently failing cloud batch advances progress once, only after all upserts', async () => {
+  const transient: any = Object.assign(new Error('token=do-not-print'), { statusCode: 503 });
   const vectors = Array.from({ length: 64 }, (_, i) => [i]);
   let calls = 0;
   let upserts = 0;
@@ -182,7 +188,7 @@ await test('a throttled cloud batch advances progress once, only after all upser
   const result = await withBulkEmbeddingRateLimit(
     async () => {
       calls += 1;
-      if (calls === 1) throw rateLimit;
+      if (calls === 1) throw transient;
       return vectors;
     },
     {
@@ -223,6 +229,9 @@ await test('tagger wires bulk retry only around document embeddings', () => {
   assert.match(tagger, /bulkEmbeddingBatchSize\(/);
   assert.match(tagger, /commitBulkEmbeddingBatch\(/);
   assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);
+  const embedPhase = tagger.slice(tagger.indexOf('withBulkEmbeddingRateLimit('));
+  assert.match(embedPhase, /notice\.classification/);
+  assert.doesNotMatch(embedPhase, /err\.message/);
   assert.match(
     tagger,
     /commit: vecs => \{[\s\S]*?upsertTrackVector[\s\S]*?onCommitted: \(\) => \{[\s\S]*?reportProgress/,

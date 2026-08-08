@@ -77,9 +77,10 @@ export function safeEmbeddingFailureClass(error: unknown): string {
 }
 
 export function bulkEmbeddingFailureMessage(err: unknown): string {
-  return isRateLimited(err as Parameters<typeof isRateLimited>[0])
+  const message = isRateLimited(err as Parameters<typeof isRateLimited>[0])
     ? 'Embedding service rate limit could not be safely retried'
     : 'Embedding service request failed';
+  return `${message} (${safeEmbeddingFailureClass(err)})`;
 }
 
 export function commitBulkEmbeddingBatch<T>(options: BulkEmbeddingCommitOptions<T>): void {
