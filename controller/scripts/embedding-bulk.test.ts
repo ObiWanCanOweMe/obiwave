@@ -4,6 +4,7 @@ import {
   bulkEmbeddingBatchSize,
   bulkEmbeddingFailureMessage,
   commitBulkEmbeddingBatch,
+  safeEmbeddingFailureClass,
   withBulkEmbeddingRateLimit,
 } from '../src/music/embedding-bulk.js';
 import { isLocalEmbeddingProvider } from '../src/llm/provider.js';
@@ -44,6 +45,59 @@ await test('HTTP self-hosted openai-compatible endpoints retain the local bounde
   assert.equal(bulkEmbeddingBatchSize(25, local), 50);
 });
 
+await test('safe classifications unwrap SDK errors without exposing provider text', () => {
+  const wrapped: any = {
+    name: 'AI_RetryError',
+    lastError: Object.assign(new Error('token=do-not-print responseBody=secret'), {
+      statusCode: 503,
+    }),
+  };
+  const fixtures: Array<[unknown, string]> = [
+    [wrapped, 'HTTP 503'],
+    [{ cause: { code: 'ECONNRESET', message: 'api_key=do-not-print' } }, 'ECONNRESET'],
+    [{ name: 'TimeoutError', message: 'token=do-not-print' }, 'timeout'],
+    [new Error('api_key=do-not-print'), 'unclassified error'],
+  ];
+
+  for (const [error, expected] of fixtures) {
+    const classification = safeEmbeddingFailureClass(error);
+    assert.equal(classification, expected);
+    assert.equal(classification.includes('do-not-print'), false);
+    assert.equal(classification.includes('secret'), false);
+  }
+});
+
+await test('safe classification retains an outer HTTP status when a nested cause exists', () => {
+  const error = Object.assign(new Error('responseBody=do-not-print'), {
+    statusCode: 503,
+    cause: new Error('api_key=do-not-print'),
+  });
+  assert.equal(safeEmbeddingFailureClass(error), 'HTTP 503');
+});
+
+await test('safe classification uses the final SDK errors entry', () => {
+  const wrapped = {
+    name: 'AI_RetryError',
+    errors: [
+      Object.assign(new Error('token=do-not-print'), { statusCode: 500 }),
+      { code: 'ECONNRESET', message: 'responseBody=do-not-print' },
+    ],
+  };
+  assert.equal(safeEmbeddingFailureClass(wrapped), 'ECONNRESET');
+});
+
+await test('safe classification bounds structural traversal and handles cycles', () => {
+  const cyclic: any = { message: 'token=do-not-print' };
+  cyclic.cause = cyclic;
+  assert.equal(safeEmbeddingFailureClass(cyclic), 'unclassified error');
+
+  const beyondBound = { cause: { cause: { cause: { cause: { cause: {
+    statusCode: 503,
+    message: 'api_key=do-not-print',
+  } } } } } };
+  assert.equal(safeEmbeddingFailureClass(beyondBound), 'unclassified error');
+});
+
 await test('Retry-After 60 retries the identical request after a safety margin', async () => {
   const rateLimit: any = new Error('rate limit exceeded');
   rateLimit.statusCode = 429;
@@ -58,16 +112,22 @@ await test('Retry-After 60 retries the identical request after a safety margin',
   assert.equal(result, 'ok');
   assert.equal(calls, 2);
   assert.deepEqual(waits, [60_250]);
-  assert.deepEqual(notices, [{ seconds: 60, attempt: 1 }]);
+  assert.deepEqual(notices, [{
+    seconds: 60,
+    attempt: 1,
+    kind: 'rate-limit',
+    classification: 'HTTP 429',
+  }]);
   assert.equal(JSON.stringify(notices).includes('rate limit exceeded'), false);
 });
 
-await test('non-rate-limit and unusable delays fail immediately', async () => {
+await test('permanent errors and rate limits without a safe Retry-After fail immediately', async () => {
   for (const error of [
-    Object.assign(new Error('boom'), { statusCode: 500 }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: {} }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: { 'retry-after': '0' } }),
-    Object.assign(new Error('rate limit'), { statusCode: 429, responseHeaders: { 'retry-after': '66' } }),
+    Object.assign(new Error('api_key=do-not-print'), { statusCode: 400 }),
+    Object.assign(new Error('api_key=do-not-print'), { statusCode: 401 }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: {} }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: { 'retry-after': '0' } }),
+    Object.assign(new Error('rate limit api_key=do-not-print'), { statusCode: 429, responseHeaders: { 'retry-after': '66' } }),
   ]) {
     let slept = false;
     await assert.rejects(() => withBulkEmbeddingRateLimit(
@@ -78,15 +138,144 @@ await test('non-rate-limit and unusable delays fail immediately', async () => {
   }
 });
 
+await test('quota-shaped rate limits with Retry-After fail immediately', async () => {
+  const quota = Object.assign(new Error('quota exceeded rate limit token=do-not-print'), {
+    statusCode: 429,
+    responseHeaders: { 'retry-after': '60' },
+  });
+  let calls = 0;
+  const waits: number[] = [];
+  await assert.rejects(() => withBulkEmbeddingRateLimit(
+    async () => { calls += 1; throw quota; },
+    { sleep: async ms => { waits.push(ms); } },
+  ));
+  assert.equal(calls, 1);
+  assert.deepEqual(waits, []);
+});
+
+await test('explicit permanent HTTP statuses override transient-looking provider text', async () => {
+  const fixtures: Array<[number, string]> = [
+    [400, 'maximum 500 tokens responseBody=do-not-print'],
+    [401, 'upstream returned 503 token=do-not-print'],
+    [403, 'network timeout api_key=do-not-print'],
+    [404, 'model returned 503 responseBody=do-not-print'],
+    [422, 'socket hang up token=do-not-print'],
+  ];
+  for (const [statusCode, message] of fixtures) {
+    let calls = 0;
+    const waits: number[] = [];
+    await assert.rejects(() => withBulkEmbeddingRateLimit(
+      async () => {
+        calls += 1;
+        throw Object.assign(new Error(message), { statusCode });
+      },
+      { sleep: async ms => { waits.push(ms); } },
+    ));
+    assert.equal(calls, 1, `HTTP ${statusCode} call count`);
+    assert.deepEqual(waits, [], `HTTP ${statusCode} waits`);
+  }
+});
+
+await test('transient embedding failures retry three times with a bounded backoff', async () => {
+  const transient = Object.assign(new Error('responseBody=do-not-print'), { statusCode: 503 });
+  let calls = 0;
+  const waits: number[] = [];
+  const notices: unknown[] = [];
+  const result = await withBulkEmbeddingRateLimit(
+    async () => { calls += 1; if (calls < 4) throw transient; return 'ok'; },
+    { sleep: async ms => { waits.push(ms); }, onWait: notice => notices.push(notice) },
+  );
+  assert.equal(result, 'ok');
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [500, 1_500, 3_500]);
+  assert.deepEqual(notices, [
+    { seconds: 1, attempt: 1, kind: 'transient', classification: 'HTTP 503' },
+    { seconds: 2, attempt: 2, kind: 'transient', classification: 'HTTP 503' },
+    { seconds: 4, attempt: 3, kind: 'transient', classification: 'HTTP 503' },
+  ]);
+  assert.equal(JSON.stringify(notices).includes('do-not-print'), false);
+});
+
+await test('transient embedding failures throw after their bounded retry budget', async () => {
+  const transient = Object.assign(new Error('responseBody=do-not-print'), { statusCode: 503 });
+  let calls = 0;
+  const waits: number[] = [];
+  const notices: unknown[] = [];
+  await assert.rejects(() => withBulkEmbeddingRateLimit(
+    async () => { calls += 1; throw transient; },
+    { sleep: async ms => { waits.push(ms); }, onWait: notice => notices.push(notice) },
+  ));
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [500, 1_500, 3_500]);
+  assert.equal(notices.length, 3);
+  assert.equal(JSON.stringify(notices).includes('do-not-print'), false);
+});
+
+await test('wrapped transport failures recover through the bulk retry wrapper', async () => {
+  const wrapped = {
+    name: 'AI_RetryError',
+    errors: [
+      new Error('token=do-not-print'),
+      { code: 'ECONNRESET', message: 'responseBody=do-not-print' },
+    ],
+  };
+  let calls = 0;
+  const waits: number[] = [];
+  const notices: unknown[] = [];
+  const result = await withBulkEmbeddingRateLimit(
+    async () => { calls += 1; if (calls === 1) throw wrapped; return 'ok'; },
+    { sleep: async ms => { waits.push(ms); }, onWait: notice => notices.push(notice) },
+  );
+  assert.equal(result, 'ok');
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [500]);
+  assert.deepEqual(notices, [
+    { seconds: 1, attempt: 1, kind: 'transient', classification: 'ECONNRESET' },
+  ]);
+  assert.equal(JSON.stringify(notices).includes('do-not-print'), false);
+});
+
+await test('rate-limit and transient retry budgets remain independently bounded', async () => {
+  const rateLimit = Object.assign(new Error('rate limit token=do-not-print'), {
+    statusCode: 429,
+    responseHeaders: { 'retry-after': '1' },
+  });
+  const transient = Object.assign(new Error('responseBody=do-not-print'), { statusCode: 503 });
+  const failures = [rateLimit, transient, transient, transient];
+  let calls = 0;
+  const waits: number[] = [];
+  const result = await withBulkEmbeddingRateLimit(
+    async () => {
+      const failure = failures[calls];
+      calls += 1;
+      if (failure) throw failure;
+      return 'ok';
+    },
+    { sleep: async ms => { waits.push(ms); } },
+  );
+  assert.equal(result, 'ok');
+  assert.equal(calls, 5);
+  assert.deepEqual(waits, [1_250, 500, 1_500, 3_500]);
+});
+
 await test('fatal operator copy never contains the raw gateway error', () => {
   const error: any = Object.assign(new Error('token sk-secret responseBody api_key=hash'), {
     statusCode: 429,
     responseHeaders: { 'retry-after': '120' },
   });
   const message = bulkEmbeddingFailureMessage(error);
-  assert.equal(message, 'Embedding service rate limit could not be safely retried');
+  assert.equal(message, 'Embedding service rate limit could not be safely retried (HTTP 429)');
   assert.equal(message.includes('secret'), false);
   assert.equal(message.includes('api_key'), false);
+});
+
+await test('fatal operator copy includes only the safe transient classification', () => {
+  const message = bulkEmbeddingFailureMessage(Object.assign(
+    new Error('token=do-not-print'),
+    { statusCode: 503 },
+  ));
+  assert.equal(message, 'Embedding service request failed (HTTP 503)');
+  assert.equal(message.includes('do-not-print'), false);
 });
 
 await test('a permanently throttled batch stops after three waits', async () => {
@@ -104,11 +293,8 @@ await test('a permanently throttled batch stops after three waits', async () => 
   assert.equal(sleeps, 3);
 });
 
-await test('a throttled cloud batch advances progress once, only after all upserts', async () => {
-  const rateLimit: any = Object.assign(new Error('rate limit'), {
-    statusCode: 429,
-    responseHeaders: { 'retry-after': '1' },
-  });
+await test('a transiently failing cloud batch advances progress once, only after all upserts', async () => {
+  const transient: any = Object.assign(new Error('token=do-not-print'), { statusCode: 503 });
   const vectors = Array.from({ length: 64 }, (_, i) => [i]);
   let calls = 0;
   let upserts = 0;
@@ -118,7 +304,7 @@ await test('a throttled cloud batch advances progress once, only after all upser
   const result = await withBulkEmbeddingRateLimit(
     async () => {
       calls += 1;
-      if (calls === 1) throw rateLimit;
+      if (calls === 1) throw transient;
       return vectors;
     },
     {
@@ -159,6 +345,12 @@ await test('tagger wires bulk retry only around document embeddings', () => {
   assert.match(tagger, /bulkEmbeddingBatchSize\(/);
   assert.match(tagger, /commitBulkEmbeddingBatch\(/);
   assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);
+  const embedPhase = tagger.slice(tagger.indexOf('withBulkEmbeddingRateLimit('));
+  assert.match(embedPhase, /notice\.kind === 'rate-limit'/);
+  assert.match(embedPhase, /Embedding rate limit — waiting \$\{notice\.seconds\}s \(attempt \$\{notice\.attempt\}\)/);
+  assert.match(embedPhase, /notice\.classification/);
+  assert.match(embedPhase, /Embedding service \$\{notice\.classification\} — retrying in \$\{notice\.seconds\}s \(attempt \$\{notice\.attempt\}\)/);
+  assert.doesNotMatch(embedPhase, /err\.message/);
   assert.match(
     tagger,
     /commit: vecs => \{[\s\S]*?upsertTrackVector[\s\S]*?onCommitted: \(\) => \{[\s\S]*?reportProgress/,

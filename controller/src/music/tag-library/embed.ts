@@ -79,8 +79,16 @@ export async function phaseEmbed(
       vecs = await withBulkEmbeddingRateLimit(
         () => embeddings.embedDocTexts(texts, textMode, { maxRetries: 0 }),
         {
-          onWait: ({ seconds, attempt }) =>
-            logEvent('info', `Embedding rate limit — waiting ${seconds}s (attempt ${attempt})`),
+          onWait: notice => {
+            if (notice.kind === 'rate-limit') {
+              logEvent('info', `Embedding rate limit — waiting ${notice.seconds}s (attempt ${notice.attempt})`);
+              return;
+            }
+            logEvent(
+              'info',
+              `Embedding service ${notice.classification} — retrying in ${notice.seconds}s (attempt ${notice.attempt})`,
+            );
+          },
         },
       );
     } catch (err) {

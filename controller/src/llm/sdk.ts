@@ -7,6 +7,7 @@ export { djText } from './internal/strategy/text.js';
 export { djObject } from './internal/strategy/object.js';
 export { djAgent } from './internal/strategy/agent.js';
 export {
+  isTransient,
   isUnreachable,
   isQuotaOrAuthError,
   isRateLimited,
