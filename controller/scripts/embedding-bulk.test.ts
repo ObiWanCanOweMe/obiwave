@@ -230,7 +230,10 @@ await test('tagger wires bulk retry only around document embeddings', () => {
   assert.match(tagger, /commitBulkEmbeddingBatch\(/);
   assert.match(tagger, /embedDocTexts\(texts, textMode, \{ maxRetries: 0 \}\)/);
   const embedPhase = tagger.slice(tagger.indexOf('withBulkEmbeddingRateLimit('));
+  assert.match(embedPhase, /notice\.kind === 'rate-limit'/);
+  assert.match(embedPhase, /Embedding rate limit — waiting \$\{notice\.seconds\}s \(attempt \$\{notice\.attempt\}\)/);
   assert.match(embedPhase, /notice\.classification/);
+  assert.match(embedPhase, /Embedding service \$\{notice\.classification\} — retrying in \$\{notice\.seconds\}s \(attempt \$\{notice\.attempt\}\)/);
   assert.doesNotMatch(embedPhase, /err\.message/);
   assert.match(
     tagger,
