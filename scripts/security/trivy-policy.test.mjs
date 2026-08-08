@@ -694,6 +694,8 @@ test('cross-release CUDA digests fail closed', () => {
     [V16_REVISION_2_TAG, V15_CUDA_DIGEST],
     [V16_REVISION_3_TAG, V13_CUDA_DIGEST],
     [V16_REVISION_3_TAG, V15_CUDA_DIGEST],
+    [V16_REVISION_4_TAG, V13_CUDA_DIGEST],
+    [V16_REVISION_4_TAG, V15_CUDA_DIGEST],
   ]) {
     const error = validationError({
       tag,

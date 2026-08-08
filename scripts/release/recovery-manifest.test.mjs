@@ -608,6 +608,9 @@ const v16Revision2ManifestPath = fileURLToPath(
 const v16Revision3ManifestPath = fileURLToPath(
   new URL('../../security/releases/v1.6.0-obiwave.3.json', import.meta.url),
 );
+const v16Revision4ManifestPath = fileURLToPath(
+  new URL('../../security/releases/v1.6.0-obiwave.4.json', import.meta.url),
+);
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
 function runImageCli(extra = [], env = process.env) {
@@ -659,6 +662,17 @@ test('validate CLI accepts the checked-in v1.6 revision 3 recovery identity', ()
     scriptPath,
     'validate',
     '--manifest', v16Revision3ManifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('validate CLI accepts the checked-in v1.6 revision 4 recovery identity', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', v16Revision4ManifestPath,
     '--scanner', scannerPath,
   ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
