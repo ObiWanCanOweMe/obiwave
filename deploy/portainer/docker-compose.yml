@@ -97,8 +97,8 @@ services:
       - TZ=${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
-      # Optional sidecar for Chatterbox + PocketTTS. Gated by --profile tts-heavy
-      # below; unreachable URL → fall back to Piper (no harm done).
+      # Ark's default-on CUDA sidecar for Chatterbox + PocketTTS. If its CUDA
+      # preflight fails it stays unavailable, so the controller falls back to Piper.
       - TTS_HEAVY_URL=${TTS_HEAVY_URL:-http://tts-heavy:8080}
       # Acoustic-analysis sidecar (the `analyzer` service below, default-on).
       # Probed, then a local venv; falls through cleanly to NULL analysis if
@@ -176,15 +176,13 @@ services:
     # The bundled Caddy service routes those paths to controller and broadcast.
 
   # -------------------------------------------------------------------------
-  # TTS-HEAVY (optional) — sidecar for Chatterbox + PocketTTS
+  # TTS-HEAVY — CUDA sidecar for Chatterbox + PocketTTS
   # -------------------------------------------------------------------------
-  # See docker-compose.yml for the full rationale (issue #103). NOT started
-  # by default. Enable this stack with the `tts-heavy` profile in Portainer.
-  # The controller falls back to Piper when the URL is unreachable.
+  # Ark runs the published CUDA image by default. Its command fail-closes before
+  # binding HTTP when CUDA is unavailable, so the controller falls back to Piper.
   tts-heavy:
-    image: ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}
-    # amd64-only image (heavy PyTorch stack); pinned so it runs under emulation
-    # on arm64 hosts. The other services are multi-arch and auto-select.
+    image: ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${SUBWAVE_VERSION:?required}
+    # CUDA is amd64-only; ark supplies NVIDIA GPUs through the reservation below.
     platform: linux/amd64
     container_name: sub-wave-tts-heavy
     restart: unless-stopped
@@ -195,20 +193,28 @@ services:
     # or the controller down with it. Default is generous — real Chatterbox +
     # PocketTTS peaks sit well under it. Raise/lower via TTS_HEAVY_MEM_LIMIT.
     mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}
-    profiles: ["tts-heavy"]
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     environment:
-      - TTS_HEAVY_DEVICE=${TTS_HEAVY_DEVICE:-cpu}
-      - POCKET_TTS_VOICE=${POCKET_TTS_VOICE:-alba}
-      # Which heavy engines to actually load. Both are baked into the image;
-      # each costs RAM + a first-boot weight download + startup time, so set
-      # this to a single engine if you only use one. Comma-separated.
-      # e.g. TTS_HEAVY_ENGINES=pocket-tts runs PocketTTS only (no Chatterbox).
-      - TTS_HEAVY_ENGINES=${TTS_HEAVY_ENGINES:-chatterbox,pocket-tts}
+      TTS_HEAVY_DEVICE: cuda
+      TTS_HEAVY_ENGINES: chatterbox,pocket-tts
+      POCKET_TTS_VOICE: ${POCKET_TTS_VOICE:-alba}
       # Optional — enables PocketTTS voice CLONING (issue #238). Cloning weights
       # are gated on Hugging Face; accept the terms at
       # huggingface.co/kyutai/pocket-tts and set HF_TOKEN in Portainer.
       # Built-in voices need no token.
-      - HF_TOKEN=${HF_TOKEN:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - *state-mount
       # Persist the per-engine Hugging Face caches across container recreates.
@@ -223,9 +229,8 @@ services:
   # + CLAP "sounds-like" embeddings and Demucs vocal-activity ranges).
   # -------------------------------------------------------------------------
   # Starts by default alongside the core services. The controller probes
-  # ANALYZE_URL (this service), then a local venv. Only the heavy *voices*
-  # (Chatterbox/PocketTTS) stay opt-in under the `tts-heavy` profile; acoustic
-  # analysis is default-on. To skip it, `docker compose stop analyzer`.
+  # ANALYZE_URL (this service), then a local venv. Ark runs both GPU sidecars by
+  # default; to skip acoustic analysis, `docker compose stop analyzer`.
   analyzer:
     image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}
     container_name: sub-wave-analyzer

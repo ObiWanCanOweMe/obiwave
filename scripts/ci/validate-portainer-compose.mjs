@@ -15,7 +15,7 @@ const serviceImages = new Map([
   ['controller', 'ghcr.io/obiwancanoweme/subwave-controller:${SUBWAVE_VERSION:?required}'],
   ['docker-socket-proxy', 'ghcr.io/tecnativa/docker-socket-proxy:0.3.0'],
   ['web', 'ghcr.io/obiwancanoweme/subwave-web:${SUBWAVE_VERSION:?required}'],
-  ['tts-heavy', 'ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}'],
+  ['tts-heavy', 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${SUBWAVE_VERSION:?required}'],
   ['analyzer', 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${SUBWAVE_VERSION:?required}'],
 ]);
 
@@ -26,6 +26,14 @@ const analyzerCudaGateSource = `command:
       - -c
       - >-
         /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080`;
+const ttsCudaGateScript = '/opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
+const ttsCudaGateCommand = ['/bin/sh', '-c', ttsCudaGateScript];
+const ttsCudaGateSource = `command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
         exec uvicorn server:app --host 0.0.0.0 --port 8080`;
 
 const serviceRequirements = [
@@ -50,8 +58,15 @@ const serviceRequirements = [
   ['web', 'logging: *default-logging', 'service web is missing default log rotation'],
   ['web', 'controller:\n        condition: service_healthy', 'service web is missing controller service_healthy dependency'],
   ['tts-heavy', 'logging: *default-logging', 'service tts-heavy is missing default log rotation'],
-  ['tts-heavy', 'profiles: ["tts-heavy"]', 'service tts-heavy is missing profile tts-heavy'],
   ['tts-heavy', 'mem_limit:', 'service tts-heavy is missing its memory limit'],
+  ['tts-heavy', ttsCudaGateSource, 'service tts-heavy is missing its fail-closed CUDA startup gate'],
+  ['tts-heavy', 'TTS_HEAVY_DEVICE: cuda', 'service tts-heavy must require CUDA'],
+  ['tts-heavy', 'TTS_HEAVY_ENGINES: chatterbox,pocket-tts', 'service tts-heavy must load both engines'],
+  [
+    'tts-heavy',
+    'driver: nvidia\n              count: all\n              capabilities: [gpu]',
+    'service tts-heavy is missing its NVIDIA GPU reservation',
+  ],
   ['tts-heavy', '*state-mount', 'service tts-heavy is missing the state mount'],
   ['tts-heavy', 'tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache', 'service tts-heavy is missing its chatterbox cache mount'],
   ['tts-heavy', 'tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache', 'service tts-heavy is missing its pocket cache mount'],
@@ -129,6 +144,10 @@ export function validatePortainerCompose(source) {
   for (const [service, marker, message] of serviceRequirements) {
     const block = blocks.get(service);
     if (block && !block.includes(marker) && !errors.includes(message)) errors.push(message);
+  }
+
+  if (/^    profiles\s*:/m.test(blocks.get('tts-heavy') ?? '')) {
+    errors.push('service tts-heavy must not be profile-gated');
   }
 
   const volumes = namedVolumes(active);
@@ -210,6 +229,31 @@ export function validateResolvedPortainerCompose(model) {
   ) {
     errors.push('resolved analyzer has an invalid NVIDIA GPU reservation');
   }
+
+  const ttsHeavy = services['tts-heavy'];
+  if (!/^ghcr\.io\/obiwancanoweme\/subwave-tts-heavy-cuda:v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-obiwave\.[1-9][0-9]*$/.test(ttsHeavy?.image ?? '')) {
+    errors.push('resolved tts-heavy has an invalid CUDA mirror image');
+  }
+  if (ttsHeavy?.environment?.TTS_HEAVY_DEVICE !== 'cuda') {
+    errors.push('resolved tts-heavy must require CUDA');
+  }
+  if (ttsHeavy?.environment?.TTS_HEAVY_ENGINES !== 'chatterbox,pocket-tts') {
+    errors.push('resolved tts-heavy must load both engines');
+  }
+  if (JSON.stringify(ttsHeavy?.command) !== JSON.stringify(ttsCudaGateCommand)) {
+    errors.push('resolved tts-heavy has an invalid fail-closed CUDA startup gate');
+  }
+  const ttsDevices = ttsHeavy?.deploy?.resources?.reservations?.devices;
+  if (
+    !Array.isArray(ttsDevices)
+    || ttsDevices.length !== 1
+    || ttsDevices[0]?.driver !== 'nvidia'
+    || !['all', -1].includes(ttsDevices[0]?.count)
+    || JSON.stringify(ttsDevices[0]?.capabilities) !== JSON.stringify(['gpu'])
+  ) {
+    errors.push('resolved tts-heavy has an invalid NVIDIA GPU reservation');
+  }
+  if (ttsHeavy?.profiles != null) errors.push('resolved tts-heavy must not be profile-gated');
   return errors;
 }
 

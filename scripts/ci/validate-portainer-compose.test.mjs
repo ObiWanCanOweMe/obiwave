@@ -22,6 +22,14 @@ const portainerManifest = readFileSync(
 );
 const cudaGateScript = '/opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
 const cudaGateCommand = ['/bin/sh', '-c', cudaGateScript];
+const cudaGateSource = `command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/analyzer/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080`;
+const ttsCudaGateScript = '/opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
+const ttsCudaGateCommand = ['/bin/sh', '-c', ttsCudaGateScript];
 const validResolved = {
   services: {
     caddy: {
@@ -32,6 +40,18 @@ const validResolved = {
       ],
     },
     web: {},
+    'tts-heavy': {
+      image: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:v1.0.0-obiwave.1',
+      command: ttsCudaGateCommand,
+      environment: { TTS_HEAVY_DEVICE: 'cuda', TTS_HEAVY_ENGINES: 'chatterbox,pocket-tts' },
+      deploy: {
+        resources: {
+          reservations: {
+            devices: [{ driver: 'nvidia', count: 'all', capabilities: ['gpu'] }],
+          },
+        },
+      },
+    },
     analyzer: {
       image: 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.0.0-obiwave.1',
       command: cudaGateCommand,
@@ -107,10 +127,27 @@ services:
       controller:
         condition: service_healthy
   tts-heavy:
-    image: ghcr.io/obiwancanoweme/subwave-tts-heavy:\${SUBWAVE_VERSION:?required}
+    image: ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:\${SUBWAVE_VERSION:?required}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
     logging: *default-logging
     mem_limit: \${TTS_HEAVY_MEM_LIMIT:-10g}
-    profiles: ["tts-heavy"]
+    environment:
+      TTS_HEAVY_DEVICE: cuda
+      TTS_HEAVY_ENGINES: chatterbox,pocket-tts
+      POCKET_TTS_VOICE: \${POCKET_TTS_VOICE:-alba}
+      HF_TOKEN: \${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - *state-mount
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
@@ -431,6 +468,64 @@ test('resolved analyzer requires the release-tagged CUDA mirror and NVIDIA reser
   assert.deepEqual(resolvedErrors(dockerNormalized), []);
 });
 
+test('source and resolved Ark TTS require the default-on fail-closed CUDA topology', () => {
+  assert.deepEqual(errorsFor(valid), []);
+
+  const sourceCases = [
+    [
+      'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${SUBWAVE_VERSION:?required}',
+      'ghcr.io/obiwancanoweme/subwave-tts-heavy:${SUBWAVE_VERSION:?required}',
+      'service tts-heavy has an invalid image',
+    ],
+    [
+      `    command:
+      - /bin/sh
+      - -c
+      - >-
+        /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
+        exec uvicorn server:app --host 0.0.0.0 --port 8080
+`,
+      '',
+      'service tts-heavy is missing its fail-closed CUDA startup gate',
+    ],
+    ['      TTS_HEAVY_DEVICE: cuda\n', '      TTS_HEAVY_DEVICE: cpu\n', 'service tts-heavy must require CUDA'],
+    ['      TTS_HEAVY_ENGINES: chatterbox,pocket-tts\n', '      TTS_HEAVY_ENGINES: chatterbox\n', 'service tts-heavy must load both engines'],
+    [
+      `    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+`,
+      '',
+      'service tts-heavy is missing its NVIDIA GPU reservation',
+    ],
+    ['    mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}\n', '    mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}\n    profiles: ["tts-heavy"]\n', 'service tts-heavy must not be profile-gated'],
+  ];
+  for (const [from, to, expected] of sourceCases) assertRejects(valid.replace(from, to), expected);
+
+  const resolvedCases = [
+    ['image', 'ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.0.0-obiwave.1', 'resolved tts-heavy has an invalid CUDA mirror image'],
+    ['command', undefined, 'resolved tts-heavy has an invalid fail-closed CUDA startup gate'],
+    ['device', 'cpu', 'resolved tts-heavy must require CUDA'],
+    ['engines', 'chatterbox', 'resolved tts-heavy must load both engines'],
+    ['devices', undefined, 'resolved tts-heavy has an invalid NVIDIA GPU reservation'],
+    ['profiles', ['tts-heavy'], 'resolved tts-heavy must not be profile-gated'],
+  ];
+  for (const [field, value, expected] of resolvedCases) {
+    const model = structuredClone(validResolved);
+    if (field === 'image') model.services['tts-heavy'].image = value;
+    if (field === 'command') delete model.services['tts-heavy'].command;
+    if (field === 'device') model.services['tts-heavy'].environment.TTS_HEAVY_DEVICE = value;
+    if (field === 'engines') model.services['tts-heavy'].environment.TTS_HEAVY_ENGINES = value;
+    if (field === 'devices') delete model.services['tts-heavy'].deploy.resources.reservations.devices;
+    if (field === 'profiles') model.services['tts-heavy'].profiles = value;
+    assert.ok(resolvedErrors(model).includes(expected), expected);
+  }
+});
+
 test('Portainer forwards analyzer lifecycle overrides', () => {
   const analyzer = renderCompose(portainerManifest, {
     ANALYZE_IDLE_UNLOAD_S: '17',
@@ -443,13 +538,13 @@ test('Portainer forwards analyzer lifecycle overrides', () => {
 test('source and resolved analyzer require the fail-closed CUDA startup gate', () => {
   assert.deepEqual(errorsFor(valid), []);
   assertRejects(
-    valid.replace(/    command:\n(?:      .*\n){5}/, ''),
+    valid.replace(cudaGateSource, ''),
     'service analyzer is missing its fail-closed CUDA startup gate',
   );
   assertRejects(
     valid.replace(
-      'sys.exit(0 if torch.cuda.is_available() else 1)',
-      'sys.exit(0)',
+      cudaGateSource,
+      cudaGateSource.replace('sys.exit(0 if torch.cuda.is_available() else 1)', 'sys.exit(0)'),
     ),
     'service analyzer is missing its fail-closed CUDA startup gate',
   );
@@ -533,12 +628,19 @@ test('rejects mutable or checkout-coupled deployment', () => {
 
 test('rejects missing services and exact first-party images', () => {
   assertRejects(valid.replace(/  analyzer:\n[\s\S]*?(?=volumes:)/, ''), 'manifest is missing service analyzer');
-  for (const service of ['caddy', 'broadcast', 'controller', 'web', 'tts-heavy']) {
+  for (const service of ['caddy', 'broadcast', 'controller', 'web']) {
     assertRejects(
       valid.replace(`ghcr.io/obiwancanoweme/subwave-${service}:`, `example.invalid/subwave-${service}:`),
       `service ${service} has an invalid image`,
     );
   }
+  assertRejects(
+    valid.replace(
+      'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${SUBWAVE_VERSION:?required}',
+      'example.invalid/subwave-tts-heavy-cuda:${SUBWAVE_VERSION:?required}',
+    ),
+    'service tts-heavy has an invalid image',
+  );
   for (const image of [
     'ghcr.io/obiwancanoweme/subwave-analyzer:\${SUBWAVE_VERSION:?required}',
     'ghcr.io/perminder-klair/subwave-analyzer-cuda:v1.0.0-obiwave.1',
@@ -563,13 +665,14 @@ test('rejects missing services and exact first-party images', () => {
 test('rejects material topology removals', () => {
   const cases = [
     ['      - stack.env\n', 'service controller is missing env_file stack.env'],
-    ['    profiles: ["tts-heavy"]\n', 'service tts-heavy is missing profile tts-heavy'],
+    ['    mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}\n', 'service tts-heavy must not be profile-gated', '    mem_limit: ${TTS_HEAVY_MEM_LIMIT:-10g}\n    profiles: ["tts-heavy"]\n'],
     ['    healthcheck:\n      test: ["CMD-SHELL", "curl -f http://localhost:7701/health"]\n', 'service controller is missing a healthcheck'],
     ['      docker-socket-proxy:\n        condition: service_started\n', 'service controller is missing docker-socket-proxy service_started dependency'],
     ['      ANALYZE_DEVICE: cuda\n', 'service analyzer must require CUDA'],
     [
-      '    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n',
+      '      ANALYZE_DEVICE: cuda\n    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n',
       'service analyzer is missing its NVIDIA GPU reservation',
+      '      ANALYZE_DEVICE: cuda\n',
     ],
     ['      - analyzer-cache:/opt/analyzer/hf-cache\n', 'service analyzer is missing its named cache mount'],
     ['  analyzer-cache:\n', 'manifest is missing named volume analyzer-cache'],
