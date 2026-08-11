@@ -1203,6 +1203,50 @@ test('release publication builds the exact CPU and CUDA Chatterbox images', () =
   assert.doesNotMatch(matrix, /subwave-analyzer-cuda/);
 });
 
+test('the exact CUDA TTS build digest is the only artifact scanned and handed to deployment', () => {
+  const artifactName = 'cuda-tts-build-digest';
+  const build = jobBlock(publish, 'build');
+  const recordStep = stepBlock(build, 'Record exact CUDA TTS build digest');
+  assert.match(recordStep, /^        if: matrix\.image == 'subwave-tts-heavy-cuda'$/m);
+  assert.deepEqual(stepEnv(recordStep), {
+    IMAGE: 'subwave-tts-heavy-cuda',
+    TAG_REF: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${{ github.ref_name }}',
+    DIGEST: '${{ steps.build.outputs.digest }}',
+    OUTPUT_DIRECTORY: '${{ runner.temp }}/cuda-tts-build-digest',
+  });
+  assert.match(stepRun(build, 'Record exact CUDA TTS build digest'), /image-digest-record\.mjs create/);
+  const uploadStep = stepBlock(build, 'Upload exact CUDA TTS build digest');
+  assert.match(uploadStep, /^        if: matrix\.image == 'subwave-tts-heavy-cuda'$/m);
+  assert.match(uploadStep, /^        uses: actions\/upload-artifact@v4$/m);
+  assert.match(uploadStep, new RegExp(`^          name: ${artifactName}$`, 'm'));
+  assert.match(uploadStep, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest\/subwave-tts-heavy-cuda\.json$/m);
+
+  const policy = jobBlock(publish, 'vulnerability-policy');
+  assert.match(policy, new RegExp(`^      cuda_tts_digest_artifact: ${artifactName}$`, 'm'));
+
+  const scanJob = jobBlock(scan, 'scan');
+  const downloadForScan = stepBlock(scanJob, 'Download exact CUDA TTS build digest');
+  assert.match(downloadForScan, /matrix\.image == 'subwave-tts-heavy-cuda'/);
+  assert.match(downloadForScan, /needs\.resolve-tag\.outputs\.recovery_mode == 'none'/);
+  assert.match(downloadForScan, /inputs\.cuda_tts_digest_artifact != ''/);
+  assert.match(downloadForScan, /^        uses: actions\/download-artifact@v4$/m);
+  assert.match(downloadForScan, /^          name: \$\{\{ inputs\.cuda_tts_digest_artifact \}\}$/m);
+  assert.match(downloadForScan, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest$/m);
+  const refsStep = stepBlock(scanJob, 'Resolve immutable image references');
+  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /image-digest-record\.mjs resolve/);
+  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /--directory "\$CUDA_TTS_DIGEST_DIRECTORY"/);
+
+  const deploy = jobBlock(publish, 'deploy-production');
+  const downloadForDeploy = stepBlock(deploy, 'Download exact CUDA TTS build digest');
+  assert.match(downloadForDeploy, /^        uses: actions\/download-artifact@v4$/m);
+  assert.match(downloadForDeploy, new RegExp(`^          name: ${artifactName}$`, 'm'));
+  assert.match(downloadForDeploy, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest$/m);
+  assert.equal(
+    stepEnv(stepBlock(deploy, 'Deploy immutable release through Portainer')).SUBWAVE_TTS_DIGEST_DIRECTORY,
+    '${{ runner.temp }}/cuda-tts-build-digest',
+  );
+});
+
 test('aggregate vulnerability policy requires the exact eleven-image release set', () => {
   assert.deepEqual(POLICY_IMAGES, [
     'subwave-caddy',
@@ -1247,6 +1291,7 @@ test('JSON and SARIF scanner invocations include tag and digest-qualified pull r
 
     const command = stepRun(scanJob, stepName);
     assert.match(command, /--tag-ref "\$TAG_REF"/);
+    assert.match(command, /if \[\[ -n "\$PULL_REF" \]\]; then/);
     assert.match(command, /recovery_args\+=\(--pull-ref "\$PULL_REF"\)/);
     assert.match(command, /"\$\{recovery_args\[@\]\}"/);
   }
@@ -1256,6 +1301,13 @@ test('sealed manifest workflow-call inputs are optional transport values', () =>
   assert.match(
     scan,
     /partial_recovery_manifest:\s*\n\s+description: Approved repository-relative partial recovery manifest\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string\s*\n\s+sealed_recovery_manifest_b64:\s*\n\s+description: Base64 sealed recovery manifest from an upstream job\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
+  );
+});
+
+test('the reusable scanner accepts only an explicit current-run CUDA TTS digest artifact handoff', () => {
+  assert.match(
+    scan,
+    /cuda_tts_digest_artifact:\s*\n\s+description: Exact-name current-run CUDA TTS build digest artifact\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
   );
 });
 
@@ -1308,6 +1360,8 @@ test('every scan matrix job materializes the sealed manifest before resolving im
     RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.recovery_manifest }}',
     PARTIAL_RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.partial_recovery_manifest }}',
     RECOVERY_MODE: '${{ needs.resolve-tag.outputs.recovery_mode }}',
+    CUDA_TTS_DIGEST_ARTIFACT: '${{ inputs.cuda_tts_digest_artifact }}',
+    CUDA_TTS_DIGEST_DIRECTORY: '${{ runner.temp }}/cuda-tts-build-digest',
   });
 
   assert.equal((scanJob.match(/--partial-recovery-manifest "\$PARTIAL_RECOVERY_MANIFEST"/g) ?? []).length, 2);

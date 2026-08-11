@@ -4,6 +4,7 @@ import { appendFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { parseForkTag } from '../release/fork-tag.mjs';
+import { loadImageDigestRecord } from '../release/image-digest-record.mjs';
 import {
   DeploymentRolledBackError,
   PortainerClient,
@@ -21,16 +22,22 @@ const REQUIRED_ENV = [
   'SUBWAVE_STREAM_URL',
 ];
 const MANIFEST_URL = new URL('../../deploy/portainer/docker-compose.yml', import.meta.url);
+const TTS_IMAGE = 'subwave-tts-heavy-cuda';
+const TTS_IMAGE_REPOSITORY = `ghcr.io/obiwancanoweme/${TTS_IMAGE}`;
 
 function releaseConfig(env) {
   const missing = REQUIRED_ENV.filter((name) => !env[name]?.trim());
   if (missing.length > 0) {
     throw new Error(`Missing required release configuration: ${missing.join(', ')}`);
   }
-  parseForkTag(env.SUBWAVE_RELEASE_TAG);
+  const release = parseForkTag(env.SUBWAVE_RELEASE_TAG);
+  if (release.revision >= 2 && !env.SUBWAVE_TTS_DIGEST_DIRECTORY?.trim()) {
+    throw new Error('Missing required release configuration: SUBWAVE_TTS_DIGEST_DIRECTORY');
+  }
   return {
     ...Object.fromEntries(REQUIRED_ENV.map((name) => [name, env[name]])),
     SUBWAVE_STREAM_PASSWORD: env.SUBWAVE_STREAM_PASSWORD || undefined,
+    SUBWAVE_TTS_DIGEST_DIRECTORY: env.SUBWAVE_TTS_DIGEST_DIRECTORY || undefined,
   };
 }
 
@@ -68,6 +75,13 @@ export async function runRelease({
 } = {}) {
   const config = releaseConfig(env);
   const manifest = await readFileImpl(MANIFEST_URL, 'utf8');
+  const ttsDigestRecord = config.SUBWAVE_TTS_DIGEST_DIRECTORY
+    ? await loadImageDigestRecord({
+      directory: config.SUBWAVE_TTS_DIGEST_DIRECTORY,
+      expectedImage: TTS_IMAGE,
+      expectedTagRef: `${TTS_IMAGE_REPOSITORY}:${config.SUBWAVE_RELEASE_TAG}`,
+    })
+    : undefined;
   const client = clientFactory({
     baseUrl: config.PORTAINER_URL,
     apiKey: config.PORTAINER_API_KEY,
@@ -85,6 +99,7 @@ export async function runRelease({
       healthUrl: config.SUBWAVE_HEALTH_URL,
       streamUrl: config.SUBWAVE_STREAM_URL,
       streamPassword: config.SUBWAVE_STREAM_PASSWORD,
+      expectedTtsDigest: ttsDigestRecord?.digest,
     });
   } catch (error) {
     if (error instanceof DeploymentRolledBackError) {

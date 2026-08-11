@@ -241,11 +241,36 @@ jobs:
           echo '- Tag: `${{ github.ref_name }}`' >> "$GITHUB_STEP_SUMMARY"
           echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda'
+        env:
+          IMAGE: subwave-tts-heavy-cuda
+          TAG_REF: ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${{ github.ref_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest
+        run: |
+          node scripts/release/image-digest-record.mjs create \
+            --image "$IMAGE" \
+            --tag-ref "$TAG_REF" \
+            --digest "$DIGEST" \
+            --directory "$OUTPUT_DIRECTORY"
+
+      - name: Upload exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda'
+        # Workflow artifacts are run-scoped, including jobs inside the called
+        # scanner workflow. Scan and deploy therefore consume this same record.
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuda-tts-build-digest
+          path: ${{ runner.temp }}/cuda-tts-build-digest/subwave-tts-heavy-cuda.json
+          if-no-files-found: error
+
   vulnerability-policy:
     needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer]
     uses: ./.github/workflows/scan-images.yml
     with:
       release_tag: ${{ github.ref_name }}
+      cuda_tts_digest_artifact: cuda-tts-build-digest
     permissions:
       contents: read
       packages: read
@@ -266,6 +291,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      - name: Download exact CUDA TTS build digest
+        uses: actions/download-artifact@v4
+        with:
+          name: cuda-tts-build-digest
+          path: ${{ runner.temp }}/cuda-tts-build-digest
       - name: Deploy immutable release through Portainer
         run: node scripts/deploy/portainer-release.mjs
         env:
@@ -277,3 +307,4 @@ jobs:
           SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
           SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
           SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
+          SUBWAVE_TTS_DIGEST_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest

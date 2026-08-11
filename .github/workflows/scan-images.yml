@@ -25,6 +25,11 @@ on:
         required: false
         default: ''
         type: string
+      cuda_tts_digest_artifact:
+        description: Exact-name current-run CUDA TTS build digest artifact
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
@@ -181,6 +186,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda' && needs.resolve-tag.outputs.recovery_mode == 'none' && inputs.cuda_tts_digest_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.cuda_tts_digest_artifact }}
+          path: ${{ runner.temp }}/cuda-tts-build-digest
+
       - name: Materialize sealed recovery manifest
         if: needs.resolve-tag.outputs.recovery_mode == 'sealed'
         env:
@@ -203,6 +215,8 @@ jobs:
           RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
           PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
           RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
+          CUDA_TTS_DIGEST_ARTIFACT: ${{ inputs.cuda_tts_digest_artifact }}
+          CUDA_TTS_DIGEST_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest
         run: |
           if [[ "$RECOVERY_MODE" == 'static' ]]; then
             node scripts/release/recovery-manifest.mjs image \
@@ -216,7 +230,15 @@ jobs:
               --scanner security/trivy-scanner.json \
               --image "$IMAGE"
           elif [[ "$RECOVERY_MODE" == 'none' ]]; then
-            echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            if [[ "$IMAGE" == 'subwave-tts-heavy-cuda' && -n "$CUDA_TTS_DIGEST_ARTIFACT" ]]; then
+              node scripts/release/image-digest-record.mjs resolve \
+                --directory "$CUDA_TTS_DIGEST_DIRECTORY" \
+                --image "$IMAGE" \
+                --tag-ref "ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" \
+                >> "$GITHUB_OUTPUT"
+            else
+              echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo 'unrecognized recovery mode' >&2
             exit 1
@@ -243,7 +265,7 @@ jobs:
             echo 'unrecognized recovery mode' >&2
             exit 1
           fi
-          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+          if [[ -n "$PULL_REF" ]]; then
             recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \
@@ -319,7 +341,7 @@ jobs:
             echo 'unrecognized recovery mode' >&2
             exit 1
           fi
-          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+          if [[ -n "$PULL_REF" ]]; then
             recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \

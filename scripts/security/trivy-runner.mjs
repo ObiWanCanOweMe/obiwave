@@ -170,9 +170,15 @@ export function runTrivyScan({ scanner, image, format, output, cacheDirectory, r
     checkedRun(run, 'docker', ['pull', target.pullRef], 'pull');
     checkedRun(run, 'docker', ['tag', target.pullRef, target.tagRef], 'tag');
     checkedRun(run, 'docker', ['image', 'inspect', target.tagRef], 'local image inspection');
+  } else if (target.pullRef) {
+    checkedRun(run, 'docker', ['pull', target.pullRef], 'pull');
+    checkedRun(run, 'docker', ['tag', target.pullRef, target.tagRef], 'tag');
+    checkedRun(run, 'docker', ['image', 'inspect', target.tagRef], 'local image inspection');
   } else {
     checkedRun(run, 'docker', ['pull', target.tagRef], 'pull');
   }
+
+  const scanRef = target.tagRef;
 
   checkedRun(run, 'docker', [
     'run', '--rm',
@@ -181,11 +187,11 @@ export function runTrivyScan({ scanner, image, format, output, cacheDirectory, r
     '--volume', `${bindings.cacheHost}:/root/.cache/trivy`,
     scanner.imageRef,
     'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
-    '--format', format, '--output', output, target.tagRef,
+    '--format', format, '--output', output, scanRef,
   ], 'scanner');
 
   if (recovery !== undefined) verifyRecovery({ recovery, partialRecovery, scanner, image: target, run });
-  return Object.freeze({ image: target.tagRef, format, output });
+  return Object.freeze({ image: scanRef, format, output });
 }
 
 function parseCli(argv) {
@@ -209,7 +215,6 @@ function parseCli(argv) {
   if (values['partial-recovery-manifest'] && !values['recovery-manifest']) {
     throw new Error('Trivy partial recovery manifest requires --recovery-manifest');
   }
-  if (!values['recovery-manifest'] && values['pull-ref']) throw new Error('Trivy command accepts --pull-ref only with --recovery-manifest');
   if (values['recovery-manifest'] && !values['pull-ref']) throw new Error('Trivy recovery command requires --pull-ref');
   if (values.output.startsWith('/') || values['cache-directory'].startsWith('/')
     || values.output.split('/').includes('..') || values['cache-directory'].split('/').includes('..')) {
