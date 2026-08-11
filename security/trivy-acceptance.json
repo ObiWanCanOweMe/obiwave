@@ -2572,68 +2572,6 @@
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-54369"
     },
     {
-      "vulnerabilityId": "CVE-2026-55199",
-      "images": [
-        "subwave-controller",
-        "subwave-tts-heavy",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libssh2-1",
-      "installedVersion": "1.10.0-3+b1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-55199"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-55199",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libssh2-1",
-      "installedVersion": "1.10.0-3+b1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-55199"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-55200",
-      "images": [
-        "subwave-controller",
-        "subwave-tts-heavy",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libssh2-1",
-      "installedVersion": "1.10.0-3+b1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-55200"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-55200",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libssh2-1",
-      "installedVersion": "1.10.0-3+b1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-55200"
-    },
-    {
       "vulnerabilityId": "CVE-2026-56208",
       "images": [
         "subwave-controller",
@@ -5300,276 +5238,6 @@
       "approvedOn": "2026-08-05",
       "expiresOn": "2026-11-03",
       "tracking": "https://avd.aquasec.com/nvd/cve-2026-66040"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "ffmpeg",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "ffmpeg",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libavcodec59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libavcodec59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libavdevice59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libavdevice59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libavfilter8",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libavfilter8",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libavformat59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libavformat59",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libavutil57",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libavutil57",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libpostproc56",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libpostproc56",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libswresample4",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libswresample4",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-controller",
-        "subwave-analyzer",
-        "subwave-analyzer-heavy"
-      ],
-      "package": "libswscale6",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "no-fix",
-      "justification": "Trivy 0.67.2 reports no fixed version for this exact runtime package occurrence; acceptance is limited to the listed image(s) and package/version while the base distribution or upstream package supplies a remediation.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-04",
-      "expiresOn": "2026-11-02",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
-    },
-    {
-      "vulnerabilityId": "CVE-2026-66041",
-      "images": [
-        "subwave-analyzer-cuda"
-      ],
-      "package": "libswscale6",
-      "installedVersion": "7:5.1.9-0+deb12u1",
-      "disposition": "upstream-mirror",
-      "justification": "This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.",
-      "owner": "SUB/WAVE maintainers",
-      "approvedOn": "2026-08-05",
-      "expiresOn": "2026-11-03",
-      "tracking": "https://avd.aquasec.com/nvd/cve-2026-66041"
     },
     {
       "vulnerabilityId": "CVE-2026-6653",
@@ -7319,6 +6987,53 @@
       "approvedOn": "2026-08-07",
       "expiresOn": "2026-09-06",
       "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-70632"
+    },
+    {
+      "vulnerabilityId": "CVE-2026-58050",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-11",
+      "expiresOn": "2026-11-09",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-58050",
+      "images": [
+        "subwave-aio-heavy",
+        "subwave-aio",
+        "subwave-broadcast"
+      ],
+      "package": "libssh2-1t64",
+      "installedVersion": "1.11.1-1+deb13u1",
+      "disposition": "unreachable",
+      "justification": "CVE-2026-58050 requires an attacker-controlled SSH public-key-subsystem response to trigger a 32-bit integer multiplication overflow. The verified published manifests for subwave-aio-heavy contain only linux/amd64, while subwave-aio and subwave-broadcast contain only linux/amd64 and linux/arm64; no 32-bit runtime architecture is present, so the vulnerable precondition is unreachable."
+    },
+    {
+      "vulnerabilityId": "CVE-2026-58050",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-11",
+      "expiresOn": "2026-11-09",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-58050",
+      "images": [
+        "subwave-analyzer-heavy",
+        "subwave-analyzer",
+        "subwave-controller",
+        "subwave-tts-heavy"
+      ],
+      "package": "libssh2-1",
+      "installedVersion": "1.10.0-3+b1",
+      "disposition": "unreachable",
+      "justification": "CVE-2026-58050 requires an attacker-controlled SSH public-key-subsystem response to trigger a 32-bit integer multiplication overflow. The verified published manifests for subwave-analyzer-heavy and subwave-tts-heavy contain only linux/amd64, while subwave-analyzer and subwave-controller contain only linux/amd64 and linux/arm64; no 32-bit runtime architecture is present, so the vulnerable precondition is unreachable."
+    },
+    {
+      "vulnerabilityId": "CVE-2026-58050",
+      "owner": "SUB/WAVE maintainers",
+      "approvedOn": "2026-08-11",
+      "expiresOn": "2026-11-09",
+      "tracking": "https://security-tracker.debian.org/tracker/CVE-2026-58050",
+      "images": [
+        "subwave-analyzer-cuda"
+      ],
+      "package": "libssh2-1",
+      "installedVersion": "1.10.0-3+b1",
+      "disposition": "upstream-mirror",
+      "justification": "CVE-2026-58050 requires an attacker-controlled SSH public-key-subsystem response to trigger a 32-bit integer multiplication overflow. This exact immutable upstream CUDA mirror has a verified linux/amd64-only manifest and no 32-bit runtime architecture; its repository digest is release-pinned and SUB/WAVE does not rebuild or mutate the mirrored contents."
     }
   ]
 }

@@ -22,6 +22,7 @@ const V16_TAG = 'v1.6.0-obiwave.1';
 const V16_REVISION_2_TAG = 'v1.6.0-obiwave.2';
 const V16_REVISION_3_TAG = 'v1.6.0-obiwave.3';
 const V16_REVISION_4_TAG = 'v1.6.0-obiwave.4';
+const V17_TAG = 'v1.7.0-obiwave.1';
 const TAG = V13_TAG;
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
@@ -30,10 +31,15 @@ const V16_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484
 const V16_REVISION_2_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V16_REVISION_3_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V16_REVISION_4_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
+const V17_CUDA_DIGEST = 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
 const checkedInAcceptance = JSON.parse(
   await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
 );
+const v17ReplayFixture = await readFile(
+  new URL('./fixtures/v1.7.0-obiwave.1-policy-replay.json', import.meta.url),
+  'utf8',
+).then(JSON.parse).catch(() => null);
 const CUDA_ACCEPTANCE_JUSTIFICATION =
   'This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.';
 const CURL_8458_ID = 'CVE-2026-8458';
@@ -64,6 +70,9 @@ const FFMPEG_IMAGES = [
   'subwave-analyzer-heavy',
   'subwave-analyzer-cuda',
 ];
+const LIBSSH2_58050_ID = 'CVE-2026-58050';
+const LIBSSH2_58050_TRACKING = 'https://security-tracker.debian.org/tracker/CVE-2026-58050';
+const STALE_ACCEPTANCE_IDS = new Set(['CVE-2026-55199', 'CVE-2026-55200', 'CVE-2026-66041']);
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -178,11 +187,12 @@ function violationCodes(error) {
 test('checked-in CUDA mirror acceptances carry the reviewed release-aware statement', () => {
   const records = checkedInAcceptance.acceptances.filter((record) =>
     record.disposition === 'upstream-mirror' &&
+    record.vulnerabilityId !== LIBSSH2_58050_ID &&
     record.vulnerabilityId !== CURL_8458_ID &&
     record.images.length === 1 &&
     record.images[0] === 'subwave-analyzer-cuda');
 
-  assert.equal(records.length, 160);
+  assert.equal(records.length, 149);
   for (const record of records) {
     assert.equal(record.justification, CUDA_ACCEPTANCE_JUSTIFICATION);
     assert.equal(record.approvedOn, '2026-08-05');
@@ -190,7 +200,7 @@ test('checked-in CUDA mirror acceptances carry the reviewed release-aware statem
   }
   assert.equal(
     checkedInAcceptance.acceptances.filter((record) => record.disposition === 'upstream-mirror').length,
-    162,
+    152,
   );
 });
 
@@ -264,6 +274,75 @@ test('checked-in 2026 FFmpeg acceptances are exact, short-lived, and limited to 
     assert.match(record.justification, /no public media-upload surface/);
     assert.match(record.justification, /short-lived pending a Debian security update/);
   }
+});
+
+test('checked-in CVE-2026-58050 acceptances are exact, architecture-bound, and time-limited', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    record.vulnerabilityId === LIBSSH2_58050_ID);
+
+  assert.deepEqual(
+    records.map(({ package: packageName, installedVersion, disposition, images }) => ({
+      package: packageName,
+      installedVersion,
+      disposition,
+      images,
+    })),
+    [
+      {
+        package: 'libssh2-1t64',
+        installedVersion: '1.11.1-1+deb13u1',
+        disposition: 'unreachable',
+        images: ['subwave-aio-heavy', 'subwave-aio', 'subwave-broadcast'],
+      },
+      {
+        package: 'libssh2-1',
+        installedVersion: '1.10.0-3+b1',
+        disposition: 'unreachable',
+        images: ['subwave-analyzer-heavy', 'subwave-analyzer', 'subwave-controller', 'subwave-tts-heavy'],
+      },
+      {
+        package: 'libssh2-1',
+        installedVersion: '1.10.0-3+b1',
+        disposition: 'upstream-mirror',
+        images: ['subwave-analyzer-cuda'],
+      },
+    ],
+  );
+  for (const record of records) {
+    assert.equal(record.owner, 'SUB/WAVE maintainers');
+    assert.equal(record.approvedOn, '2026-08-11');
+    assert.equal(record.expiresOn, '2026-11-09');
+    assert.equal(record.tracking, LIBSSH2_58050_TRACKING);
+    assert.match(record.justification, /32-bit/);
+    assert.match(record.justification, /linux\/amd64/);
+    assert.doesNotMatch(record.justification, /no-fix/i);
+  }
+});
+
+test('checked-in acceptance data preserves the reviewed v1.7 catalog size and removes the exact stale findings', () => {
+  assert.equal(checkedInAcceptance.acceptances.length, 457);
+  assert.deepEqual(
+    checkedInAcceptance.acceptances.filter(({ vulnerabilityId }) =>
+      STALE_ACCEPTANCE_IDS.has(vulnerabilityId)),
+    [],
+  );
+});
+
+test('reduced exact v1.7 ten-report replay passes with the reviewed CVE-2026-58050 scopes', () => {
+  assert.equal(v17ReplayFixture?.releaseTag, V17_TAG);
+  const acceptanceSubset = checkedInAcceptance.acceptances.filter(({ vulnerabilityId }) =>
+    vulnerabilityId === LIBSSH2_58050_ID);
+  const summary = validateReports({
+    tag: V17_TAG,
+    reports: v17ReplayFixture.reports,
+    acceptance: manifest(acceptanceSubset),
+    expectedImages: EXPECTED_IMAGES,
+    now: new Date(v17ReplayFixture.now),
+  });
+  assert.equal(summary.imageCount, 10);
+  assert.equal(summary.findingCount, 8);
+  assert.equal(summary.acceptedCount, 8);
+  assert.equal(summary.unacceptedCount, 0);
 });
 
 test('clean ten-image matrix returns a deterministic empty summary', () => {
@@ -670,6 +749,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
     [V16_REVISION_2_TAG, V16_REVISION_2_CUDA_DIGEST],
     [V16_REVISION_3_TAG, V16_REVISION_3_CUDA_DIGEST],
     [V16_REVISION_4_TAG, V16_REVISION_4_CUDA_DIGEST],
+    [V17_TAG, V17_CUDA_DIGEST],
   ]) {
     const summary = validateReports({
       tag,
@@ -696,6 +776,7 @@ test('cross-release CUDA digests fail closed', () => {
     [V16_REVISION_3_TAG, V15_CUDA_DIGEST],
     [V16_REVISION_4_TAG, V13_CUDA_DIGEST],
     [V16_REVISION_4_TAG, V15_CUDA_DIGEST],
+    [V17_TAG, V16_CUDA_DIGEST],
   ]) {
     const error = validationError({
       tag,
