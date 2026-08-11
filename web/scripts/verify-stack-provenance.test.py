@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROVENANCE_ENV = "SUBWAVE_VERIFY_PROVENANCE"
+ALLOW_DESTRUCTIVE_ENV = "SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE"
 EXPECTED_MARKER = "subwave-verify-8de7ba8b-17f5-4d89-9f34-e0f625529b11"
 EXPECTED_CONTROLLER_ATTESTATION = "38da5b3c3d40ccea2a9ac5188f0ab9edc55b7b2d9b0d42ea95b2b683b781ca9a"
 EXPECTED_BACKEND_ATTESTATION = "185e93a687fce26d6a7cf4cdf0128ce7221ac6e5e4ab5be267ec6ed5614c9fb6"
@@ -29,6 +30,7 @@ def load_verifier(module_name, filename):
 class VerifyControllerHandler(BaseHTTPRequestHandler):
     backend_marker = OTHER_MARKER
     proxied_subsonic_requests = 0
+    mutation_requests = 0
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -43,6 +45,10 @@ class VerifyControllerHandler(BaseHTTPRequestHandler):
             }
         elif url.path == "/library/browse":
             payload = {"rows": [{"id": "isolated-fixture"}]}
+        elif url.path == "/settings":
+            payload = {"values": {"personas": [
+                {"name": "Marlowe"}, {"name": "Wren"}, {"name": "Hale"},
+            ]}}
         elif url.path == "/dj/search":
             type(self).proxied_subsonic_requests += 1
             payload = {"error": "provenance must not proxy to Subsonic"}
@@ -56,6 +62,10 @@ class VerifyControllerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        type(self).mutation_requests += 1
+        self.send_error(500)
 
     def log_message(self, _format, *_args):
         pass
@@ -93,6 +103,7 @@ class VerifierProvenanceTest(unittest.TestCase):
         cls.backend_thread = threading.Thread(target=cls.backend_server.serve_forever, daemon=True)
         cls.backend_thread.start()
         cls.verifiers = [
+            load_verifier("verify_forms", "verify-forms.py"),
             load_verifier("verify_library", "verify-library.py"),
             load_verifier("verify_query_cache", "verify-query-cache.py"),
         ]
@@ -108,17 +119,29 @@ class VerifierProvenanceTest(unittest.TestCase):
 
     def setUp(self):
         self.previous_marker = os.environ.get(PROVENANCE_ENV)
+        self.previous_allow_destructive = os.environ.get(ALLOW_DESTRUCTIVE_ENV)
+        os.environ[ALLOW_DESTRUCTIVE_ENV] = "1"
         VerifyControllerHandler.proxied_subsonic_requests = 0
+        VerifyControllerHandler.mutation_requests = 0
 
     def tearDown(self):
         if self.previous_marker is None:
             os.environ.pop(PROVENANCE_ENV, None)
         else:
             os.environ[PROVENANCE_ENV] = self.previous_marker
+        if self.previous_allow_destructive is None:
+            os.environ.pop(ALLOW_DESTRUCTIVE_ENV, None)
+        else:
+            os.environ[ALLOW_DESTRUCTIVE_ENV] = self.previous_allow_destructive
         self.assertEqual(
             VerifyControllerHandler.proxied_subsonic_requests,
             0,
             "provenance guard contacted a controller route that proxies to Subsonic",
+        )
+        self.assertEqual(
+            VerifyControllerHandler.mutation_requests,
+            0,
+            "a verifier mutation ran before both provenance attestations passed",
         )
 
     def test_each_verifier_rejects_a_mismatched_controller_attestation(self):

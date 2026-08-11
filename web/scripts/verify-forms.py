@@ -60,6 +60,7 @@ import traceback
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
@@ -1118,6 +1119,12 @@ def onboarding(page):
     )
     web_proc = None
     try:
+        # Wait only for the loopback child listener; the following opaque
+        # controller-plus-backend attestation remains the permission boundary
+        # and runs before any onboarding state write.
+        _wait_http(f"{ONBOARD_API}/health")
+        child_health = json.loads(_onboard_curl("GET", f"{ONBOARD_API}/health"))
+        assert_dummy_backend_provenance(child_health)
         _wait_http(f"{ONBOARD_API}/onboarding/status")
         status = json.loads(_onboard_curl("GET", f"{ONBOARD_API}/onboarding/status"))
         assert status.get("needsSetup") is True, (
@@ -1919,11 +1926,11 @@ def assert_throwaway_stack():
         )
         raise SystemExit(1)
 
-    # Secondary sanity check, informational only from here on — it cannot
-    # grant permission (that already happened above) and a failure here
-    # aborts too, but the message is about a probably-wrong TARGET, not about
-    # missing consent.
+    # Prove the controller and dummy backend share this run's opaque marker
+    # before the secondary fixture check or any mutation.
     try:
+        health = json.loads(api("/health"))
+        assert_dummy_backend_provenance(health)
         settings = json.loads(api("/settings"))
     except Exception as e:  # noqa: BLE001 — any failure here means "not our stack"
         print(
