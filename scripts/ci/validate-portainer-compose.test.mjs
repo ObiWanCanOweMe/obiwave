@@ -603,6 +603,45 @@ test('CUDA preflight gates analyzer server startup', () => {
   }
 });
 
+test('CUDA preflight gates Ark TTS server startup', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-tts-cuda-gate-'));
+  const preflight = join(directory, 'cuda-preflight');
+  const server = join(directory, 'tts-heavy-server');
+  const started = join(directory, 'server-started');
+  try {
+    writeFileSync(preflight, '#!/bin/sh\nexit "$CUDA_PREFLIGHT_STATUS"\n');
+    writeFileSync(server, '#!/bin/sh\n: > "$TTS_HEAVY_STARTED"\n');
+    chmodSync(preflight, 0o755);
+    chmodSync(server, 0o755);
+
+    const command = renderCompose(portainerManifest).services['tts-heavy'].command[2]
+      .replace(
+        '/opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)"',
+        '"$CUDA_PREFLIGHT"',
+      )
+      .replace(
+        'exec uvicorn server:app --host 0.0.0.0 --port 8080',
+        'exec "$TTS_HEAVY_SERVER"',
+      );
+    const runGate = (status) => spawnSync('/bin/sh', ['-c', command], {
+      env: {
+        ...process.env,
+        CUDA_PREFLIGHT: preflight,
+        CUDA_PREFLIGHT_STATUS: String(status),
+        TTS_HEAVY_SERVER: server,
+        TTS_HEAVY_STARTED: started,
+      },
+    });
+
+    assert.equal(runGate(1).status, 1);
+    assert.equal(existsSync(started), false);
+    assert.equal(runGate(0).status, 0);
+    assert.equal(existsSync(started), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('accepts the full seven-service Caddy production contract', () => {
   assert.deepEqual(errorsFor(valid), []);
 });

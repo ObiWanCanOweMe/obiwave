@@ -62,8 +62,8 @@ into the container. That's the native route below.
 
 Ark's image-only Portainer manifest already selects the published
 `subwave-tts-heavy-cuda` image for its release tag. It starts Chatterbox and
-PocketTTS together on CUDA; no Portainer variable or profile selection is
-needed for the device or engines.
+PocketTTS together: Chatterbox uses CUDA, while PocketTTS remains CPU-only. No
+Portainer variable or profile selection is needed for the device or engines.
 
 Before the sidecar binds its internal HTTP port, it verifies that PyTorch can
 see CUDA. If the image, NVIDIA runtime, or GPU is unavailable, the sidecar exits
