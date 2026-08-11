@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { resolveActiveStationDir } from './stations/resolve.js';
 import { envEnum, envFloat, envInt, envStr, envUrl } from './util/env.js';
+import { resolveVerifierProvenance } from './util/verify-provenance.js';
 
 // The shared state ROOT — the compose files mount <repo>/state → /var/sub-wave
 // and pass STATE_DIR=/var/sub-wave. Native dev (`npm run dev` from controller/)
@@ -317,3 +318,13 @@ export const config = {
     cloudSpeed: envFloat('CLOUD_TTS_SPEED', TTS_SPEED, { min: 0.1 }),
   },
 };
+
+// Evaluated while config is imported, before server startup or any scheduled
+// work. A verifier marker is inert in production and absent/invalid markers
+// expose nothing. A valid development/test marker fails boot unless the
+// controller is pinned to the fixed loopback dummy backend.
+export const VERIFY_PROVENANCE = resolveVerifierProvenance({
+  nodeEnv: process.env.NODE_ENV,
+  marker: process.env.SUBWAVE_VERIFY_PROVENANCE,
+  navidromeUrl: config.navidrome.url,
+});

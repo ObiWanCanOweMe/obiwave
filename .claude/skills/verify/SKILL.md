@@ -10,14 +10,36 @@ point tests at it. Boot your own stack from the worktree instead:
 
 ## Isolated controller (API surface)
 
+Generate one fresh marker per verification run and give it only to the
+controller, verifiers, and the task-local Subsonic stub:
+
+```bash
+SUBWAVE_VERIFY_PROVENANCE="subwave-verify-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+export SUBWAVE_VERIFY_PROVENANCE
+```
+
+Before starting the controller, start a task-local dummy Subsonic server on
+`127.0.0.1:9999` with that same environment variable. It must expose
+`GET /__subwave_verify_provenance` returning JSON whose `verifyProvenance` is
+the SHA-256 hex digest of `subwave-dummy-backend\0<marker>`. Keep all of its
+fixtures and logs under the task's ignored evidence directory.
+
 ```bash
 cd <worktree>/controller
 STATE_DIR=$CLAUDE_JOB_DIR/tmp/state PORT=7791 ADMIN_USER=test ADMIN_PASS=test \
-  NODE_ENV=development \
-  NAVIDROME_URL=http://localhost:9999 NAVIDROME_USER=x NAVIDROME_PASS=x \
+  NODE_ENV=development SUBWAVE_VERIFY_PROVENANCE=$SUBWAVE_VERIFY_PROVENANCE \
+  NAVIDROME_URL=http://127.0.0.1:9999 NAVIDROME_USER=x NAVIDROME_PASS=x \
   npx tsx src/server.ts
 ```
 
+- With a valid verifier marker, controller config fails before startup unless
+  Navidrome is exactly the loopback dummy URL. `/health` then adds only an
+  opaque attestation hash; production, absent-marker, and invalid-marker health
+  responses keep their original shape.
+- Run `verify-library.py` and `verify-query-cache.py` with the same exported
+  marker and a Python interpreter that has Playwright installed. Their guard
+  checks controller + stub attestations before any verifier mutation and never
+  calls a controller route that proxies to Subsonic.
 - A fresh `STATE_DIR` boots clean (seeds sfx/jingles, writes `settings.json` on first save).
 - The fake `NAVIDROME_*` env matters: without it `needsSetup` is true and the admin shell
   redirects every page to `/onboarding`, so UI tests never find their controls.

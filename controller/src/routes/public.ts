@@ -27,8 +27,9 @@ import { fetchWithTimeout } from '../util/fetch-timeout.js';
 import { listenerAuthDecision, stationAuthDecision } from '../util/listener-auth.js';
 import { publicGuestIds, publicPersonaShape, soulsArePublic } from '../util/public-persona.js';
 import { resolveThemeProvenance } from '../util/theme-provenance.js';
+import { verifierHealthFields } from '../util/verify-provenance.js';
 import { checkAuthRateLimit, clientIp, listenerAuthFailureDelayMs } from '../middleware/ratelimit.js';
-import { STATE_ROOT } from '../config.js';
+import { STATE_ROOT, VERIFY_PROVENANCE } from '../config.js';
 import { activeStationId } from '../stations/resolve.js';
 
 export const router = express.Router();
@@ -781,4 +782,7 @@ router.get('/geocode', async (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /health
 // ---------------------------------------------------------------------------
-router.get('/health', (req, res) => res.json({ status: 'on-air' }));
+router.get('/health', (_req, res) => res.json({
+  status: 'on-air',
+  ...verifierHealthFields(VERIFY_PROVENANCE),
+}));

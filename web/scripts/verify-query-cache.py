@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
@@ -66,9 +67,10 @@ def assert_throwaway_stack():
     if API != "http://localhost:7791" or WEB != "http://localhost:7793":
         sys.exit("refusing to run: API/WEB are not the verify stack's ports")
     try:
-        api("/health")
+        health = api("/health")
     except Exception as e:
         sys.exit(f"verify stack not reachable at {API}: {e}")
+    assert_dummy_backend_provenance(health)
     if not (api("/library/browse?limit=1").get("rows") or []):
         sys.exit("verify stack has an empty library.db — copy one into its STATE_DIR")
 
