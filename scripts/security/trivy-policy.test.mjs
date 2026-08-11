@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import {
   EXPECTED_IMAGES,
   loadReports,
+  PINNED_CUDA_IMAGE_DIGESTS,
   PolicyValidationError,
   validateReports,
 } from './trivy-policy.mjs';
@@ -23,6 +24,7 @@ const V16_REVISION_2_TAG = 'v1.6.0-obiwave.2';
 const V16_REVISION_3_TAG = 'v1.6.0-obiwave.3';
 const V16_REVISION_4_TAG = 'v1.6.0-obiwave.4';
 const V17_TAG = 'v1.7.0-obiwave.1';
+const V17_REVISION_2_TAG = 'v1.7.0-obiwave.2';
 const TAG = V13_TAG;
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
@@ -32,6 +34,7 @@ const V16_REVISION_2_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587
 const V16_REVISION_3_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V16_REVISION_4_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V17_CUDA_DIGEST = 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b';
+const V17_REVISION_2_CUDA_DIGEST = 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
 const checkedInAcceptance = JSON.parse(
   await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
@@ -40,6 +43,18 @@ const v17ReplayFixture = await readFile(
   new URL('./fixtures/v1.7.0-obiwave.1-policy-replay.json', import.meta.url),
   'utf8',
 ).then(JSON.parse).catch(() => null);
+const ttsCudaScanFixture = JSON.parse(await readFile(
+  new URL('./fixtures/tts-heavy-cuda-pinned-scan.json', import.meta.url),
+  'utf8',
+));
+const v13RecoveryManifest = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.3.0-obiwave.2.json', import.meta.url),
+  'utf8',
+));
+const v16PartialRecoveryManifest = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.6.0-obiwave.1.partial.json', import.meta.url),
+  'utf8',
+));
 const CUDA_ACCEPTANCE_JUSTIFICATION =
   'This image is an exact immutable upstream CUDA mirror; the checked-in release-aware CUDA digest policy binds each supported fork release to its reviewed repository manifest digest, and SUB/WAVE does not rebuild or mutate the mirrored contents.';
 const CURL_8458_ID = 'CVE-2026-8458';
@@ -73,55 +88,12 @@ const FFMPEG_IMAGES = [
 const LIBSSH2_58050_ID = 'CVE-2026-58050';
 const LIBSSH2_58050_TRACKING = 'https://security-tracker.debian.org/tracker/CVE-2026-58050';
 const STALE_ACCEPTANCE_IDS = new Set(['CVE-2026-55199', 'CVE-2026-55200', 'CVE-2026-66041']);
-const TTS_CUDA_SCAN_TUPLES = [
-  'CVE-2023-2953|libldap-2.5-0|2.5.13+dfsg-5',
-  'CVE-2023-45853|zlib1g|1:1.2.13.dfsg-1',
-  'CVE-2025-47273|setuptools|70.3.0',
-  'CVE-2025-69720|libncursesw6|6.4-4',
-  'CVE-2025-69720|libtinfo6|6.4-4',
-  'CVE-2025-69720|ncurses-base|6.4-4',
-  'CVE-2025-69720|ncurses-bin|6.4-4',
-  'CVE-2025-7458|libsqlite3-0|3.40.1-2+deb12u2',
-  'CVE-2026-12064|curl|7.88.1-10+deb12u15',
-  'CVE-2026-12064|libcurl4|7.88.1-10+deb12u15',
-  'CVE-2026-13221|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-37555|libsndfile1|1.2.0-1+deb12u1',
-  'CVE-2026-41992|gzip|1.12-1',
-  'CVE-2026-42496|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-42497|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-4372|transformers|5.2.0',
-  'CVE-2026-44513|diffusers|0.29.0',
-  'CVE-2026-45804|diffusers|0.29.0',
-  'CVE-2026-48545|gradio|6.8.0',
-  'CVE-2026-48818|starlette|0.52.1',
-  'CVE-2026-48962|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-5241|transformers|5.2.0',
-  'CVE-2026-53615|bsdutils|1:2.38.1-5+deb12u3',
-  'CVE-2026-53615|libblkid1|2.38.1-5+deb12u3',
-  'CVE-2026-53615|libmount1|2.38.1-5+deb12u3',
-  'CVE-2026-53615|libsmartcols1|2.38.1-5+deb12u3',
-  'CVE-2026-53615|libuuid1|2.38.1-5+deb12u3',
-  'CVE-2026-53615|mount|2.38.1-5+deb12u3',
-  'CVE-2026-53615|util-linux-extra|2.38.1-5+deb12u3',
-  'CVE-2026-53615|util-linux|2.38.1-5+deb12u3',
-  'CVE-2026-54283|starlette|0.52.1',
-  'CVE-2026-54369|libacl1|2.3.1-3',
-  'CVE-2026-57432|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-57433|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-58050|libssh2-1|1.10.0-3+b1',
-  'CVE-2026-6276|curl|7.88.1-10+deb12u15',
-  'CVE-2026-6276|libcurl4|7.88.1-10+deb12u15',
-  'CVE-2026-7598|libssh2-1|1.10.0-3+b1',
-  'CVE-2026-8286|curl|7.88.1-10+deb12u15',
-  'CVE-2026-8286|libcurl4|7.88.1-10+deb12u15',
-  'CVE-2026-8376|perl-base|5.36.0-7+deb12u3',
-  'CVE-2026-8458|curl|7.88.1-10+deb12u15',
-  'CVE-2026-8458|libcurl4|7.88.1-10+deb12u15',
-  'CVE-2026-8927|curl|7.88.1-10+deb12u15',
-  'CVE-2026-8927|libcurl4|7.88.1-10+deb12u15',
-  'CVE-2026-9538|perl-base|5.36.0-7+deb12u3',
-  'GHSA-6v7p-g79w-8964|msgpack|1.1.2',
-];
+const ttsCudaScanFindings = ttsCudaScanFixture.results.flatMap((result) =>
+  result.Vulnerabilities.map((vulnerability) => ({ result, vulnerability })));
+const TTS_CUDA_SCAN_TUPLES = ttsCudaScanFindings
+  .map(({ vulnerability }) =>
+    `${vulnerability.VulnerabilityID}|${vulnerability.PkgName}|${vulnerability.InstalledVersion}`)
+  .sort();
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -269,6 +241,58 @@ test('checked-in TTS CUDA acceptances match the exact pinned local scan tuples',
     assert.notEqual(cpuIndex, -1);
     assert.equal(record.images[cpuIndex + 1], 'subwave-tts-heavy-cuda');
   }
+});
+
+test('all 47 exact pinned TTS CUDA findings pass full policy validation', () => {
+  assert.equal(ttsCudaScanFixture.schemaVersion, 1);
+  assert.equal(ttsCudaScanFixture.scannerVersion, '0.67.2');
+  assert.equal(
+    ttsCudaScanFixture.scannerImageRef,
+    'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+  );
+  assert.equal(ttsCudaScanFindings.length, 47);
+
+  const acceptanceRecords = checkedInAcceptance.acceptances.filter((record) =>
+    record.images.includes('subwave-tts-heavy-cuda'));
+  const reports = cleanReports({ tag: V17_TAG, cudaDigest: V17_CUDA_DIGEST });
+
+  for (const image of EXPECTED_IMAGES) {
+    const scopedTuples = new Set(
+      acceptanceRecords
+        .filter((record) => record.images.includes(image))
+        .map((record) => `${record.vulnerabilityId}|${record.package}|${record.installedVersion}`),
+    );
+    if (scopedTuples.size === 0) continue;
+
+    reports[image].report.Results = ttsCudaScanFixture.results
+      .map((result) => ({
+        Target: result.Target,
+        Class: result.Class,
+        Type: result.Type,
+        Vulnerabilities: result.Vulnerabilities.filter((vulnerability) =>
+          scopedTuples.has(
+            `${vulnerability.VulnerabilityID}|${vulnerability.PkgName}|${vulnerability.InstalledVersion}`,
+          )),
+      }))
+      .filter((result) => result.Vulnerabilities.length > 0);
+  }
+
+  const summary = validateReports({
+    tag: V17_TAG,
+    reports,
+    acceptance: manifest(acceptanceRecords),
+    expectedImages: EXPECTED_IMAGES,
+    now: new Date('2026-08-11T12:00:00.000Z'),
+  });
+
+  assert.equal(
+    summary.findings.filter((currentFinding) =>
+      currentFinding.image === 'subwave-tts-heavy-cuda').length,
+    47,
+  );
+  assert.equal(summary.acceptedCount, summary.findingCount);
+  assert.equal(summary.unacceptedCount, 0);
+  assert.equal(summary.acceptanceCount, 47);
 });
 
 test('checked-in CVE-2026-8458 acceptances are time-bounded to the reviewed curl scopes', () => {
@@ -601,6 +625,26 @@ test('every image scope in a multi-image acceptance must match a current finding
   assert.equal(error.summary.acceptedCount, 2);
 });
 
+test('historical policy projects valid live-only acceptance scopes out of orphan checks', () => {
+  const expectedImages = ['subwave-tts-heavy'];
+  const reports = {
+    'subwave-tts-heavy': reportEntry('subwave-tts-heavy', [finding()], { tag: V17_TAG }),
+  };
+  const summary = validateReports({
+    tag: V17_TAG,
+    reports,
+    acceptance: manifest([acceptance({
+      images: ['subwave-tts-heavy', 'subwave-tts-heavy-cuda'],
+    })]),
+    expectedImages,
+    now: NOW,
+  });
+
+  assert.equal(summary.imageCount, 1);
+  assert.equal(summary.acceptedCount, 1);
+  assert.equal(summary.unacceptedCount, 0);
+});
+
 test('every required image must have one report', () => {
   const reports = cleanReports();
   delete reports['subwave-aio-heavy'];
@@ -817,6 +861,8 @@ test('a CUDA platform image ID cannot substitute for the pinned repository diges
 });
 
 test('each supported release accepts only its pinned CUDA repository digest', () => {
+  assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_TAG], V17_CUDA_DIGEST);
+  assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_REVISION_2_TAG], V17_REVISION_2_CUDA_DIGEST);
   for (const [tag, cudaDigest] of [
     [V13_TAG, V13_CUDA_DIGEST],
     [V15_TAG, V15_CUDA_DIGEST],
@@ -825,6 +871,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
     [V16_REVISION_3_TAG, V16_REVISION_3_CUDA_DIGEST],
     [V16_REVISION_4_TAG, V16_REVISION_4_CUDA_DIGEST],
     [V17_TAG, V17_CUDA_DIGEST],
+    [V17_REVISION_2_TAG, V17_REVISION_2_CUDA_DIGEST],
   ]) {
     const summary = validateReports({
       tag,
@@ -852,6 +899,7 @@ test('cross-release CUDA digests fail closed', () => {
     [V16_REVISION_4_TAG, V13_CUDA_DIGEST],
     [V16_REVISION_4_TAG, V15_CUDA_DIGEST],
     [V17_TAG, V16_CUDA_DIGEST],
+    [V17_REVISION_2_TAG, V16_CUDA_DIGEST],
   ]) {
     const error = validationError({
       tag,
@@ -972,6 +1020,130 @@ test('the report loader requires matching raw JSON and status files for the requ
   assert.match(
     error.message,
     /canonical requested image ghcr\.io\/obiwancanoweme\/subwave-caddy:v1\.3\.0-obiwave\.2/,
+  );
+});
+
+test('the CLI derives the exact historical ten-image policy set from a validated recovery', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-historical-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const acceptancePath = join(directory, 'acceptance.json');
+  await writeFile(acceptancePath, JSON.stringify(manifest()));
+
+  const historicalImages = v13RecoveryManifest.images.map(({ name }) => name);
+  assert.equal(historicalImages.length, 10);
+  assert.ok(!historicalImages.includes('subwave-tts-heavy-cuda'));
+  for (const image of historicalImages) {
+    await writeFile(
+      join(directory, `${image}.json`),
+      JSON.stringify(trivyReport(image, [], {}, { tag: V13_TAG })),
+    );
+    await writeFile(join(directory, `${image}.status.json`), JSON.stringify(scanStatus(image)));
+  }
+
+  const script = new URL('./trivy-policy.mjs', import.meta.url);
+  const recoveryManifestPath = new URL(
+    '../../security/releases/v1.3.0-obiwave.2.json',
+    import.meta.url,
+  ).pathname;
+  const scannerPath = new URL('../../security/trivy-scanner.json', import.meta.url).pathname;
+  const passing = await execFileAsync(process.execPath, [
+    script.pathname,
+    '--reports', directory,
+    '--acceptance', acceptancePath,
+    '--tag', V13_TAG,
+    '--recovery-manifest', recoveryManifestPath,
+    '--scanner', scannerPath,
+  ]);
+  const summary = JSON.parse(passing.stdout);
+  assert.equal(summary.result, 'pass');
+  assert.equal(summary.imageCount, 10);
+  assert.equal(summary.unacceptedCount, 0);
+});
+
+test('the CLI validates a sealed historical ten-image recovery before policy projection', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-sealed-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const acceptancePath = join(directory, 'acceptance.json');
+  const sealedPath = join(directory, 'sealed.json');
+  await writeFile(acceptancePath, JSON.stringify(manifest()));
+
+  const sealed = {
+    schemaVersion: 1,
+    releaseTag: v16PartialRecoveryManifest.releaseTag,
+    sourceCommit: v16PartialRecoveryManifest.sourceCommit,
+    scanner: v16PartialRecoveryManifest.scanner,
+    images: v16PartialRecoveryManifest.images.map((image, index) => ({
+      name: image.name,
+      digest: image.action === 'preserve'
+        ? image.digest
+        : `sha256:${(index + 1).toString(16).padStart(2, '0').repeat(32)}`,
+    })),
+  };
+  await writeFile(sealedPath, JSON.stringify(sealed));
+  for (const { name: image } of sealed.images) {
+    await writeFile(
+      join(directory, `${image}.json`),
+      JSON.stringify(trivyReport(image, [], {}, {
+        tag: V16_TAG,
+        cudaDigest: V16_CUDA_DIGEST,
+      })),
+    );
+    await writeFile(
+      join(directory, `${image}.status.json`),
+      JSON.stringify(scanStatus(image, {}, V16_TAG)),
+    );
+  }
+
+  const script = new URL('./trivy-policy.mjs', import.meta.url);
+  const partialPath = new URL(
+    '../../security/releases/v1.6.0-obiwave.1.partial.json',
+    import.meta.url,
+  ).pathname;
+  const scannerPath = new URL('../../security/trivy-scanner.json', import.meta.url).pathname;
+  const passing = await execFileAsync(process.execPath, [
+    script.pathname,
+    '--reports', directory,
+    '--acceptance', acceptancePath,
+    '--tag', V16_TAG,
+    '--recovery-manifest', sealedPath,
+    '--partial-recovery-manifest', partialPath,
+    '--scanner', scannerPath,
+  ]);
+  const summary = JSON.parse(passing.stdout);
+  assert.equal(summary.result, 'pass');
+  assert.equal(summary.imageCount, 10);
+  assert.equal(summary.unacceptedCount, 0);
+});
+
+test('the CLI rejects a recovery whose historical name or order drifts', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'subwave-trivy-drifted-recovery-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const acceptancePath = join(directory, 'acceptance.json');
+  const recoveryPath = join(directory, 'recovery.json');
+  await writeFile(acceptancePath, JSON.stringify(manifest()));
+  const driftedRecovery = structuredClone(v13RecoveryManifest);
+  [driftedRecovery.images[6], driftedRecovery.images[7]] = [
+    driftedRecovery.images[7],
+    driftedRecovery.images[6],
+  ];
+  await writeFile(recoveryPath, JSON.stringify(driftedRecovery));
+
+  const script = new URL('./trivy-policy.mjs', import.meta.url);
+  const scannerPath = new URL('../../security/trivy-scanner.json', import.meta.url).pathname;
+  await assert.rejects(
+    execFileAsync(process.execPath, [
+      script.pathname,
+      '--reports', directory,
+      '--acceptance', acceptancePath,
+      '--tag', V13_TAG,
+      '--recovery-manifest', recoveryPath,
+      '--scanner', scannerPath,
+    ]),
+    (error) => {
+      assert.notEqual(error.code, 0);
+      assert.match(error.stderr, /image 6 must equal subwave-tts-heavy/);
+      return true;
+    },
   );
 });
 

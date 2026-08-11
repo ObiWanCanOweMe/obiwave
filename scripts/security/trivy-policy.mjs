@@ -29,6 +29,7 @@ export const PINNED_CUDA_IMAGE_DIGESTS = Object.freeze({
   'v1.6.0-obiwave.3': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
   'v1.6.0-obiwave.4': 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341',
   'v1.7.0-obiwave.1': 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b',
+  'v1.7.0-obiwave.2': 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b',
 });
 
 const POLICY_SEVERITIES = Object.freeze(['CRITICAL', 'HIGH']);
@@ -576,7 +577,7 @@ export function validateReports({ reports, acceptance, expectedImages, tag, now 
 
   const acceptanceRecords = validateAcceptanceManifest(
     acceptance,
-    imageList,
+    [...new Set([...EXPECTED_IMAGES, ...imageList])],
     validationNow,
     violations,
   );
@@ -619,6 +620,7 @@ export function validateReports({ reports, acceptance, expectedImages, tag, now 
 
   for (const record of acceptanceRecords) {
     for (const image of record.images) {
+      if (!expectedImageSet.has(image)) continue;
       if (!matchedAcceptanceScopes.has(`${record.index}\u0000${image}`)) {
         addViolation(
           violations,
@@ -724,35 +726,81 @@ export async function loadReports({ reportsDirectory, expectedImages, tag }) {
 }
 
 function parseCliArguments(argv) {
+  const usage =
+    'Usage: node scripts/security/trivy-policy.mjs --reports <directory> --acceptance <file> --tag <fork-tag> ' +
+    '[--recovery-manifest <file> --scanner <file> [--partial-recovery-manifest <file>]]';
+  if (argv.length % 2 !== 0) throw new Error(usage);
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
-    if (!['--reports', '--acceptance', '--tag'].includes(flag) || !isNonEmptyString(value)) {
-      throw new Error(
-        'Usage: node scripts/security/trivy-policy.mjs --reports <directory> --acceptance <file> --tag <fork-tag>',
-      );
-    }
+    if (![
+      '--reports',
+      '--acceptance',
+      '--tag',
+      '--recovery-manifest',
+      '--partial-recovery-manifest',
+      '--scanner',
+    ].includes(flag) || !isNonEmptyString(value)) throw new Error(usage);
     if (Object.hasOwn(options, flag)) throw new Error(`Duplicate argument: ${flag}`);
     options[flag] = value;
   }
-  if (argv.length !== 6 || !options['--reports'] || !options['--acceptance'] || !options['--tag']) {
-    throw new Error(
-      'Usage: node scripts/security/trivy-policy.mjs --reports <directory> --acceptance <file> --tag <fork-tag>',
-    );
-  }
+  if (!options['--reports'] || !options['--acceptance'] || !options['--tag']) throw new Error(usage);
+  const hasRecovery = Boolean(options['--recovery-manifest']);
+  const hasPartial = Boolean(options['--partial-recovery-manifest']);
+  const hasScanner = Boolean(options['--scanner']);
+  if (hasRecovery !== hasScanner || (hasPartial && !hasRecovery)) throw new Error(usage);
   parseForkTag(options['--tag']);
   return {
     reportsDirectory: options['--reports'],
     acceptancePath: options['--acceptance'],
     tag: options['--tag'],
+    recoveryManifestPath: options['--recovery-manifest'],
+    partialRecoveryManifestPath: options['--partial-recovery-manifest'],
+    scannerPath: options['--scanner'],
   };
 }
 
+async function resolveCliExpectedImages({
+  tag,
+  recoveryManifestPath,
+  partialRecoveryManifestPath,
+  scannerPath,
+}) {
+  if (!recoveryManifestPath) return EXPECTED_IMAGES;
+  const { loadRecoveryManifest, loadSealedRecoveryManifest } = await import(
+    '../release/recovery-manifest.mjs'
+  );
+  const recovery = partialRecoveryManifestPath
+    ? await loadSealedRecoveryManifest({
+      manifestPath: recoveryManifestPath,
+      partialManifestPath: partialRecoveryManifestPath,
+      scannerPath,
+    })
+    : await loadRecoveryManifest({ manifestPath: recoveryManifestPath, scannerPath });
+  if (recovery.releaseTag !== tag) {
+    throw new Error('Recovery manifest release tag does not match the requested policy tag');
+  }
+  return Object.freeze(recovery.images.map(({ name }) => name));
+}
+
 async function runCli(argv) {
-  const { reportsDirectory, acceptancePath, tag } = parseCliArguments(argv);
+  const {
+    reportsDirectory,
+    acceptancePath,
+    tag,
+    recoveryManifestPath,
+    partialRecoveryManifestPath,
+    scannerPath,
+  } = parseCliArguments(argv);
+  const expectedImages = await resolveCliExpectedImages({
+    tag,
+    recoveryManifestPath,
+    partialRecoveryManifestPath,
+    scannerPath,
+  });
   const [reports, acceptanceRead] = await Promise.all([
-    loadReports({ reportsDirectory, expectedImages: EXPECTED_IMAGES, tag }),
+    loadReports({ reportsDirectory, expectedImages, tag }),
     readJsonFile(acceptancePath),
   ]);
   if (acceptanceRead.error) {
@@ -762,7 +810,7 @@ async function runCli(argv) {
   const summary = validateReports({
     reports,
     acceptance: acceptanceRead.value,
-    expectedImages: EXPECTED_IMAGES,
+    expectedImages,
     tag,
     now: new Date(),
   });

@@ -21,6 +21,10 @@ const recoveryV13 = await readFile(
   new URL('../../.github/workflows/recover-v1.3.0-obiwave.2.yml', import.meta.url),
   'utf8',
 );
+const recoveryV13Manifest = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.3.0-obiwave.2.json', import.meta.url),
+  'utf8',
+));
 const recoveryV15 = await readFile(
   new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -895,6 +899,12 @@ async function runResolveTag(env) {
   }
 }
 
+function resolveOutputJson(output, key) {
+  const value = output.match(new RegExp(`^${key}=(.+)$`, 'm'))?.[1];
+  assert.ok(value, `missing ${key} output`);
+  return JSON.parse(value);
+}
+
 test('scanner resolve-tag executes static recovery validation as valid Bash', async () => {
   const { result, output } = await runResolveTag({
     RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
@@ -904,6 +914,7 @@ test('scanner resolve-tag executes static recovery validation as valid Bash', as
   assert.match(output, /^tag=v1\.3\.0-obiwave\.2$/m);
   assert.match(output, /^recovery_mode=static$/m);
   assert.match(output, /^recovery_manifest=security\/releases\/v1\.3\.0-obiwave\.2\.json$/m);
+  assert.deepEqual(resolveOutputJson(output, 'images'), recoveryV13Manifest.images.map(({ name }) => name));
 });
 
 test('scanner resolve-tag materializes and validates a sealed manifest as valid Bash', async () => {
@@ -917,7 +928,16 @@ test('scanner resolve-tag materializes and validates a sealed manifest as valid 
   assert.match(output, /^recovery_mode=sealed$/m);
   assert.match(output, /^recovery_manifest=security\/releases\/runtime-v1\.6\.0-obiwave\.1\.json$/m);
   assert.match(output, /^partial_recovery_manifest=security\/releases\/v1\.6\.0-obiwave\.1\.partial\.json$/m);
+  assert.deepEqual(resolveOutputJson(output, 'images'), sealedRecoveryV16.images.map(({ name }) => name));
   assert.doesNotMatch(output, new RegExp(sealedRecoveryV16B64));
+});
+
+test('scanner resolve-tag emits the exact live eleven-image set outside recovery', async () => {
+  const { result, output } = await runResolveTag({
+    REQUESTED_TAG: 'v1.7.0-obiwave.2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(resolveOutputJson(output, 'images'), POLICY_IMAGES);
 });
 
 test('sealed manifest resolution rejects mixed, incomplete, escaped, and mismatched recovery inputs', async () => {
@@ -1086,7 +1106,8 @@ test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
   assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
   assert.match(publish, /vulnerability-policy:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
   assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
-  assert.match(scan, /matrix:[\s\S]*- subwave-analyzer-cuda/);
+  assert.match(scan, /matrix:\n\s+image: \$\{\{ fromJSON\(needs\.resolve-tag\.outputs\.images\) \}\}/);
+  assert.ok(POLICY_IMAGES.includes('subwave-analyzer-cuda'));
 });
 
 test('CLI asset drift watches the analyzer GPU overlay', () => {
@@ -1253,6 +1274,7 @@ test('recovery inputs are transferred through the environment, never interpolate
   assert.match(outputs, /^      recovery_mode: \$\{\{ steps\.resolve\.outputs\.recovery_mode \}\}$/m);
   assert.match(outputs, /^      recovery_manifest: \$\{\{ steps\.resolve\.outputs\.recovery_manifest \}\}$/m);
   assert.match(outputs, /^      partial_recovery_manifest: \$\{\{ steps\.resolve\.outputs\.partial_recovery_manifest \}\}$/m);
+  assert.match(outputs, /^      images: \$\{\{ steps\.resolve\.outputs\.images \}\}$/m);
   assert.doesNotMatch(outputs, /sealed_recovery_manifest_b64/i);
 });
 
@@ -1292,24 +1314,9 @@ test('every scan matrix job materializes the sealed manifest before resolving im
   assert.equal((scanJob.match(/--recovery-manifest "\$RECOVERY_MANIFEST"/g) ?? []).length, 2);
 });
 
-test('image vulnerability policy scans and aggregates the exact eleven-image matrix', () => {
+test('image vulnerability policy uses validated live or historical image sets', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
-  const matrix = scanJob.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
-  assert.ok(matrix, 'missing scan image matrix');
-  const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
-  assert.deepEqual(images, [
-    'subwave-caddy',
-    'subwave-broadcast',
-    'subwave-controller',
-    'subwave-web',
-    'subwave-aio',
-    'subwave-aio-heavy',
-    'subwave-tts-heavy',
-    'subwave-tts-heavy-cuda',
-    'subwave-analyzer',
-    'subwave-analyzer-heavy',
-    'subwave-analyzer-cuda',
-  ]);
+  assert.match(scanJob, /matrix:\n\s+image: \$\{\{ fromJSON\(needs\.resolve-tag\.outputs\.images\) \}\}/);
 
   assert.match(scanJob, /name: trivy-json-\$\{\{ matrix\.image \}\}/);
   assert.match(scanJob, /Record JSON scanner status[\s\S]*?if: always\(\)/);
@@ -1323,6 +1330,10 @@ test('image vulnerability policy scans and aggregates the exact eleven-image mat
   assert.match(policyJob, /merge-multiple: true/);
   assert.match(policyJob, /node scripts\/security\/trivy-policy\.mjs/);
   assert.match(policyJob, /security\/trivy-acceptance\.json/);
+  assert.match(policyJob, /name: Materialize sealed recovery manifest/);
+  assert.match(policyJob, /--recovery-manifest "\$RECOVERY_MANIFEST"/);
+  assert.match(policyJob, /--partial-recovery-manifest "\$PARTIAL_RECOVERY_MANIFEST"/);
+  assert.match(policyJob, /--scanner security\/trivy-scanner\.json/);
 });
 
 test('release scans exercise production child commands in controller and both AIO images', () => {
