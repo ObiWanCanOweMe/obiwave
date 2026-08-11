@@ -1,0 +1,909 @@
+{
+  "schemaVersion": 1,
+  "releaseTag": "v1.7.0-obiwave.1",
+  "now": "2026-08-11T12:00:00.000Z",
+  "reports": {
+    "subwave-caddy": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-caddy",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-caddy:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-caddy:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:f0aeac66861cc8defb0325503ef12b157ae4209c5c7ae64ad82725ef2941d40f",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-caddy:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-caddy@sha256:591b4e7b511097335d27aba289e58baa85ff80df87c85a8447ed9b2b559a9b2d"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-caddy:v1.7.0-obiwave.1 (alpine 3.23.5)",
+            "Class": "os-pkgs",
+            "Type": "alpine",
+            "Vulnerabilities": []
+          }
+        ]
+      }
+    },
+    "subwave-broadcast": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-broadcast",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-broadcast:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-broadcast:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:e82bde90a8b6b68dcbc5d7649f60172db0dc5e818e3646c801ee2f9960230e2b",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-broadcast:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-broadcast@sha256:cef32c8b4289d7ff366b809321a2da3d19f27d991260c9a473177a6a029371d7"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-broadcast:v1.7.0-obiwave.1 (debian 13.6)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1t64@1.11.1-1+deb13u1",
+                "PkgName": "libssh2-1t64",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1t64@1.11.1-1%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+                  "UID": "17d08a8fc58d8f4e"
+                },
+                "InstalledVersion": "1.11.1-1+deb13u1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:89bf8869ca919a5c1e109d1e067ac83a7babdcfad16effbb9d97df5a53616b19"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-controller": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-controller",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-controller:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-controller:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:8b8c6024e9c93100b892c075b36842b87445cdb7b2c7153ebeb4211dec7736d3",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-controller:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-controller@sha256:b0f8e0de367970ec765384c24bd4070229f3b88e4e7db01f91fabe827c62a2dc"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-controller:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1@1.10.0-3+b1",
+                "PkgName": "libssh2-1",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bb1?arch=amd64&distro=debian-12.15",
+                  "UID": "b53ee940b2807762"
+                },
+                "InstalledVersion": "1.10.0-3+b1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:0042a1da3a3d2293c723779ef6fa43b70325d8a596c1147b6396275b8bbed44a"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-web": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-web",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-web:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-web:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:58e20307a6d83b0ae2e7062be5b9859bd3311498249a9c1f45eabc895f0ece69",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-web:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-web@sha256:cf973b3e18dbd3eb1e7769d30c76429605898975a476be0dd1350dc0f7dd4b6a"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-web:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": []
+          }
+        ]
+      }
+    },
+    "subwave-aio": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-aio",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-aio:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-aio:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:ba9c67c1fe9144836626dcb2c2333f75dcaedd0238bdf2470a1c8b2d0a9ea2f6",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-aio:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-aio@sha256:cd7956245880da40e66646ff28571409f5d1fbd4e26253760ad5f81208b65a11"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-aio:v1.7.0-obiwave.1 (debian 13.6)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1t64@1.11.1-1+deb13u1",
+                "PkgName": "libssh2-1t64",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1t64@1.11.1-1%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+                  "UID": "17d08a8fc58d8f4e"
+                },
+                "InstalledVersion": "1.11.1-1+deb13u1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:27cc5465e51fe45b353883875f7f61ce2eceb02ee747cda796a511dbe70fdf47"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-aio-heavy": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-aio-heavy",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-aio-heavy:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-aio-heavy:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:c0551d6b35bbf663b8af3518d554615d91bc2870e2f01b5e286847711c512d65",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-aio-heavy:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-aio-heavy@sha256:c73ced1117cfe15ce085b9744b998c55945fb92d549d2c1a5548b2d68eefedd5"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-aio-heavy:v1.7.0-obiwave.1 (debian 13.6)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1t64@1.11.1-1+deb13u1",
+                "PkgName": "libssh2-1t64",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1t64@1.11.1-1%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+                  "UID": "72f0418141424844"
+                },
+                "InstalledVersion": "1.11.1-1+deb13u1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:9b41ce8c7641b419a7e9c24d93f1a3d69aae8e9c0687ab831f17d1281c759207"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-tts-heavy": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-tts-heavy",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:20a8d10d2779b5de5de1f0a61e957e3d4bf8d58036f4f93e2ccc710e4031b9b9",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-tts-heavy@sha256:ae75b8c439cf1541cdb5a9b536298b93b46ed58e1068ec7df861774b15d62007"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-tts-heavy:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1@1.10.0-3+b1",
+                "PkgName": "libssh2-1",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bb1?arch=amd64&distro=debian-12.15",
+                  "UID": "821bc64b282616c9"
+                },
+                "InstalledVersion": "1.10.0-3+b1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:a5df921c600dcb352bbc014b7fe1ca800f187a0aad298efe168fdb66df4f8e4d"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-analyzer": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-analyzer",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-analyzer:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-analyzer:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:1f455714e804874efdc8dba081ee8766c868c38344720894214f76c801fb8d9a",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer@sha256:00b1220098b08b6ecce4d9d9c796a55e1cd78fa19f8aa18271048c8cab856868"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-analyzer:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1@1.10.0-3+b1",
+                "PkgName": "libssh2-1",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bb1?arch=amd64&distro=debian-12.15",
+                  "UID": "b53ee940b2807762"
+                },
+                "InstalledVersion": "1.10.0-3+b1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:62432a6632884fdd776a0d7e7b9bce3e1832d5a5675bd44d0eb5b84b7dd9f66e"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-analyzer-heavy": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-analyzer-heavy",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-analyzer-heavy:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-analyzer-heavy:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:3c4d1f43e111f2a4f7cb18a2fe9c4352378accb3c08fd4d9b2658e4334f60148",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer-heavy:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer-heavy@sha256:8520a2dd063ace1b5d7a17d96815b880ce08db9dee8fd882a8ae57bc34efe5c7"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-analyzer-heavy:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1@1.10.0-3+b1",
+                "PkgName": "libssh2-1",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bb1?arch=amd64&distro=debian-12.15",
+                  "UID": "821bc64b282616c9"
+                },
+                "InstalledVersion": "1.10.0-3+b1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:149fd0476036ce892d0730eb75e41e10962beb0f2e48c78e1636a7bee486dacc"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "subwave-analyzer-cuda": {
+      "status": {
+        "schemaVersion": 1,
+        "image": "subwave-analyzer-cuda",
+        "imageRef": "ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.7.0-obiwave.1",
+        "scanner": "trivy",
+        "scannerVersion": "0.67.2",
+        "scanners": [
+          "vuln"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "outcome": "success"
+      },
+      "report": {
+        "SchemaVersion": 2,
+        "ArtifactName": "ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.7.0-obiwave.1",
+        "ArtifactType": "container_image",
+        "Metadata": {
+          "ImageID": "sha256:632c364bfa4d0858263e9cf1774247af2bd4effb6b5f68d5cc08b34f84ffbc15",
+          "RepoTags": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.7.0-obiwave.1"
+          ],
+          "RepoDigests": [
+            "ghcr.io/obiwancanoweme/subwave-analyzer-cuda@sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b"
+          ]
+        },
+        "Results": [
+          {
+            "Target": "ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.7.0-obiwave.1 (debian 12.15)",
+            "Class": "os-pkgs",
+            "Type": "debian",
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-58050",
+                "PkgID": "libssh2-1@1.10.0-3+b1",
+                "PkgName": "libssh2-1",
+                "PkgIdentifier": {
+                  "PURL": "pkg:deb/debian/libssh2-1@1.10.0-3%2Bb1?arch=amd64&distro=debian-12.15",
+                  "UID": "821bc64b282616c9"
+                },
+                "InstalledVersion": "1.10.0-3+b1",
+                "Status": "affected",
+                "Layer": {
+                  "DiffID": "sha256:84754fd34df6bf8f6ab23f4f03b74424025b05d98c7fd3bd2a5a933427d13199"
+                },
+                "SeveritySource": "nvd",
+                "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-58050",
+                "DataSource": {
+                  "ID": "debian",
+                  "Name": "Debian Security Tracker",
+                  "URL": "https://salsa.debian.org/security-tracker-team/security-tracker"
+                },
+                "Title": "libssh2: libssh2: Heap buffer overflow via integer overflow in publickey attribute allocation",
+                "Description": "libssh2 through 1.11.1 reads an attacker-controlled 32-bit attribute count from a publickey-subsystem response and uses it in the allocation num_attrs * sizeof(libssh2_publickey_attribute) without bounds checking, so on 32-bit platforms the multiplication overflows to an undersized buffer. A malicious SSH server can then drive the attribute-parsing loop to write past the allocation, causing a heap buffer overflow in a connecting libssh2 client.",
+                "Severity": "HIGH",
+                "CweIDs": [
+                  "CWE-190"
+                ],
+                "VendorSeverity": {
+                  "amazon": 3,
+                  "julia": 3,
+                  "nvd": 3,
+                  "redhat": 2,
+                  "ubuntu": 2
+                },
+                "CVSS": {
+                  "julia": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.3
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+                    "V3Score": 7
+                  }
+                },
+                "References": [
+                  "https://access.redhat.com/security/cve/CVE-2026-58050",
+                  "https://github.com/advisories/GHSA-mf77-5hj2-98w9",
+                  "https://github.com/bikini/exploitarium/tree/main/libssh2-publickey-list-calc-poc",
+                  "https://github.com/libssh2/libssh2/blob/master/src/publickey.c",
+                  "https://github.com/libssh2/libssh2/pull/2205#discussion_r3523193089",
+                  "https://nvd.nist.gov/vuln/detail/CVE-2026-58050",
+                  "https://ubuntu.com/security/notices/USN-8532-1",
+                  "https://www.cve.org/CVERecord?id=CVE-2026-58050",
+                  "https://www.vulncheck.com/advisories/libssh2-integer-overflow-in-publickey-subsystem-attribute-allocation"
+                ],
+                "PublishedDate": "2026-06-28T02:16:32.017Z",
+                "LastModifiedDate": "2026-06-30T20:27:36.86Z"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

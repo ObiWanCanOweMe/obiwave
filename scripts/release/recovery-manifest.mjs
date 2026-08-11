@@ -100,6 +100,21 @@ const APPROVED_RECOVERIES = Object.freeze({
       Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341' }),
     ]),
   }),
+  'v1.7.0-obiwave.1': Object.freeze({
+    sourceCommit: '62c7c9cf9f73256a4499d4b0aad9b3388866a46b',
+    images: Object.freeze([
+      Object.freeze({ name: 'subwave-caddy', digest: 'sha256:591b4e7b511097335d27aba289e58baa85ff80df87c85a8447ed9b2b559a9b2d' }),
+      Object.freeze({ name: 'subwave-broadcast', digest: 'sha256:cef32c8b4289d7ff366b809321a2da3d19f27d991260c9a473177a6a029371d7' }),
+      Object.freeze({ name: 'subwave-controller', digest: 'sha256:b0f8e0de367970ec765384c24bd4070229f3b88e4e7db01f91fabe827c62a2dc' }),
+      Object.freeze({ name: 'subwave-web', digest: 'sha256:cf973b3e18dbd3eb1e7769d30c76429605898975a476be0dd1350dc0f7dd4b6a' }),
+      Object.freeze({ name: 'subwave-aio', digest: 'sha256:cd7956245880da40e66646ff28571409f5d1fbd4e26253760ad5f81208b65a11' }),
+      Object.freeze({ name: 'subwave-aio-heavy', digest: 'sha256:c73ced1117cfe15ce085b9744b998c55945fb92d549d2c1a5548b2d68eefedd5' }),
+      Object.freeze({ name: 'subwave-tts-heavy', digest: 'sha256:ae75b8c439cf1541cdb5a9b536298b93b46ed58e1068ec7df861774b15d62007' }),
+      Object.freeze({ name: 'subwave-analyzer', digest: 'sha256:00b1220098b08b6ecce4d9d9c796a55e1cd78fa19f8aa18271048c8cab856868' }),
+      Object.freeze({ name: 'subwave-analyzer-heavy', digest: 'sha256:8520a2dd063ace1b5d7a17d96815b880ce08db9dee8fd882a8ae57bc34efe5c7' }),
+      Object.freeze({ name: 'subwave-analyzer-cuda', digest: 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b' }),
+    ]),
+  }),
 });
 const APPROVED_PARTIAL_RECOVERIES = Object.freeze({
   'v1.6.0-obiwave.1': Object.freeze({

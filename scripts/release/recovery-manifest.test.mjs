@@ -158,6 +158,30 @@ function exactV16Revision4Manifest() {
   };
 }
 
+function exactV17Manifest() {
+  return {
+    schemaVersion: 1,
+    releaseTag: 'v1.7.0-obiwave.1',
+    sourceCommit: '62c7c9cf9f73256a4499d4b0aad9b3388866a46b',
+    scanner: {
+      version: '0.67.2',
+      imageRef: 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08',
+    },
+    images: [
+      { name: 'subwave-caddy', digest: 'sha256:591b4e7b511097335d27aba289e58baa85ff80df87c85a8447ed9b2b559a9b2d' },
+      { name: 'subwave-broadcast', digest: 'sha256:cef32c8b4289d7ff366b809321a2da3d19f27d991260c9a473177a6a029371d7' },
+      { name: 'subwave-controller', digest: 'sha256:b0f8e0de367970ec765384c24bd4070229f3b88e4e7db01f91fabe827c62a2dc' },
+      { name: 'subwave-web', digest: 'sha256:cf973b3e18dbd3eb1e7769d30c76429605898975a476be0dd1350dc0f7dd4b6a' },
+      { name: 'subwave-aio', digest: 'sha256:cd7956245880da40e66646ff28571409f5d1fbd4e26253760ad5f81208b65a11' },
+      { name: 'subwave-aio-heavy', digest: 'sha256:c73ced1117cfe15ce085b9744b998c55945fb92d549d2c1a5548b2d68eefedd5' },
+      { name: 'subwave-tts-heavy', digest: 'sha256:ae75b8c439cf1541cdb5a9b536298b93b46ed58e1068ec7df861774b15d62007' },
+      { name: 'subwave-analyzer', digest: 'sha256:00b1220098b08b6ecce4d9d9c796a55e1cd78fa19f8aa18271048c8cab856868' },
+      { name: 'subwave-analyzer-heavy', digest: 'sha256:8520a2dd063ace1b5d7a17d96815b880ce08db9dee8fd882a8ae57bc34efe5c7' },
+      { name: 'subwave-analyzer-cuda', digest: 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b' },
+    ],
+  };
+}
+
 function exactV16PartialManifest() {
   return {
     schemaVersion: 2,
@@ -314,6 +338,7 @@ function rejects(label, mutate) {
     ['v1.6 revision 2', exactV16Revision2Manifest],
     ['v1.6 revision 3', exactV16Revision3Manifest],
     ['v1.6 revision 4', exactV16Revision4Manifest],
+    ['v1.7 revision 1', exactV17Manifest],
   ]) {
     test(`rejects ${label} for ${release}`, () => {
       const manifest = exactManifest();
@@ -334,6 +359,7 @@ test('accepts each literal approved recovery identity', () => {
     [exactV16Revision2Manifest(), 'v1.6.0-obiwave.2', '28076250da60844457973794933b5af3b82fa1dc'],
     [exactV16Revision3Manifest(), 'v1.6.0-obiwave.3', '47a76f4cb5b45a26307ba4ebfcf7c77f66405492'],
     [exactV16Revision4Manifest(), 'v1.6.0-obiwave.4', 'b96ef42c6a014ecf96964809a42370ad5e6954ea'],
+    [exactV17Manifest(), 'v1.7.0-obiwave.1', '62c7c9cf9f73256a4499d4b0aad9b3388866a46b'],
   ]) {
     const value = manifestModule.validateRecoveryManifest({ manifest, scannerConfig });
     assert.equal(value.releaseTag, tag);
@@ -355,7 +381,7 @@ test('rejects a valid manifest assembled from cross-release identity parts', () 
 
 test('rejects an unsupported recovery tag even when its manifest is internally consistent', () => {
   const manifest = exactV15Manifest();
-  manifest.releaseTag = 'v1.7.0-obiwave.1';
+  manifest.releaseTag = 'v9.9.9-obiwave.9';
   assert.throws(
     () => manifestModule.validateRecoveryManifest({ manifest, scannerConfig }),
     /releaseTag is not approved/,
@@ -396,6 +422,7 @@ for (const [release, exactManifest] of [
   ['v1.6 revision 2', exactV16Revision2Manifest],
   ['v1.6 revision 3', exactV16Revision3Manifest],
   ['v1.6 revision 4', exactV16Revision4Manifest],
+  ['v1.7 revision 1', exactV17Manifest],
 ]) {
   test(`rejects scanner-config disagreement for ${release}`, () => {
     assert.throws(
@@ -611,6 +638,9 @@ const v16Revision3ManifestPath = fileURLToPath(
 const v16Revision4ManifestPath = fileURLToPath(
   new URL('../../security/releases/v1.6.0-obiwave.4.json', import.meta.url),
 );
+const v17ManifestPath = fileURLToPath(
+  new URL('../../security/releases/v1.7.0-obiwave.1.json', import.meta.url),
+);
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
 function runImageCli(extra = [], env = process.env) {
@@ -640,6 +670,17 @@ test('validate CLI accepts the checked-in v1.6 recovery identity', () => {
     scriptPath,
     'validate',
     '--manifest', v16ManifestPath,
+    '--scanner', scannerPath,
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('validate CLI accepts the exact checked-in v1.7 recovery identity', () => {
+  const result = spawnSync(process.execPath, [
+    scriptPath,
+    'validate',
+    '--manifest', v17ManifestPath,
     '--scanner', scannerPath,
   ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);

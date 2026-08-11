@@ -39,10 +39,18 @@ const finalizeV16Revision4 = await readFile(
   new URL('../../.github/workflows/finalize-v1.6.0-obiwave.4.yml', import.meta.url),
   'utf8',
 );
+const recoverV17 = await readFile(
+  new URL('../../.github/workflows/recover-v1.7.0-obiwave.1.yml', import.meta.url),
+  'utf8',
+).catch(() => '');
 const recoveryV16Revision4Manifest = JSON.parse(await readFile(
   new URL('../../security/releases/v1.6.0-obiwave.4.json', import.meta.url),
   'utf8',
 ));
+const recoveryV17Manifest = await readFile(
+  new URL('../../security/releases/v1.7.0-obiwave.1.json', import.meta.url),
+  'utf8',
+).then(JSON.parse).catch(() => null);
 const recoveryV16 = await readFile(
   new URL('../../.github/workflows/recover-v1.6.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -297,6 +305,11 @@ const RECOVERY_WORKFLOWS = Object.freeze([
     workflow: finalizeV16Revision4,
     tag: 'v1.6.0-obiwave.4',
     manifest: 'security/releases/v1.6.0-obiwave.4.json',
+  }),
+  Object.freeze({
+    workflow: recoverV17,
+    tag: 'v1.7.0-obiwave.1',
+    manifest: 'security/releases/v1.7.0-obiwave.1.json',
   }),
 ]);
 
@@ -580,6 +593,7 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     'v1.6.0-obiwave.2',
     'v1.6.0-obiwave.3',
     'v1.6.0-obiwave.4',
+    'v1.7.0-obiwave.1',
   ].includes(tag);
   assert.deepEqual(
     topLevelBlockLines(workflow, 'on'),
@@ -746,6 +760,13 @@ test('v1.6.0-obiwave.4 workflow and immutable manifest share the fixed release i
   assert.equal(recoveryV16Revision4Manifest.releaseTag, 'v1.6.0-obiwave.4');
   assert.match(finalizeV16Revision4, /^      release_tag: v1\.6\.0-obiwave\.4$/m);
   assert.match(finalizeV16Revision4, /^          SUBWAVE_RELEASE_TAG: v1\.6\.0-obiwave\.4$/m);
+});
+
+test('v1.7.0-obiwave.1 workflow and immutable manifest share the fixed release identity', () => {
+  assert.equal(recoveryV17Manifest?.releaseTag, 'v1.7.0-obiwave.1');
+  assert.equal(recoveryV17Manifest?.sourceCommit, '62c7c9cf9f73256a4499d4b0aad9b3388866a46b');
+  assert.match(recoverV17, /^      release_tag: v1\.7\.0-obiwave\.1$/m);
+  assert.match(recoverV17, /^          SUBWAVE_RELEASE_TAG: v1\.7\.0-obiwave\.1$/m);
 });
 
 test('recovery contracts reject every trigger beyond manual dispatch', () => {
