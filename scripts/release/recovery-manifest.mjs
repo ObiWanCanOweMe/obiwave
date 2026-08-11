@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFile, readdir, readFile, writeFile } from 'node:fs/promises';
 
-import { CANONICAL_IMAGE_NAMESPACE, EXPECTED_IMAGES } from '../security/trivy-policy.mjs';
+import { CANONICAL_IMAGE_NAMESPACE } from '../security/trivy-policy.mjs';
 
 const SCANNER_VERSION = '0.67.2';
 const SCANNER_IMAGE = 'aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08';
@@ -206,7 +206,7 @@ export function validatePartialRecoveryManifest({ manifest, scannerConfig }) {
     const approved = approvedRecovery.images[index];
     const expectedKeys = approved.action === 'preserve' ? ['name', 'action', 'digest'] : ['name', 'action'];
     if (!hasExactKeys(entry, expectedKeys)) fail(`partial image ${index} has invalid keys`);
-    if (entry.name !== approved.name || entry.name !== EXPECTED_IMAGES[index]) {
+    if (entry.name !== approved.name) {
       fail(`image ${index} must equal ${approved.name}`);
     }
     if (entry.action !== approved.action) fail(`image ${entry.name} action is not approved`);
@@ -237,10 +237,11 @@ function sealedManifestFromEvidence(partialManifest, buildDigests, registryDiges
   const buildImages = partialManifest.images.filter(({ action }) => action === 'build');
   const buildNames = buildImages.map(({ name }) => name);
   const registryNames = Object.keys(registryDigests);
+  const approvedNames = partialManifest.images.map(({ name }) => name);
   if (Object.keys(buildDigests).length !== buildNames.length || !buildNames.every((name) => Object.hasOwn(buildDigests, name))) {
     fail('build digest evidence must contain exactly the approved build images');
   }
-  if (registryNames.length !== EXPECTED_IMAGES.length || !registryNames.every((name, index) => name === EXPECTED_IMAGES[index])) {
+  if (registryNames.length !== approvedNames.length || !registryNames.every((name, index) => name === approvedNames[index])) {
     fail('registry digest evidence must contain every image in canonical order');
   }
   return {
@@ -290,7 +291,7 @@ export function validateSealedRecoveryManifest({ manifest, partialManifest, scan
   for (const [index, entry] of manifest.images.entries()) {
     const partialEntry = validatedPartial.images[index];
     if (!hasExactKeys(entry, ['name', 'digest'])) fail(`sealed image ${index} keys must be name and digest`);
-    if (entry.name !== partialEntry.name || entry.name !== EXPECTED_IMAGES[index]) {
+    if (entry.name !== partialEntry.name) {
       fail(`sealed image ${index} must equal ${partialEntry.name}`);
     }
     if (!DIGEST.test(entry.digest)) fail(`sealed image ${entry.name} must have a lowercase sha256 digest`);
@@ -349,7 +350,7 @@ export function validateRecoveryManifest({ manifest, scannerConfig }) {
   for (const [index, entry] of manifest.images.entries()) {
     const approved = approvedRecovery.images[index];
     if (!hasExactKeys(entry, ['name', 'digest'])) fail(`image ${index} keys must be name and digest`);
-    if (entry.name !== approved.name || entry.name !== EXPECTED_IMAGES[index]) {
+    if (entry.name !== approved.name) {
       fail(`image ${index} must equal ${approved.name}`);
     }
     if (!DIGEST.test(entry.digest)) fail(`image ${entry.name} must have a lowercase sha256 digest`);

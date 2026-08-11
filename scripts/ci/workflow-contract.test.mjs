@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { EXPECTED_IMAGES as POLICY_IMAGES } from '../security/trivy-policy.mjs';
+
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const webPackage = JSON.parse(
   await readFile(new URL('../../web/package.json', import.meta.url), 'utf8'),
@@ -1127,7 +1129,7 @@ test('release tag concurrency never cancels an in-flight publication', () => {
   assert.match(publish, /concurrency:\s*\n\s+group: publish-images-\$\{\{ github\.ref_name \}\}\s*\n\s+cancel-in-progress: false/);
 });
 
-test('all ten exact tags pass a complete preflight before any build starts', () => {
+test('all eleven exact tags pass a complete preflight before any build starts', () => {
   const preflightStart = publish.indexOf('  tag-preflight:');
   const buildStart = publish.indexOf('  build:');
   const scanStart = publish.indexOf('  vulnerability-policy:');
@@ -1146,12 +1148,54 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
     'subwave-aio',
     'subwave-aio-heavy',
     'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
     'subwave-analyzer',
     'subwave-analyzer-heavy',
     'subwave-analyzer-cuda',
   ]);
   assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
+});
+
+test('release publication builds the exact CPU and CUDA Chatterbox images', () => {
+  const build = jobBlock(publish, 'build');
+  const matrix = build.slice(build.indexOf('      matrix:'), build.indexOf('    steps:'));
+  const images = [...matrix.matchAll(/^          - image: ([^\n]+)$/gm)]
+    .map(([, image]) => image);
+
+  assert.deepEqual(images, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+  ]);
+  assert.match(
+    matrix,
+    /          - image: subwave-tts-heavy\n            dockerfile: docker\/Dockerfile\.tts-heavy\n            platforms: linux\/amd64\n          - image: subwave-tts-heavy-cuda\n            dockerfile: docker\/Dockerfile\.tts-heavy\n            platforms: linux\/amd64\n            build_args: \|\n              CHATTERBOX_TORCH_INDEX_URL=https:\/\/download\.pytorch\.org\/whl\/cu124\n/,
+  );
+  assert.doesNotMatch(matrix, /subwave-analyzer-cuda/);
+});
+
+test('aggregate vulnerability policy requires the exact eleven-image release set', () => {
+  assert.deepEqual(POLICY_IMAGES, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+    'subwave-analyzer-cuda',
+  ]);
 });
 
 test('private image scans authenticate with package read permission', () => {
@@ -1248,7 +1292,7 @@ test('every scan matrix job materializes the sealed manifest before resolving im
   assert.equal((scanJob.match(/--recovery-manifest "\$RECOVERY_MANIFEST"/g) ?? []).length, 2);
 });
 
-test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
+test('image vulnerability policy scans and aggregates the exact eleven-image matrix', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
   const matrix = scanJob.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
   assert.ok(matrix, 'missing scan image matrix');
@@ -1261,6 +1305,7 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
     'subwave-aio',
     'subwave-aio-heavy',
     'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
     'subwave-analyzer',
     'subwave-analyzer-heavy',
     'subwave-analyzer-cuda',

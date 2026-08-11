@@ -116,6 +116,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -208,6 +209,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -331,6 +333,7 @@
         "subwave-aio",
         "subwave-aio-heavy",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -552,6 +555,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -600,6 +604,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -648,6 +653,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -696,6 +702,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -773,6 +780,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -979,6 +987,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1042,6 +1051,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1120,6 +1130,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1761,6 +1772,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1809,6 +1821,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1857,6 +1870,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1905,6 +1919,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -1950,7 +1965,8 @@
     {
       "vulnerabilityId": "CVE-2026-4372",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "transformers",
       "installedVersion": "5.2.0",
@@ -1964,7 +1980,8 @@
     {
       "vulnerabilityId": "CVE-2026-44513",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "diffusers",
       "installedVersion": "0.29.0",
@@ -2008,7 +2025,8 @@
     {
       "vulnerabilityId": "CVE-2026-45804",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "diffusers",
       "installedVersion": "0.29.0",
@@ -2022,7 +2040,8 @@
     {
       "vulnerabilityId": "CVE-2026-48545",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "gradio",
       "installedVersion": "6.8.0",
@@ -2036,7 +2055,8 @@
     {
       "vulnerabilityId": "CVE-2026-48818",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "starlette",
       "installedVersion": "0.52.1",
@@ -2053,6 +2073,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2098,7 +2119,8 @@
     {
       "vulnerabilityId": "CVE-2026-5241",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "transformers",
       "installedVersion": "5.2.0",
@@ -2115,6 +2137,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2163,6 +2186,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2227,6 +2251,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2275,6 +2300,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2323,6 +2349,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2387,6 +2414,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2435,6 +2463,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2483,6 +2512,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2512,7 +2542,8 @@
     {
       "vulnerabilityId": "CVE-2026-54283",
       "images": [
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "starlette",
       "installedVersion": "0.52.1",
@@ -2529,6 +2560,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2727,6 +2759,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -2775,6 +2808,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -3562,6 +3596,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -3593,6 +3628,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5468,6 +5504,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5499,6 +5536,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5562,6 +5600,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5610,6 +5649,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5705,6 +5745,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -5722,6 +5763,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -6037,6 +6079,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -6100,6 +6143,7 @@
       "images": [
         "subwave-controller",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -6148,6 +6192,7 @@
         "subwave-controller",
         "subwave-web",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -6197,6 +6242,7 @@
         "subwave-aio",
         "subwave-aio-heavy",
         "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda",
         "subwave-analyzer",
         "subwave-analyzer-heavy"
       ],
@@ -7014,7 +7060,8 @@
         "subwave-analyzer-heavy",
         "subwave-analyzer",
         "subwave-controller",
-        "subwave-tts-heavy"
+        "subwave-tts-heavy",
+        "subwave-tts-heavy-cuda"
       ],
       "package": "libssh2-1",
       "installedVersion": "1.10.0-3+b1",

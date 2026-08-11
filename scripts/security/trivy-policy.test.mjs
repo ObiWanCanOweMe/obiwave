@@ -73,6 +73,55 @@ const FFMPEG_IMAGES = [
 const LIBSSH2_58050_ID = 'CVE-2026-58050';
 const LIBSSH2_58050_TRACKING = 'https://security-tracker.debian.org/tracker/CVE-2026-58050';
 const STALE_ACCEPTANCE_IDS = new Set(['CVE-2026-55199', 'CVE-2026-55200', 'CVE-2026-66041']);
+const TTS_CUDA_SCAN_TUPLES = [
+  'CVE-2023-2953|libldap-2.5-0|2.5.13+dfsg-5',
+  'CVE-2023-45853|zlib1g|1:1.2.13.dfsg-1',
+  'CVE-2025-47273|setuptools|70.3.0',
+  'CVE-2025-69720|libncursesw6|6.4-4',
+  'CVE-2025-69720|libtinfo6|6.4-4',
+  'CVE-2025-69720|ncurses-base|6.4-4',
+  'CVE-2025-69720|ncurses-bin|6.4-4',
+  'CVE-2025-7458|libsqlite3-0|3.40.1-2+deb12u2',
+  'CVE-2026-12064|curl|7.88.1-10+deb12u15',
+  'CVE-2026-12064|libcurl4|7.88.1-10+deb12u15',
+  'CVE-2026-13221|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-37555|libsndfile1|1.2.0-1+deb12u1',
+  'CVE-2026-41992|gzip|1.12-1',
+  'CVE-2026-42496|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-42497|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-4372|transformers|5.2.0',
+  'CVE-2026-44513|diffusers|0.29.0',
+  'CVE-2026-45804|diffusers|0.29.0',
+  'CVE-2026-48545|gradio|6.8.0',
+  'CVE-2026-48818|starlette|0.52.1',
+  'CVE-2026-48962|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-5241|transformers|5.2.0',
+  'CVE-2026-53615|bsdutils|1:2.38.1-5+deb12u3',
+  'CVE-2026-53615|libblkid1|2.38.1-5+deb12u3',
+  'CVE-2026-53615|libmount1|2.38.1-5+deb12u3',
+  'CVE-2026-53615|libsmartcols1|2.38.1-5+deb12u3',
+  'CVE-2026-53615|libuuid1|2.38.1-5+deb12u3',
+  'CVE-2026-53615|mount|2.38.1-5+deb12u3',
+  'CVE-2026-53615|util-linux-extra|2.38.1-5+deb12u3',
+  'CVE-2026-53615|util-linux|2.38.1-5+deb12u3',
+  'CVE-2026-54283|starlette|0.52.1',
+  'CVE-2026-54369|libacl1|2.3.1-3',
+  'CVE-2026-57432|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-57433|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-58050|libssh2-1|1.10.0-3+b1',
+  'CVE-2026-6276|curl|7.88.1-10+deb12u15',
+  'CVE-2026-6276|libcurl4|7.88.1-10+deb12u15',
+  'CVE-2026-7598|libssh2-1|1.10.0-3+b1',
+  'CVE-2026-8286|curl|7.88.1-10+deb12u15',
+  'CVE-2026-8286|libcurl4|7.88.1-10+deb12u15',
+  'CVE-2026-8376|perl-base|5.36.0-7+deb12u3',
+  'CVE-2026-8458|curl|7.88.1-10+deb12u15',
+  'CVE-2026-8458|libcurl4|7.88.1-10+deb12u15',
+  'CVE-2026-8927|curl|7.88.1-10+deb12u15',
+  'CVE-2026-8927|libcurl4|7.88.1-10+deb12u15',
+  'CVE-2026-9538|perl-base|5.36.0-7+deb12u3',
+  'GHSA-6v7p-g79w-8964|msgpack|1.1.2',
+];
 
 function imageRef(image, tag = V13_TAG) {
   return `${IMAGE_NAMESPACE}/${image}:${tag}`;
@@ -204,6 +253,24 @@ test('checked-in CUDA mirror acceptances carry the reviewed release-aware statem
   );
 });
 
+test('checked-in TTS CUDA acceptances match the exact pinned local scan tuples', () => {
+  const records = checkedInAcceptance.acceptances.filter((record) =>
+    record.images.includes('subwave-tts-heavy-cuda'));
+
+  assert.deepEqual(
+    records
+      .map((record) => `${record.vulnerabilityId}|${record.package}|${record.installedVersion}`)
+      .sort(),
+    TTS_CUDA_SCAN_TUPLES,
+  );
+  assert.equal(records.length, 47);
+  for (const record of records) {
+    const cpuIndex = record.images.indexOf('subwave-tts-heavy');
+    assert.notEqual(cpuIndex, -1);
+    assert.equal(record.images[cpuIndex + 1], 'subwave-tts-heavy-cuda');
+  }
+});
+
 test('checked-in CVE-2026-8458 acceptances are time-bounded to the reviewed curl scopes', () => {
   const records = checkedInAcceptance.acceptances.filter((record) =>
     record.vulnerabilityId === CURL_8458_ID);
@@ -220,8 +287,8 @@ test('checked-in CVE-2026-8458 acceptances are time-bounded to the reviewed curl
       { package: 'curl', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
       { package: 'libcurl3t64-gnutls', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
       { package: 'libcurl4t64', installedVersion: '8.14.1-2+deb13u4', disposition: 'unreachable', images: ['subwave-broadcast', 'subwave-aio', 'subwave-aio-heavy'] },
-      { package: 'curl', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
-      { package: 'libcurl4', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
+      { package: 'curl', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-tts-heavy-cuda', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
+      { package: 'libcurl4', installedVersion: '7.88.1-10+deb12u15', disposition: 'unreachable', images: ['subwave-controller', 'subwave-tts-heavy', 'subwave-tts-heavy-cuda', 'subwave-analyzer', 'subwave-analyzer-heavy'] },
       { package: 'curl', installedVersion: '7.88.1-10+deb12u15', disposition: 'upstream-mirror', images: ['subwave-analyzer-cuda'] },
       { package: 'libcurl4', installedVersion: '7.88.1-10+deb12u15', disposition: 'upstream-mirror', images: ['subwave-analyzer-cuda'] },
     ],
@@ -298,7 +365,7 @@ test('checked-in CVE-2026-58050 acceptances are exact, architecture-bound, and t
         package: 'libssh2-1',
         installedVersion: '1.10.0-3+b1',
         disposition: 'unreachable',
-        images: ['subwave-analyzer-heavy', 'subwave-analyzer', 'subwave-controller', 'subwave-tts-heavy'],
+        images: ['subwave-analyzer-heavy', 'subwave-analyzer', 'subwave-controller', 'subwave-tts-heavy', 'subwave-tts-heavy-cuda'],
       },
       {
         package: 'libssh2-1',
@@ -328,24 +395,32 @@ test('checked-in acceptance data preserves the reviewed v1.7 catalog size and re
   );
 });
 
-test('reduced exact v1.7 ten-report replay passes with the reviewed CVE-2026-58050 scopes', () => {
+test('reduced exact v1.7 eleven-report replay passes with the reviewed CVE-2026-58050 scopes', () => {
   assert.equal(v17ReplayFixture?.releaseTag, V17_TAG);
   const acceptanceSubset = checkedInAcceptance.acceptances.filter(({ vulnerabilityId }) =>
     vulnerabilityId === LIBSSH2_58050_ID);
+  const reports = {
+    ...v17ReplayFixture.reports,
+    'subwave-tts-heavy-cuda': reportEntry('subwave-tts-heavy-cuda', [finding({
+      VulnerabilityID: LIBSSH2_58050_ID,
+      PkgName: 'libssh2-1',
+      InstalledVersion: '1.10.0-3+b1',
+    })], { tag: V17_TAG }),
+  };
   const summary = validateReports({
     tag: V17_TAG,
-    reports: v17ReplayFixture.reports,
+    reports,
     acceptance: manifest(acceptanceSubset),
     expectedImages: EXPECTED_IMAGES,
     now: new Date(v17ReplayFixture.now),
   });
-  assert.equal(summary.imageCount, 10);
-  assert.equal(summary.findingCount, 8);
-  assert.equal(summary.acceptedCount, 8);
+  assert.equal(summary.imageCount, 11);
+  assert.equal(summary.findingCount, 9);
+  assert.equal(summary.acceptedCount, 9);
   assert.equal(summary.unacceptedCount, 0);
 });
 
-test('clean ten-image matrix returns a deterministic empty summary', () => {
+test('clean eleven-image matrix returns a deterministic empty summary', () => {
   const summary = validateReports({
     tag: TAG,
     reports: cleanReports(),
@@ -355,7 +430,7 @@ test('clean ten-image matrix returns a deterministic empty summary', () => {
   });
 
   assert.deepEqual(summary, {
-    imageCount: 10,
+    imageCount: 11,
     findingCount: 0,
     acceptedCount: 0,
     unacceptedCount: 0,
@@ -758,7 +833,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
       expectedImages: EXPECTED_IMAGES,
       now: NOW,
     });
-    assert.equal(summary.imageCount, 10);
+    assert.equal(summary.imageCount, 11);
   }
 });
 
@@ -874,7 +949,7 @@ test('the report loader requires matching raw JSON and status files for the requ
     expectedImages: EXPECTED_IMAGES,
     now: NOW,
   });
-  assert.equal(summary.imageCount, 10);
+  assert.equal(summary.imageCount, 11);
 
   await writeFile(
     join(directory, 'subwave-caddy.json'),
@@ -920,7 +995,7 @@ test('the CLI emits a machine-readable summary and exits nonzero on a missing re
   ]);
   const passingSummary = JSON.parse(passing.stdout);
   assert.equal(passingSummary.result, 'pass');
-  assert.equal(passingSummary.imageCount, 10);
+  assert.equal(passingSummary.imageCount, 11);
   assert.equal(passingSummary.unacceptedCount, 0);
 
   await rm(join(directory, 'subwave-web.json'));

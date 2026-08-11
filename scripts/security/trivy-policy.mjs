@@ -14,6 +14,7 @@ export const EXPECTED_IMAGES = Object.freeze([
   'subwave-aio',
   'subwave-aio-heavy',
   'subwave-tts-heavy',
+  'subwave-tts-heavy-cuda',
   'subwave-analyzer',
   'subwave-analyzer-heavy',
   'subwave-analyzer-cuda',

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import * as manifestModule from './recovery-manifest.mjs';
+import { EXPECTED_IMAGES } from '../security/trivy-policy.mjs';
 
 const scannerConfig = {
   schemaVersion: 1,
@@ -368,6 +369,42 @@ test('accepts each literal approved recovery identity', () => {
     assert.ok(Object.isFrozen(value));
     assert.ok(Object.isFrozen(value.images));
   }
+});
+
+test('historical recovery images stay bound to their approved record after live policy expansion', () => {
+  assert.deepEqual(EXPECTED_IMAGES, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+    'subwave-analyzer-cuda',
+  ]);
+
+  const approved = manifestModule.validateRecoveryManifest({
+    manifest: exactV13Manifest(),
+    scannerConfig,
+  });
+  assert.equal(approved.images.length, 10);
+
+  const wrongName = exactV13Manifest();
+  wrongName.images[6].name = 'subwave-tts-heavy-cuda';
+  assert.throws(
+    () => manifestModule.validateRecoveryManifest({ manifest: wrongName, scannerConfig }),
+    /image 6 must equal subwave-tts-heavy/,
+  );
+
+  const wrongOrder = exactV13Manifest();
+  [wrongOrder.images[6], wrongOrder.images[7]] = [wrongOrder.images[7], wrongOrder.images[6]];
+  assert.throws(
+    () => manifestModule.validateRecoveryManifest({ manifest: wrongOrder, scannerConfig }),
+    /image 6 must equal subwave-tts-heavy/,
+  );
 });
 
 test('rejects a valid manifest assembled from cross-release identity parts', () => {
