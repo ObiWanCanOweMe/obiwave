@@ -1021,9 +1021,10 @@ def onboarding(page):
     NavidromeStep/LlmStep/TtsStep/DjStep each own a useZodForm and their own
     gated "Next" submit; ReviewStep is unchanged (no fields of its own).
 
-    Boots its OWN throwaway controller (port 7792, a fresh temp STATE_DIR, and
-    critically NO NAVIDROME_* env at all — that absence is what makes
-    needsSetup true) and its OWN second Next dev server (port 7794). Both are
+    Boots its OWN throwaway controller (port 7792, a fresh temp STATE_DIR, a
+    loopback dummy NAVIDROME_URL, and critically no Navidrome credentials —
+    their absence is what makes needsSetup true) and its OWN second Next dev
+    server (port 7794). Both are
     started and stopped by THIS check, in a `finally`, so this file stays
     runnable as a whole against a freshly booted stack (Task 13's job) with no
     manual step for anyone to forget — that was Task 5's bar.
@@ -1097,12 +1098,15 @@ def onboarding(page):
         "ADMIN_USER": "test",
         "ADMIN_PASS": "test",
         "NODE_ENV": "development",
+        # Keep a valid inherited verifier marker pinned to the same dummy
+        # backend. needsSetup depends on all three Navidrome credentials, so
+        # omitting user/pass still exercises the onboarding path.
+        "NAVIDROME_URL": "http://127.0.0.1:9999",
     })
-    # The absence of these three is the entire point — with them set,
-    # needsSetup is false and the wizard never renders. Strip rather than
-    # trust the ambient shell not to have them (the shared verify SKILL sets
-    # exactly these three for the OTHER stack).
-    for k in ("NAVIDROME_URL", "NAVIDROME_USER", "NAVIDROME_PASS"):
+    # Credentials must stay absent or needsSetup is false and the wizard never
+    # renders. Strip rather than trust the ambient shell not to have them (the
+    # shared verify skill sets them for the other stack).
+    for k in ("NAVIDROME_USER", "NAVIDROME_PASS"):
         controller_env.pop(k, None)
 
     controller_proc = subprocess.Popen(
