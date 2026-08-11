@@ -178,18 +178,19 @@ async function main() {
       ? embedCfg.seedCount
       : null;
 
-  // Shared vote plumbing for phase 3, the phase-4 re-propagation rounds and
-  // the post-run self-check: KNN → neighbour-tag lookup → similarity-weighted
-  // vote. Same-album+artist neighbours vote at half weight — a track's text
-  // embedding is dominated by artist/album, so its KNN list is mostly its own
-  // album mates; at full weight one mistagged seed swept its whole album, and
-  // cross-album corroboration never got a say (the same-album echo chamber).
+  // Shared vote plumbing for phase 3, the phase-4 re-propagation rounds and the
+  // post-run self-check: KNN → neighbour-tag lookup → similarity-weighted vote.
   //
-  // When the track has a CLAP "sounds-like" vector, audio-KNN neighbours are
-  // fused into the list at audioFusionWeight before the vote — sound is the
-  // stronger mood signal for instrumentals / thin-metadata tracks, and CLAP
-  // doesn't cluster by album. knnAudioById returns [] for un-analysed tracks,
-  // so fusion degrades to text-only per track, not per run.
+  // Same-album+artist neighbours vote at HALF weight: a text embedding is
+  // dominated by artist/album, so a track's KNN list is mostly its own album
+  // mates, and at full weight one mistagged seed swept the whole album while
+  // cross-album corroboration never got a say.
+  //
+  // With a CLAP "sounds-like" vector, audio-KNN neighbours fuse in at
+  // audioFusionWeight before the vote — sound is the stronger mood signal for
+  // instrumentals and thin-metadata tracks, and CLAP doesn't cluster by album.
+  // knnAudioById returns [] for un-analysed tracks, so fusion degrades to
+  // text-only per track, not per run.
   const SAME_ALBUM_WEIGHT = 0.5;
   // Same artist, DIFFERENT album — damped too. On a label-only text index (no
   // Last.fm key, no lyrics, no CLAP) "nearest neighbours" is mostly the

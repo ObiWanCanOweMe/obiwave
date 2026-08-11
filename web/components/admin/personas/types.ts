@@ -56,6 +56,20 @@ export interface FormState {
   djHouseRules: string;
 }
 
+// The react-hook-form shape: the two field arrays.
+// `activePersonaId`/`activeDjPromptId`/`djHouseRules` stay plain useState in
+// PersonasPanel — they aren't array rows, and the patch registry validates them
+// as their own top-level settings keys.
+//
+// Hand-written rather than derived from the schemas' z.input: every leaf of
+// those is a `z.unknown().transform()` (they double as the server's load-repair
+// target), so no nested path would type-check as a FieldPath. Persona and
+// DjPromptPreset are what the transforms actually produce.
+export interface PersonasFormValues {
+  personas: Persona[];
+  djPrompts: DjPromptPreset[];
+}
+
 export interface SkillCatalogEntry {
   name: string;
   label?: string;

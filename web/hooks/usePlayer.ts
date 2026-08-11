@@ -62,6 +62,9 @@ export type PlayerStatus = 'idle' | 'connecting' | 'playing';
 
 export interface Player {
   audioRef: RefObject<HTMLAudioElement | null>;
+  /** Ref callback the consumer MUST put on its <audio> element. It keeps
+   *  audioRef on the live node and re-attaches media listeners whenever the
+   *  private-station gate replaces that node (issue #1232). Stable identity. */
   audioElementRef: RefCallback<HTMLAudioElement>;
   tunedIn: boolean;
   status: PlayerStatus;
@@ -196,10 +199,9 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  // Restore the listener's last-used volume (issue #783). localStorage is
-  // effect-only (never read during render) so SSR + first paint stay on the
-  // default and there's no hydration mismatch. `hydrated` gates persistence so
-  // this restoring setVolume doesn't race the persist effect.
+  // Restore the listener's last-used volume (issue #783). Effect-only, so SSR
+  // and first paint stay on the default with no hydration mismatch; `hydrated`
+  // keeps this restoring setVolume from racing the persist effect below.
   const hydratedRef = useRef(false);
   useEffect(() => {
     const stored = loadVolumePref();

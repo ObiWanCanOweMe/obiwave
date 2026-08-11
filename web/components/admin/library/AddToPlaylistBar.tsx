@@ -6,8 +6,7 @@ import { ListMusic } from 'lucide-react';
 import { Input } from '../../ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../ui/select';
 import { Card, Btn } from '../ui';
-
-import type { PlaylistSummary } from '../LibraryPlaylistsTab';
+import type { PlaylistSummary } from './types';
 
 export function AddToPlaylistBar({ count, playlists, busy, onAdd, onClear }: {
   count: number;

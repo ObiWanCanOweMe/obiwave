@@ -85,6 +85,7 @@ async function renderTtsSection(
       setForm: updater => setForm(current => updater(current)),
       busy: false,
       saveSettings,
+      fieldErrors: {},
       adminFetch: async () => new Response(JSON.stringify({ ok: true, models: [], voices: [] })),
       refresh: async () => {},
     });

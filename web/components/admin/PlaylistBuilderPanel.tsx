@@ -10,6 +10,8 @@ import {
   Plus, X, Search, ArrowUp, ArrowDown, ChevronRight, ChevronUp, ChevronDown,
   GripVertical, RefreshCw, Trash2, FolderOpen, FilePlus2, Save,
 } from 'lucide-react';
+import { Controller, useWatch } from 'react-hook-form';
+import type { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { useDynamicStyle } from '../../hooks/useDynamicStyle';
 import { Button } from '../ui/button';
@@ -17,13 +19,14 @@ import { Switch } from '../ui/switch';
 import { V3Alert } from '../ui/alert';
 import { ScrollArea } from '../ui/scroll-area';
 import { cn } from '../../lib/cn';
+import { useZodForm, applyServerFieldErrors } from '../../lib/form';
+import { TextField, TextareaField, SwitchField, ToggleGroupField } from '../../lib/form-fields';
 import { EnergyGraph } from './playlist-builder/EnergyGraph';
 import {
   Chip,
   DualRange,
   Eyeb,
   IconBtn,
-  SwitchRow,
   Tog,
   energyBgClass,
   energyLabel,
@@ -47,7 +50,6 @@ import {
   ENERGIES,
   LEN_MAX,
   LEN_STEP,
-  MOODS,
   YEAR_MAX,
   YEAR_MIN,
   fmtDur,
@@ -55,33 +57,106 @@ import {
   relTime,
   rowToDraft,
 } from './playlist-builder/types';
+import {
+  PLAYLIST_NAME_MAX,
+  playlistGenerateSchema,
+  playlistHasIntent,
+  playlistSaveSchema,
+} from '@/lib/schemas.generated';
+
+// ─── The generate-vs-save split ────────────────────────────────────────────
+//
+// Two request bodies, two forms. The recipe rail (RecipeFormValues) feeds both
+// POST /playlists/generate and the `recipe` field of POST /playlists, since the
+// two share a shape. `seedArtist` and `genreInput` stay plain state: the latter
+// is an uncommitted text buffer, and neither carries a schema rule.
+//
+// `formState.isValid` on the recipe form is inert and never read. The only
+// whole-object rule is `playlistHasIntent`, which the schema's `.refine` reads
+// off the NESTED wire shape (`knobs.moods`, `sources.recentlyAdded`), while
+// this form's fields are flat to match the rail's own UI concepts. So
+// `playlistHasIntent(buildBody())` stays the real Generate gate.
+//
+// The SAVE modal is a separate form bound to playlistSaveSchema, where `name`
+// is the one real rule — songIds/playlistId/recipe are assembled at submit time
+// from live component state. `saveMode` isn't a schema key at all; it travels
+// here anyway as a save-time choice, and is read off raw form state.
+interface RecipeFormValues {
+  prompt: string;
+  seeds: SeedChip[];
+  moods: string[];
+  genres: string[];
+  energies: string[];
+  yearFrom: number;
+  yearTo: number;
+  bpmOn: boolean;
+  minBpm: number;
+  maxBpm: number;
+  artists: string[];
+  arc: ArcShape;
+  count: number;
+  artistSpacing: number;
+  capOn: boolean;
+  minSec: number;
+  maxSec: number;
+  excludeRecent: boolean;
+  instrumentalOnly: boolean;
+  recentlyAdded: boolean;
+}
+
+const RECIPE_DEFAULTS: RecipeFormValues = {
+  prompt: '',
+  seeds: [],
+  moods: [],
+  genres: [],
+  energies: [],
+  yearFrom: YEAR_MIN,
+  yearTo: YEAR_MAX,
+  bpmOn: false,
+  minBpm: BPM_MIN,
+  maxBpm: BPM_MAX,
+  artists: [],
+  arc: 'flat',
+  count: 25,
+  artistSpacing: 2,
+  capOn: false,
+  minSec: 0,
+  maxSec: LEN_MAX,
+  excludeRecent: false,
+  instrumentalOnly: false,
+  recentlyAdded: false,
+};
+
+interface SaveFormValues {
+  name: string;
+  keepInSync: boolean;
+  saveMode: 'overwrite' | 'create';
+}
+
+const SAVE_DEFAULTS: SaveFormValues = { name: '', keepInSync: false, saveMode: 'create' };
 
 export default function PlaylistBuilderPanel() {
   const { adminFetch } = useAdminAuth();
 
-  const [prompt, setPrompt] = useState('');
-  const [seeds, setSeeds] = useState<SeedChip[]>([]);
+  // Both playlist schemas are `z.preprocess(...)`-wrapped, so their inferred
+  // `_input` is `unknown` and can't satisfy useZodForm's generic bound. Cast to
+  // the form's own field shape; the resolver still runs the real schema.
+  const recipeForm = useZodForm(
+    playlistGenerateSchema as unknown as z.ZodType<RecipeFormValues, RecipeFormValues>,
+    RECIPE_DEFAULTS,
+  );
+  const recipeControl = recipeForm.control;
+  const recipeValues = useWatch({ control: recipeControl }) as RecipeFormValues;
+
+  const saveForm = useZodForm(
+    playlistSaveSchema as unknown as z.ZodType<SaveFormValues, SaveFormValues>,
+    SAVE_DEFAULTS,
+  );
+  const saveControl = saveForm.control;
+  const saveNameValue = useWatch({ control: saveControl, name: 'name' });
+
   const [seedArtist, setSeedArtist] = useState('');
-  const [moods, setMoods] = useState<string[]>([]);
-  const [genres, setGenres] = useState<string[]>([]);
   const [genreInput, setGenreInput] = useState('');
-  const [energies, setEnergies] = useState<string[]>([]);
-  const [yearFrom, setYearFrom] = useState(YEAR_MIN);
-  const [yearTo, setYearTo] = useState(YEAR_MAX);
-  const [bpmOn, setBpmOn] = useState(false);
-  const [minBpm, setMinBpm] = useState(BPM_MIN);
-  const [maxBpm, setMaxBpm] = useState(BPM_MAX);
-  const [artists, setArtists] = useState<string[]>([]);
-  const [arc, setArc] = useState<ArcShape>('flat');
-  const [count, setCount] = useState(25);
-  const [artistSpacing, setArtistSpacing] = useState(2);
-  const [capOn, setCapOn] = useState(false);
-  // Track-length band anchors (seconds). min at 0 = no floor; max at LEN_MAX = no cap.
-  const [minSec, setMinSec] = useState(0);
-  const [maxSec, setMaxSec] = useState(LEN_MAX);
-  const [excludeRecent, setExcludeRecent] = useState(false);
-  const [instrumentalOnly, setInstrumentalOnly] = useState(false);
-  const [recentlyAdded, setRecentlyAdded] = useState(false);
 
   const [view, setView] = useState<View>('empty');
   const [name, setName] = useState('');
@@ -103,9 +178,6 @@ export default function PlaylistBuilderPanel() {
   const [saving, setSaving] = useState(false);
 
   const [modal, setModal] = useState<null | 'open' | 'save'>(null);
-  const [saveName, setSaveName] = useState('');
-  const [saveMode, setSaveMode] = useState<'overwrite' | 'create'>('create');
-  const [saveSync, setSaveSync] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null);
   const [playlistQuery, setPlaylistQuery] = useState('');
   // Two-click armed delete in the Open modal — the only delete surface.
@@ -117,6 +189,10 @@ export default function PlaylistBuilderPanel() {
   const listRef = useRef<HTMLDivElement>(null);
   const hotTimer = useRef<number | null>(null);
   const [toast, setToast] = useState('');
+
+  // The live mood names off /settings. Moods are operator-editable, so a
+  // hand-copied vocabulary here would miss custom ones and offer deleted ones.
+  const [liveMoods, setLiveMoods] = useState<string[]>([]);
 
   const [seedQuery, setSeedQuery] = useState('');
   const [seedResults, setSeedResults] = useState<RawTrackRow[] | null>(null);
@@ -168,6 +244,27 @@ export default function PlaylistBuilderPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modal]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminFetch('/settings');
+        if (!r.ok || cancelled) return;
+        const j = await r.json() as { tts?: { moods?: string[] } };
+        if (!cancelled && Array.isArray(j.tts?.moods)) setLiveMoods(j.tts.moods);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [adminFetch]);
+
+  // Already-selected moods union in, so retiring a mood at /admin/moods can't
+  // make a picked chip vanish from under the operator.
+  const moodOptions = useMemo(() => {
+    const out = [...liveMoods];
+    for (const m of recipeValues.moods) if (!out.includes(m)) out.push(m);
+    return out;
+  }, [liveMoods, recipeValues.moods]);
+
   // Without this the modal is only reachable by tabbing through the page behind
   // it, and closing leaves focus on <body>.
   const modalPanelRef = useRef<HTMLDivElement>(null);
@@ -207,37 +304,35 @@ export default function PlaylistBuilderPanel() {
   }, [tracks]);
 
   const buildBody = useCallback((excludeTrackIds: string[] = []) => ({
-    prompt: prompt.trim() || undefined,
-    seedTrackIds: seeds.map(s => s.id),
+    prompt: recipeValues.prompt.trim() || undefined,
+    seedTrackIds: recipeValues.seeds.map(s => s.id),
     seedArtist: seedArtist || undefined,
     knobs: {
-      targetCount: count,
-      energyArc: arc,
-      moods,
-      genres,
-      energies,
-      artists,
-      eras: yearFrom > YEAR_MIN || yearTo < YEAR_MAX
-        ? [{ fromYear: yearFrom > YEAR_MIN ? yearFrom : null, toYear: yearTo < YEAR_MAX ? yearTo : null }]
+      targetCount: recipeValues.count,
+      energyArc: recipeValues.arc,
+      moods: recipeValues.moods,
+      genres: recipeValues.genres,
+      energies: recipeValues.energies,
+      artists: recipeValues.artists,
+      eras: recipeValues.yearFrom > YEAR_MIN || recipeValues.yearTo < YEAR_MAX
+        ? [{ fromYear: recipeValues.yearFrom > YEAR_MIN ? recipeValues.yearFrom : null, toYear: recipeValues.yearTo < YEAR_MAX ? recipeValues.yearTo : null }]
         : [],
-      artistSpacing,
-      excludeRecentlyPlayed: excludeRecent,
-      instrumentalOnly,
-      minTrackSeconds: capOn && minSec > 0 ? minSec : undefined,
-      maxTrackSeconds: capOn && maxSec < LEN_MAX ? maxSec : undefined,
-      minBpm: bpmOn && minBpm > BPM_MIN ? minBpm : undefined,
-      maxBpm: bpmOn && maxBpm < BPM_MAX ? maxBpm : undefined,
+      artistSpacing: recipeValues.artistSpacing,
+      excludeRecentlyPlayed: recipeValues.excludeRecent,
+      instrumentalOnly: recipeValues.instrumentalOnly,
+      minTrackSeconds: recipeValues.capOn && recipeValues.minSec > 0 ? recipeValues.minSec : undefined,
+      maxTrackSeconds: recipeValues.capOn && recipeValues.maxSec < LEN_MAX ? recipeValues.maxSec : undefined,
+      minBpm: recipeValues.bpmOn && recipeValues.minBpm > BPM_MIN ? recipeValues.minBpm : undefined,
+      maxBpm: recipeValues.bpmOn && recipeValues.maxBpm < BPM_MAX ? recipeValues.maxBpm : undefined,
     },
-    sources: { recentlyAdded },
+    sources: { recentlyAdded: recipeValues.recentlyAdded },
     excludeTrackIds,
-  }), [prompt, seeds, seedArtist, count, arc, moods, genres, energies, artists, yearFrom, yearTo, artistSpacing, excludeRecent, instrumentalOnly, capOn, minSec, maxSec, bpmOn, minBpm, maxBpm, recentlyAdded]);
+  }), [recipeValues, seedArtist]);
 
-  const hasIntent = Boolean(
-    prompt.trim() || seeds.length || seedArtist || recentlyAdded || moods.length ||
-    genres.length || artists.length || energies.length || instrumentalOnly ||
-    yearFrom > YEAR_MIN || yearTo < YEAR_MAX ||
-    (bpmOn && (minBpm > BPM_MIN || maxBpm < BPM_MAX)),
-  );
+  // The same intent rule the /generate route enforces — exported as a predicate
+  // rather than living only inside the schema, because the Generate button needs
+  // the answer before a request exists. See the split comment at the top.
+  const hasIntent = useMemo(() => playlistHasIntent(buildBody()), [buildBody]);
 
   const generating = view === 'generating';
 
@@ -325,10 +420,10 @@ export default function PlaylistBuilderPanel() {
     if (!genreList) return null;
     const q = genreInput.trim().toLowerCase();
     if (!q) return null;
-    const chosen = new Set(genres.map(g => g.toLowerCase()));
+    const chosen = new Set(recipeValues.genres.map(g => g.toLowerCase()));
     const hits = genreList.filter(g => g.value.toLowerCase().includes(q) && !chosen.has(g.value.toLowerCase()));
     return hits.slice(0, 8);
-  }, [genreList, genreInput, genres]);
+  }, [genreList, genreInput, recipeValues.genres]);
 
   // Artist-filter search (debounced) — suggests distinct artist credits.
   useEffect(() => {
@@ -339,7 +434,7 @@ export default function PlaylistBuilderPanel() {
       try {
         const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=20`);
         const j = await r.json();
-        const seen = new Set(artists.map(a => a.toLowerCase()));
+        const seen = new Set(recipeValues.artists.map(a => a.toLowerCase()));
         const names: string[] = [];
         for (const row of (j.results || []) as RawTrackRow[]) {
           const a = (row.artist || '').trim();
@@ -350,7 +445,7 @@ export default function PlaylistBuilderPanel() {
       } catch { if (!stale) setArtistResults([]); }
     }, 250);
     return () => { stale = true; window.clearTimeout(h); };
-  }, [artistQuery, adminFetch, artists]);
+  }, [artistQuery, adminFetch, recipeValues.artists]);
 
   // Distinct artists in the seed results — the "seed the artist" rows.
   const seedArtists = useMemo(() => {
@@ -364,15 +459,6 @@ export default function PlaylistBuilderPanel() {
     }
     return out;
   }, [seedResults]);
-
-  const toggle = (list: string[], set: (v: string[]) => void, v: string) =>
-    set(list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
-
-  const addGenre = () => {
-    const g = genreInput.trim().replace(/,+$/, '');
-    if (g && !genres.some(x => x.toLowerCase() === g.toLowerCase())) setGenres([...genres, g]);
-    setGenreInput('');
-  };
 
   const move = (from: number, to: number) => {
     if (to < 0 || to >= tracks.length) return;
@@ -444,44 +530,56 @@ export default function PlaylistBuilderPanel() {
 
   const openSave = useCallback(() => {
     if (!tracks.length) { flash('nothing to save'); return; }
-    setSaveName(name.trim() || '');
-    setSaveMode(existingId ? 'overwrite' : 'create');
-    setSaveSync(keepInSync);
+    saveForm.reset({
+      name: name.trim() || '',
+      keepInSync,
+      saveMode: existingId ? 'overwrite' : 'create',
+    });
+    // reset() doesn't validate, so an empty default would leave `isValid`
+    // stale-true until the field is touched, and the Save button wrongly
+    // enabled on first paint.
+    void saveForm.trigger();
     setModal('save');
-  }, [tracks.length, name, existingId, keepInSync, flash]);
+  }, [tracks.length, name, existingId, keepInSync, flash, saveForm]);
 
-  const doSave = useCallback(async () => {
-    const finalName = saveName.trim();
-    if (!finalName) { flash('name the playlist first'); return; }
+  const onSaveSubmit = saveForm.handleSubmit(async (values) => {
     setSaving(true);
     try {
+      // Read off raw form state, NOT off `values`: `saveMode` is not a key of
+      // playlistSaveSchema, so the resolver's parsed output drops it and
+      // `values.saveMode` is always undefined — which once made every
+      // "Overwrite existing" save create a new playlist instead.
+      const saveMode = saveForm.getValues('saveMode');
       const overwrite = saveMode === 'overwrite' && existingId;
       const r = await adminFetch('/playlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: finalName,
+          name: values.name,
           songIds: tracks.map(t => t.id),
           playlistId: overwrite ? existingId : undefined,
-          keepInSync: saveSync,
-          recipe: saveSync ? buildBody() : undefined,
+          keepInSync: values.keepInSync,
+          recipe: values.keepInSync ? buildBody() : undefined,
         }),
       });
       const j = await r.json();
-      if (!r.ok) { flash(j.error || 'save failed'); return; }
+      if (!r.ok) {
+        if (!applyServerFieldErrors(saveForm, j.fieldErrors)) flash(j.error || 'save failed');
+        return;
+      }
       const id = j.playlist?.id || (overwrite ? existingId : undefined);
-      setName(finalName);
+      setName(values.name);
       setExistingId(id);
-      setKeepInSync(saveSync);
-      setSyncInfo(saveSync ? (syncInfo ?? { lastSyncedAt: null }) : null);
+      setKeepInSync(values.keepInSync);
+      setSyncInfo(values.keepInSync ? (syncInfo ?? { lastSyncedAt: null }) : null);
       setModal(null);
-      flash(`Saved “${finalName}” to Navidrome${saveSync ? ' · sync on' : ''}`);
+      flash(`Saved “${values.name}” to Navidrome${values.keepInSync ? ' · sync on' : ''}`);
     } catch (err) {
       flash(err instanceof Error ? err.message : 'save failed');
     } finally {
       setSaving(false);
     }
-  }, [saveName, saveMode, saveSync, existingId, tracks, syncInfo, buildBody, adminFetch, flash]);
+  });
 
   const syncNow = useCallback(async () => {
     if (!existingId || syncing) return;
@@ -531,150 +629,189 @@ export default function PlaylistBuilderPanel() {
               Describe the set
             </h1>
 
-            <div className="mb-[22px]">
-              <div className="mb-[7px]"><Eyeb>Vibe</Eyeb></div>
-              <textarea
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                rows={3}
-                placeholder={'“rainy sunday jazz that warms up halfway through”'}
-                aria-label="Vibe"
-                className={cn(searchInputClass, 'resize-none leading-[1.45]')}
-              />
-            </div>
+            <TextareaField
+              control={recipeControl}
+              name="prompt"
+              label="Vibe"
+              rows={3}
+              placeholder={'“rainy sunday jazz that warms up halfway through”'}
+              className="mb-[22px]"
+            />
 
-            <div className="mb-[22px]">
-              <div className="mb-[7px] flex items-center justify-between">
-                <Eyeb>Seeds</Eyeb>
-                <span className="font-mono text-[10px] text-muted">optional</span>
-              </div>
-              <div className="relative">
-                <input
-                  value={seedQuery}
-                  onChange={e => setSeedQuery(e.target.value)}
-                  placeholder="Search a track or artist to anchor on…"
-                  aria-label="Search seeds"
-                  className={searchInputClass}
-                />
-                {seedResults && (seedResults.length > 0 || seedArtists.length > 0) && (
-                  <div className="absolute z-20 max-h-64 w-full overflow-auto border border-t-0 border-ink bg-bg">
-                    {seedResults.map(s => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => {
-                          if (!seeds.some(x => x.id === s.id)) setSeeds([...seeds, { id: s.id, title: s.title || '', artist: s.artist || '' }]);
-                          setSeedQuery(''); setSeedResults(null);
-                        }}
-                        className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left hover:bg-ink-soft"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-[13px]">{s.title}</span>
-                          <span className="block truncate font-mono text-[10px] text-muted">{s.artist}</span>
-                        </span>
-                        <Plus className="size-3.5 flex-none text-muted" />
-                      </button>
-                    ))}
-                    {seedArtists.map(a => (
-                      <button
-                        key={a}
-                        type="button"
-                        onClick={() => { setSeedArtist(a); setSeedQuery(''); setSeedResults(null); }}
-                        className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-[13px] text-vermilion">Artist · {a}</span>
-                          <span className="block font-mono text-[10px] text-muted">seed everything similar to this artist</span>
-                        </span>
-                        <Plus className="size-3.5 flex-none text-vermilion" />
-                      </button>
-                    ))}
+            {/* Raw Controller: the array-mutation half (chips, add/remove) needs
+                RHF's field, but the search dropdown above it (seedQuery/
+                seedResults) is transient UI, not a form value. */}
+            <Controller
+              control={recipeControl}
+              name="seeds"
+              render={({ field: seedsField }) => (
+                <div className="mb-[22px]">
+                  <div className="mb-[7px] flex items-center justify-between">
+                    <Eyeb>Seeds</Eyeb>
+                    <span className="font-mono text-[10px] text-muted">optional</span>
                   </div>
-                )}
-              </div>
-              {(seeds.length > 0 || seedArtist) && (
-                <div className="mt-2.5 flex flex-wrap gap-[7px]">
-                  {seeds.map(s => (
-                    <Chip key={s.id} onRemove={() => setSeeds(seeds.filter(x => x.id !== s.id))}>
-                      {s.title} · {s.artist}
-                    </Chip>
-                  ))}
-                  {seedArtist && (
-                    <Chip accent onRemove={() => setSeedArtist('')}>Artist · {seedArtist}</Chip>
+                  <div className="relative">
+                    <input
+                      value={seedQuery}
+                      onChange={e => setSeedQuery(e.target.value)}
+                      placeholder="Search a track or artist to anchor on…"
+                      aria-label="Search seeds"
+                      className={searchInputClass}
+                    />
+                    {seedResults && (seedResults.length > 0 || seedArtists.length > 0) && (
+                      <div className="absolute z-20 max-h-64 w-full overflow-auto border border-t-0 border-ink bg-bg">
+                        {seedResults.map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              if (!seedsField.value.some(x => x.id === s.id)) {
+                                seedsField.onChange([...seedsField.value, { id: s.id, title: s.title || '', artist: s.artist || '' }]);
+                              }
+                              setSeedQuery(''); setSeedResults(null);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left hover:bg-ink-soft"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px]">{s.title}</span>
+                              <span className="block truncate font-mono text-[10px] text-muted">{s.artist}</span>
+                            </span>
+                            <Plus className="size-3.5 flex-none text-muted" />
+                          </button>
+                        ))}
+                        {seedArtists.map(a => (
+                          <button
+                            key={a}
+                            type="button"
+                            onClick={() => { setSeedArtist(a); setSeedQuery(''); setSeedResults(null); }}
+                            className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] text-vermilion">Artist · {a}</span>
+                              <span className="block font-mono text-[10px] text-muted">seed everything similar to this artist</span>
+                            </span>
+                            <Plus className="size-3.5 flex-none text-vermilion" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {(seedsField.value.length > 0 || seedArtist) && (
+                    <div className="mt-2.5 flex flex-wrap gap-[7px]">
+                      {seedsField.value.map(s => (
+                        <Chip key={s.id} onRemove={() => seedsField.onChange(seedsField.value.filter(x => x.id !== s.id))}>
+                          {s.title} · {s.artist}
+                        </Chip>
+                      ))}
+                      {seedArtist && (
+                        <Chip accent onRemove={() => setSeedArtist('')}>Artist · {seedArtist}</Chip>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            />
 
             <div className="mb-5 h-px bg-separator-strong" />
 
-            <div className="mb-5">
-              <div className="mb-[9px] flex items-center justify-between">
-                <Eyeb>Target length</Eyeb>
-                <span className="font-mono text-[11px] font-bold text-vermilion">{count} tracks</span>
-              </div>
-              <input type="range" min={5} max={60} value={count} onChange={e => setCount(+e.target.value)} aria-label="Target length in tracks" className="w-full accent-[var(--accent)]" />
-              <div className="mt-[5px] flex justify-between font-mono text-[9px] text-muted"><span>5</span><span>60</span></div>
-            </div>
+            <TextField
+              control={recipeControl}
+              name="count"
+              label="Target length"
+              numeric
+              description="5–60 tracks"
+              className="mb-5"
+            />
+
+            <TextField
+              control={recipeControl}
+              name="artistSpacing"
+              label="Artist spacing"
+              numeric
+              description="0–5 · minimum tracks between repeats of the same artist, 0 = off"
+              className="mb-5"
+            />
 
             <div className="mb-5">
               <div className="mb-[9px] flex items-center justify-between">
-                <Eyeb>Artist spacing</Eyeb>
-                <span className="font-mono text-[11px] text-muted">{artistSpacing ? `min ${artistSpacing} apart` : 'off'}</span>
-              </div>
-              <input type="range" min={0} max={5} value={artistSpacing} onChange={e => setArtistSpacing(+e.target.value)} aria-label="Artist spacing" className="w-full accent-[var(--accent)]" />
-            </div>
-
-            <div className="mb-5">
-              <div className="mb-[9px] flex items-center justify-between">
-                <Eyeb muted={!capOn}>Track length</Eyeb>
+                <Eyeb muted={!recipeValues.capOn}>Track length</Eyeb>
                 <div className="flex items-center gap-2.5">
-                  {capOn && (
+                  {recipeValues.capOn && (
                     <span className="font-mono text-[11px] font-bold text-vermilion">
-                      {minSec > 0 && maxSec < LEN_MAX ? `${fmtDur(minSec)} – ${fmtDur(maxSec)}`
-                        : minSec > 0 ? `≥ ${fmtDur(minSec)}`
-                          : maxSec < LEN_MAX ? `≤ ${fmtDur(maxSec)}`
+                      {recipeValues.minSec > 0 && recipeValues.maxSec < LEN_MAX ? `${fmtDur(recipeValues.minSec)} – ${fmtDur(recipeValues.maxSec)}`
+                        : recipeValues.minSec > 0 ? `≥ ${fmtDur(recipeValues.minSec)}`
+                          : recipeValues.maxSec < LEN_MAX ? `≤ ${fmtDur(recipeValues.maxSec)}`
                             : 'any'}
                     </span>
                   )}
-                  <Switch checked={capOn} onCheckedChange={setCapOn} aria-label="Limit track length" />
+                  {/* Raw Controller, not SwitchField: the live length badge sits
+                      between the label and the switch in this row, a slot
+                      SwitchField's fixed label+switch layout has no place for. */}
+                  <Controller
+                    control={recipeControl}
+                    name="capOn"
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} aria-label="Limit track length" />
+                    )}
+                  />
                 </div>
               </div>
-              <DualRange
-                min={0} max={LEN_MAX} step={LEN_STEP}
-                lo={minSec} hi={maxSec} disabled={!capOn}
-                onLo={setMinSec} onHi={setMaxSec}
-                loLabel="minimum track length in seconds"
-                hiLabel="maximum track length in seconds"
-              />
+              {/* Raw Controller pair, not TextField: DualRange clamps lo
+                  against hi (and vice versa) INSIDE its own onChange before
+                  either prop fires, so the invariant lo<=hi holds by
+                  construction — there is no zod rule to bind and no error
+                  state to wire. Two Controllers because the two thumbs are
+                  two independent RHF field paths. */}
+              <Controller control={recipeControl} name="minSec" render={({ field: lo }) => (
+                <Controller control={recipeControl} name="maxSec" render={({ field: hi }) => (
+                  <DualRange
+                    min={0} max={LEN_MAX} step={LEN_STEP}
+                    lo={lo.value} hi={hi.value} disabled={!recipeValues.capOn}
+                    onLo={lo.onChange} onHi={hi.onChange}
+                    loLabel="minimum track length in seconds"
+                    hiLabel="maximum track length in seconds"
+                  />
+                )} />
+              )} />
               <div className="mt-[5px] flex justify-between font-mono text-[9px] text-muted">
-                <span>{capOn && minSec > 0 ? `min ${fmtDur(minSec)}` : 'no min'}</span>
-                <span>{capOn && maxSec < LEN_MAX ? `max ${fmtDur(maxSec)}` : 'no max'}</span>
+                <span>{recipeValues.capOn && recipeValues.minSec > 0 ? `min ${fmtDur(recipeValues.minSec)}` : 'no min'}</span>
+                <span>{recipeValues.capOn && recipeValues.maxSec < LEN_MAX ? `max ${fmtDur(recipeValues.maxSec)}` : 'no max'}</span>
               </div>
             </div>
 
             <div className="mb-5">
               <div className="mb-[9px] flex items-center justify-between">
-                <Eyeb muted={!bpmOn}>Tempo</Eyeb>
+                <Eyeb muted={!recipeValues.bpmOn}>Tempo</Eyeb>
                 <div className="flex items-center gap-2.5">
-                  {bpmOn && (
+                  {recipeValues.bpmOn && (
                     <span className="font-mono text-[11px] font-bold text-vermilion">
-                      {minBpm > BPM_MIN && maxBpm < BPM_MAX ? `${minBpm} – ${maxBpm} bpm`
-                        : minBpm > BPM_MIN ? `≥ ${minBpm} bpm`
-                          : maxBpm < BPM_MAX ? `≤ ${maxBpm} bpm`
+                      {recipeValues.minBpm > BPM_MIN && recipeValues.maxBpm < BPM_MAX ? `${recipeValues.minBpm} – ${recipeValues.maxBpm} bpm`
+                        : recipeValues.minBpm > BPM_MIN ? `≥ ${recipeValues.minBpm} bpm`
+                          : recipeValues.maxBpm < BPM_MAX ? `≤ ${recipeValues.maxBpm} bpm`
                             : 'any bpm'}
                     </span>
                   )}
-                  <Switch checked={bpmOn} onCheckedChange={setBpmOn} aria-label="Limit tempo" />
+                  {/* Same reason as Track length's switch above. */}
+                  <Controller
+                    control={recipeControl}
+                    name="bpmOn"
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} aria-label="Limit tempo" />
+                    )}
+                  />
                 </div>
               </div>
-              <DualRange
-                min={BPM_MIN} max={BPM_MAX} step={BPM_STEP}
-                lo={minBpm} hi={maxBpm} disabled={!bpmOn}
-                onLo={setMinBpm} onHi={setMaxBpm}
-                loLabel="minimum tempo in bpm"
-                hiLabel="maximum tempo in bpm"
-              />
+              <Controller control={recipeControl} name="minBpm" render={({ field: lo }) => (
+                <Controller control={recipeControl} name="maxBpm" render={({ field: hi }) => (
+                  <DualRange
+                    min={BPM_MIN} max={BPM_MAX} step={BPM_STEP}
+                    lo={lo.value} hi={hi.value} disabled={!recipeValues.bpmOn}
+                    onLo={lo.onChange} onHi={hi.onChange}
+                    loLabel="minimum tempo in bpm"
+                    hiLabel="maximum tempo in bpm"
+                  />
+                )} />
+              )} />
               <div className="mt-[5px] flex justify-between font-mono text-[9px] text-muted">
                 <span>{BPM_MIN}</span>
                 <span>{BPM_MAX} bpm</span>
@@ -683,154 +820,204 @@ export default function PlaylistBuilderPanel() {
 
             <div className="mb-5 h-px bg-separator-strong" />
 
-            <div className="mb-5">
-              <div className="mb-[9px]"><Eyeb>Energy arc</Eyeb></div>
-              <div className="flex flex-wrap gap-1.5">
-                {ARCS.map(a => (
-                  <Tog key={a.id} on={arc === a.id} onClick={() => setArc(a.id)} title={a.hint}>{a.label}</Tog>
-                ))}
-              </div>
-            </div>
+            <ToggleGroupField
+              control={recipeControl}
+              name="arc"
+              label="Energy arc"
+              className="mb-5"
+              options={ARCS.map(a => ({ value: a.id, label: a.label }))}
+            />
 
-            <div className="mb-5">
-              <div className="mb-[9px]"><Eyeb>Moods</Eyeb></div>
-              <div className="flex flex-wrap gap-1.5">
-                {MOODS.map(m => (
-                  <Tog key={m} on={moods.includes(m)} onClick={() => toggle(moods, setMoods, m)}>{m}</Tog>
-                ))}
-              </div>
-            </div>
+            <Controller
+              control={recipeControl}
+              name="moods"
+              render={({ field: moodsField }) => (
+                <div className="mb-5">
+                  <div className="mb-[9px]"><Eyeb>Moods</Eyeb></div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {moodOptions.map(m => (
+                      <Tog
+                        key={m}
+                        on={moodsField.value.includes(m)}
+                        onClick={() => moodsField.onChange(
+                          moodsField.value.includes(m) ? moodsField.value.filter(x => x !== m) : [...moodsField.value, m],
+                        )}
+                      >
+                        {m}
+                      </Tog>
+                    ))}
+                  </div>
+                </div>
+              )}
+            />
 
-            <div className="mb-5">
-              <div className="mb-[9px]"><Eyeb>Energy levels</Eyeb></div>
-              <div className="flex flex-wrap gap-1.5">
-                {ENERGIES.map(e => (
-                  <Tog key={e} on={energies.includes(e)} onClick={() => toggle(energies, setEnergies, e)}>
-                    {e.charAt(0).toUpperCase() + e.slice(1)}
-                  </Tog>
-                ))}
-              </div>
-            </div>
+            <Controller
+              control={recipeControl}
+              name="energies"
+              render={({ field: energiesField }) => (
+                <div className="mb-5">
+                  <div className="mb-[9px]"><Eyeb>Energy levels</Eyeb></div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ENERGIES.map(e => (
+                      <Tog
+                        key={e}
+                        on={energiesField.value.includes(e)}
+                        onClick={() => energiesField.onChange(
+                          energiesField.value.includes(e) ? energiesField.value.filter(x => x !== e) : [...energiesField.value, e],
+                        )}
+                      >
+                        {e.charAt(0).toUpperCase() + e.slice(1)}
+                      </Tog>
+                    ))}
+                  </div>
+                </div>
+              )}
+            />
 
             <div className="mb-5">
               <div className="mb-[9px] flex items-center justify-between">
                 <Eyeb>Release year</Eyeb>
                 <span className={cn(
                   'font-mono text-[11px]',
-                  yearFrom > YEAR_MIN || yearTo < YEAR_MAX ? 'font-bold text-vermilion' : 'text-muted',
+                  recipeValues.yearFrom > YEAR_MIN || recipeValues.yearTo < YEAR_MAX ? 'font-bold text-vermilion' : 'text-muted',
                 )}>
-                  {yearFrom > YEAR_MIN && yearTo < YEAR_MAX ? `${yearFrom} – ${yearTo}`
-                    : yearFrom > YEAR_MIN ? `since ${yearFrom}`
-                      : yearTo < YEAR_MAX ? `until ${yearTo}`
+                  {recipeValues.yearFrom > YEAR_MIN && recipeValues.yearTo < YEAR_MAX ? `${recipeValues.yearFrom} – ${recipeValues.yearTo}`
+                    : recipeValues.yearFrom > YEAR_MIN ? `since ${recipeValues.yearFrom}`
+                      : recipeValues.yearTo < YEAR_MAX ? `until ${recipeValues.yearTo}`
                         : 'any year'}
                 </span>
               </div>
-              <DualRange
-                min={YEAR_MIN} max={YEAR_MAX} step={1}
-                lo={yearFrom} hi={yearTo}
-                onLo={setYearFrom} onHi={setYearTo}
-                loLabel="earliest release year"
-                hiLabel="latest release year"
-              />
+              <Controller control={recipeControl} name="yearFrom" render={({ field: lo }) => (
+                <Controller control={recipeControl} name="yearTo" render={({ field: hi }) => (
+                  <DualRange
+                    min={YEAR_MIN} max={YEAR_MAX} step={1}
+                    lo={lo.value} hi={hi.value}
+                    onLo={lo.onChange} onHi={hi.onChange}
+                    loLabel="earliest release year"
+                    hiLabel="latest release year"
+                  />
+                )} />
+              )} />
               <div className="mt-[5px] flex justify-between font-mono text-[9px] text-muted">
                 <span>{YEAR_MIN}</span>
                 <span>{YEAR_MAX}</span>
               </div>
             </div>
 
-            <div className="mb-5">
-              <div className="mb-[9px]"><Eyeb>Genres</Eyeb></div>
-              <div className="relative">
-                <input
-                  value={genreInput}
-                  onChange={e => setGenreInput(e.target.value)}
-                  onFocus={loadGenres}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addGenre(); } }}
-                  onBlur={() => { if (genreInput.trim()) addGenre(); }}
-                  placeholder="Add a genre…"
-                  aria-label="Add a genre"
-                  className={searchInputClass}
-                />
-                {genreSuggestions && genreSuggestions.length > 0 && (
-                  <div className="absolute z-20 max-h-56 w-full overflow-auto border border-t-0 border-ink bg-bg">
-                    {genreSuggestions.map(g => (
-                      <button
-                        key={g.value}
-                        type="button"
-                        // preventDefault on mousedown so the input's onBlur (which
-                        // commits raw text) doesn't fire before this click lands.
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => {
-                          setGenres(prev => prev.some(x => x.toLowerCase() === g.value.toLowerCase()) ? prev : [...prev, g.value]);
-                          setGenreInput('');
-                        }}
-                        className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
-                      >
-                        <span className="truncate text-[13px]">{g.value}</span>
-                        <span className="flex flex-none items-center gap-2 font-mono text-[10px] text-muted">
-                          {g.songCount} tracks <Plus className="size-3.5" />
-                        </span>
-                      </button>
-                    ))}
+            <Controller
+              control={recipeControl}
+              name="genres"
+              render={({ field: genresField }) => {
+                const addGenre = () => {
+                  const g = genreInput.trim().replace(/,+$/, '');
+                  if (g && !genresField.value.some(x => x.toLowerCase() === g.toLowerCase())) genresField.onChange([...genresField.value, g]);
+                  setGenreInput('');
+                };
+                return (
+                  <div className="mb-5">
+                    <div className="mb-[9px]"><Eyeb>Genres</Eyeb></div>
+                    <div className="relative">
+                      <input
+                        value={genreInput}
+                        onChange={e => setGenreInput(e.target.value)}
+                        onFocus={loadGenres}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addGenre(); } }}
+                        onBlur={() => { if (genreInput.trim()) addGenre(); }}
+                        placeholder="Add a genre…"
+                        aria-label="Add a genre"
+                        className={searchInputClass}
+                      />
+                      {genreSuggestions && genreSuggestions.length > 0 && (
+                        <div className="absolute z-20 max-h-56 w-full overflow-auto border border-t-0 border-ink bg-bg">
+                          {genreSuggestions.map(g => (
+                            <button
+                              key={g.value}
+                              type="button"
+                              // preventDefault on mousedown so the input's onBlur (which
+                              // commits raw text) doesn't fire before this click lands.
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => {
+                                genresField.onChange(
+                                  genresField.value.some(x => x.toLowerCase() === g.value.toLowerCase()) ? genresField.value : [...genresField.value, g.value],
+                                );
+                                setGenreInput('');
+                              }}
+                              className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
+                            >
+                              <span className="truncate text-[13px]">{g.value}</span>
+                              <span className="flex flex-none items-center gap-2 font-mono text-[10px] text-muted">
+                                {g.songCount} tracks <Plus className="size-3.5" />
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {genresField.value.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-[7px]">
+                        {genresField.value.map(g => (
+                          <Chip key={g} onRemove={() => genresField.onChange(genresField.value.filter(x => x !== g))}>{g}</Chip>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              {genres.length > 0 && (
-                <div className="mt-2.5 flex flex-wrap gap-[7px]">
-                  {genres.map(g => (
-                    <Chip key={g} onRemove={() => setGenres(genres.filter(x => x !== g))}>{g}</Chip>
-                  ))}
-                </div>
-              )}
-            </div>
+                );
+              }}
+            />
 
-            <div className="mb-5">
-              <div className="mb-[9px] flex items-center justify-between">
-                <Eyeb>Artists</Eyeb>
-                <span className="font-mono text-[10px] text-muted">only these artists</span>
-              </div>
-              <div className="relative">
-                <input
-                  value={artistQuery}
-                  onChange={e => setArtistQuery(e.target.value)}
-                  placeholder="Add an artist…"
-                  aria-label="Add an artist"
-                  className={searchInputClass}
-                />
-                {artistResults && artistResults.length > 0 && (
-                  <div className="absolute z-20 max-h-56 w-full overflow-auto border border-t-0 border-ink bg-bg">
-                    {artistResults.map(a => (
-                      <button
-                        key={a}
-                        type="button"
-                        onClick={() => {
-                          if (!artists.some(x => x.toLowerCase() === a.toLowerCase())) setArtists([...artists, a]);
-                          setArtistQuery(''); setArtistResults(null);
-                        }}
-                        className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
-                      >
-                        <span className="truncate text-[13px]">{a}</span>
-                        <Plus className="size-3.5 flex-none text-muted" />
-                      </button>
-                    ))}
+            <Controller
+              control={recipeControl}
+              name="artists"
+              render={({ field: artistsField }) => (
+                <div className="mb-5">
+                  <div className="mb-[9px] flex items-center justify-between">
+                    <Eyeb>Artists</Eyeb>
+                    <span className="font-mono text-[10px] text-muted">only these artists</span>
                   </div>
-                )}
-              </div>
-              {artists.length > 0 && (
-                <div className="mt-2.5 flex flex-wrap gap-[7px]">
-                  {artists.map(a => (
-                    <Chip key={a} onRemove={() => setArtists(artists.filter(x => x !== a))}>{a}</Chip>
-                  ))}
+                  <div className="relative">
+                    <input
+                      value={artistQuery}
+                      onChange={e => setArtistQuery(e.target.value)}
+                      placeholder="Add an artist…"
+                      aria-label="Add an artist"
+                      className={searchInputClass}
+                    />
+                    {artistResults && artistResults.length > 0 && (
+                      <div className="absolute z-20 max-h-56 w-full overflow-auto border border-t-0 border-ink bg-bg">
+                        {artistResults.map(a => (
+                          <button
+                            key={a}
+                            type="button"
+                            onClick={() => {
+                              if (!artistsField.value.some(x => x.toLowerCase() === a.toLowerCase())) artistsField.onChange([...artistsField.value, a]);
+                              setArtistQuery(''); setArtistResults(null);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 border-b border-separator-soft px-[11px] py-2 text-left last:border-b-0 hover:bg-ink-soft"
+                          >
+                            <span className="truncate text-[13px]">{a}</span>
+                            <Plus className="size-3.5 flex-none text-muted" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {artistsField.value.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-[7px]">
+                      {artistsField.value.map(a => (
+                        <Chip key={a} onRemove={() => artistsField.onChange(artistsField.value.filter(x => x !== a))}>{a}</Chip>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            />
 
             <div className="mb-[18px] h-px bg-separator-strong" />
 
             <div className="grid gap-[13px]">
-              <SwitchRow label="Instrumental only" hint="skip vocal-forward tracks · best-effort" on={instrumentalOnly} onToggle={setInstrumentalOnly} />
-              <SwitchRow label="Recently added" hint="source from new library arrivals" on={recentlyAdded} onToggle={setRecentlyAdded} />
-              <SwitchRow label="Skip recent plays" hint="avoid tracks that recently aired" on={excludeRecent} onToggle={setExcludeRecent} />
+              <SwitchField control={recipeControl} name="instrumentalOnly" label="Instrumental only" description="skip vocal-forward tracks · best-effort" />
+              <SwitchField control={recipeControl} name="recentlyAdded" label="Recently added" description="source from new library arrivals" />
+              <SwitchField control={recipeControl} name="excludeRecent" label="Skip recent plays" description="avoid tracks that recently aired" />
             </div>
             </div>
           </ScrollArea>
@@ -961,7 +1148,7 @@ export default function PlaylistBuilderPanel() {
 
                 <EnergyGraph
                   tracks={tracks}
-                  arc={arc}
+                  arc={recipeValues.arc}
                   open={graphOpen}
                   onToggle={() => setGraphOpen(v => !v)}
                   onBarClick={jumpToRow}
@@ -1164,8 +1351,8 @@ export default function PlaylistBuilderPanel() {
       {modal === 'open' && (
         <div
           // Backdrop keeps no role and no tabIndex: `role="button"` would put a
-          // full-viewport control in the tab order and hide the dialog's real
-          // controls from assistive tech. Escape is handled at the document level.
+          // full-viewport control in the tab order, ahead of the dialog's real
+          // controls. Escape is handled at the document level.
           className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(20,18,14,0.42)] p-5 pt-16"
           // Only a click on the backdrop itself closes, so the panel needs no
           // stopPropagation of its own.
@@ -1275,45 +1462,51 @@ export default function PlaylistBuilderPanel() {
               <IconBtn onClick={() => setModal(null)} title="close"><X className="size-4" /></IconBtn>
             </div>
             <div className="grid gap-4 px-5 py-[18px]">
-              <div>
-                <div className="mb-[7px]"><Eyeb>Name</Eyeb></div>
-                <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Untitled set" aria-label="Playlist name" className={searchInputClass} />
-              </div>
+              <TextField
+                control={saveControl}
+                name="name"
+                label="Name"
+                placeholder="Untitled set"
+                description={`1–${PLAYLIST_NAME_MAX} characters`}
+              />
               {existingId && (
-                <div className="grid gap-2">
-                  {([
-                    { id: 'overwrite' as const, label: 'Overwrite existing', hint: `updates “${name || saveName || 'this playlist'}” on the server` },
-                    { id: 'create' as const, label: 'Create a new playlist', hint: 'leaves the original untouched' },
-                  ]).map(opt => {
-                    const on = saveMode === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setSaveMode(opt.id)}
-                        className={cn('flex items-center gap-[11px] border p-3 text-left', on ? 'border-[var(--accent)]' : 'border-separator-strong')}
-                      >
-                        <span className={cn('grid size-3.5 flex-none place-items-center rounded-full border', on ? 'border-[var(--accent)]' : 'border-separator-strong')}>
-                          {on && <span className="size-[7px] rounded-full bg-[var(--accent)]" />}
-                        </span>
-                        <span>
-                          <span className="block text-[13px] font-semibold">{opt.label}</span>
-                          <span className="block font-mono text-[10px] text-muted">{opt.hint}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <Controller
+                  control={saveControl}
+                  name="saveMode"
+                  render={({ field }) => (
+                    <div className="grid gap-2">
+                      {([
+                        { id: 'overwrite' as const, label: 'Overwrite existing', hint: `updates “${name || saveNameValue || 'this playlist'}” on the server` },
+                        { id: 'create' as const, label: 'Create a new playlist', hint: 'leaves the original untouched' },
+                      ]).map(opt => {
+                        const on = field.value === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => field.onChange(opt.id)}
+                            className={cn('flex items-center gap-[11px] border p-3 text-left', on ? 'border-[var(--accent)]' : 'border-separator-strong')}
+                          >
+                            <span className={cn('grid size-3.5 flex-none place-items-center rounded-full border', on ? 'border-[var(--accent)]' : 'border-separator-strong')}>
+                              {on && <span className="size-[7px] rounded-full bg-[var(--accent)]" />}
+                            </span>
+                            <span>
+                              <span className="block text-[13px] font-semibold">{opt.label}</span>
+                              <span className="block font-mono text-[10px] text-muted">{opt.hint}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                />
               )}
-              <div className="flex items-center justify-between gap-3 border-t border-separator-soft pt-3.5">
-                <div>
-                  <div className="text-[13px] font-semibold">Keep in sync</div>
-                  <div className="max-w-[280px] font-mono text-[10px] leading-[1.5] text-muted">
-                    Remembers this recipe and appends new matching songs after library tagging.
-                  </div>
-                </div>
-                <Switch checked={saveSync} onCheckedChange={setSaveSync} aria-label="Keep in sync" />
-              </div>
+              <SwitchField
+                control={saveControl}
+                name="keepInSync"
+                label="Keep in sync"
+                description="Remembers this recipe and appends new matching songs after library tagging."
+              />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink px-5 py-3.5">
               <span className="font-mono text-[10px] text-muted">
@@ -1321,7 +1514,12 @@ export default function PlaylistBuilderPanel() {
               </span>
               <div className="flex flex-none gap-2.5">
                 <Button variant="ghost" className="h-10" onClick={() => setModal(null)}>Cancel</Button>
-                <Button variant="accent" className="h-10" disabled={saving || !saveName.trim()} onClick={doSave}>
+                <Button
+                  variant="accent"
+                  className="h-10"
+                  disabled={saving || !saveForm.formState.isValid}
+                  onClick={() => { void onSaveSubmit(); }}
+                >
                   {saving ? 'Saving…' : 'Save playlist'}
                 </Button>
               </div>

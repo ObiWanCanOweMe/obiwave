@@ -24,6 +24,12 @@ import { queue } from '../broadcast/queue.js';
 import { tagger, taggerView, startAnalyzer, startReconcile } from '../broadcast/tagger.js';
 import { refreshAutoPlaylist } from '../broadcast/scheduler.js';
 import * as mapProjection from '../music/map-projection.js';
+import { validateBody, validateBodyAsync } from '../middleware/validate.js';
+import { blockEntrySchema, blockRuleSchema } from '../schemas/blocklist.js';
+import { manualTagSchema } from '../schemas/library.js';
+import type { z } from 'zod';
+
+type ManualTagBody = z.output<ReturnType<typeof manualTagSchema>>;
 
 export const router = express.Router();
 
@@ -119,13 +125,11 @@ router.get('/library/history', requireAdmin, async (req, res) => {
 // Query: limit=50 offset=0 sort=recent|count|artist q=foo
 //
 // Sourced from the likes store rather than library.db, then enriched from the
-// index where a row exists. That order matters: a liked track may never have
-// been walked or tagged (listeners heart whatever is on air), and the Browse
-// tab's tagged-only gate would hide exactly those. The stored snapshot is
-// always present, so every liked track renders either way.
-//
-// It lives here rather than in routes/likes.ts because it does the library-db
-// enrichment and returns the row shape the library table already renders.
+// index where a row exists. The order matters: a liked track may never have been
+// walked or tagged (listeners heart whatever is on air) and the Browse tab's
+// tagged-only gate would hide exactly those, whereas the stored snapshot is
+// always present. Lives here rather than routes/likes.ts because it does the
+// library-db enrichment and returns the row shape the library table renders.
 // ---------------------------------------------------------------------------
 router.get('/library/liked', requireAdmin, async (req, res) => {
   try {
@@ -300,15 +304,11 @@ router.get('/library/genres/related', requireAdmin, async (_req, res) => {
 // is returned with `sampled`/`truncated` flags. Station-archive rows are dropped
 // (issue #273).
 // ---------------------------------------------------------------------------
-// Default node cap (env-overridable) and the hard ceiling the client may raise
-// it to from the UI (?max=). 25000 covers most personal libraries in full while
-// keeping the payload sane; above it the observatory's MAP SIZE control dials up
-// to OBSERVATORY_HARD_MAX. Above the cap we return a stratified sample. The web
-// client sends no ?max= until the operator picks one, so this default (and the
-// OBSERVATORY_MAX override) governs the UI too; the response reports the
-// applied `max` + `defaultMax` so the MAP SIZE control can display it.
-// (Libraries above ~3k render on the canvas renderer; only small ones keep the
-// animated SVG path.)
+// Default node cap (env-overridable) and the hard ceiling the UI may raise it to
+// via ?max=. 25000 covers most personal libraries in full while keeping the
+// payload sane. The web client sends no ?max= until the operator picks one, so
+// this default also governs the UI; the response reports the applied `max` +
+// `defaultMax` so the MAP SIZE control can display it.
 const OBSERVATORY_DEFAULT_MAX = Math.max(500, Number(process.env.OBSERVATORY_MAX) || 25000);
 // The 500k ceiling is stress-verified (scripts/observatory-scale.test.ts + the
 // browser harness, both run at 200k/400k/500k): lean sampled reads stay ~1–4 s,
@@ -708,14 +708,12 @@ router.post('/library/reset', requireAdmin, async (_req, res) => {
 // Goes through the same machinery as `npm run tag`:
 //   1. Resolve metadata (body wins; falls back to Subsonic search).
 //   2. Refresh enrichment (Last.fm tags + lyrics excerpt) per settings.
-//   3. Re-embed with the current model so future propagation runs use a
-//      fresh vector grounded in current metadata.
+//   3. Re-embed with the current model.
 //   4. LLM-tag via tagBatch([song]) using the same batch prompt as bulk.
 //
-// We always go to the LLM here (not propagation) — "retag" semantically
-// means "override what's there", and the operator is sitting in front of
-// the UI waiting for a fresh decision. Embedding/enrichment updates are
-// best-effort: a failure there logs and continues to the LLM step.
+// Always the LLM here, never propagation: "retag" means "override what's there",
+// and the operator is waiting on a fresh decision. Embedding/enrichment updates
+// are best-effort — a failure logs and continues to the LLM step.
 // ---------------------------------------------------------------------------
 router.post('/library/retag', requireAdmin, async (req, res) => {
   const id = req.body?.id;
@@ -869,100 +867,94 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
 // Body: { id, moods: string[], energy?: 'low'|'medium'|'high'|null,
 //         applyToAlbum?: boolean }
 //
-// `moods: []` clears the tags entirely (track returns to the untagged pool).
-// `applyToAlbum` resolves the whole album server-side from the track id
-// (subsonic.getSong → albumId → getAlbum) and applies the same tags to every
-// track — this is the "tag an album/folder for targeted queuing" path
-// (discussion #336). Moods are restricted to the live vocabulary
-// (settings.moodVocab()) so manual rows feed songsByMood()/MOOD_NEIGHBOURS
-// exactly like LLM-tagged ones.
+// `moods: []` clears the tags entirely (the track returns to the untagged pool).
+// `applyToAlbum` resolves the album server-side from the track id and applies
+// the same tags to every track — the "tag an album/folder for targeted queuing"
+// path (discussion #336). Moods are restricted to the live vocabulary so manual
+// rows feed songsByMood()/MOOD_NEIGHBOURS exactly like LLM-tagged ones.
 // ---------------------------------------------------------------------------
-router.post('/library/manual-tag', requireAdmin, async (req, res) => {
-  const id = req.body?.id;
-  if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
-  const moods = req.body?.moods;
-  if (!Array.isArray(moods) || moods.some((m) => typeof m !== 'string')) {
-    return res.status(400).json({ error: 'moods must be an array of strings' });
-  }
-  if (moods.length > 3) return res.status(400).json({ error: 'at most 3 moods per track' });
-  const unknown = moods.filter((m: string) => !settings.moodVocab().includes(m));
-  if (unknown.length) {
-    return res.status(400).json({ error: `unknown mood(s): ${unknown.join(', ')}` });
-  }
-  const energy = req.body?.energy ?? null;
-  if (energy !== null && !['low', 'medium', 'high'].includes(energy)) {
-    return res.status(400).json({ error: "energy must be 'low', 'medium', 'high' or null" });
-  }
-  const applyToAlbum = req.body?.applyToAlbum === true;
-  const clearing = moods.length === 0;
+router.post(
+  '/library/manual-tag',
+  requireAdmin,
+  // The mood vocabulary is operator-editable, so the schema cannot exist until
+  // the request does — hence validateBodyAsync, the same middleware POST /shows
+  // uses. Messages are verbatim: each already names its own field, and they are
+  // the exact strings this route has always answered with.
+  validateBodyAsync(() => manualTagSchema({ moodNames: settings.moodVocab() }), {
+    messages: 'verbatim',
+  }),
+  async (req, res) => {
+    const { id, moods, energy, applyToAlbum } = req.body as ManualTagBody;
+    const clearing = moods.length === 0;
 
-  try {
-    await library.load();
+    try {
+      await library.load();
 
-    // Resolve the seed track — Subsonic first (carries albumId), library-db
-    // row as fallback so already-indexed tracks work even if Navidrome misses.
-    let song: LibrarySong | null = null;
-    try { song = await subsonic.getSong(id); } catch {}
-    if (!song) {
-      const row = db.getTrack(id);
-      if (row) song = { id: row.id, title: row.title, artist: row.artist, album: row.album, year: row.year, genre: row.genre, duration: row.durationSec };
-    }
-    if (!song) return res.status(404).json({ error: 'track not found' });
-
-    let targets: LibrarySong[] = [song];
-    if (applyToAlbum) {
-      if (!song.albumId) return res.status(404).json({ error: 'album not resolvable for this track' });
-      targets = await subsonic.getAlbum(song.albumId);
-      if (!targets.length) return res.status(404).json({ error: 'album has no tracks' });
-    }
-
-    for (const t of targets) {
-      // Album siblings may be brand-new to library-db — make sure a row exists
-      // before tagging it.
-      db.upsertTrackMeta(t.id, {
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        year: t.year ?? null,
-        genres: subsonic.songGenres(t),
-        duration: t.duration ?? null,
-      });
-      if (clearing) {
-        db.clearTrackTags(t.id);
-      } else {
-        db.upsertTrackTags(t.id, {
-          moods,
-          energy,
-          source: 'manual',
-          confidence: 1,
-        });
+      // Resolve the seed track — Subsonic first (carries albumId), library-db
+      // row as fallback so already-indexed tracks work even if Navidrome misses.
+      let song: LibrarySong | null = null;
+      try { song = await subsonic.getSong(id); } catch {}
+      if (!song) {
+        const row = db.getTrack(id);
+        if (row) song = { id: row.id, title: row.title, artist: row.artist, album: row.album, year: row.year, genre: row.genre, duration: row.durationSec };
       }
+      if (!song) return res.status(404).json({ error: 'track not found' });
+
+      let targets: LibrarySong[] = [song];
+      if (applyToAlbum) {
+        if (!song.albumId) return res.status(404).json({ error: 'album not resolvable for this track' });
+        targets = await subsonic.getAlbum(song.albumId);
+        if (!targets.length) return res.status(404).json({ error: 'album has no tracks' });
+      }
+
+      for (const t of targets) {
+        // Album siblings may be brand-new to library-db — make sure a row exists
+        // before tagging it.
+        db.upsertTrackMeta(t.id, {
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          year: t.year ?? null,
+          genres: subsonic.songGenres(t),
+          duration: t.duration ?? null,
+        });
+        if (clearing) {
+          db.clearTrackTags(t.id);
+        } else {
+          db.upsertTrackTags(t.id, {
+            moods,
+            energy,
+            source: 'manual',
+            confidence: 1,
+          });
+        }
+      }
+      await library.save();
+
+      const scope = applyToAlbum ? `album "${song.album}" (${targets.length} tracks)` : `"${song.title}"`;
+      queue.log('info', clearing
+        ? `manual-tag: cleared tags on ${scope}`
+        : `manual-tag: ${scope} → [${moods.join(', ')}] energy=${energy ?? '—'}`);
+
+      res.json({
+        ok: true,
+        updated: targets.length,
+        cleared: clearing,
+        album: applyToAlbum ? (song.album ?? null) : null,
+        tracks: targets.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          moods: clearing ? [] : moods,
+          energy: clearing ? null : energy,
+        })),
+      });
+    } catch (err) {
+      queue.log('error', `/library/manual-tag failed: ${err.message}`);
+      res.status(500).json({ error: err.message });
     }
-    await library.save();
-
-    const scope = applyToAlbum ? `album "${song.album}" (${targets.length} tracks)` : `"${song.title}"`;
-    queue.log('info', clearing
-      ? `manual-tag: cleared tags on ${scope}`
-      : `manual-tag: ${scope} → [${moods.join(', ')}] energy=${energy ?? '—'}`);
-
-    res.json({
-      ok: true,
-      updated: targets.length,
-      cleared: clearing,
-      album: applyToAlbum ? (song.album ?? null) : null,
-      tracks: targets.map(t => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        moods: clearing ? [] : moods,
-        energy: clearing ? null : energy,
-      })),
-    });
-  } catch (err) {
-    queue.log('error', `/library/manual-tag failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
-});
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Never-play blocklist — station-level "never let this air" entries at
@@ -989,7 +981,15 @@ router.get('/library/blocklist', requireAdmin, (_req, res) => {
 // Registered BEFORE the entry routes: DELETE /library/blocklist/:type/:id
 // would otherwise swallow /library/blocklist/rules/:id with type='rules'.
 
-router.post('/library/blocklist/rules', requireAdmin, async (req, res) => {
+// The route runs the SAME schema blocklist.addRule reaches through
+// validateRulePatch, so the card gets `fieldErrors` while the store stays the
+// authoritative chokepoint for anything arriving another way. Messages are
+// verbatim — each already names its own `rule.<field>` path.
+router.post(
+  '/library/blocklist/rules',
+  requireAdmin,
+  validateBody(blockRuleSchema, { messages: 'verbatim' }),
+  async (req, res) => {
   try {
     const rule = await blocklist.addRule(req.body);
     queue.log('blocked', `rule "${rule.label}" (${rule.field}: ${rule.values.join(', ')}) added to the never-play blocklist`);
@@ -1002,11 +1002,16 @@ router.post('/library/blocklist/rules', requireAdmin, async (req, res) => {
     // Validation errors are the operator's typo, not a server fault.
     res.status(400).json({ error: err.message });
   }
-});
+  },
+);
 
-router.put('/library/blocklist/rules/:id', requireAdmin, async (req, res) => {
+router.put(
+  '/library/blocklist/rules/:id',
+  requireAdmin,
+  validateBody(blockRuleSchema, { messages: 'verbatim' }),
+  async (req, res) => {
   try {
-    const rule = await blocklist.updateRule(req.params.id, req.body);
+    const rule = await blocklist.updateRule(String(req.params.id), req.body);
     if (!rule) return res.status(404).json({ error: 'no such rule' });
     queue.log('blocked', `rule "${rule.label}" updated on the never-play blocklist`);
     const purged = queue.purgeBlocked();
@@ -1015,7 +1020,8 @@ router.put('/library/blocklist/rules/:id', requireAdmin, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
-});
+  },
+);
 
 router.delete('/library/blocklist/rules/:id', requireAdmin, async (req, res) => {
   try {
@@ -1034,11 +1040,15 @@ router.delete('/library/blocklist/rules/:id', requireAdmin, async (req, res) => 
 // Body: { type: 'track'|'album'|'artist', trackId } — the UI flow: block from a
 // track row, server resolves the album/artist ids + display snapshots. OR a
 // pre-resolved { type, id, name?, artist?, album? } for direct entries.
-router.post('/library/blocklist', requireAdmin, async (req, res) => {
-  const type = req.body?.type;
-  if (!['track', 'album', 'artist'].includes(type)) {
-    return res.status(400).json({ error: "type must be 'track', 'album' or 'artist'" });
-  }
+router.post(
+  '/library/blocklist',
+  requireAdmin,
+  // Shape only — WHICH of the two accepted forms arrived is decided below,
+  // because resolving `{type, trackId}` needs Subsonic. Verbatim messages keep
+  // the existing "type must be 'track', 'album' or 'artist'" string exact.
+  validateBody(blockEntrySchema, { messages: 'verbatim' }),
+  async (req, res) => {
+  const type = req.body.type;
   try {
     let input: { type: blocklist.BlockType; id: string; name?: string | null; artist?: string | null; album?: string | null };
     const trackId = req.body?.trackId;
@@ -1082,7 +1092,8 @@ router.post('/library/blocklist', requireAdmin, async (req, res) => {
     queue.log('error', `/library/blocklist failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
-});
+  },
+);
 
 router.delete('/library/blocklist/:type/:id', requireAdmin, async (req, res) => {
   const { type, id } = req.params;

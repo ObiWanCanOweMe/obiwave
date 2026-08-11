@@ -1,16 +1,28 @@
-// Shapes and caps the shows panel and its editor share. The caps mirror the
-// controller's own limits in settings.ts — keep them in lockstep.
+// Shapes the shows panel and its editor share.
+//
+// Every cap below re-exports the shared show schema's own constant under a
+// local name, so nothing here can drift from the controller.
 
-export const NAME_MAX = 60;
-// Mirrors the controller's SHOW_TOPIC_MAX (settings/vocab.ts).
-export const TOPIC_MAX = 2000;
-export const SHOWS_MAX = 64;
-// Mirrors the controller's GUESTS_PER_SHOW cap (settings.ts).
-export const GUESTS_MAX = 3;
-// Mirrors the controller's PLAYLISTS_PER_SHOW / EXCLUDED_PLAYLISTS_PER_SHOW
-// caps (settings/vocab.ts), which are the same figure. Pinned against drift by
-// controller/scripts/playlists-cap.test.ts.
-export const PLAYLISTS_MAX = 10;
+import {
+  EXCLUDED_PLAYLISTS_PER_SHOW,
+  GUESTS_PER_SHOW,
+  PLAYLISTS_PER_SHOW,
+  SHOWS_LIMIT,
+  SHOW_ENERGY,
+  SHOW_FILTER_VALUES_MAX,
+  SHOW_NAME_MAX,
+  SHOW_TOPIC_MAX,
+  SHOW_VOCALS,
+} from '@/lib/schemas.generated';
+
+export const NAME_MAX = SHOW_NAME_MAX;
+export const TOPIC_MAX = SHOW_TOPIC_MAX;
+export const SHOWS_MAX = SHOWS_LIMIT;
+export const GUESTS_MAX = GUESTS_PER_SHOW;
+export const PLAYLISTS_MAX = PLAYLISTS_PER_SHOW;
+// Deliberately separate from PLAYLISTS_MAX: the same figure today, but one name
+// covering both is how they would silently stop being.
+export const EXCLUDED_PLAYLISTS_MAX = EXCLUDED_PLAYLISTS_PER_SHOW;
 
 /** How much the panel knows about the live Navidrome playlist index.
  *
@@ -107,21 +119,16 @@ export const DECADES: { key: string; label: string; from: number; to: number }[]
   { key: '1960', label: '60s', from: 1960, to: 1969 },
   { key: '1950', label: '50s', from: 1950, to: 1959 },
 ];
-export const ENERGY_OPTIONS = ['low', 'medium', 'high'];
-// Mirrors the controller's SHOW_VOCALS (settings/vocab.ts). '' is the absent
-// third state and deliberately has no chip — clearing the selection is how you
-// get back to it.
-export const VOCAL_OPTIONS = [
-  { key: 'instrumental', label: 'instrumental' },
-  { key: 'vocal', label: 'vocals' },
-];
+export const ENERGY_OPTIONS: readonly string[] = SHOW_ENERGY;
+// '' is the absent third state and deliberately has no chip — clearing the
+// selection is how you get back to it. Labels are UI copy ("vocals" reads
+// better as a chip than the schema's "vocal"), so only the KEYS come from the
+// schema; a value added there without a label here shows its raw key rather
+// than vanishing.
+const VOCAL_LABELS: Record<string, string> = { instrumental: 'instrumental', vocal: 'vocals' };
+export const VOCAL_OPTIONS = SHOW_VOCALS.map((key) => ({ key, label: VOCAL_LABELS[key] ?? key }));
 export const ANY_SENTINEL = '__any__';
-// Mirrors the controller's SHOW_FILTER_VALUES_MAX cap
-// (controller/src/settings/vocab.ts — read the comment there before changing
-// this number). Drift is caught by controller/scripts/show-filter-cap.test.ts:
-// a UI cap ABOVE the controller's turns a save into a validator 400, one BELOW
-// silently hides entries the operator is allowed to add.
-export const FILTER_VALUES_MAX = 15;
+export const FILTER_VALUES_MAX = SHOW_FILTER_VALUES_MAX;
 
 export function sameEra(a: EraWindow, b: { from: number | null; to: number | null } | EraWindow): boolean {
   const bf = 'from' in b ? b.from : b.fromYear;
@@ -169,6 +176,18 @@ export interface Schedule {
 export interface FormState {
   shows: Show[];
   schedule: Schedule;
+}
+
+// The react-hook-form shape. `schedule` is not form data — the panel reads it
+// for the hours-a-week counts and the Rundown page owns PUT /schedule.
+//
+// Hand-written rather than derived from z.input<typeof showSchema>: that input
+// type is `unknown` all the way down (the legacy-field migration wraps the
+// object in a z.preprocess, and most fields are pipelines of their own), so no
+// nested path would type-check as a FieldPath. `Show` is what the schema's
+// parse actually produces.
+export interface ShowsFormValues {
+  shows: Show[];
 }
 
 export interface SettingsResponse {
