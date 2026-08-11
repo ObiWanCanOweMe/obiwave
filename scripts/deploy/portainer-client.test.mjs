@@ -98,15 +98,82 @@ function analyzerFetch({ summary = analyzerSummary(), inspection = analyzerInspe
   };
 }
 
+const ttsReleaseTag = 'v0.42.0-obiwave.1';
+const ttsImage = `ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${ttsReleaseTag}`;
+const ttsImageId = `sha256:${'a'.repeat(64)}`;
+const ttsRepoDigest = `ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda@sha256:${'b'.repeat(64)}`;
+const ttsExpectedDigest = `sha256:${'b'.repeat(64)}`;
+
+function ttsSummary(overrides = {}) {
+  return {
+    Id: 'tts-container-id',
+    Names: ['/sub-wave-tts-heavy'],
+    Labels: {
+      'com.docker.compose.project': 'subwave',
+      'com.docker.compose.service': 'tts-heavy',
+    },
+    ...overrides,
+  };
+}
+
+function ttsInspection(overrides = {}) {
+  return {
+    Id: 'tts-container-id',
+    Image: ttsImageId,
+    Config: { Image: ttsImage },
+    State: { Running: true, Health: { Status: 'healthy' } },
+    RestartCount: 0,
+    ...overrides,
+  };
+}
+
+function ttsImageInspection(overrides = {}) {
+  return {
+    Id: ttsImageId,
+    RepoDigests: [ttsRepoDigest],
+    ...overrides,
+  };
+}
+
+function ttsFetch({
+  summary = ttsSummary(),
+  inspection = ttsInspection(),
+  imageInspection = ttsImageInspection(),
+} = {}) {
+  return async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Name: 'subwave', Env: oldEnv });
+    if (parsed.pathname.endsWith('/docker/containers/json')) {
+      return jsonResponse(summary ? [summary] : []);
+    }
+    if (parsed.pathname.endsWith('/docker/containers/tts-container-id/json')) {
+      return jsonResponse(inspection);
+    }
+    if (parsed.pathname.endsWith(`/docker/images/${encodeURIComponent(ttsImage)}/json`)) {
+      return jsonResponse(imageInspection);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+}
+
 function analyzerDockerResponse(url, releaseTag) {
   const parsed = new URL(url);
   if (parsed.pathname.endsWith('/docker/containers/json')) {
-    return jsonResponse([analyzerSummary()]);
+    return jsonResponse([analyzerSummary(), ttsSummary()]);
   }
   if (parsed.pathname.endsWith('/docker/containers/analyzer-container-id/json')) {
     return jsonResponse(analyzerInspection({
       Config: { Image: `ghcr.io/obiwancanoweme/subwave-analyzer-cuda:${releaseTag}` },
     }));
+  }
+  if (parsed.pathname.endsWith('/docker/containers/tts-container-id/json')) {
+    return jsonResponse(ttsInspection({
+      Config: { Image: `ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${releaseTag}` },
+    }));
+  }
+  const releaseImage = `ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${releaseTag}`;
+  if (parsed.pathname.endsWith(`/docker/images/${encodeURIComponent(releaseImage)}/json`)) {
+    return jsonResponse(ttsImageInspection());
   }
   return null;
 }
@@ -162,6 +229,114 @@ test('Portainer analyzer verification requires the exact running healthy restart
   }
 });
 
+test('Portainer CUDA TTS verification binds a healthy container to the exact tagged digest-bearing image', async () => {
+  assert.equal(typeof PortainerClient.prototype.verifyTtsDeployment, 'function');
+  await clientFor(ttsFetch()).verifyTtsDeployment({
+    releaseTag: ttsReleaseTag,
+    expectedDigest: ttsExpectedDigest,
+  });
+
+  const cases = [
+    ['missing', { summary: null }, /missing/],
+    ['wrong repository', {
+      inspection: ttsInspection({
+        Config: { Image: `ghcr.io/other/subwave-tts-heavy-cuda:${ttsReleaseTag}` },
+      }),
+    }, /release image/],
+    ['wrong tag', {
+      inspection: ttsInspection({
+        Config: { Image: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:v0.41.0-obiwave.3' },
+      }),
+    }, /release image/],
+    ['unhealthy', {
+      inspection: ttsInspection({ State: { Running: true, Health: { Status: 'unhealthy' } } }),
+    }, /healthy/],
+    ['starting', {
+      inspection: ttsInspection({ State: { Running: true, Health: { Status: 'starting' } } }),
+    }, /healthy/],
+    ['exited', {
+      inspection: ttsInspection({ State: { Running: false, Health: { Status: 'healthy' } } }),
+    }, /running/],
+    ['restarted', { inspection: ttsInspection({ RestartCount: 1 }) }, /restart count/],
+    ['different local image', {
+      inspection: ttsInspection({ Image: `sha256:${'c'.repeat(64)}` }),
+    }, /image identity/],
+    ['missing repository digest', {
+      imageInspection: ttsImageInspection({ RepoDigests: [] }),
+    }, /repository digest/],
+    ['wrong repository digest', {
+      imageInspection: ttsImageInspection({
+        RepoDigests: [`ghcr.io/other/subwave-tts-heavy-cuda@sha256:${'b'.repeat(64)}`],
+      }),
+    }, /repository digest/],
+    ['wrong same-repository digest', {
+      imageInspection: ttsImageInspection({
+        RepoDigests: [`ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda@sha256:${'c'.repeat(64)}`],
+      }),
+    }, /expected repository digest/],
+    ['duplicated expected digest', {
+      imageInspection: ttsImageInspection({
+        RepoDigests: [ttsRepoDigest, ttsRepoDigest],
+      }),
+    }, /exactly/],
+    ['expected digest plus foreign evidence', {
+      imageInspection: ttsImageInspection({
+        RepoDigests: [
+          ttsRepoDigest,
+          `ghcr.io/other/subwave-tts-heavy-cuda@sha256:${'d'.repeat(64)}`,
+        ],
+      }),
+    }, /exactly one/],
+    ['malformed repository digest', {
+      imageInspection: ttsImageInspection({ RepoDigests: ['not-a-repository-digest'] }),
+    }, /expected repository digest/],
+  ];
+
+  for (const [name, fixture, expected] of cases) {
+    await assert.rejects(
+      clientFor(ttsFetch(fixture)).verifyTtsDeployment({
+        releaseTag: ttsReleaseTag,
+        expectedDigest: ttsExpectedDigest,
+      }),
+      (error) => {
+        assert.ok(error instanceof DeploymentVerificationError, name);
+        assert.match(error.message, expected, name);
+        return true;
+      },
+    );
+  }
+});
+
+test('CUDA TTS Portainer reads cap every request timeout by the monotonic deadline', async () => {
+  let clockMs = 0;
+  const timeouts = [];
+  const client = clientFor(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/docker/containers/json')) {
+      clockMs += 15_000;
+      return jsonResponse([ttsSummary()]);
+    }
+    if (parsed.pathname.endsWith('/docker/containers/tts-container-id/json')) {
+      clockMs += 5_000;
+      return jsonResponse(ttsInspection());
+    }
+    throw new Error(`request escaped deadline: ${url}`);
+  }, {
+    now: () => clockMs,
+    signalFactory: (milliseconds) => {
+      timeouts.push(milliseconds);
+      return new AbortController().signal;
+    },
+  });
+
+  await assert.rejects(client.verifyTtsDeployment({
+    releaseTag: ttsReleaseTag,
+    expectedDigest: ttsExpectedDigest,
+    deadlineMs: 20_000,
+  }), /deadline/i);
+  assert.deepEqual(timeouts, [15_000, 5_000]);
+});
+
 test('analyzer verification failure enters the existing verified rollback path', async () => {
   assert.equal(typeof DeploymentVerificationError, 'function');
   const releases = [];
@@ -194,6 +369,190 @@ test('analyzer verification failure enters the existing verified rollback path',
 
   assert.equal(updates, 2);
   assert.deepEqual(releases, ['v0.42.0-obiwave.1', 'v0.41.0-obiwave.3']);
+});
+
+test('target CUDA TTS failure triggers rollback while the historical .1 snapshot verifies without TTS', async () => {
+  let clockMs = 0;
+  const ttsReleases = [];
+  let updates = 0;
+  const client = {
+    snapshotStack: async () => ({
+      Env: [
+        { name: 'ADMIN_USER', value: 'operator' },
+        { name: 'SUBWAVE_VERSION', value: 'v1.7.0-obiwave.1' },
+      ],
+      StackFileContent: oldFile,
+    }),
+    updateStack: async () => { updates += 1; },
+    verifyAnalyzerDeployment: async () => {},
+    verifyTtsDeployment: async ({ releaseTag }) => {
+      ttsReleases.push(releaseTag);
+      throw new DeploymentVerificationError('CUDA TTS is unhealthy');
+    },
+  };
+  const fetchImpl = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: releaseManifest,
+    targetVersion: 'v1.7.0-obiwave.2',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl,
+    attempts: 1,
+    ttsWindowMs: 1,
+    now: () => clockMs,
+    sleep: async (milliseconds) => { clockMs += milliseconds; },
+  }), (error) => {
+    assert.ok(error instanceof DeploymentRolledBackError);
+    assert.match(error.cause.message, /CUDA TTS/);
+    return true;
+  });
+
+  assert.equal(updates, 2);
+  assert.deepEqual(ttsReleases, ['v1.7.0-obiwave.2']);
+});
+
+test('an exhausted CUDA TTS read deadline returns immediately to rollback without update grace', async () => {
+  let clockMs = 0;
+  const sleeps = [];
+  let updates = 0;
+  const client = {
+    snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
+    updateStack: async () => { updates += 1; },
+    verifyAnalyzerDeployment: async () => {},
+    verifyTtsDeployment: async () => {
+      throw new PortainerRequestTimeoutError('TTS container listing', 1);
+    },
+  };
+  const fetchImpl = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: releaseManifest,
+    targetVersion: 'v1.7.0-obiwave.2',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl,
+    attempts: 1,
+    ttsWindowMs: 1,
+    now: () => clockMs,
+    sleep: async (milliseconds) => {
+      sleeps.push(milliseconds);
+      clockMs += milliseconds;
+    },
+  }), DeploymentRolledBackError);
+
+  assert.equal(updates, 2);
+  assert.deepEqual(sleeps, [1]);
+});
+
+test('target CUDA TTS verification keeps a full twenty-minute cold-start deadline', async () => {
+  let clockMs = 0;
+  let ttsCalls = 0;
+  const sleeps = [];
+  const client = {
+    snapshotStack: async () => ({ Env: oldEnv, StackFileContent: oldFile }),
+    updateStack: async () => {},
+    verifyAnalyzerDeployment: async () => {},
+    verifyTtsDeployment: async ({ deadlineMs }) => {
+      ttsCalls += 1;
+      assert.equal(deadlineMs, 20 * 60_000);
+      throw new DeploymentVerificationError('models still loading');
+    },
+  };
+  const fetchImpl = async (url) => url.endsWith('/health')
+    ? jsonResponse({ status: 'on-air' })
+    : streamResponse();
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: releaseManifest,
+    targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl,
+    attempts: 1,
+    now: () => clockMs,
+    sleep: async (milliseconds) => {
+      sleeps.push(milliseconds);
+      clockMs += milliseconds;
+    },
+  }), DeploymentRolledBackError);
+
+  assert.equal(ttsCalls, 80);
+  assert.equal(sleeps.length, 80);
+  assert.ok(sleeps.every((milliseconds) => milliseconds === 15_000));
+  assert.equal(clockMs, 20 * 60_000);
+});
+
+test('slow target reads and sleeps preserve verified rollback with a six-minute job safety margin', async () => {
+  const JOB_TIMEOUT_MS = 50 * 60_000;
+  const REQUIRED_SAFETY_MARGIN_MS = 6 * 60_000;
+  let clockMs = 0;
+  let updates = 0;
+  let phase = 'target';
+  const attemptsByPhase = new Map();
+  const advanceWithin = (durationMs, deadlineMs = Number.POSITIVE_INFINITY) => {
+    const elapsed = Math.min(durationMs, Math.max(0, deadlineMs - clockMs));
+    clockMs += elapsed;
+  };
+  const attempt = (kind) => {
+    const key = `${phase}:${kind}`;
+    const count = (attemptsByPhase.get(key) ?? 0) + 1;
+    attemptsByPhase.set(key, count);
+    return count;
+  };
+  const client = {
+    snapshotStack: async ({ deadlineMs } = {}) => {
+      advanceWithin(15_000, deadlineMs);
+      return { Env: oldEnv, StackFileContent: oldFile };
+    },
+    updateStack: async (_snapshot, { deadlineMs } = {}) => {
+      advanceWithin(300_000, deadlineMs);
+      updates += 1;
+      if (updates === 2) phase = 'rollback';
+    },
+    verifyAnalyzerDeployment: async ({ deadlineMs }) => {
+      advanceWithin(30_000, deadlineMs);
+      if (attempt('analyzer') < 6) throw new DeploymentVerificationError('analyzer starting');
+    },
+    verifyTtsDeployment: async ({ deadlineMs }) => {
+      advanceWithin(45_000, deadlineMs);
+      throw new DeploymentVerificationError('models still loading');
+    },
+  };
+  const fetchImpl = async (url) => {
+    const kind = url.endsWith('/health') ? 'health' : 'stream';
+    advanceWithin(10_000);
+    const currentAttempt = attempt(kind);
+    if (kind === 'health') {
+      return currentAttempt < 6
+        ? jsonResponse({ status: 'starting' }, { status: 503 })
+        : jsonResponse({ status: 'on-air' });
+    }
+    return currentAttempt < 6
+      ? new Response(null, { status: 503, headers: { 'Content-Type': 'audio/mpeg' } })
+      : streamResponse();
+  };
+
+  await assert.rejects(deployWithRollback({
+    client,
+    manifest: releaseManifest,
+    targetVersion: 'v1.7.0-obiwave.2',
+    healthUrl: 'https://radio.example/health',
+    streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl,
+    now: () => clockMs,
+    sleep: async (milliseconds) => { clockMs += milliseconds; },
+  }), DeploymentRolledBackError);
+
+  assert.equal(updates, 2);
+  assert.ok(clockMs <= JOB_TIMEOUT_MS - REQUIRED_SAFETY_MARGIN_MS, `elapsed ${clockMs}ms`);
 });
 
 function releaseEnv(overrides = {}) {
@@ -539,6 +898,7 @@ test('deploys the rendered checked-in manifest without an upstream analyzer pin'
     streamUrl: 'https://radio.example/stream.mp3',
     fetchImpl: probeFetch,
     attempts: 1,
+    expectedTtsDigest: ttsExpectedDigest,
   });
 
   assert.equal(successfulUpdateCalls.length, 1);

@@ -33,6 +33,12 @@ POCKET_TTS_PYTHON = os.environ.get("POCKET_TTS_PYTHON", "/opt/pocket-tts/venv/bi
 POCKET_TTS_WORKER = os.environ.get("POCKET_TTS_WORKER", "/app/workers/pocket_tts_worker.py")
 
 DEVICE = os.environ.get("TTS_HEAVY_DEVICE", "cpu").lower()
+STRICT_DEVICE = os.environ.get("TTS_HEAVY_STRICT_DEVICE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 POCKET_TTS_DEFAULT_VOICE = os.environ.get("POCKET_TTS_VOICE", "alba")
 
 # Per-worker HF cache homes so the engines don't fight over one directory;
@@ -215,6 +221,9 @@ chatterbox_worker = TtsWorker(
     script=CHATTERBOX_WORKER,
     env_extra={
         "CHATTERBOX_DEVICE": DEVICE,
+        # Explicitly copied into every supervised child. Ark sets this strict;
+        # portable sidecars leave it false and retain CUDA-to-CPU fallback.
+        "CHATTERBOX_STRICT_DEVICE": "1" if STRICT_DEVICE else "0",
         "CHATTERBOX_REFERENCE_WAV": os.environ.get("CHATTERBOX_REFERENCE_WAV", ""),
         "HF_HOME": CHATTERBOX_HF_HOME,
     },
@@ -282,6 +291,9 @@ async def health():
         "enabled": ENABLED_ENGINES,
         "chatterbox_loaded": chatterbox_worker.ready,
         "pocket_loaded": pocket_worker.ready,
+        "chatterbox_device": (
+            chatterbox_worker.ready_meta.get("device") if chatterbox_worker.ready else None
+        ),
         # PocketTTS zero-shot cloning capability — false when the gated
         # weights weren't available at load (no HF_TOKEN), so cloned .wav
         # voices don't silently revert to a built-in (#238). None until ready.

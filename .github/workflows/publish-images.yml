@@ -13,6 +13,7 @@ name: Publish images
 #   ghcr.io/<owner>/subwave-aio         (whole stack in one container — the Unraid
 #                                        Community Applications one-click image)
 #   ghcr.io/<owner>/subwave-tts-heavy   (optional Chatterbox + PocketTTS sidecar, ~3-4GB)
+#   ghcr.io/<owner>/subwave-tts-heavy-cuda (optional CUDA Chatterbox + PocketTTS sidecar)
 #   ghcr.io/<owner>/subwave-analyzer-cuda (mirrored exact upstream CUDA analyzer)
 #
 # Platforms: the core four images (caddy, broadcast, controller, web) are
@@ -69,6 +70,7 @@ jobs:
           - subwave-aio
           - subwave-aio-heavy
           - subwave-tts-heavy
+          - subwave-tts-heavy-cuda
           - subwave-analyzer
           - subwave-analyzer-heavy
           - subwave-analyzer-cuda
@@ -171,6 +173,11 @@ jobs:
           - image: subwave-tts-heavy
             dockerfile: docker/Dockerfile.tts-heavy
             platforms: linux/amd64
+          - image: subwave-tts-heavy-cuda
+            dockerfile: docker/Dockerfile.tts-heavy
+            platforms: linux/amd64
+            build_args: |
+              CHATTERBOX_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
             # TTS-only (Chatterbox + PocketTTS). Acoustic analysis (librosa +
             # CLAP + Demucs) was moved out into the standalone subwave-analyzer
             # image, so no analyzer build args here anymore.
@@ -234,11 +241,36 @@ jobs:
           echo '- Tag: `${{ github.ref_name }}`' >> "$GITHUB_STEP_SUMMARY"
           echo '- Digest: `${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda'
+        env:
+          IMAGE: subwave-tts-heavy-cuda
+          TAG_REF: ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${{ github.ref_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          OUTPUT_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest
+        run: |
+          node scripts/release/image-digest-record.mjs create \
+            --image "$IMAGE" \
+            --tag-ref "$TAG_REF" \
+            --digest "$DIGEST" \
+            --directory "$OUTPUT_DIRECTORY"
+
+      - name: Upload exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda'
+        # Workflow artifacts are run-scoped, including jobs inside the called
+        # scanner workflow. Scan and deploy therefore consume this same record.
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuda-tts-build-digest
+          path: ${{ runner.temp }}/cuda-tts-build-digest/subwave-tts-heavy-cuda.json
+          if-no-files-found: error
+
   vulnerability-policy:
     needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer]
     uses: ./.github/workflows/scan-images.yml
     with:
       release_tag: ${{ github.ref_name }}
+      cuda_tts_digest_artifact: cuda-tts-build-digest
     permissions:
       contents: read
       packages: read
@@ -251,14 +283,19 @@ jobs:
     concurrency:
       group: subwave-production
       cancel-in-progress: false
-    # Worst case: 2 x 5-minute stack updates, target + rollback probe budgets,
-    # a post-timeout grace period, and snapshot overhead remain below 17 min.
-    timeout-minutes: 30
+    # Worst case: 2 x 5-minute stack updates, a 20-minute first-boot CUDA TTS
+    # model-load budget, rollback probes, grace, and snapshot overhead.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      - name: Download exact CUDA TTS build digest
+        uses: actions/download-artifact@v4
+        with:
+          name: cuda-tts-build-digest
+          path: ${{ runner.temp }}/cuda-tts-build-digest
       - name: Deploy immutable release through Portainer
         run: node scripts/deploy/portainer-release.mjs
         env:
@@ -270,3 +307,4 @@ jobs:
           SUBWAVE_HEALTH_URL: ${{ vars.SUBWAVE_HEALTH_URL }}
           SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
           SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
+          SUBWAVE_TTS_DIGEST_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest

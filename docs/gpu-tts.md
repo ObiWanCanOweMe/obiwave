@@ -58,6 +58,33 @@ into the container. That's the native route below.
 
 ---
 
+## Ark Portainer: CUDA TTS is default-on
+
+Ark's image-only Portainer manifest already selects the published
+`subwave-tts-heavy-cuda` image for its release tag. It starts Chatterbox and
+PocketTTS together: Chatterbox uses CUDA, while PocketTTS remains CPU-only. No
+Portainer variable or profile selection is needed for the device or engines.
+
+Before the sidecar binds its internal HTTP port, it verifies that PyTorch can
+see CUDA. Every supervised Chatterbox worker start repeats that contract: if
+CUDA disappears after the server is already running, the replacement worker
+fails instead of silently loading on ark's CPU. Docker marks the sidecar healthy
+only after Chatterbox and PocketTTS are both ready and Chatterbox attests CUDA;
+the protected deployer allows a 20-minute cold-start window for first-boot model
+downloads and rolls back if that acceptance never passes. Until then the
+controller uses its normal Piper fallback. The sidecar remains internal to the
+Compose network and retains its state and model-cache volumes, memory limit,
+and log rotation.
+
+`HF_TOKEN` is the only optional Ark TTS setting: add it in Portainer only when
+you need PocketTTS voice cloning after accepting the Hugging Face model terms.
+Built-in voices need no token.
+
+The generic root Compose files remain CPU-first and profile-gated. For a local
+or non-Ark GPU deployment, keep using the overlay instructions below.
+
+---
+
 ## Easy route: your own Chatterbox server over the OpenAI layer
 
 SUB/WAVE's **Cloud** TTS engine speaks the OpenAI speech API, and it accepts an

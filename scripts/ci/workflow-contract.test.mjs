@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { EXPECTED_IMAGES as POLICY_IMAGES } from '../security/trivy-policy.mjs';
+
 const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const webPackage = JSON.parse(
   await readFile(new URL('../../web/package.json', import.meta.url), 'utf8'),
@@ -19,6 +21,10 @@ const recoveryV13 = await readFile(
   new URL('../../.github/workflows/recover-v1.3.0-obiwave.2.yml', import.meta.url),
   'utf8',
 );
+const recoveryV13Manifest = JSON.parse(await readFile(
+  new URL('../../security/releases/v1.3.0-obiwave.2.json', import.meta.url),
+  'utf8',
+));
 const recoveryV15 = await readFile(
   new URL('../../.github/workflows/recover-v1.5.0-obiwave.1.yml', import.meta.url),
   'utf8',
@@ -893,6 +899,12 @@ async function runResolveTag(env) {
   }
 }
 
+function resolveOutputJson(output, key) {
+  const value = output.match(new RegExp(`^${key}=(.+)$`, 'm'))?.[1];
+  assert.ok(value, `missing ${key} output`);
+  return JSON.parse(value);
+}
+
 test('scanner resolve-tag executes static recovery validation as valid Bash', async () => {
   const { result, output } = await runResolveTag({
     RECOVERY_MANIFEST: 'security/releases/v1.3.0-obiwave.2.json',
@@ -902,6 +914,7 @@ test('scanner resolve-tag executes static recovery validation as valid Bash', as
   assert.match(output, /^tag=v1\.3\.0-obiwave\.2$/m);
   assert.match(output, /^recovery_mode=static$/m);
   assert.match(output, /^recovery_manifest=security\/releases\/v1\.3\.0-obiwave\.2\.json$/m);
+  assert.deepEqual(resolveOutputJson(output, 'images'), recoveryV13Manifest.images.map(({ name }) => name));
 });
 
 test('scanner resolve-tag materializes and validates a sealed manifest as valid Bash', async () => {
@@ -915,7 +928,16 @@ test('scanner resolve-tag materializes and validates a sealed manifest as valid 
   assert.match(output, /^recovery_mode=sealed$/m);
   assert.match(output, /^recovery_manifest=security\/releases\/runtime-v1\.6\.0-obiwave\.1\.json$/m);
   assert.match(output, /^partial_recovery_manifest=security\/releases\/v1\.6\.0-obiwave\.1\.partial\.json$/m);
+  assert.deepEqual(resolveOutputJson(output, 'images'), sealedRecoveryV16.images.map(({ name }) => name));
   assert.doesNotMatch(output, new RegExp(sealedRecoveryV16B64));
+});
+
+test('scanner resolve-tag emits the exact live eleven-image set outside recovery', async () => {
+  const { result, output } = await runResolveTag({
+    REQUESTED_TAG: 'v1.7.0-obiwave.2',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(resolveOutputJson(output, 'images'), POLICY_IMAGES);
 });
 
 test('sealed manifest resolution rejects mixed, incomplete, escaped, and mismatched recovery inputs', async () => {
@@ -1084,7 +1106,8 @@ test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
   assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
   assert.match(publish, /vulnerability-policy:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
   assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
-  assert.match(scan, /matrix:[\s\S]*- subwave-analyzer-cuda/);
+  assert.match(scan, /matrix:\n\s+image: \$\{\{ fromJSON\(needs\.resolve-tag\.outputs\.images\) \}\}/);
+  assert.ok(POLICY_IMAGES.includes('subwave-analyzer-cuda'));
 });
 
 test('CLI asset drift watches the analyzer GPU overlay', () => {
@@ -1127,7 +1150,7 @@ test('release tag concurrency never cancels an in-flight publication', () => {
   assert.match(publish, /concurrency:\s*\n\s+group: publish-images-\$\{\{ github\.ref_name \}\}\s*\n\s+cancel-in-progress: false/);
 });
 
-test('all ten exact tags pass a complete preflight before any build starts', () => {
+test('all eleven exact tags pass a complete preflight before any build starts', () => {
   const preflightStart = publish.indexOf('  tag-preflight:');
   const buildStart = publish.indexOf('  build:');
   const scanStart = publish.indexOf('  vulnerability-policy:');
@@ -1146,12 +1169,98 @@ test('all ten exact tags pass a complete preflight before any build starts', () 
     'subwave-aio',
     'subwave-aio-heavy',
     'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
     'subwave-analyzer',
     'subwave-analyzer-heavy',
     'subwave-analyzer-cuda',
   ]);
   assert.match(preflight, /uses: docker\/login-action@v4[\s\S]*node scripts\/ci\/assert-image-tag-absent\.mjs/);
   assert.doesNotMatch(build, /assert-image-tag-absent/);
+});
+
+test('release publication builds the exact CPU and CUDA Chatterbox images', () => {
+  const build = jobBlock(publish, 'build');
+  const matrix = build.slice(build.indexOf('      matrix:'), build.indexOf('    steps:'));
+  const images = [...matrix.matchAll(/^          - image: ([^\n]+)$/gm)]
+    .map(([, image]) => image);
+
+  assert.deepEqual(images, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+  ]);
+  assert.match(
+    matrix,
+    /          - image: subwave-tts-heavy\n            dockerfile: docker\/Dockerfile\.tts-heavy\n            platforms: linux\/amd64\n          - image: subwave-tts-heavy-cuda\n            dockerfile: docker\/Dockerfile\.tts-heavy\n            platforms: linux\/amd64\n            build_args: \|\n              CHATTERBOX_TORCH_INDEX_URL=https:\/\/download\.pytorch\.org\/whl\/cu124\n/,
+  );
+  assert.doesNotMatch(matrix, /subwave-analyzer-cuda/);
+});
+
+test('the exact CUDA TTS build digest is the only artifact scanned and handed to deployment', () => {
+  const artifactName = 'cuda-tts-build-digest';
+  const build = jobBlock(publish, 'build');
+  const recordStep = stepBlock(build, 'Record exact CUDA TTS build digest');
+  assert.match(recordStep, /^        if: matrix\.image == 'subwave-tts-heavy-cuda'$/m);
+  assert.deepEqual(stepEnv(recordStep), {
+    IMAGE: 'subwave-tts-heavy-cuda',
+    TAG_REF: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:${{ github.ref_name }}',
+    DIGEST: '${{ steps.build.outputs.digest }}',
+    OUTPUT_DIRECTORY: '${{ runner.temp }}/cuda-tts-build-digest',
+  });
+  assert.match(stepRun(build, 'Record exact CUDA TTS build digest'), /image-digest-record\.mjs create/);
+  const uploadStep = stepBlock(build, 'Upload exact CUDA TTS build digest');
+  assert.match(uploadStep, /^        if: matrix\.image == 'subwave-tts-heavy-cuda'$/m);
+  assert.match(uploadStep, /^        uses: actions\/upload-artifact@v4$/m);
+  assert.match(uploadStep, new RegExp(`^          name: ${artifactName}$`, 'm'));
+  assert.match(uploadStep, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest\/subwave-tts-heavy-cuda\.json$/m);
+
+  const policy = jobBlock(publish, 'vulnerability-policy');
+  assert.match(policy, new RegExp(`^      cuda_tts_digest_artifact: ${artifactName}$`, 'm'));
+
+  const scanJob = jobBlock(scan, 'scan');
+  const downloadForScan = stepBlock(scanJob, 'Download exact CUDA TTS build digest');
+  assert.match(downloadForScan, /matrix\.image == 'subwave-tts-heavy-cuda'/);
+  assert.match(downloadForScan, /needs\.resolve-tag\.outputs\.recovery_mode == 'none'/);
+  assert.match(downloadForScan, /inputs\.cuda_tts_digest_artifact != ''/);
+  assert.match(downloadForScan, /^        uses: actions\/download-artifact@v4$/m);
+  assert.match(downloadForScan, /^          name: \$\{\{ inputs\.cuda_tts_digest_artifact \}\}$/m);
+  assert.match(downloadForScan, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest$/m);
+  const refsStep = stepBlock(scanJob, 'Resolve immutable image references');
+  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /image-digest-record\.mjs resolve/);
+  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /--directory "\$CUDA_TTS_DIGEST_DIRECTORY"/);
+
+  const deploy = jobBlock(publish, 'deploy-production');
+  const downloadForDeploy = stepBlock(deploy, 'Download exact CUDA TTS build digest');
+  assert.match(downloadForDeploy, /^        uses: actions\/download-artifact@v4$/m);
+  assert.match(downloadForDeploy, new RegExp(`^          name: ${artifactName}$`, 'm'));
+  assert.match(downloadForDeploy, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest$/m);
+  assert.equal(
+    stepEnv(stepBlock(deploy, 'Deploy immutable release through Portainer')).SUBWAVE_TTS_DIGEST_DIRECTORY,
+    '${{ runner.temp }}/cuda-tts-build-digest',
+  );
+});
+
+test('aggregate vulnerability policy requires the exact eleven-image release set', () => {
+  assert.deepEqual(POLICY_IMAGES, [
+    'subwave-caddy',
+    'subwave-broadcast',
+    'subwave-controller',
+    'subwave-web',
+    'subwave-aio',
+    'subwave-aio-heavy',
+    'subwave-tts-heavy',
+    'subwave-tts-heavy-cuda',
+    'subwave-analyzer',
+    'subwave-analyzer-heavy',
+    'subwave-analyzer-cuda',
+  ]);
 });
 
 test('private image scans authenticate with package read permission', () => {
@@ -1182,6 +1291,7 @@ test('JSON and SARIF scanner invocations include tag and digest-qualified pull r
 
     const command = stepRun(scanJob, stepName);
     assert.match(command, /--tag-ref "\$TAG_REF"/);
+    assert.match(command, /if \[\[ -n "\$PULL_REF" \]\]; then/);
     assert.match(command, /recovery_args\+=\(--pull-ref "\$PULL_REF"\)/);
     assert.match(command, /"\$\{recovery_args\[@\]\}"/);
   }
@@ -1191,6 +1301,13 @@ test('sealed manifest workflow-call inputs are optional transport values', () =>
   assert.match(
     scan,
     /partial_recovery_manifest:\s*\n\s+description: Approved repository-relative partial recovery manifest\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string\s*\n\s+sealed_recovery_manifest_b64:\s*\n\s+description: Base64 sealed recovery manifest from an upstream job\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
+  );
+});
+
+test('the reusable scanner accepts only an explicit current-run CUDA TTS digest artifact handoff', () => {
+  assert.match(
+    scan,
+    /cuda_tts_digest_artifact:\s*\n\s+description: Exact-name current-run CUDA TTS build digest artifact\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
   );
 });
 
@@ -1209,6 +1326,7 @@ test('recovery inputs are transferred through the environment, never interpolate
   assert.match(outputs, /^      recovery_mode: \$\{\{ steps\.resolve\.outputs\.recovery_mode \}\}$/m);
   assert.match(outputs, /^      recovery_manifest: \$\{\{ steps\.resolve\.outputs\.recovery_manifest \}\}$/m);
   assert.match(outputs, /^      partial_recovery_manifest: \$\{\{ steps\.resolve\.outputs\.partial_recovery_manifest \}\}$/m);
+  assert.match(outputs, /^      images: \$\{\{ steps\.resolve\.outputs\.images \}\}$/m);
   assert.doesNotMatch(outputs, /sealed_recovery_manifest_b64/i);
 });
 
@@ -1242,29 +1360,17 @@ test('every scan matrix job materializes the sealed manifest before resolving im
     RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.recovery_manifest }}',
     PARTIAL_RECOVERY_MANIFEST: '${{ needs.resolve-tag.outputs.partial_recovery_manifest }}',
     RECOVERY_MODE: '${{ needs.resolve-tag.outputs.recovery_mode }}',
+    CUDA_TTS_DIGEST_ARTIFACT: '${{ inputs.cuda_tts_digest_artifact }}',
+    CUDA_TTS_DIGEST_DIRECTORY: '${{ runner.temp }}/cuda-tts-build-digest',
   });
 
   assert.equal((scanJob.match(/--partial-recovery-manifest "\$PARTIAL_RECOVERY_MANIFEST"/g) ?? []).length, 2);
   assert.equal((scanJob.match(/--recovery-manifest "\$RECOVERY_MANIFEST"/g) ?? []).length, 2);
 });
 
-test('image vulnerability policy scans and aggregates the exact ten-image matrix', () => {
+test('image vulnerability policy uses validated live or historical image sets', () => {
   const scanJob = scan.slice(scan.indexOf('  scan:'), scan.indexOf('  vulnerability-policy:'));
-  const matrix = scanJob.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
-  assert.ok(matrix, 'missing scan image matrix');
-  const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
-  assert.deepEqual(images, [
-    'subwave-caddy',
-    'subwave-broadcast',
-    'subwave-controller',
-    'subwave-web',
-    'subwave-aio',
-    'subwave-aio-heavy',
-    'subwave-tts-heavy',
-    'subwave-analyzer',
-    'subwave-analyzer-heavy',
-    'subwave-analyzer-cuda',
-  ]);
+  assert.match(scanJob, /matrix:\n\s+image: \$\{\{ fromJSON\(needs\.resolve-tag\.outputs\.images\) \}\}/);
 
   assert.match(scanJob, /name: trivy-json-\$\{\{ matrix\.image \}\}/);
   assert.match(scanJob, /Record JSON scanner status[\s\S]*?if: always\(\)/);
@@ -1278,6 +1384,10 @@ test('image vulnerability policy scans and aggregates the exact ten-image matrix
   assert.match(policyJob, /merge-multiple: true/);
   assert.match(policyJob, /node scripts\/security\/trivy-policy\.mjs/);
   assert.match(policyJob, /security\/trivy-acceptance\.json/);
+  assert.match(policyJob, /name: Materialize sealed recovery manifest/);
+  assert.match(policyJob, /--recovery-manifest "\$RECOVERY_MANIFEST"/);
+  assert.match(policyJob, /--partial-recovery-manifest "\$PARTIAL_RECOVERY_MANIFEST"/);
+  assert.match(policyJob, /--scanner security\/trivy-scanner\.json/);
 });
 
 test('release scans exercise production child commands in controller and both AIO images', () => {
@@ -1307,7 +1417,7 @@ test('image scanner outcomes remain visible to the aggregate policy gate', () =>
 });
 
 test('production timeout covers bounded target and rollback operations', () => {
-  assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 30/);
+  assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 50/);
 });
 
 test('fork release defaults to the fork release branch', () => {

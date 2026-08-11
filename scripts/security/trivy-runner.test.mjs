@@ -281,6 +281,45 @@ test('scans a normal canonical tag without recovery pull or local retagging', ()
   ]);
 });
 
+test('scans a current build only through its exact digest-qualified reference', () => {
+  const image = Object.freeze({
+    image: 'subwave-tts-heavy-cuda',
+    tagRef: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:v1.7.0-obiwave.2',
+    pullRef: `ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:v1.7.0-obiwave.2@${digest}`,
+    digest,
+  });
+  const command = runner(success(), success(), success(), success());
+
+  const result = runTrivyScan({
+    scanner: scannerConfig,
+    image,
+    format: 'json',
+    output: '/workspace/subwave-tts-heavy-cuda.json',
+    cacheDirectory: '/workspace/.tmp/trivy-cache',
+    run: command.run,
+  });
+
+  assert.deepEqual(result, {
+    image: image.tagRef,
+    format: 'json',
+    output: '/workspace/subwave-tts-heavy-cuda.json',
+  });
+  assert.deepEqual(command.calls, [
+    ['docker', ['pull', image.pullRef]],
+    ['docker', ['tag', image.pullRef, image.tagRef]],
+    ['docker', ['image', 'inspect', image.tagRef]],
+    ['docker', [
+      'run', '--rm',
+      '--volume', '/var/run/docker.sock:/var/run/docker.sock',
+      '--volume', `${workspace}:/workspace`,
+      '--volume', `${workspace}/.tmp/trivy-cache:/root/.cache/trivy`,
+      scannerConfig.imageRef,
+      'image', '--image-src', 'docker', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+      '--format', 'json', '--output', '/workspace/subwave-tts-heavy-cuda.json', image.tagRef,
+    ]],
+  ]);
+});
+
 test('fails before scanning when recovery digest verification fails', () => {
   const command = runner(failure('digest mismatch'));
 

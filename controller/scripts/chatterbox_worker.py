@@ -28,6 +28,12 @@ import traceback
 from pathlib import Path
 
 DEVICE = os.environ.get("CHATTERBOX_DEVICE", "cpu").lower()
+STRICT_DEVICE = os.environ.get("CHATTERBOX_STRICT_DEVICE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DEFAULT_REFERENCE = os.environ.get("CHATTERBOX_REFERENCE_WAV", "")
 
 # --- long-input chunking (issue #1130) -------------------------------------
@@ -123,6 +129,14 @@ def chunk_text(text, max_chars=MAX_CHUNK_CHARS):
     return chunks
 
 
+def resolve_device(requested, cuda_available, strict=False):
+    if requested == "cuda" and not cuda_available:
+        if strict:
+            raise RuntimeError("CUDA requested in strict mode but unavailable")
+        return "cpu"
+    return requested
+
+
 def emit(obj):
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
     sys.stdout.flush()
@@ -177,10 +191,14 @@ def main():
     except Exception as e:
         log(f"librosa float32 guard not applied: {e}")
 
-    device = DEVICE
-    if device == "cuda" and not torch.cuda.is_available():
+    try:
+        device = resolve_device(DEVICE, torch.cuda.is_available(), strict=STRICT_DEVICE)
+    except RuntimeError as e:
+        log(str(e))
+        emit({"id": None, "ok": False, "fatal": True, "error": str(e)})
+        sys.exit(1)
+    if DEVICE == "cuda" and device != "cuda":
         log("CUDA requested but unavailable — falling back to cpu")
-        device = "cpu"
 
     log(f"loading ChatterboxTurboTTS on device={device}")
     try:
@@ -208,7 +226,7 @@ def main():
         return samples
 
     log("ready")
-    emit({"id": None, "ready": True})
+    emit({"id": None, "ready": True, "device": device})
 
     for line in sys.stdin:
         line = line.strip()

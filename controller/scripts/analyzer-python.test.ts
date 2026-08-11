@@ -15,6 +15,7 @@ const SUITES = [
   'idle_release_test.py', // idle model release + heavy clock (#1099/#1204)
   'vocal_gate_test.py', // vocal-stem gate thresholds (#1125)
   'test_chatterbox_chunk.py', // chatterbox chunk_text (#1130)
+  'test_tts_heavy_strict_device.py', // Ark CUDA worker startup + supervised restart
   'analyzer_noise_test.py', // decode-noise filter + capability loss (#1300)
 ];
 

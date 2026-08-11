@@ -25,6 +25,11 @@ on:
         required: false
         default: ''
         type: string
+      cuda_tts_digest_artifact:
+        description: Exact-name current-run CUDA TTS build digest artifact
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
@@ -54,6 +59,7 @@ jobs:
       recovery_mode: ${{ steps.resolve.outputs.recovery_mode }}
       recovery_manifest: ${{ steps.resolve.outputs.recovery_manifest }}
       partial_recovery_manifest: ${{ steps.resolve.outputs.partial_recovery_manifest }}
+      images: ${{ steps.resolve.outputs.images }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -127,8 +133,10 @@ jobs:
             RECOVERY_MODE=sealed
             RESOLVED_PARTIAL_RECOVERY_MANIFEST="$PARTIAL_RECOVERY_MANIFEST"
           fi
-          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          RECOVERY_MODE="$RECOVERY_MODE" RESOLVED_RECOVERY_MANIFEST="$RESOLVED_RECOVERY_MANIFEST" \
+            node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
           import { readFile } from 'node:fs/promises';
+          import { EXPECTED_IMAGES } from './scripts/security/trivy-policy.mjs';
           const scanner = JSON.parse(await readFile('security/trivy-scanner.json', 'utf8'));
           const keys = ['schemaVersion', 'version', 'imageRef'];
           if (scanner === null || typeof scanner !== 'object' || Array.isArray(scanner)
@@ -139,6 +147,18 @@ jobs:
           }
           console.log(`scanner_image=${scanner.imageRef}`);
           console.log(`scanner_version=${scanner.version}`);
+          let images;
+          if (process.env.RECOVERY_MODE === 'none') {
+            images = EXPECTED_IMAGES;
+          } else if (['static', 'sealed'].includes(process.env.RECOVERY_MODE)) {
+            const manifest = JSON.parse(
+              await readFile(process.env.RESOLVED_RECOVERY_MANIFEST, 'utf8'),
+            );
+            images = manifest.images.map(({ name }) => name);
+          } else {
+            throw new Error('unrecognized recovery mode');
+          }
+          console.log(`images=${JSON.stringify(images)}`);
           NODE
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "recovery_mode=$RECOVERY_MODE" >> "$GITHUB_OUTPUT"
@@ -151,17 +171,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - subwave-caddy
-          - subwave-broadcast
-          - subwave-controller
-          - subwave-web
-          - subwave-aio
-          - subwave-aio-heavy
-          - subwave-tts-heavy
-          - subwave-analyzer
-          - subwave-analyzer-heavy
-          - subwave-analyzer-cuda
+        image: ${{ fromJSON(needs.resolve-tag.outputs.images) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -175,6 +185,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download exact CUDA TTS build digest
+        if: matrix.image == 'subwave-tts-heavy-cuda' && needs.resolve-tag.outputs.recovery_mode == 'none' && inputs.cuda_tts_digest_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.cuda_tts_digest_artifact }}
+          path: ${{ runner.temp }}/cuda-tts-build-digest
 
       - name: Materialize sealed recovery manifest
         if: needs.resolve-tag.outputs.recovery_mode == 'sealed'
@@ -198,6 +215,8 @@ jobs:
           RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
           PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
           RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
+          CUDA_TTS_DIGEST_ARTIFACT: ${{ inputs.cuda_tts_digest_artifact }}
+          CUDA_TTS_DIGEST_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest
         run: |
           if [[ "$RECOVERY_MODE" == 'static' ]]; then
             node scripts/release/recovery-manifest.mjs image \
@@ -211,7 +230,15 @@ jobs:
               --scanner security/trivy-scanner.json \
               --image "$IMAGE"
           elif [[ "$RECOVERY_MODE" == 'none' ]]; then
-            echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            if [[ "$IMAGE" == 'subwave-tts-heavy-cuda' && -n "$CUDA_TTS_DIGEST_ARTIFACT" ]]; then
+              node scripts/release/image-digest-record.mjs resolve \
+                --directory "$CUDA_TTS_DIGEST_DIRECTORY" \
+                --image "$IMAGE" \
+                --tag-ref "ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" \
+                >> "$GITHUB_OUTPUT"
+            else
+              echo "tag_ref=ghcr.io/obiwancanoweme/$IMAGE:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo 'unrecognized recovery mode' >&2
             exit 1
@@ -238,7 +265,7 @@ jobs:
             echo 'unrecognized recovery mode' >&2
             exit 1
           fi
-          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+          if [[ -n "$PULL_REF" ]]; then
             recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \
@@ -314,7 +341,7 @@ jobs:
             echo 'unrecognized recovery mode' >&2
             exit 1
           fi
-          if [[ "$RECOVERY_MODE" == 'static' || "$RECOVERY_MODE" == 'sealed' ]]; then
+          if [[ -n "$PULL_REF" ]]; then
             recovery_args+=(--pull-ref "$PULL_REF")
           fi
           node scripts/security/trivy-runner.mjs \
@@ -343,6 +370,19 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      - name: Materialize sealed recovery manifest
+        if: needs.resolve-tag.outputs.recovery_mode == 'sealed'
+        env:
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
+          SEALED_RECOVERY_MANIFEST_B64: ${{ inputs.sealed_recovery_manifest_b64 }}
+        run: |
+          [[ "$RECOVERY_MODE" == 'sealed' ]]
+          node scripts/release/recovery-manifest.mjs materialize-sealed \
+            --manifest "$PARTIAL_RECOVERY_MANIFEST" \
+            --scanner security/trivy-scanner.json \
+            --output "$RECOVERY_MANIFEST"
       - name: Download all policy reports
         uses: actions/download-artifact@v4
         with:
@@ -350,8 +390,32 @@ jobs:
           path: .tmp/trivy-policy
           merge-multiple: true
       - name: Enforce Critical/High vulnerability policy
-        run: >-
-          node scripts/security/trivy-policy.mjs
-          --reports .tmp/trivy-policy
-          --acceptance security/trivy-acceptance.json
-          --tag "${{ needs.resolve-tag.outputs.tag }}"
+        env:
+          PARTIAL_RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.partial_recovery_manifest }}
+          RECOVERY_MANIFEST: ${{ needs.resolve-tag.outputs.recovery_manifest }}
+          RECOVERY_MODE: ${{ needs.resolve-tag.outputs.recovery_mode }}
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          recovery_args=()
+          if [[ "$RECOVERY_MODE" == 'static' ]]; then
+            [[ -n "$RECOVERY_MANIFEST" && -z "$PARTIAL_RECOVERY_MANIFEST" ]]
+            recovery_args=(
+              --recovery-manifest "$RECOVERY_MANIFEST"
+              --scanner security/trivy-scanner.json
+            )
+          elif [[ "$RECOVERY_MODE" == 'sealed' ]]; then
+            [[ -n "$RECOVERY_MANIFEST" && -n "$PARTIAL_RECOVERY_MANIFEST" ]]
+            recovery_args=(
+              --recovery-manifest "$RECOVERY_MANIFEST"
+              --partial-recovery-manifest "$PARTIAL_RECOVERY_MANIFEST"
+              --scanner security/trivy-scanner.json
+            )
+          elif [[ "$RECOVERY_MODE" != 'none' ]]; then
+            echo 'unrecognized recovery mode' >&2
+            exit 1
+          fi
+          node scripts/security/trivy-policy.mjs \
+            --reports .tmp/trivy-policy \
+            --acceptance security/trivy-acceptance.json \
+            --tag "$RELEASE_TAG" \
+            "${recovery_args[@]}"
