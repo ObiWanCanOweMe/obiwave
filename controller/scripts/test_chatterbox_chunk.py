@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from chatterbox_worker import chunk_text  # noqa: E402
+from chatterbox_worker import chunk_text, resolve_device  # noqa: E402
 
 FAILS = []
 
@@ -36,6 +36,13 @@ def reassembles(chunks, text):
     """Every non-whitespace char of the original survives, in order (chunking
     only drops the whitespace it splits on)."""
     return "".join(chunks).replace(" ", "") == text.replace(" ", "").strip()
+
+
+# Runtime device resolution preserves portable CPU operation when CUDA is
+# requested but unavailable.
+check("cpu stays cpu", resolve_device("cpu", False) == "cpu")
+check("available cuda stays cuda", resolve_device("cuda", True) == "cuda")
+check("unavailable cuda falls back", resolve_device("cuda", False) == "cpu")
 
 
 # 1. Empty / whitespace -> no chunks.

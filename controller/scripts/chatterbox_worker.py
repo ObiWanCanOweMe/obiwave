@@ -123,6 +123,12 @@ def chunk_text(text, max_chars=MAX_CHUNK_CHARS):
     return chunks
 
 
+def resolve_device(requested, cuda_available):
+    if requested == "cuda" and not cuda_available:
+        return "cpu"
+    return requested
+
+
 def emit(obj):
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
     sys.stdout.flush()
@@ -177,10 +183,9 @@ def main():
     except Exception as e:
         log(f"librosa float32 guard not applied: {e}")
 
-    device = DEVICE
-    if device == "cuda" and not torch.cuda.is_available():
+    device = resolve_device(DEVICE, torch.cuda.is_available())
+    if DEVICE == "cuda" and device != "cuda":
         log("CUDA requested but unavailable — falling back to cpu")
-        device = "cpu"
 
     log(f"loading ChatterboxTurboTTS on device={device}")
     try:
@@ -208,7 +213,7 @@ def main():
         return samples
 
     log("ready")
-    emit({"id": None, "ready": True})
+    emit({"id": None, "ready": True, "device": device})
 
     for line in sys.stdin:
         line = line.strip()

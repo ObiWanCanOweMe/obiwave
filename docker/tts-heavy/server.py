@@ -282,6 +282,9 @@ async def health():
         "enabled": ENABLED_ENGINES,
         "chatterbox_loaded": chatterbox_worker.ready,
         "pocket_loaded": pocket_worker.ready,
+        "chatterbox_device": (
+            chatterbox_worker.ready_meta.get("device") if chatterbox_worker.ready else None
+        ),
         # PocketTTS zero-shot cloning capability — false when the gated
         # weights weren't available at load (no HF_TOKEN), so cloned .wav
         # voices don't silently revert to a built-in (#238). None until ready.
