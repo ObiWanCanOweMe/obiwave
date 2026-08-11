@@ -202,6 +202,9 @@ services:
     environment:
       TTS_HEAVY_DEVICE: cuda
       TTS_HEAVY_ENGINES: chatterbox,pocket-tts
+      # Re-applied to every supervised Chatterbox worker start. If CUDA later
+      # disappears, the replacement worker exits instead of loading on CPU.
+      TTS_HEAVY_STRICT_DEVICE: "1"
       POCKET_TTS_VOICE: ${POCKET_TTS_VOICE:-alba}
       # Optional — enables PocketTTS voice CLONING (issue #238). Cloning weights
       # are gated on Hugging Face; accept the terms at
@@ -223,6 +226,17 @@ services:
       # `up -d --build` / image pull / update. With them it happens once.
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
+    # Ark's runtime acceptance gate. HTTP binds while the two workers download
+    # and load their models, but Docker does not mark the service healthy until
+    # both engines are ready and Chatterbox attests CUDA. The long first-start
+    # period accommodates multi-GB model downloads; named caches make later
+    # recreates much faster.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health | /opt/server/venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); ready=set(d.get(\"engines\", [])); raise SystemExit(0 if d.get(\"ok\") is True and {\"chatterbox\", \"pocket-tts\"}.issubset(ready) and d.get(\"chatterbox_loaded\") is True and d.get(\"pocket_loaded\") is True and d.get(\"chatterbox_device\") == \"cuda\" else 1)'"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20m
 
   # -------------------------------------------------------------------------
   # ANALYZER — acoustic-analysis sidecar (bpm / key / intro / loudness;

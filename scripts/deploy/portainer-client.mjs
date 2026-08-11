@@ -4,8 +4,11 @@ const DEFAULT_READ_TIMEOUT_MS = 15_000;
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 300_000;
 const DEFAULT_ROLLBACK_GRACE_MS = 15_000;
+const DEFAULT_TTS_ATTEMPTS = 81;
+const DEFAULT_TTS_RETRY_DELAY_MS = 15_000;
 const RELEASE_VERSION_TOKEN = '${SUBWAVE_VERSION:?required}';
 const UNRESOLVED_RELEASE_VERSION = /\$\{SUBWAVE_VERSION[^}]*\}/;
+const TTS_IMAGE_REPOSITORY = 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda';
 
 export class PortainerRequestTimeoutError extends Error {
   constructor(operation, timeoutMs, options = {}) {
@@ -132,10 +135,17 @@ export class PortainerClient {
     });
   }
 
-  inspectContainer(containerId) {
+  inspectContainer(containerId, operation = 'container inspection') {
     return this.request(
       `/endpoints/${this.endpointId}/docker/containers/${encodeURIComponent(containerId)}/json`,
-      { operation: 'analyzer container inspection' },
+      { operation },
+    );
+  }
+
+  inspectImage(imageRef) {
+    return this.request(
+      `/endpoints/${this.endpointId}/docker/images/${encodeURIComponent(imageRef)}/json`,
+      { operation: 'TTS image inspection' },
     );
   }
 
@@ -176,6 +186,67 @@ export class PortainerClient {
     } catch (error) {
       if (error instanceof DeploymentVerificationError) throw error;
       throw new DeploymentVerificationError('Analyzer deployment verification failed', { cause: error });
+    }
+  }
+
+  async verifyTtsDeployment({ releaseTag }) {
+    try {
+      if (typeof releaseTag !== 'string' || releaseTag.length === 0) {
+        throw new DeploymentVerificationError('CUDA TTS release image tag is missing');
+      }
+      const expectedImage = `${TTS_IMAGE_REPOSITORY}:${releaseTag}`;
+      const containers = await this.request(
+        `/endpoints/${this.endpointId}/docker/containers/json?all=true`,
+        { operation: 'TTS container listing' },
+      );
+      const tts = Array.isArray(containers) && containers.find((container) => {
+        const labels = container?.Labels ?? {};
+        if (labels['com.docker.compose.service'] !== 'tts-heavy') return false;
+        if (this.stackName) return labels['com.docker.compose.project'] === this.stackName;
+        return container?.Names?.includes('/sub-wave-tts-heavy');
+      });
+      if (!tts?.Id) {
+        throw new DeploymentVerificationError('CUDA TTS container is missing');
+      }
+
+      const container = await this.inspectContainer(tts.Id, 'TTS container inspection');
+      if (container?.State?.Running !== true) {
+        throw new DeploymentVerificationError('CUDA TTS container is not running');
+      }
+      if (container?.State?.Health?.Status !== 'healthy') {
+        throw new DeploymentVerificationError('CUDA TTS container is not healthy');
+      }
+      if (container?.RestartCount !== 0) {
+        throw new DeploymentVerificationError('CUDA TTS container restart count is not zero');
+      }
+      if (container?.Config?.Image !== expectedImage) {
+        throw new DeploymentVerificationError('CUDA TTS container does not use the exact release image');
+      }
+
+      // Bind the running container to the local immutable tag and require a
+      // registry digest for the expected repository. Tag preflight guarantees
+      // the release tag itself was absent before publication; this proves the
+      // exact pulled artifact, rather than an unrelated image with a matching
+      // Config.Image string, is what Docker started.
+      const image = await this.inspectImage(expectedImage);
+      if (typeof container?.Image !== 'string'
+        || typeof image?.Id !== 'string'
+        || container.Image !== image.Id) {
+        throw new DeploymentVerificationError('CUDA TTS container image identity does not match the release tag');
+      }
+      const expectedDigestPrefix = `${TTS_IMAGE_REPOSITORY}@sha256:`;
+      if (!Array.isArray(image?.RepoDigests)
+        || !image.RepoDigests.some((digest) => (
+          typeof digest === 'string'
+          && digest.startsWith(expectedDigestPrefix)
+          && /^[0-9a-f]{64}$/.test(digest.slice(expectedDigestPrefix.length))
+        ))) {
+        throw new DeploymentVerificationError('CUDA TTS release image has no expected repository digest');
+      }
+      return container;
+    } catch (error) {
+      if (error instanceof DeploymentVerificationError) throw error;
+      throw new DeploymentVerificationError('CUDA TTS deployment verification failed', { cause: error });
     }
   }
 }
@@ -279,6 +350,9 @@ async function verifyDeployment({
   streamUrl,
   streamPassword,
   fetchImpl,
+  requireTts = false,
+  ttsAttempts = DEFAULT_TTS_ATTEMPTS,
+  ttsRetryDelayMs = DEFAULT_TTS_RETRY_DELAY_MS,
   ...retryOptions
 }) {
   const options = { fetchImpl, ...retryOptions };
@@ -288,6 +362,12 @@ async function verifyDeployment({
   // an active `analyze` engine. Inspecting healthy here proves that contract
   // without exposing the analyzer on a public host port.
   await retry(() => client.verifyAnalyzerDeployment({ releaseTag }), retryOptions);
+  if (requireTts) {
+    await retry(
+      () => client.verifyTtsDeployment({ releaseTag }),
+      { ...retryOptions, attempts: ttsAttempts, retryDelayMs: ttsRetryDelayMs },
+    );
+  }
 }
 
 export async function deployWithRollback({
@@ -300,6 +380,8 @@ export async function deployWithRollback({
   fetchImpl = fetch,
   attempts = DEFAULT_ATTEMPTS,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  ttsAttempts = DEFAULT_TTS_ATTEMPTS,
+  ttsRetryDelayMs = DEFAULT_TTS_RETRY_DELAY_MS,
   rollbackGraceMs = DEFAULT_ROLLBACK_GRACE_MS,
   sleep,
 }) {
@@ -318,12 +400,14 @@ export async function deployWithRollback({
     fetchImpl,
     attempts,
     retryDelayMs,
+    ttsAttempts,
+    ttsRetryDelayMs,
     ...(sleep ? { sleep } : {}),
   };
 
   try {
     await client.updateStack(target);
-    await verifyDeployment({ ...verification, releaseTag: targetVersion });
+    await verifyDeployment({ ...verification, releaseTag: targetVersion, requireTts: true });
   } catch (deploymentError) {
     // Portainer's update endpoint is synchronous, but after a client timeout the
     // server may briefly continue work. A bounded grace period reduces overlap;
@@ -335,6 +419,9 @@ export async function deployWithRollback({
     }
     try {
       await client.updateStack(snapshot);
+      // v1.7.0-obiwave.1 predates Ark's default-on TTS sidecar. Rollback
+      // verification therefore retains the public radio + analyzer contract
+      // without requiring a container the restored snapshot never ran.
       await verifyDeployment({ ...verification, releaseTag: previousVersion });
     } catch (rollbackError) {
       throw new RollbackIncidentError({

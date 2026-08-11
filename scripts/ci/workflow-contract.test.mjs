@@ -1363,7 +1363,7 @@ test('image scanner outcomes remain visible to the aggregate policy gate', () =>
 });
 
 test('production timeout covers bounded target and rollback operations', () => {
-  assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 30/);
+  assert.match(publish, /deploy-production:[\s\S]*?timeout-minutes: 50/);
 });
 
 test('fork release defaults to the fork release branch', () => {

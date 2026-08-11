@@ -35,6 +35,14 @@ const ttsCudaGateSource = `command:
       - >-
         /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
         exec uvicorn server:app --host 0.0.0.0 --port 8080`;
+const ttsHealthScript = 'curl -fsS http://localhost:8080/health | /opt/server/venv/bin/python -c \'import json,sys; d=json.load(sys.stdin); ready=set(d.get("engines", [])); raise SystemExit(0 if d.get("ok") is True and {"chatterbox", "pocket-tts"}.issubset(ready) and d.get("chatterbox_loaded") is True and d.get("pocket_loaded") is True and d.get("chatterbox_device") == "cuda" else 1)\'';
+const ttsHealthCommand = ['CMD-SHELL', ttsHealthScript];
+const ttsHealthSource = `    healthcheck:
+      test: ["CMD-SHELL", "${ttsHealthScript.replaceAll('"', '\\"')}"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20m`;
 
 const serviceRequirements = [
   ['caddy', 'logging: *default-logging', 'service caddy is missing default log rotation'],
@@ -62,6 +70,8 @@ const serviceRequirements = [
   ['tts-heavy', ttsCudaGateSource, 'service tts-heavy is missing its fail-closed CUDA startup gate'],
   ['tts-heavy', 'TTS_HEAVY_DEVICE: cuda', 'service tts-heavy must require CUDA'],
   ['tts-heavy', 'TTS_HEAVY_ENGINES: chatterbox,pocket-tts', 'service tts-heavy must load both engines'],
+  ['tts-heavy', 'TTS_HEAVY_STRICT_DEVICE: "1"', 'service tts-heavy must enforce strict CUDA after startup'],
+  ['tts-heavy', ttsHealthSource, 'service tts-heavy is missing its CUDA engine healthcheck'],
   [
     'tts-heavy',
     'driver: nvidia\n              count: all\n              capabilities: [gpu]',
@@ -240,8 +250,21 @@ export function validateResolvedPortainerCompose(model) {
   if (ttsHeavy?.environment?.TTS_HEAVY_ENGINES !== 'chatterbox,pocket-tts') {
     errors.push('resolved tts-heavy must load both engines');
   }
+  if (ttsHeavy?.environment?.TTS_HEAVY_STRICT_DEVICE !== '1') {
+    errors.push('resolved tts-heavy must enforce strict CUDA after startup');
+  }
   if (JSON.stringify(ttsHeavy?.command) !== JSON.stringify(ttsCudaGateCommand)) {
     errors.push('resolved tts-heavy has an invalid fail-closed CUDA startup gate');
+  }
+  const ttsHealth = ttsHeavy?.healthcheck;
+  if (
+    JSON.stringify(ttsHealth?.test) !== JSON.stringify(ttsHealthCommand)
+    || !['15s', '15s0ms'].includes(ttsHealth?.interval)
+    || !['5s', '5s0ms'].includes(ttsHealth?.timeout)
+    || ttsHealth?.retries !== 8
+    || !['20m', '20m0s'].includes(ttsHealth?.start_period)
+  ) {
+    errors.push('resolved tts-heavy has an invalid CUDA engine healthcheck');
   }
   const ttsDevices = ttsHeavy?.deploy?.resources?.reservations?.devices;
   if (

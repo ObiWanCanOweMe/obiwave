@@ -45,6 +45,17 @@ check("available cuda stays cuda", resolve_device("cuda", True) == "cuda")
 check("unavailable cuda falls back", resolve_device("cuda", False) == "cpu")
 
 
+def strict_cuda_rejected():
+    try:
+        resolve_device("cuda", False, strict=True)
+    except RuntimeError:
+        return True
+    return False
+
+
+check("strict unavailable cuda is rejected", strict_cuda_rejected())
+
+
 # 1. Empty / whitespace -> no chunks.
 check("empty string -> []", chunk_text("") == [])
 check("whitespace -> []", chunk_text("   \n  ") == [])

@@ -30,6 +30,20 @@ const cudaGateSource = `command:
         exec uvicorn server:app --host 0.0.0.0 --port 8080`;
 const ttsCudaGateScript = '/opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" && exec uvicorn server:app --host 0.0.0.0 --port 8080';
 const ttsCudaGateCommand = ['/bin/sh', '-c', ttsCudaGateScript];
+const ttsHealthScript = 'curl -fsS http://localhost:8080/health | /opt/server/venv/bin/python -c \'import json,sys; d=json.load(sys.stdin); ready=set(d.get("engines", [])); raise SystemExit(0 if d.get("ok") is True and {"chatterbox", "pocket-tts"}.issubset(ready) and d.get("chatterbox_loaded") is True and d.get("pocket_loaded") is True and d.get("chatterbox_device") == "cuda" else 1)\'';
+const ttsHealthcheck = {
+  test: ['CMD-SHELL', ttsHealthScript],
+  interval: '15s',
+  timeout: '5s',
+  retries: 8,
+  start_period: '20m',
+};
+const ttsHealthSource = `    healthcheck:
+      test: ["CMD-SHELL", "${ttsHealthScript.replaceAll('"', '\\"')}"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20m`;
 const validResolved = {
   services: {
     caddy: {
@@ -43,7 +57,12 @@ const validResolved = {
     'tts-heavy': {
       image: 'ghcr.io/obiwancanoweme/subwave-tts-heavy-cuda:v1.0.0-obiwave.1',
       command: ttsCudaGateCommand,
-      environment: { TTS_HEAVY_DEVICE: 'cuda', TTS_HEAVY_ENGINES: 'chatterbox,pocket-tts' },
+      environment: {
+        TTS_HEAVY_DEVICE: 'cuda',
+        TTS_HEAVY_ENGINES: 'chatterbox,pocket-tts',
+        TTS_HEAVY_STRICT_DEVICE: '1',
+      },
+      healthcheck: ttsHealthcheck,
       deploy: {
         resources: {
           reservations: {
@@ -139,6 +158,7 @@ services:
     environment:
       TTS_HEAVY_DEVICE: cuda
       TTS_HEAVY_ENGINES: chatterbox,pocket-tts
+      TTS_HEAVY_STRICT_DEVICE: "1"
       POCKET_TTS_VOICE: \${POCKET_TTS_VOICE:-alba}
       HF_TOKEN: \${HF_TOKEN:-}
     deploy:
@@ -152,6 +172,7 @@ services:
       - *state-mount
       - tts-heavy-chatterbox-cache:/opt/chatterbox/hf-cache
       - tts-heavy-pocket-cache:/opt/pocket-tts/hf-cache
+${ttsHealthSource}
   analyzer:
     image: ghcr.io/obiwancanoweme/subwave-analyzer-cuda:\${SUBWAVE_VERSION:?required}
     command:
@@ -224,6 +245,11 @@ function renderAnalyzerService(file) {
   return renderCompose(source).services.analyzer;
 }
 
+function renderTtsService(file) {
+  const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+  return renderCompose(source).services['tts-heavy'];
+}
+
 function runAnalyzerHealthcheck(healthcheck, body) {
   const directory = mkdtempSync(join(tmpdir(), 'subwave-analyzer-health-'));
   const curl = join(directory, 'curl');
@@ -231,6 +257,21 @@ function runAnalyzerHealthcheck(healthcheck, body) {
     writeFileSync(curl, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(body)}'\n`);
     chmodSync(curl, 0o755);
     const command = healthcheck.test[1].replace('/opt/analyzer/venv/bin/python', 'python3');
+    return spawnSync('/bin/sh', ['-c', command], {
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+    }).status;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runTtsHealthcheck(healthcheck, body) {
+  const directory = mkdtempSync(join(tmpdir(), 'subwave-tts-health-'));
+  const curl = join(directory, 'curl');
+  try {
+    writeFileSync(curl, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(body)}'\n`);
+    chmodSync(curl, 0o755);
+    const command = healthcheck.test[1].replace('/opt/server/venv/bin/python', 'python3');
     return spawnSync('/bin/sh', ['-c', command], {
       env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
     }).status;
@@ -273,6 +314,45 @@ test('every sidecar analyzer healthcheck requires ok=true and the analyze engine
     ]) {
       assert.notEqual(runAnalyzerHealthcheck(healthcheck, body), 0, `${file}: ${JSON.stringify(body)}`);
     }
+  }
+});
+
+test('Ark TTS health requires both loaded engines and CUDA runtime attestation', () => {
+  const healthcheck = renderTtsService('deploy/portainer/docker-compose.yml').healthcheck;
+  assert.ok(healthcheck, 'Ark tts-heavy is missing a healthcheck');
+  assert.equal(healthcheck.start_period, '20m0s');
+  assert.equal(runTtsHealthcheck(healthcheck, {
+    ok: true,
+    engines: ['chatterbox', 'pocket-tts'],
+    chatterbox_loaded: true,
+    pocket_loaded: true,
+    chatterbox_device: 'cuda',
+  }), 0);
+
+  for (const body of [
+    {
+      ok: true,
+      engines: ['chatterbox', 'pocket-tts'],
+      chatterbox_loaded: true,
+      pocket_loaded: true,
+      chatterbox_device: 'cpu',
+    },
+    {
+      ok: true,
+      engines: ['chatterbox'],
+      chatterbox_loaded: true,
+      pocket_loaded: false,
+      chatterbox_device: 'cuda',
+    },
+    {
+      ok: true,
+      engines: ['pocket-tts'],
+      chatterbox_loaded: false,
+      pocket_loaded: true,
+      chatterbox_device: null,
+    },
+  ]) {
+    assert.notEqual(runTtsHealthcheck(healthcheck, body), 0, JSON.stringify(body));
   }
 });
 
@@ -490,6 +570,8 @@ test('source and resolved Ark TTS require the default-on fail-closed CUDA topolo
     ],
     ['      TTS_HEAVY_DEVICE: cuda\n', '      TTS_HEAVY_DEVICE: cpu\n', 'service tts-heavy must require CUDA'],
     ['      TTS_HEAVY_ENGINES: chatterbox,pocket-tts\n', '      TTS_HEAVY_ENGINES: chatterbox\n', 'service tts-heavy must load both engines'],
+    ['      TTS_HEAVY_STRICT_DEVICE: "1"\n', '', 'service tts-heavy must enforce strict CUDA after startup'],
+    [ttsHealthSource, '', 'service tts-heavy is missing its CUDA engine healthcheck'],
     [
       `    deploy:
       resources:
@@ -511,6 +593,8 @@ test('source and resolved Ark TTS require the default-on fail-closed CUDA topolo
     ['command', undefined, 'resolved tts-heavy has an invalid fail-closed CUDA startup gate'],
     ['device', 'cpu', 'resolved tts-heavy must require CUDA'],
     ['engines', 'chatterbox', 'resolved tts-heavy must load both engines'],
+    ['strict', '0', 'resolved tts-heavy must enforce strict CUDA after startup'],
+    ['healthcheck', undefined, 'resolved tts-heavy has an invalid CUDA engine healthcheck'],
     ['devices', undefined, 'resolved tts-heavy has an invalid NVIDIA GPU reservation'],
     ['profiles', ['tts-heavy'], 'resolved tts-heavy must not be profile-gated'],
   ];
@@ -520,6 +604,8 @@ test('source and resolved Ark TTS require the default-on fail-closed CUDA topolo
     if (field === 'command') delete model.services['tts-heavy'].command;
     if (field === 'device') model.services['tts-heavy'].environment.TTS_HEAVY_DEVICE = value;
     if (field === 'engines') model.services['tts-heavy'].environment.TTS_HEAVY_ENGINES = value;
+    if (field === 'strict') model.services['tts-heavy'].environment.TTS_HEAVY_STRICT_DEVICE = value;
+    if (field === 'healthcheck') delete model.services['tts-heavy'].healthcheck;
     if (field === 'devices') delete model.services['tts-heavy'].deploy.resources.reservations.devices;
     if (field === 'profiles') model.services['tts-heavy'].profiles = value;
     assert.ok(resolvedErrors(model).includes(expected), expected);

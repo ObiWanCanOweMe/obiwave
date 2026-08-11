@@ -258,9 +258,9 @@ jobs:
     concurrency:
       group: subwave-production
       cancel-in-progress: false
-    # Worst case: 2 x 5-minute stack updates, target + rollback probe budgets,
-    # a post-timeout grace period, and snapshot overhead remain below 17 min.
-    timeout-minutes: 30
+    # Worst case: 2 x 5-minute stack updates, a 20-minute first-boot CUDA TTS
+    # model-load budget, rollback probes, grace, and snapshot overhead.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

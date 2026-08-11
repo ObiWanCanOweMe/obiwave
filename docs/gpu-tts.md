@@ -66,10 +66,15 @@ PocketTTS together: Chatterbox uses CUDA, while PocketTTS remains CPU-only. No
 Portainer variable or profile selection is needed for the device or engines.
 
 Before the sidecar binds its internal HTTP port, it verifies that PyTorch can
-see CUDA. If the image, NVIDIA runtime, or GPU is unavailable, the sidecar exits
-instead of silently using ark's CPU; the controller then uses its normal Piper
-fallback. The sidecar remains internal to the Compose network and retains its
-state and model-cache volumes, memory limit, and log rotation.
+see CUDA. Every supervised Chatterbox worker start repeats that contract: if
+CUDA disappears after the server is already running, the replacement worker
+fails instead of silently loading on ark's CPU. Docker marks the sidecar healthy
+only after Chatterbox and PocketTTS are both ready and Chatterbox attests CUDA;
+the protected deployer allows a 20-minute cold-start window for first-boot model
+downloads and rolls back if that acceptance never passes. Until then the
+controller uses its normal Piper fallback. The sidecar remains internal to the
+Compose network and retains its state and model-cache volumes, memory limit,
+and log rotation.
 
 `HF_TOKEN` is the only optional Ark TTS setting: add it in Portainer only when
 you need PocketTTS voice cloning after accepting the Hugging Face model terms.
