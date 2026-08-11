@@ -50,6 +50,7 @@ fieldAria's groupProps carries no id, see lib/form.ts).
 import base64
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -66,6 +67,19 @@ AUTH = base64.b64encode(b"test:test").decode()
 
 WEB_DIR = Path(__file__).resolve().parents[1]
 CONTROLLER_DIR = WEB_DIR.parent / "controller"
+
+
+def _kill_by_port(port):
+    """Stop only the isolated listener on ``port`` on Linux or macOS."""
+    if shutil.which("lsof"):
+        out = subprocess.run(
+            ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True,
+        )
+        for raw_pid in out.stdout.split():
+            os.kill(int(raw_pid), signal.SIGTERM)
+        return
+    subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
 
 
 def api(path):
@@ -1225,9 +1239,9 @@ def onboarding(page):
         # either would match this very Bash/subprocess wrapper's own cmdline
         # and take the calling shell down with it (exit 144).
         if web_proc is not None:
-            subprocess.run(["fuser", "-k", f"{ONBOARD_WEB_PORT}/tcp"], capture_output=True)
+            _kill_by_port(ONBOARD_WEB_PORT)
             web_proc.wait(timeout=15)
-        subprocess.run(["fuser", "-k", f"{ONBOARD_CONTROLLER_PORT}/tcp"], capture_output=True)
+        _kill_by_port(ONBOARD_CONTROLLER_PORT)
         controller_proc.wait(timeout=15)
         shutil.rmtree(state_dir, ignore_errors=True)
         shutil.rmtree(dist_dir_abs, ignore_errors=True)

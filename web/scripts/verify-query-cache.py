@@ -255,7 +255,9 @@ def signed_out_does_not_retry_storm(page):
     a 401 into a sign-out, and a retrying query would fire three more
     unauthenticated calls per key and race the token wipe.
     """
-    page.goto(f"{WEB}/admin/library", wait_until="domcontentloaded", timeout=60_000)
+    # Browse is SQLite-backed, so this cache-policy check does not also require
+    # a reachable Subsonic server merely to render its first row.
+    page.goto(f"{WEB}/admin/library?tab=browse", wait_until="domcontentloaded", timeout=60_000)
     page.wait_for_selector(ROW, timeout=60_000)
     page.evaluate("() => localStorage.removeItem('subwave_admin_auth')")
 

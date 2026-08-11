@@ -9,7 +9,7 @@ import {
   SCHEDULE_DAYS,
   SCHEDULE_HOURS,
   emptyWeek as emptyScheduleWeek,
-} from '@/lib/schemas.generated';
+} from '../../../lib/schemas.generated.ts';
 
 export interface Schedule {
   [day: number]: (string | null)[];
