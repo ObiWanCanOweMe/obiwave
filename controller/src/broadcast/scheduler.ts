@@ -518,14 +518,13 @@ export async function runHourlyCheck() {
 // Every step traps its own errors — node-cron doesn't catch async throws, and
 // the route callers are fire-and-forget.
 //
-// `airHandoff` decides whether this call site may air the mic-pass itself.
-// The hourly cron passes false: it must still roll the session and plan the
-// episode (that state has to be right whether or not a track boundary is
-// near), but airing at wall-clock :00 ducks the middle of a song. Leaving the
-// handoff pending hands it to the next track boundary, which is where it
-// belongs. The takeover routes keep the default true — an operator action is
-// explicit and should air promptly, the same reasoning that exempts the manual
-// /dj/segment runners from the budget gate.
+// `airHandoff` decides whether this call site may air the mic-pass itself. The
+// hourly cron passes false: it must still roll the session and plan the episode
+// (that state has to be right regardless), but airing at wall-clock :00 ducks
+// the middle of a song, so leaving the handoff pending hands it to the next
+// track boundary. The takeover routes keep the default true — an operator action
+// is explicit and should air promptly, the same reasoning that exempts the
+// manual /dj/segment runners from the budget gate.
 export async function rollSessionNow({ airHandoff = true }: { airHandoff?: boolean } = {}) {
   let ctx: Awaited<ReturnType<typeof getFullContext>> | null = null;
   try {
@@ -699,14 +698,13 @@ async function skillsTick() {
 
 // ---------------------------------------------------------------------------
 // PROGRAMME BEATS
-// The feature beat mid-hour (station-minute :35–:39) and the outro in the
-// closing minutes of the final hour (station-minute :55+). Placement is a
-// STATION-clock fact, but station zones sit at :30/:45 offsets (IST, Nepal),
-// so fixed process-minute crons can land mid-show — the tick runs every 5
-// minutes and dispatches on programme.dueBeat() instead; the beat flags make
-// the repeat ticks inside a window no-ops. The intro has no cron of its own:
-// it rides the session-settled hook (hourlyCheck above + queue's track-start
-// path). Gating (listeners, budget, beat-already-aired) lives in programme.ts.
+// The feature beat mid-hour (station-minute :35–:39) and the outro in the final
+// hour's closing minutes (station-minute :55+). Placement is a STATION-clock
+// fact, but station zones sit at :30/:45 offsets (IST, Nepal), so a fixed
+// process-minute cron would land mid-show — instead the tick runs every 5
+// minutes and dispatches on programme.dueBeat(), with the beat flags making
+// repeat ticks inside a window no-ops. The intro has no cron of its own; it
+// rides the session-settled hook. Gating lives in programme.ts.
 // ---------------------------------------------------------------------------
 
 async function programmeTick() {
@@ -916,7 +914,7 @@ export function startScheduler() {
   // Initial run
   refreshAutoPlaylist().catch(err => queue.log('error', `Initial playlist failed: ${err.message}`));
 
-  // Auto-playlist refresh every 10 minutes
+  // Auto-playlist refresh, every AUTO_QUEUE_REFRESH_MINUTES (default 60)
   cron.schedule(`*/${config.show.autoQueueRefreshMinutes} * * * *`, refreshAutoPlaylist);
 
   // Top of every hour

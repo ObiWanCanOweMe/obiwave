@@ -25,8 +25,10 @@ import {
 } from './request-strict.js';
 import {
   checkRateLimit, checkGlobalRateLimit, commitRateLimit, commitGlobalRateLimit, clientIp,
-  REQUESTS_DISABLED, REQUEST_TEXT_MAX,
+  REQUESTS_DISABLED,
 } from '../middleware/ratelimit.js';
+import { validatePublicBody } from '../middleware/validate.js';
+import { listenerRequestSchema } from '../schemas/request.js';
 import { shuffle } from '../util/shuffle.js';
 
 export const router = express.Router();
@@ -169,12 +171,11 @@ async function resolveGenre(name) {
 // `ctx` from getFullContext() is fetched once here and threaded through every
 // path, instead of the four separate fetches the inline handler used to do.
 // ---------------------------------------------------------------------------
-// Append the durable debug record once, at a request's terminal state. Reads
-// the trace fields the resolution paths stash on `entry` as they go (path,
-// pickSource, the matcher breakdown, the full picked track + intro script).
-// Best-effort — never let a logging hiccup affect the listener's outcome. Used
-// by both resolveRequest's terminal closures and the crash catch below, so a
-// request that throws mid-resolution still lands in the log.
+// Append the durable debug record once, at a request's terminal state, from the
+// trace fields the resolution paths stash on `entry` as they go. Best-effort —
+// a logging hiccup must never affect the listener's outcome. Called from both
+// resolveRequest's terminal closures and the crash catch below, so a request
+// that throws mid-resolution still lands in the log.
 function recordOutcome(entry) {
   try {
     requestLog.record({
@@ -774,8 +775,19 @@ async function resolveRequest(entry) {
 // POST /request — listener submits a request. Validates + rate-limits
 // synchronously, then returns a request id immediately and resolves in the
 // background. The listener never waits on the LLM.
+//
+// The shared schema (schemas/request.ts, also run pre-flight by the player's
+// request boxes) owns the SHAPE: text present and under the cap, name under its
+// cap. Over-cap text REFUSES rather than being sliced — a silent slice could cut
+// a request mid-thought and have the DJ answer half of it — and the box tells
+// the listener before the network is touched. The guard pipeline below
+// (sanitize → strip → screen) stays route-owned: it repairs rather than refuses,
+// and needs server state the schema can't see.
 // ---------------------------------------------------------------------------
-router.post('/request', async (req, res) => {
+// validatePublicBody, not validateBody: this is the one LISTENER-facing form,
+// so the 400 carries an unprefixed message plus the success/message keys the
+// shipped native app reads. See the middleware for why.
+router.post('/request', validatePublicBody(listenerRequestSchema), async (req, res) => {
   const cfg = (settings.get() as any)?.requests || {};
   if (REQUESTS_DISABLED || cfg.enabled === false) {
     return res.status(503).json({ success: false, message: 'Requests are temporarily closed.' });
@@ -790,13 +802,15 @@ router.post('/request', async (req, res) => {
     });
   }
 
-  const rawText = typeof req.body?.text === 'string' ? req.body.text : '';
-  const rawName = typeof req.body?.name === 'string' ? req.body.name : '';
-  // Sanitize (markup-shaped injection), then neutralize the "read this on air"
-  // directive family — the cleaned text is all the session/prompts/air see; the
-  // raw text is preserved on the entry for the operator request log.
+  // validateBody already replaced req.body with the parsed shape: text is a
+  // trimmed non-empty string within the cap, name a trimmed string ('' when
+  // absent). Sanitize (markup-shaped injection), then neutralize the "read
+  // this on air" directive family — the cleaned text is all the
+  // session/prompts/air see; the raw text is preserved on the entry for the
+  // operator request log. Sanitize never grows its input, so no re-slice.
+  const { text: rawText, name: rawName } = req.body as { text: string; name: string };
   const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
-  const text = stripped.text.slice(0, REQUEST_TEXT_MAX);
+  const text = stripped.text;
   if (!text) {
     // Distinguish "you typed nothing" from "everything you typed was staging
     // directions for the DJ, so there is no request left to resolve" — the
@@ -879,7 +893,7 @@ router.post('/request', async (req, res) => {
   const id = randomUUID();
   const entry: any = {
     id, status: 'pending', requester, text,
-    rawText: sanitizeRequestText(rawText).slice(0, REQUEST_TEXT_MAX),
+    rawText: sanitizeRequestText(rawText),
     injection: stripped.injection,
     ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),

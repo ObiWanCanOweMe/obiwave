@@ -93,4 +93,53 @@ const form = {
   assert.equal(md, '---\nname: brand-new\n---\nSay something.\n', 'no existing file → no carry, no crash');
 }
 
+// ── what writeSkillFile emits must survive parseFrontmatter unchanged ───────
+// The loader parses SKILL.md as real YAML, so the writer and the reader are now
+// two halves of one round trip: a value the writer emits bare that YAML reads
+// back as something else is silent data loss on the operator's next save.
+{
+  const { parseFrontmatter } = await import('../src/skills/loader.js');
+
+  const awkward = {
+    plain: 'Tech headlines',
+    colon: 'Headlines: today',                       // bare → a YAML parse error
+    hash: 'sharp # not a comment',                   // bare → truncated at the #
+    leadingZeros: '007',                             // bare → the number 7
+    numberish: '6',                                  // bare → 6 → "6". No quotes needed.
+    boolish: 'true',                                 // bare → true → "true". Ditto.
+    commaList: 'factual, late-night',                // the flattened-list form
+    url: 'https://example.com/a.xml?x=1&y=2#top',
+    brace: 'Returns { available, city }. Use it.',   // the real moon-phase/meanwhile shape
+    dash: '- leading dash',                          // bare → a list
+    quote: `it's "quoted"`,
+    empty: '',
+  };
+
+  await writeSkillFile({
+    kind: 'awkward',
+    label: awkward.colon,
+    config: awkward,
+    configKeys: Object.keys(awkward),
+    brief: 'Say something.',
+  });
+  const md = readFileSync(join(stateDir, 'skills', 'awkward', 'SKILL.md'), 'utf8');
+  const { data, malformed } = parseFrontmatter(md);
+
+  assert.equal(malformed, undefined, `emitted file is not valid YAML:\n${md}`);
+  assert.equal(data.label, awkward.colon, 'a colon in a label survives the round trip');
+  for (const [key, value] of Object.entries(awkward)) {
+    if (value === '') {
+      assert.equal(data[key], undefined, 'an empty knob is omitted, not written blank');
+      continue;
+    }
+    assert.equal(data[key], value, `knob "${key}" did not round-trip`);
+  }
+  // Minimality: the ordinary values must not have picked up quotes, or every
+  // existing SKILL.md churns on its first save after the upgrade.
+  assert.match(md, /^plain: Tech headlines$/m, 'an ordinary value stays bare');
+  assert.match(md, /^numberish: 6$/m, 'a number that round-trips stays bare');
+  assert.match(md, /^commaList: factual, late-night$/m, 'the comma-list form stays bare');
+  assert.match(md, /^url: https:\/\/example\.com\/a\.xml\?x=1&y=2#top$/m, 'a URL stays bare');
+}
+
 console.log('skill-scaffold-preserve.test.ts — all assertions passed');

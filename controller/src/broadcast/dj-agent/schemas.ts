@@ -131,21 +131,18 @@ export function requestSchema() {
 // only one with no framing at all behind it.
 export const LISTENER_TEXT_CLAUSE = instruction('shared', 'listener-text');
 
-// Ultra-minimal — persona + editorial criteria, nothing else. The AI SDK
-// already conveys everything else through its own channels: tool descriptions
-// (llm/tools.js), the done-tool description (llm/sdk.js), schema field
-// descriptions (PICK_SCHEMA above), and the per-pick event message in the
-// session window ("Stay silent — no link this time." vs "Also write a short
-// link to speak over this track now."). Duplicating those in prompt text
-// competes with the framework's structural signals and derails smaller
-// models. PICKER_CRITERIA stays because it's editorial preference (flow,
-// context, variety, interest) — that's not in any tool or schema.
-// The transition-effects guidance (PICK_SCHEMA.transition) now lives in
-// llm/internal/prompts/picker.ts (dj.effectsGuidance) so the pool picker
-// shares it verbatim — it's appended to the picker system prompt ONLY when
-// effects are active (the on-air persona's djMode — see
-// settings.effectsActive; there is no separate toggle). Invisible otherwise,
-// so the model leaves "transition" null.
+// Ultra-minimal — persona + editorial criteria, nothing else. The AI SDK already
+// conveys the rest through its own channels: tool descriptions, the done-tool
+// description, schema field descriptions, and the per-pick event message in the
+// session window. Duplicating those in prompt text competes with the framework's
+// structural signals and derails smaller models. PICKER_CRITERIA stays because
+// editorial preference (flow, context, variety, interest) is in no tool or
+// schema.
+//
+// The transition-effects guidance lives in prompts/picker.ts (dj.effectsGuidance)
+// so the pool picker shares it verbatim, and is appended ONLY when effects are
+// active (settings.effectsActive — there is no separate toggle). Invisible
+// otherwise, so the model leaves "transition" null.
 
 // `showAt` — resolve the show brief/leans for that future moment instead of
 // now: the pick airs when the current track ends, so near a show boundary the

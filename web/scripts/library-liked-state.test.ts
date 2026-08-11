@@ -252,6 +252,10 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
   const flush = async () => {
     await Promise.resolve();
     await Promise.resolve();
+    // TanStack Query publishes observer updates through notifyManager rather
+    // than synchronously inside the resolved fetch promise.
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    await Promise.resolve();
   };
   const respond = async (request: PendingRequest, rows: Track[], total: number) => {
     await act(async () => {
@@ -299,23 +303,21 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     assert.equal(rowVisible('Stale Offset'), false, 'an older offset response cannot overwrite it');
 
     await act(async () => { buttonWithText('Refresh').props.onClick({}); await flush(); });
-    const staleModeRequest = likedRequests[3]!;
+    const sharedModeRequest = likedRequests[3]!;
     const allMode = radioWithText('All');
     await act(async () => { allMode.props.onClick({}); await flush(); });
     const likedModeControl = radioWithText('Liked');
     await act(async () => { likedModeControl.props.onClick({}); await flush(); });
-    const currentModeRequest = likedRequests[4]!;
-    await respond(currentModeRequest, [track('fresh-mode', 'Fresh Mode')], 101);
-    await respond(staleModeRequest, [track('stale-mode', 'Stale Mode')], 101);
-    assert.equal(rowVisible('Fresh Mode'), true, 'the re-entered mode owns its response');
-    assert.equal(rowVisible('Stale Mode'), false, 'the prior-mode response stays rejected');
+    assert.equal(likedRequests.length, 4, 're-entering the same query key shares its in-flight request');
+    await respond(sharedModeRequest, [track('fresh-mode', 'Fresh Mode')], 101);
+    assert.equal(rowVisible('Fresh Mode'), true, 'the re-entered mode observes its shared query');
 
     await act(async () => { buttonWithText('next ›').props.onClick({}); await flush(); });
-    assert.match(likedRequests[5]!.path, /offset=50/);
-    await respond(likedRequests[5]!, [], 21);
-    assert.equal(likedRequests.length, 7, 'an emptied invalid page triggers a clamped refetch');
-    assert.match(likedRequests[6]!.path, /offset=0/);
-    await respond(likedRequests[6]!, [track('clamped-track', 'Clamped Track')], 21);
+    assert.match(likedRequests[4]!.path, /offset=50/);
+    await respond(likedRequests[4]!, [], 21);
+    assert.equal(likedRequests.length, 6, 'an emptied invalid page triggers a clamped refetch');
+    assert.match(likedRequests[5]!.path, /offset=0/);
+    await respond(likedRequests[5]!, [track('clamped-track', 'Clamped Track')], 21);
     assert.equal(rowVisible('Clamped Track'), true, 'the newest valid page is rendered after clamping');
 
     // Hold an unlike while the operator changes sort. Mutation completion must
@@ -332,15 +334,14 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
 
     const recentSort = radioWithText('Recent');
     await act(async () => { recentSort.props.onClick({}); await flush(); });
-    assert.match(likedRequests[7]!.path, /sort=recent/);
-    await respond(likedRequests[7]!, [track('clamped-track', 'Clamped Track')], 21);
+    assert.equal(likedRequests.length, 6, 'the fresh recent-sort cache is reused until the mutation settles');
 
     await act(async () => {
       operatorMutationRequests[0]!.resolve(jsonResponse({ ok: true, count: 3 }));
       await unlikeMutation;
       await flush();
     });
-    const mutationRefresh = likedRequests[8]!;
+    const mutationRefresh = likedRequests[6]!;
     const mutationRefreshUsesCurrentSort = /sort=recent/.test(mutationRefresh.path);
 
     await act(async () => {
@@ -381,7 +382,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     }, 'mutation completion follows current controls and restores the invalidated shared index');
 
     await act(async () => { radioWithText('Liked').props.onClick({}); await flush(); });
-    await respond(likedRequests[9]!, [track('clamped-track', 'Clamped Track', 3)], 21);
+    assert.equal(rowVisible('Clamped Track'), true, 're-entering Liked reuses the settled current-sort cache');
 
     const desktopClear = renderer.root.findByProps({ 'aria-label': 'clear all likes for Clamped Track' });
     await act(async () => { desktopClear.props.onClick({}); await flush(); });
@@ -392,8 +393,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       path: '/api/likes/song/clamped-track',
       method: 'DELETE',
     });
-    assert.equal(likedRequests.length, 11, 'confirmed desktop clear refreshes the active liked page');
-    await respond(likedRequests[10]!, [track('mobile-track', 'Mobile Track')], 1);
+    assert.equal(likedRequests.length, 8, 'confirmed desktop clear refreshes the active liked page');
+    await respond(likedRequests[7]!, [track('mobile-track', 'Mobile Track')], 1);
 
     const mobileTrigger = renderer.root.findByProps({ 'aria-label': 'actions for Mobile Track' });
     await act(async () => { mobileTrigger.props.onClick({}); });
@@ -408,7 +409,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       path: '/api/likes/song/mobile-track',
       method: 'DELETE',
     }, 'mobile confirmation invokes the same per-song DELETE mutation path');
-    await respond(likedRequests[11]!, [], 0);
+    await respond(likedRequests[8]!, [], 0);
   } finally {
     if (renderer) await act(async () => { renderer.unmount(); });
     for (const [key, descriptor] of Object.entries(saved)) {

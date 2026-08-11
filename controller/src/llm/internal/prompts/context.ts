@@ -1,6 +1,7 @@
 // The shared "right now" context block + narrative-variety helpers. Used by
 // every generate* script, by matchRequest, and by the segment director
 // (skills/_agent.js) — so they all show the model the same picture of the moment.
+import { CONTEXT_FIELDS, type ContextField } from '../../../schemas/skill.js';
 
 // Narrative angles per call type. One is picked at random and injected into the
 // user prompt as "Tone for this segment:" so consecutive generations don't fall
@@ -88,8 +89,11 @@ export function randomSeed() {
 // The "right now" fields buildContextLines can emit — the vocabulary every
 // per-skill / per-generator context allowlist is drawn from (issue #471). Order
 // is the order the lines are emitted in. Keep in sync with the guards below.
-export const CONTEXT_FIELDS = ['date', 'clock', 'time', 'weather', 'festival', 'show', 'listeners'] as const;
-export type ContextField = (typeof CONTEXT_FIELDS)[number];
+//
+// Homed in the shared skill schema and re-exported here: the admin skill editor
+// renders one chip per entry and used to carry its own hand-maintained copy, so
+// a new field meant editing this list and a web file that nothing linked to it.
+export { CONTEXT_FIELDS, type ContextField };
 
 // Normalise a contextFields spec (array | comma-string | null/undefined) to a
 // Set of known field keys, or `null` meaning "every field" — the back-compat

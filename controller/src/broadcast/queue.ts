@@ -378,28 +378,26 @@ class Queue {
     return 0;
   }
 
-  // Push a listener request. Adds to upcoming and kicks off the Liquidsoap sender.
-  // `introScript` is the spoken intro/link tied to THIS track — it is NOT aired
-  // at queue time. drainToLiquidsoap renders it to a WAV ahead of time and
-  // airIntro() writes that WAV to Liquidsoap only when the track actually starts
-  // playing (see onTrackStarted), so the voice always lands over the right song.
-  // `introKind` picks both the TTS engine routing and the duck channel:
-  //   'dj-speak' → say.txt   (HEAVY duck — request intros)
-  //   'link'     → intro.txt (LIGHT duck — between-track auto-DJ links)
-  // `linkPrev` is the track this item's intro/link BACK-ANNOUNCES (the one that
-  // was on-air when the pick was made). A between-track link is written as "that
-  // was X, here's this" against the track playing then; deferring it to air time
-  // (#189) is only valid while this pick is still the immediately-next track. If
-  // a listener request slips into `upcoming` ahead of it before it airs, that
-  // request plays first, so the baked-in "that was X" would name a track one (or
-  // more) older than what actually just played. airIntro() uses linkPrev to
-  // detect that and drop the now-stale back-announce rather than air a wrong
-  // name. Left null for request intros (they never back-announce).
-  // `linkClockAt` is the air moment `introScript` was written against, present
-  // only when the generator gave the model a clock to speak (#1314). airIntro
-  // drops the line if the real seam lands too far from it — a forecast made
-  // from the on-air track's remaining play goes badly wrong when the pick
-  // misses that seam and auto.m3u fills the slot instead.
+  // Add a track to `upcoming` and kick off the Liquidsoap sender.
+  //
+  // `introScript` is tied to THIS track but is NOT aired at queue time:
+  // drainToLiquidsoap renders it to a WAV ahead of time and airIntro() writes
+  // that WAV only when the track actually starts, so the voice lands over the
+  // right song. `introKind` picks the engine routing and the duck channel —
+  // 'dj-speak' → say.txt (HEAVY duck, request intros), 'link' → intro.txt
+  // (LIGHT duck, between-track links).
+  //
+  // `linkPrev` is the track the intro BACK-ANNOUNCES. Deferring the line to air
+  // time (#189) is only valid while this pick is still immediately-next; a
+  // listener request slipping in ahead of it would make the baked-in "that was
+  // X" name the wrong song, so airIntro uses linkPrev to detect that and drop
+  // the back-announce. Null for request intros, which never back-announce.
+  //
+  // `linkClockAt` is the air moment the script was written against, set only
+  // when the generator gave the model a clock to speak (#1314). airIntro drops
+  // the line if the real seam lands too far from it — the forecast is made from
+  // the on-air track's remaining play and goes badly wrong when the pick misses
+  // that seam and auto.m3u fills the slot.
   async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
     track: Track;
     requestedBy?: string | null;
@@ -412,21 +410,11 @@ class Queue {
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
     linkClockAt?: Date | number | null;
   }) {
-    // Dedup guard. Applies to AI picks AND listener requests: two listener
-    // requests resolving to the same song over the 25-45s identify/match window
-    // each read queuedIds() before either reaches push(), so the early read
-    // can't see the other (issue #619). This check is the only synchronous
-    // point where both are visible — there is no await between it and the
-    // upcoming.push() below, so within the single-threaded event loop it's
-    // atomic and closes the race. Returns -1 so the caller can acknowledge
-    // honestly ("already on the way") instead of queuing a second back-to-back
-    // play. `allowDuplicate` opts an explicit operator action (the studio
-    // queue-track route) out — a deliberate manual queue always fires.
-    // Global never-play gate — the blocklist is absolute (operator's call:
-    // even explicit manual queueing is refused until the entry is unblocked),
-    // so it sits above allowDuplicate. Every playback path funnels through
-    // push() (dj-agent, requests, MCP, studio queue), making this the last
-    // line even for sources that bypass the subsonic/library filters.
+    // The blocklist is absolute — even explicit manual queueing is refused
+    // until the entry is unblocked — so it sits above `allowDuplicate`. Every
+    // playback path funnels through push() (dj-agent, requests, MCP, studio
+    // queue), making this the last line even for sources that bypass the
+    // subsonic/library filters.
     const blockHit = blocklist.hitOf(track);
     if (blockHit) {
       // Name what refused it — an id entry reads as before; a rule names
@@ -438,6 +426,13 @@ class Queue {
       this.log('blocked', `${track?.title} — ${track?.artist} (${why})`);
       return -2;
     }
+    // Applies to AI picks AND listener requests: two requests resolving to the
+    // same song over the 25-45s identify/match window each read queuedIds()
+    // before either reaches push(), so neither early read sees the other (#619).
+    // This is the only synchronous point where both are visible — no await
+    // between it and the upcoming.push() below — so it closes the race. -1 lets
+    // the caller acknowledge honestly instead of queuing a back-to-back play;
+    // `allowDuplicate` opts out an explicit operator action.
     if (!allowDuplicate && track?.id) {
       const dominated = this.upcoming.some(i => i.track?.id === track.id)
         || (this.current?.track?.id === track.id);
@@ -516,26 +511,15 @@ class Queue {
     };
   }
 
-  // Resolve a track's integrated loudness + peak and stash a clamped gain
-  // offset toward the operator's loudness target on the track as `gainDb`.
-  // Source ladder is settings.loudness.source: an embedded ReplayGain tag
-  // (whole-file stereo R128 via Navidrome, issue #998) outranks the analyzer's
-  // measured LUFS (leading-window only) unless the operator pins one source.
-  // A track object without the `replayGain` key came through a projection
-  // that dropped it (the agent's slim candidates, a JSON round trip), so a
-  // one-row getSong recovers it — `replayGain: {}`/null means Navidrome was
-  // asked and the file is untagged, no lookup. Measured values resolve track
-  // object first, else a library lookup. The peak lets gainForLoudness cap
-  // the boost by real headroom instead of a blind clamp; a ReplayGain
-  // loudness keeps its own trackPeak (mixing it with the analyzer's window
-  // peak would cap against a different scan). Null loudness from every
-  // allowed source → leaves gainDb undefined, so getAnnotatedUri emits no
-  // liq_amplify and the track plays at unity gain.
+  // Stash a clamped gain offset toward the operator's loudness target on the
+  // track as `gainDb`. Null loudness from every allowed source leaves it
+  // undefined, so getAnnotatedUri emits no liq_amplify and the track plays at
+  // unity.
   //
-  // The resolution itself lives in music/loudness.ts because the stem-blend
-  // render needs the SAME answer (#1240) — a clip carries no liq_amplify, so
-  // the render bakes this figure in, and a second implementation there is how
-  // rendered seams ended up at a different level than the tracks around them.
+  // The resolution lives in music/loudness.ts because the stem-blend render
+  // needs the SAME answer (#1240) — a clip carries no liq_amplify, so the render
+  // bakes this figure in, and a second implementation there is how rendered
+  // seams ended up at a different level than the tracks around them.
   async applyLoudnessGain(track: Track | null) {
     if (!track) return;
     const gain = await loudness.resolveGainDb(track, msg => this.log('warn', msg));
@@ -573,25 +557,18 @@ class Queue {
     this.log('mix', `${kind} dropped (${reason})`);
   }
 
-  // DJ-mode mixing applied to the transition INTO `item`'s track (features 1 &
-  // 2, plus the sweep/washout transition effects). No-op unless the active
-  // persona is in DJ mode. Stashes a per-transition crossfade length on the
-  // track (read by subsonic.getAnnotatedUri → liq_cross_duration) and, on a
-  // notable upward tempo jump, fires a rate-limited riser across the blend.
-  // Beds — push an instrumental bed into dj_queue ahead of `item` when its link
-  // would outlast the song's own intro, so the DJ talks over the bed instead of
-  // over the song. Sets item.bedded, which is how the bed's start event (see
-  // onBedStarted) finds the item whose link it should air.
+  // Push an instrumental bed into dj_queue ahead of `item` when its link would
+  // outlast the song's own intro, so the DJ talks over the bed rather than over
+  // the song. Sets item.bedded, which is how the bed's start event
+  // (onBedStarted) finds the item whose link it should air.
   //
-  // Everything this needs already exists at this point in the drain: the link's
-  // WAV was rendered a few lines up, so its real length is readable NOW, before
-  // the track URI is written. That ordering is what makes the whole feature a
-  // controller-side change rather than a mixer one.
+  // Ordering is what makes this a controller-side feature rather than a mixer
+  // one: the link's WAV was rendered a few lines up, so its real length is
+  // readable here, before the track URI is written.
   //
   // Silent no-op on every path that isn't a bedded link — beds off, a request
-  // intro (heavy duck by design, see the design doc), no script, a script that
-  // fits the intro, or no bed long enough. All of them leave today's behaviour
-  // untouched.
+  // intro (heavy duck by design), no script, a script that fits the intro, or no
+  // bed long enough.
   async maybePushBed(item: QueueItem) {
     const cfg = settings.get()?.beds;
     if (!cfg?.enabled) return;
@@ -704,34 +681,29 @@ class Queue {
     const cur = this.mixAnalysisFor(prevTrack);
     const next = this.mixAnalysisFor(item.track);
 
-    // Feature 1 — the pair-sized adaptive blend — is NOT computed here. It
-    // was #749's wall for years: liq_cross_duration governs the crossfade at
-    // the STAMPED track's OWN end, but at this point in the FIFO drain the
-    // predecessor is already annotated and gone, so the value could never be
-    // attached to the right track. The pair-drain hold (drain-policy.ts)
-    // dissolved the wall: applyPairStamps() sizes the blend for the seam OUT
-    // of an item once its successor is known at drain time — the direction
-    // the old comment prescribed. This function keeps only the
-    // track-intrinsic work: ending-aware exit canvas + effect gating below.
-    // The operator crossfade ceiling still caps every canvas stamped here.
+    // The pair-sized adaptive blend is NOT computed here — liq_cross_duration
+    // governs the crossfade at the STAMPED track's OWN end, and at this point in
+    // the FIFO drain the predecessor is already annotated and gone. The
+    // pair-drain hold (drain-policy.ts) is what makes it possible at all:
+    // applyPairStamps() sizes the blend once the successor is known (#749). This
+    // function keeps only the track-intrinsic work — ending-aware exit canvas
+    // plus effect gating — still capped by the operator crossfade ceiling.
     const maxSec = settings.get()?.crossfadeDuration ?? null;
 
     // DJ transition effects (sweep/washout) — the agent proposes, the data
-    // disposes. A rejected flag is stripped so getAnnotatedUri never stamps it. On success the
-    // washout also gets its canvas + tempo stamps: cross-duration physics puts
-    // both on the flagged track itself (its liq_cross_duration governs its OWN
-    // end, exactly where the wash fires — overriding the feature-1 value). The
-    // sweep needs no stamps: the transition INTO it is already sized, and its
-    // envelope scales to whatever d it gets.
-    // Length-cap exit (max-track-length × effects): when this pick will be CUT
-    // by the cap (duration > effectiveMaxTrackSec → drain stamps liq_cue_out),
-    // its ending is a forced mid-song exit — and the classic DJ move for
-    // leaving a record before it ends is the echo-out. Auto-arm a washout so
-    // the cut sounds intentional instead of broken. Deterministic, not an LLM
-    // choice: the controller KNOWS which tracks will be capped. The flag rides
-    // the ending track, exactly like a DJ-chosen washout, and coexists with a
-    // sweep on the same pick (sweep shapes its ENTRY, washout its EXIT).
-    // Requests are exempt from the cap (requestedBy) so they never arm this.
+    // disposes; a rejected flag is stripped so getAnnotatedUri never stamps it.
+    // A washout also gets canvas + tempo stamps on the flagged track ITSELF,
+    // since its liq_cross_duration governs its own end, exactly where the wash
+    // fires. The sweep needs no stamps: the transition into it is already sized
+    // and its envelope scales to whatever d it gets.
+    //
+    // Auto-arm a washout when the cap will CUT this pick (duration >
+    // effectiveMaxTrackSec → drain stamps liq_cue_out): the ending is a forced
+    // mid-song exit, and the echo-out is what makes it sound intentional rather
+    // than broken. Deterministic rather than an LLM choice — the controller
+    // knows which tracks will be capped. Coexists with a sweep on the same pick
+    // (sweep shapes ENTRY, washout EXIT). Requests are exempt from the cap, so
+    // they never arm it.
     const capSec = item.requestedBy ? null : settings.effectiveMaxTrackSec();
     const durSec = knownDurationSec(item.track);
     const cappedExit = !!(capSec && durSec > capSec);
@@ -788,20 +760,19 @@ class Queue {
       }
     }
 
-    // The two flags are independent boundaries — sweep shapes this pick's
-    // ENTRY, washout its EXIT — so both can ride one pick; validate and stamp
-    // them separately. No cooldown by design: pacing is the DJ's call (the
-    // prompt tells it to let ordinary blends breathe between effects); the
-    // analyzer veto is the only deterministic guard, and it only judges
-    // sweeps (musically wrong between locked tracks), never frequency.
-    // Anti-streak: the model imitates its own session history, so once it
-    // finds a defensible favourite it repeats it mechanically (observed twice:
-    // all-normal, then all-blend). The third consecutive IDENTICAL CHOICE is
-    // stripped — variety is a station rule, not a model virtue. The ledger
-    // tracks what the model ASKED FOR, not what aired: a stripped blend still
-    // evidences monoculture, so a stuck model gets everything past the second
-    // stripped until it genuinely varies. Auto (length-cap) washouts are
-    // deterministic, not choices — invisible to the ledger in both directions.
+    // The two flags are independent boundaries — sweep shapes ENTRY, washout
+    // EXIT — so both can ride one pick and are validated separately. No cooldown
+    // by design: pacing is the DJ's call, and the analyzer veto only judges
+    // whether a sweep is musically wrong between locked tracks, never frequency.
+    //
+    // Anti-streak: the model imitates its own session history, so once it finds
+    // a defensible favourite it repeats it mechanically (observed as all-normal,
+    // then all-blend). The third consecutive IDENTICAL choice is stripped —
+    // variety is a station rule, not a model virtue. The ledger tracks what the
+    // model ASKED FOR, not what aired, so a stripped blend still evidences
+    // monoculture and a stuck model stays stripped until it genuinely varies.
+    // Auto (length-cap) washouts are deterministic, not choices, and are
+    // invisible to the ledger in both directions.
     const choice: string | null =
       item.track.sweep ? 'sweep' : item.track.blend ? 'blend'
         : item.track.dissolve ? 'dissolve'
@@ -987,14 +958,14 @@ class Queue {
     return names;
   }
 
-  // Pair-sized exit blend (feature 1 — the #749 fix, applied at last): with
-  // the successor known at drain time, size THIS track's own exit crossfade
-  // for the actual pair — compatibility curve, daypart nudge, bar-snap,
-  // capped to the successor's instrumental intro. Precedence: washout/loop
-  // own their canvases outright (their physics stamped them); the
-  // ending-aware canvas from applyMixTransition is narrowed, never widened —
-  // the pair value wins only when SHORTER, so a cold ending's tight cut
-  // survives a clash's long wash and a measured fade never doubles under a
+  // Pair-sized exit blend (#749): with the successor known at drain time, size
+  // THIS track's own exit crossfade for the actual pair — compatibility curve,
+  // daypart nudge, bar-snap, capped to the successor's instrumental intro.
+  //
+  // Precedence: washout/loop own their canvases outright (their physics stamped
+  // them), and applyMixTransition's ending-aware canvas is narrowed, never
+  // widened — the pair value wins only when SHORTER, so a cold ending's tight
+  // cut survives a clash's long wash and a measured fade never doubles under a
   // locked pair's 4s blend.
   applyPairStamps(item: QueueItem, successor: QueueItem) {
     if (!settings.getEffectivePersona()?.djMode) return;
@@ -1103,17 +1074,13 @@ class Queue {
         // liq_amplify. No loudness from any source → no liq_amplify → unity.
         await this.applyLoudnessGain(item.track);
 
-        // Hard length cap (#447 max-track-length): stamp a cue_out so Liquidsoap
-        // cuts an over-length autonomous pick mid-air. Explicit listener requests
-        // (requestedBy set) stay exempt — a requested long mix plays in full,
-        // mirroring the request path's selection-cap exemption in the picker tools.
-        // Beds: if this item's link would outlast the song's own intro, push an
-        // instrumental bed into dj_queue AHEAD of the track. The DJ then talks
-        // over the bed and the track ramps in under the closing words, instead
-        // of the link being talked over the song it's introducing.
+        // Hard length cap (#447): stamp a cue_out so Liquidsoap cuts an
+        // over-length autonomous pick mid-air. Listener requests stay exempt —
+        // a requested long mix plays in full, mirroring the picker tools'
+        // selection-cap exemption.
         //
-        // Order matters and dj_queue is FIFO, so the bed must be handed over
-        // before the track URI below.
+        // Then the bed, if this item's link would outlast the song's own intro.
+        // dj_queue is FIFO, so it must be handed over BEFORE the track URI below.
         await this.maybePushBed(item);
 
         const maxDurationSec = item.requestedBy ? null : settings.effectiveMaxTrackSec();
@@ -1216,16 +1183,15 @@ class Queue {
     }
   }
 
-  // Commit the queued pick to Liquidsoap before an operator skip (#1300 bug
-  // 6). Under pair-aware drain the held pick isn't in dj_queue for most of
-  // each track's runtime — a bare telnet skip falls through to the randomized
-  // auto playlist while the admin queue shows a different "next". Force-drain
-  // whatever is held, then wait until the dj_queue_status probe reports a
-  // RESOLVED request waiting (a sent-but-still-downloading request loses the
-  // fallback race just the same), bounded by SKIP_COMMIT_WAIT_MS — past it
-  // the skip proceeds anyway (ending THIS track is the operator's intent) and
-  // the caller reports the miss honestly. Never throws: a skip must not fail
-  // on its safety net.
+  // Commit the queued pick to Liquidsoap before an operator skip (#1300 bug 6).
+  // Under pair-aware drain the held pick isn't in dj_queue for most of a track's
+  // runtime, so a bare telnet skip falls through to the randomized auto playlist
+  // while the admin queue shows a different "next". Force-drain whatever is
+  // held, then wait for the dj_queue_status probe to report a RESOLVED request
+  // (a sent-but-still-downloading one loses the fallback race just the same),
+  // bounded by SKIP_COMMIT_WAIT_MS. Past it the skip proceeds anyway — ending
+  // THIS track is the operator's intent — and the caller reports the miss
+  // honestly. Never throws: a skip must not fail on its safety net.
   async commitBeforeSkip(): Promise<{ pending: boolean; committed: boolean; waitedMs: number }> {
     if (skipPrepAction(this.upcoming.length) === 'skip-now') {
       return { pending: false, committed: false, waitedMs: 0 };
@@ -1256,20 +1222,16 @@ class Queue {
     return { pending: true, committed: false, waitedMs: Date.now() - t0 };
   }
 
-  // Speak something without queueing a track — for hourly time checks,
-  // weather updates, station IDs, and auto DJ links.
+  // Speak something without queueing a track — hourly time checks, weather,
+  // station IDs, auto-DJ links. Two Liquidsoap voice channels, picked by kind:
+  //   - 'link' → intro.txt → intro_queue → LIGHT duck (talk-over feel: the song
+  //              that just started stays audible under the voice)
+  //   - else   → say.txt   → voice_queue → HEAVY duck (solo voice dominates)
   //
-  // Dispatches to one of two Liquidsoap voice channels based on kind:
-  //   - 'link' → intro.txt → intro_queue → LIGHT duck (talk-over feel: the
-  //              song that just started stays audible underneath the voice)
-  //   - everything else → say.txt → voice_queue → HEAVY duck (solo voice
-  //              dominates; used for station ID / hourly / weather)
-  //
-  // `opts.persona` overrides the on-air persona for THIS clip's voice — the
-  // persona-handoff mic-pass voices the outgoing DJ after the hour has flipped
-  // (see broadcast/dj-agent.runPersonaHandoff). `opts.meta` is merged into the
-  // session turn (e.g. tagging the sign-off with the outgoing persona id). Both
-  // default to absent, so every existing call site is byte-identical.
+  // `opts.persona` overrides the on-air persona for THIS clip — the mic-pass
+  // voices the OUTGOING DJ after the hour has flipped (dj-agent.runPersonaHandoff).
+  // `opts.meta` is merged into the session turn, e.g. tagging the sign-off with
+  // the outgoing persona id.
   async announce(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
     if (!text || !text.trim()) return;
     try {
@@ -1330,19 +1292,18 @@ class Queue {
     return true;
   }
 
-  // Defer a spoken segment to the NEXT track boundary instead of airing it
-  // immediately. Used for station idents: they have no real-time constraint
-  // (unlike the hourly time check), so ducking the current song mid-vocal at
-  // an arbitrary wall-clock minute is pure loss — at a transition the same
-  // ident lands like real radio. The WAV is rendered NOW (TTS latency off the
-  // air path); onTrackStarted airs it via the light-duck intro channel so the
-  // incoming song stays audible underneath, same feel as an auto-DJ link.
+  // Defer a spoken segment to the NEXT track boundary. Used for station idents:
+  // unlike the hourly time check they have no real-time constraint, so ducking
+  // the current song mid-vocal at an arbitrary minute is pure loss, where at a
+  // transition the same ident lands like real radio. The WAV renders NOW (TTS
+  // latency off the air path) and onTrackStarted airs it via the light-duck
+  // intro channel.
   //
-  // One slot only: a newer pending segment replaces an unaired older one (on
-  // an aggressive station a fresh ident supersedes a stale one rather than
-  // stacking). All bookkeeping (djLog → recap/opener anti-repeat, session
-  // turn, webhook) happens at AIR time, so the DJ's memory reflects what
-  // actually reached the stream, not what was merely scheduled.
+  // One slot only: a newer pending segment replaces an unaired older one, so a
+  // fresh ident supersedes a stale one rather than stacking. All bookkeeping
+  // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
+  // time, so the DJ's memory reflects what reached the stream, not what was
+  // merely scheduled.
   async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
     if (!text || !text.trim()) return;
     try {
@@ -1489,15 +1450,13 @@ class Queue {
       this.persist();
       return;
     }
-    // The WAV was rendered at drain time, and the voice reaper deletes clips
-    // older than ~1h — a predecessor longer than that (long-form mixes are
-    // supported) outlives the file. A silent return here used to be a lost
-    // link; for a bedded item the bed is already committed and airing, so it
-    // would air naked. The WAV may also never have been rendered at all: the
-    // drain skips the render while the station voice is off, and this item
-    // lived to air because the switch came back on. Either way the script is
-    // still on the item: render it now. introAired is already set above, so
-    // the render can't double-air.
+    // Two ways the WAV can be missing: the voice reaper deletes clips older
+    // than ~1h, so a long-form predecessor outlives the file; or it was never
+    // rendered, because the drain skips the render while the station voice is
+    // off and this item lived to air after the switch came back on. A silent
+    // return would lose the link, and a bedded item would air its bed naked. The
+    // script is still on the item either way, so render it now — introAired is
+    // set above, so this can't double-air.
     if (!item.introWav || !existsSync(item.introWav)) {
       if (!item.introScript) return;
       try {
@@ -1578,13 +1537,12 @@ class Queue {
 
     // Stem-blend safety guard: metadata matching a NOT-YET-SENT upcoming item
     // means a rendered clip annotated as that track is airing while the track
-    // itself was never handed to Liquidsoap (controller restart between the
-    // pair drain and the clip airing, or a missed deadline). Consuming it as
-    // "played" here would orphan it — the clip would finish and Liquidsoap
-    // would fall to auto.m3u; the track the clip just introduced would never
-    // air. Force-drain it NOW (bypassing the pair hold) and leave this fire
-    // unprocessed — lastSeenKey stays unset, so the track's REAL fire (same
-    // key) re-enters and the normal consume path takes over.
+    // itself never reached Liquidsoap (a restart between the pair drain and the
+    // clip, or a missed deadline). Consuming it as "played" would orphan it —
+    // the clip ends, Liquidsoap falls to auto.m3u, and the track the clip just
+    // introduced never airs. Force-drain NOW (bypassing the pair hold) and leave
+    // this fire unprocessed: lastSeenKey stays unset, so the track's REAL fire
+    // re-enters and the normal consume path takes over.
     if (np.subsonic_id && this.upcoming.some(u => !u.sent && u.track.id === np.subsonic_id)) {
       this.log('scheduler', `"${np.title}" fired while its queue item was still unsent — force-draining it (clip-as-track guard)`);
       void this.drainToLiquidsoap(true);
@@ -1813,35 +1771,26 @@ class Queue {
     this.pickerBusy = true;
     (async () => {
       try {
-        // The pick made now airs when the track it FOLLOWS ends — so near a
-        // show boundary the rules to pick by are the NEXT show's, not this
-        // one's (a pick queued minutes before the boundary used to follow the
-        // outgoing show's brief, handing the incoming DJ an off-format
-        // opener). Probe a little past the pick's expected start so a pick
-        // that begins just shy of the boundary — and plays mostly inside the
-        // new show — also counts as the new show's. Without a held
-        // predecessor the pick follows the on-air track, so the lead is what
-        // REMAINS of it (never its full duration — this cycle also runs from
-        // the deadline backstop and from boot recovery, part-way through a
-        // track, and the elapsed part would push `showAt` over the next
-        // boundary early, #1205); with one (deadline path) it follows the
-        // HELD track, so the lead is on-air remaining + the held track's
-        // length (knownDurationSec — the same library fallback every other
-        // duration read uses). Unknown clock → no look-ahead — rarer than it
-        // was pre-#1205: untracked auto plays carry a start stamp and
-        // usually a library duration, so remainingSecOnAir now gives them a
-        // real lead where the old duration-only read never could.
+        // The pick made now airs when the track it FOLLOWS ends, so near a show
+        // boundary the rules to pick by are the NEXT show's. PICK_SHOW_LOOKAHEAD
+        // probes a little past the expected start so a pick beginning just shy
+        // of the boundary — and playing mostly inside the new show — counts as
+        // the new show's.
+        //
+        // The lead is what REMAINS of the on-air track, never its full duration:
+        // this cycle also runs from the deadline backstop and from boot
+        // recovery, part-way through a track, where the elapsed part would push
+        // `showAt` over the next boundary early (#1205). With a held predecessor
+        // (deadline path) the pick follows the HELD track instead, so the lead
+        // adds that track's length. Unknown clock → no look-ahead.
         //
         // This ONE date then drives the whole boundary sequence below — roll,
-        // episode plan, mic-pass, episode hook — not just the pick. It used
-        // to drive only the pick, with the roll and handoff left on the live
-        // clock; that split is what let the two disagree. At 09:58 the live
-        // grid still says "morning show", so the roll here never fired and
-        // the :00 cron won it mid-song — the changeover track (already picked
-        // under the incoming brief) aired BEFORE anyone handed over. Keying
-        // both off `showAt` makes the mic-pass land in front of that track,
-        // and makes it structurally impossible for the pick's brief and the
-        // on-air persona to disagree: there is no second date to disagree with.
+        // episode plan, mic-pass, episode hook — not just the pick. Leaving the
+        // roll and handoff on the live clock is what let the two disagree: at
+        // 09:58 the live grid still says "morning show", so the roll never fired
+        // here and the :00 cron won it mid-song, airing the changeover track
+        // (already picked under the incoming brief) BEFORE anyone handed over.
+        // With one date there is no second date to disagree with.
         const leadSec = pickLeadSec(
           this.remainingSecOnAir(),
           predecessorItem ? knownDurationSec(predecessorItem.track) : null,
@@ -1908,17 +1857,17 @@ class Queue {
     })();
   }
 
-  // Pair-drain deadline routine (feature: pair-aware transitions), run every
-  // watcher tick. When the on-air track nears its end and the NEXT track to
-  // air is still held without a successor, fire the pick cycle for that
-  // successor — the push() it ends in re-runs the drain loop, which then
-  // sends the held item pair-aware. Fires only for the item that airs
-  // immediately after the on-air track (head of `upcoming` unsent, and the
-  // only unsent item): once its successor lands, the fresh pick becomes the
-  // new held tail whose own deadline is a full track away — without the
-  // head-only condition every tick would pick another track and run the
-  // pipeline ahead unbounded. Past the hard deadline the pick window closes
-  // and drainToLiquidsoap's intrinsic path owns the endgame.
+  // Pair-drain deadline routine, run every watcher tick. When the on-air track
+  // nears its end and the NEXT track is still held without a successor, fire the
+  // pick cycle for that successor — the push() it ends in re-runs the drain
+  // loop, which then sends the held item pair-aware.
+  //
+  // Fires ONLY for the item airing immediately after the on-air track (head of
+  // `upcoming` unsent, and the only unsent item). Without that condition every
+  // tick would pick another track and run the pipeline ahead unbounded; with it,
+  // the fresh pick becomes the new held tail whose own deadline is a full track
+  // away. Past the hard deadline the window closes and drainToLiquidsoap's
+  // intrinsic path owns the endgame.
   maybeDeadlinePick() {
     if (!this.autoPick || this.pickerBusy || !djCallsAllowed()) return;
     if (!this.pairDrainActive()) return;
@@ -1963,19 +1912,16 @@ class Queue {
     try {
       const liveIds = await liquidsoapControl.getDjQueueIds();
 
-      // Empty dj_queue while we still hold sent items. On a single read this is
-      // ambiguous — a pick may be mid-poll (written to next.txt, not yet pulled
-      // in), Liquidsoap may have restarted and lost the queue, or the last item
-      // is on-air (popped from the queue) but its metadata didn't match in
-      // onTrackStarted so it never left `upcoming`. Don't drop on one read, but
-      // count consecutive empties: once the queue has been authoritatively empty
-      // for EMPTY_DJ_QUEUE_CLEAR_THRESHOLD checks the sent items are genuinely
-      // gone (restart) or stuck, so clear them and let the auto-DJ — gated on
-      // `upcoming.length === 0` — start picking again. This restores the restart
-      // self-heal the old `_autoMisses` clear provided, without its false wipes:
-      // it advances only on an authoritatively empty queue, so an interleaved
-      // jingle or an artist-string mismatch (with tracks still queued) resets it
-      // instead of tripping it.
+      // Empty dj_queue while we still hold sent items. A single read is
+      // ambiguous: a pick may be mid-poll, Liquidsoap may have restarted and
+      // lost the queue, or the last item is on air (popped) but its metadata
+      // didn't match in onTrackStarted so it never left `upcoming`. So count
+      // consecutive empties instead of dropping on one — after
+      // EMPTY_DJ_QUEUE_CLEAR_THRESHOLD the sent items are genuinely gone or
+      // stuck, and clearing them lets the auto-DJ (gated on
+      // `upcoming.length === 0`) pick again. The counter advances only on an
+      // authoritatively empty queue, so an interleaved jingle or an artist-string
+      // mismatch resets it rather than tripping it.
       if (liveIds.size === 0) {
         this._emptyDjQueueStreak++;
         if (this._emptyDjQueueStreak >= EMPTY_DJ_QUEUE_CLEAR_THRESHOLD) {
@@ -2133,19 +2079,16 @@ class Queue {
   }
 
   // The last `n` DISTINCT tracks played — the count-based HARD no-repeat guard
-  // (filterPickerCandidates hardRecent*; never relaxed). Clock-independent: it
-  // walks the rolling sidecar newest-first and stops once it has seen `n`
-  // distinct tracks, so a busy or a quiet hour blocks the same number of songs.
+  // (filterPickerCandidates hardRecent*, never relaxed). Clock-independent: it
+  // walks the sidecar newest-first until it has seen `n` distinct tracks, so a
+  // busy hour and a quiet one block the same number of songs.
   //
-  // Counts DISTINCT tracks, not raw rows: the sidecar can hold two entries for
-  // one play (recordPlay logs it with an id at track-end; the boot events
-  // backfill logs an id-less copy at track-start), and those collapse here —
-  // `n` means n songs, not n rows — so the guard's strength matches the
-  // configured number regardless of the double-write. Collapses an id-less
-  // (backfilled) row against an id'd row of the same track via the shared
-  // title|artist key. Returns BOTH ids and keys so a candidate is blocked by
-  // whichever identifier it carries; the current track is added on top so a
-  // mid-song pick can't re-pick it. Empty sets when n <= 0.
+  // DISTINCT tracks, not raw rows: the sidecar can hold two entries for one play
+  // (recordPlay logs it with an id at track-end, the boot backfill logs an
+  // id-less copy at track-start), collapsed here via the shared title|artist
+  // key, so `n` means n songs regardless of the double-write. Returns BOTH ids
+  // and keys so a candidate is blocked by whichever identifier it carries, plus
+  // the current track so a mid-song pick can't re-pick it.
   recentlyPlayedByCount(n = 0): { ids: Set<string>; keys: Set<string> } {
     const ids = new Set<string>();
     const keys = new Set<string>();
@@ -2271,16 +2214,15 @@ class Queue {
 
   // A bed started feeding the music chain — air the link it was pushed for.
   //
-  // Unlike waitForJingleClear (which computes a deadline on demand and sleeps
-  // it out), this genuinely has to be an event: the bed is pushed minutes
-  // before it airs, and the link must land ON it. radio.liq writes
-  // bed-playing.json the moment the bed's metadata fires; a new startedAt is
-  // the edge. Dedupe on that value, exactly as onTrackStarted dedupes on the
-  // track key — the file is never deleted, so a stale marker must not re-fire.
+  // Unlike waitForJingleClear (which computes a deadline and sleeps it out),
+  // this has to be an event: the bed is pushed minutes before it airs and the
+  // link must land ON it. radio.liq writes bed-playing.json the moment the bed's
+  // metadata fires, so a new startedAt is the edge — deduped on that value, like
+  // onTrackStarted's track key, since the file is never deleted and a stale
+  // marker must not re-fire.
   //
-  // Song B's own onTrackStarted will also call airIntro for the same item a bed
-  // later; airIntro sets introAired before any await, so the double-call is
-  // already idempotent and no guard is needed here.
+  // Song B's own onTrackStarted also calls airIntro for this item a bed later;
+  // airIntro sets introAired before any await, so that is already idempotent.
   onBedStarted() {
     // The bed is pushed immediately ahead of its item, so the item a marker
     // belongs to is the first bedded one still waiting to speak. No such item

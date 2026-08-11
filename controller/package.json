@@ -1,6 +1,6 @@
 {
   "name": "sub-wave-controller",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -33,12 +33,16 @@
     "ai": "^7.0.48",
     "ai-sdk-ollama": "^4.1.0",
     "better-sqlite3": "^11.10.0",
+    "dotenv": "^17.4.2",
     "express": "^4.21.0",
+    "fast-xml-parser": "^5.10.1",
+    "helmet": "^8.3.0",
     "multer": "^2.0.1",
     "node-cron": "^3.0.3",
     "sqlite-vec": "^0.1.9",
     "tsx": "^4.19.2",
     "umap-js": "^1.4.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

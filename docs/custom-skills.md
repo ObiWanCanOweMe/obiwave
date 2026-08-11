@@ -69,6 +69,26 @@ body becomes the per-segment briefing the DJ agent follows (the same role the
 inline `desc:` strings play for built-in skills) and the description shown in the
 admin UI.
 
+The block is parsed as **real YAML**, so the ordinary things work: inline `#`
+comments like the ones above, quoted values (`label: "Tonight: the moon"`), and
+lists written either way —
+
+```yaml
+tags: [late-night, factual]
+# ...is the same as...
+tags:
+  - late-night
+  - factual
+# ...is the same as...
+tags: late-night, factual
+```
+
+Values are read as text whatever their YAML type, so `feedMaxItems: 6` and
+`feedMaxItems: "6"` are identical. Nested maps have no meaning here and are
+ignored. A block that isn't valid YAML — most often an unquoted colon in a
+value — still loads, read with the old line-by-line parser, and logs a warning
+naming the file.
+
 ### `context:` — what the segment is allowed to mention
 
 `context:` is a comma-separated allow-list of the "right now" fields the DJ may

@@ -27,8 +27,9 @@ import { fetchWithTimeout } from '../util/fetch-timeout.js';
 import { listenerAuthDecision, stationAuthDecision } from '../util/listener-auth.js';
 import { publicGuestIds, publicPersonaShape, soulsArePublic } from '../util/public-persona.js';
 import { resolveThemeProvenance } from '../util/theme-provenance.js';
+import { verifierHealthFields } from '../util/verify-provenance.js';
 import { checkAuthRateLimit, clientIp, listenerAuthFailureDelayMs } from '../middleware/ratelimit.js';
-import { STATE_ROOT } from '../config.js';
+import { STATE_ROOT, VERIFY_PROVENANCE } from '../config.js';
 import { activeStationId } from '../stations/resolve.js';
 
 export const router = express.Router();
@@ -291,19 +292,22 @@ router.get('/now-playing', async (req, res) => {
         sampleRate: stream.sampleRate,
         channels: stream.channels,
         // How far behind the live edge a listener is: Icecast bursts this many
-        // seconds of already-broadcast audio on connect, and the client plays
-        // it out at 1x, so the offset holds for the whole connection.
+        // seconds of already-broadcast audio on connect and the client plays it
+        // out at 1x, so the offset holds for the whole connection.
         //
-        // Every timestamp on this payload (startedAt included) is stamped at
-        // the LIVE EDGE by radio.liq's pre-cross on_metadata hook. Players are
-        // expected to subtract this to render listener-time — without it the
-        // title and elapsed clock run this far ahead of the audio, which is
-        // the "Now Spinning is ahead of real time" report (issue #1114).
-        // This is the ADVERTISED depth. Players must use it rather than
-        // buffered.end − currentTime: browsers may retain the connect burst
-        // outside the demuxed buffered window, so that value is not a
-        // live-edge measurement. Per-format values account for mount bitrate.
-        // Operator surfaces (admin dash, MCP) intentionally keep live edge.
+        // Every timestamp on this payload (startedAt included) is stamped at the
+        // LIVE EDGE by radio.liq's pre-cross on_metadata hook, so players
+        // subtract this to render listener-time; without it the title and
+        // elapsed clock run this far ahead of the audio (#1114).
+        //
+        // This ADVERTISED depth is the whole offset — do NOT prefer a
+        // client-side measurement. `buffered.end - currentTime` reports only the
+        // window the browser has DEMUXED, not the distance from the live edge
+        // (Chrome holds the connect burst in a cache `buffered` never exposes):
+        // measured 22.5s true vs 2.25s buffered against a 22s advertised depth,
+        // so preferring it flipped every title ~20s early. Operator surfaces
+        // (admin dash, MCP) intentionally keep live edge. Per-format values
+        // account for each mount's bitrate.
         bufferSeconds: stationSettings.stream?.bufferSeconds ?? 22,
         bufferSecondsByFormat: streamBufferSecondsByFormat(
           stationSettings.stream?.bufferSeconds ?? 22,
@@ -333,12 +337,11 @@ router.get('/now-playing', async (req, res) => {
 // and software players (Sonos, VLC, moOde, car receivers). A listener adds the
 // station by pasting one URL instead of hunting for the raw /stream.mp3 mount.
 //
-// All wrap the always-served MP3 floor first (the universal entry every player
-// can decode); the optional Opus / FLAC / AAC mounts are appended only when the
-// operator has enabled each. Origin comes from publicOrigin() (SITE_URL when
-// set, else the request host) so the link works from however the listener
-// reached the site. Unauthenticated by design — these expose nothing beyond the
-// already-public stream URL and station name.
+// The always-served MP3 floor comes first (the universal entry every player can
+// decode); optional Opus / FLAC / AAC mounts are appended only when enabled.
+// Origin comes from publicOrigin() (SITE_URL when set, else the request host) so
+// the link works however the listener reached the site. Unauthenticated by
+// design — nothing here isn't already public.
 // ---------------------------------------------------------------------------
 function listenMounts(req: express.Request) {
   const origin = publicOrigin(req);
@@ -562,15 +565,14 @@ router.get('/state', (req, res) => {
 // always Icecast, so per-IP limiting would throttle every listener through
 // one bucket. The password never gets logged.
 //
-// That "the caller is always Icecast" premise only holds because the edge
-// refuses this path — the bundled Caddyfiles 404 /api/listener-auth, and
-// Icecast reaches the controller directly over the internal network. It was
-// NOT true before that: handle_path /api/* forwarded everything, so the
-// internet could POST here and brute-force the shared privacy.password at full
-// speed, bypassing the 20-per-15-min cap /station-auth puts on the SAME
-// password. byo-proxy operators own their own route table, so failures are
-// also damped in-handler below (successes are never delayed — see
-// listenerAuthFailureDelayMs).
+// That "the caller is always Icecast" premise holds only because the edge
+// refuses this path: the bundled Caddyfiles 404 /api/listener-auth, and Icecast
+// reaches the controller over the internal network. Before that, handle_path
+// /api/* forwarded everything, so the internet could POST here and brute-force
+// the shared privacy.password at full speed, bypassing the 20-per-15-min cap
+// /station-auth puts on the SAME password. byo-proxy operators own their own
+// route table, so failures are also damped in-handler below (successes are never
+// delayed — see listenerAuthFailureDelayMs).
 //
 // This endpoint fails OPEN when listenerAuth is off — see listenerAuthDecision.
 // The web UI must NOT use it for that reason; it has /station-auth below.
@@ -780,4 +782,7 @@ router.get('/geocode', async (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /health
 // ---------------------------------------------------------------------------
-router.get('/health', (req, res) => res.json({ status: 'on-air' }));
+router.get('/health', (_req, res) => res.json({
+  status: 'on-air',
+  ...verifierHealthFields(VERIFY_PROVENANCE),
+}));

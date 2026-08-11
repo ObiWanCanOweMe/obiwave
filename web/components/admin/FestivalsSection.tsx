@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  useController, useFieldArray, useWatch, type Control,
+} from 'react-hook-form';
+import { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
+import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
+import { TextField, SelectField } from '@/lib/form-fields';
 import { Card, Btn } from './ui';
 import { SectionHeader } from './settings/shared';
+import { Field, FieldLabel, FieldError } from '@/components/ui/field';
 import { Input } from '../ui/input';
-import { Label } from '../ui/label';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../ui/select';
@@ -15,15 +21,21 @@ import { V3AlertDialog } from '../ui/alert-dialog';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
+import {
+  festivalsSchema,
+  SETTINGS_FESTIVAL_DESCRIPTION_MAX,
+  SETTINGS_FESTIVAL_NAME_MAX,
+  SETTINGS_FESTIVAL_WINDOW_DAYS_MAX,
+} from '@/lib/schemas.generated';
 
-interface Festival {
-  month: number;
-  day: number;
-  name: string;
-  mood: string;
-  description?: string;
-  windowDays?: number;
-}
+// festivalsSchema is a factory, and a hand-validated
+// `z.unknown().superRefine().transform()` rather than a structural array, so
+// `z.input<>` collapses to `unknown` and no nested path type-checks as a
+// FieldPath. `ReturnType`/`z.output` pull the real output shape at the type
+// level only; the per-render schema below is what validates at runtime.
+type FestivalsArray = z.output<ReturnType<typeof festivalsSchema>>;
+type FestivalsFormValues = { festivals: FestivalsArray };
+type Festival = FestivalsArray[number];
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -62,16 +74,178 @@ function festivalTiming(f: Festival, now: Date) {
   };
 }
 
+// The modal's fields, bound into the `festivals` field array at `idx`. Its own
+// component rather than inline JSX so its hook calls are unconditional from its
+// own perspective; the parent mounts it only while a row is open.
+//
+// Name, description and mood bind through the shared TextField/SelectField, and
+// their ids embed the literal RHF path (dots included — legal in a DOM id).
+// Month, day and windowDays stay hand-rolled on useController + fieldAria:
+// month's onChange also clamps day and windowDays clamps itself, neither of
+// which the bound components' plain field.onChange can express.
+function FestivalModalFields({
+  idx,
+  control,
+  moods,
+  fieldId,
+}: {
+  idx: number;
+  control: Control<FestivalsFormValues>;
+  moods: string[];
+  fieldId: string;
+}) {
+  const monthField = useController({ control, name: `festivals.${idx}.month` });
+  const dayField = useController({ control, name: `festivals.${idx}.day` });
+  const windowField = useController({ control, name: `festivals.${idx}.windowDays` });
+
+  const monthAria = fieldAria(`${fieldId}-month`, monthField.fieldState.error);
+  const dayAria = fieldAria(`${fieldId}-day`, dayField.fieldState.error);
+  const windowAria = fieldAria(`${fieldId}-window`, windowField.fieldState.error);
+
+  const month = monthField.field.value;
+  const moodOptions = moods.map(m => ({ value: m, label: m }));
+
+  return (
+    <div className="grid gap-4">
+      <TextField
+        control={control}
+        name={`festivals.${idx}.name`}
+        label="Name"
+        placeholder="e.g. New Year's Day"
+        maxLength={SETTINGS_FESTIVAL_NAME_MAX}
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field data-invalid={monthAria.invalid || undefined}>
+          <FieldLabel {...monthAria.labelProps}>Month</FieldLabel>
+          <Select
+            value={String(month)}
+            onValueChange={v => {
+              // Clamp the day so Oct 31 → February can't leave an
+              // impossible date in the form. The schema owns the actual
+              // month/day validity rule — this is display convenience only.
+              const nextMonth = Number(v);
+              monthField.field.onChange(nextMonth);
+              const maxDay = DAYS_IN_MONTH(nextMonth);
+              if (dayField.field.value > maxDay) dayField.field.onChange(maxDay);
+            }}
+          >
+            <SelectTrigger {...monthAria.controlProps} onBlur={monthField.field.onBlur} ref={monthField.field.ref}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_NAMES.map((name, i) => (
+                <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldError {...monthAria.errorProps} errors={monthField.fieldState.error ? [monthField.fieldState.error] : undefined} />
+        </Field>
+
+        <Field data-invalid={dayAria.invalid || undefined}>
+          <FieldLabel {...dayAria.labelProps}>Day</FieldLabel>
+          <Select
+            value={String(dayField.field.value)}
+            onValueChange={v => dayField.field.onChange(Number(v))}
+          >
+            <SelectTrigger {...dayAria.controlProps} onBlur={dayField.field.onBlur} ref={dayField.field.ref}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: DAYS_IN_MONTH(month) }, (_, i) => (
+                <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldError {...dayAria.errorProps} errors={dayField.fieldState.error ? [dayField.fieldState.error] : undefined} />
+        </Field>
+      </div>
+
+      <TextField
+        control={control}
+        name={`festivals.${idx}.description`}
+        label="Description (optional)"
+        placeholder="Short note about the festival"
+        description="A short note your DJ can weave into its chat while the festival is on."
+        maxLength={SETTINGS_FESTIVAL_DESCRIPTION_MAX}
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <SelectField
+          control={control}
+          name={`festivals.${idx}.mood`}
+          label="Mood"
+          options={moodOptions}
+        />
+
+        <Field data-invalid={windowAria.invalid || undefined}>
+          <FieldLabel {...windowAria.labelProps}>
+            Window <span className="text-muted">(days)</span>
+          </FieldLabel>
+          <Input
+            {...windowAria.controlProps}
+            type="number"
+            min={0}
+            max={SETTINGS_FESTIVAL_WINDOW_DAYS_MAX}
+            value={String(windowField.field.value)}
+            onChange={e => {
+              const n = Math.max(
+                0,
+                Math.min(SETTINGS_FESTIVAL_WINDOW_DAYS_MAX, Number(e.target.value) || 0),
+              );
+              windowField.field.onChange(n);
+            }}
+            onBlur={windowField.field.onBlur}
+            ref={windowField.field.ref}
+          />
+          <FieldError {...windowAria.errorProps} errors={windowField.fieldState.error ? [windowField.fieldState.error] : undefined} />
+        </Field>
+      </div>
+      <div className="field-hint -mt-2">
+        Music and spoken tone shift into the mood for the days around the date — a 3-day
+        window covers a full week.
+      </div>
+    </div>
+  );
+}
+
 export default function FestivalsSection() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
-  const [festivals, setFestivals] = useState<Festival[] | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [moods, setMoods] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<Festival | null>(null);
+  // Which-row-is-open UI state, kept out of the form. `editIdx` is the
+  // festivals[] index open in the modal for BOTH add and edit — an "add"
+  // appends a blank row immediately so its fields bind through the same field
+  // array. `editing` distinguishes the two on Cancel: remove the fresh append,
+  // or revert the edit to the snapshot taken on open.
+  const [editing, setEditing] = useState(false);
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const editSnapshot = useRef<Festival | null>(null);
   const fieldId = useId();
+
+  // moodNames is nullable on the shared context, where null means "this caller
+  // cannot check that rule". The browser has the live list, so pass it — that's
+  // what makes the editor refuse a dead mood exactly when the controller would.
+  // Memoised because a factory schema rebuilds the resolver on every render.
+  const schema = useMemo(
+    () => z.object({ festivals: festivalsSchema({ moodNames: moods }) }),
+    [moods],
+  );
+  const form = useZodForm(schema, { festivals: [] });
+  // Widens the control's declared `{ festivals: unknown }` (see the schema
+  // comment at the top of this file) to the schema's OUTPUT type — the type
+  // every row really holds, since the form is seeded only from server data or
+  // EMPTY_FESTIVAL. Type-level only; same object at runtime.
+  const arrayControl = form.control as unknown as Control<FestivalsFormValues>;
+  const { fields, append, update, remove: removeField } = useFieldArray({
+    control: arrayControl,
+    name: 'festivals',
+    keyName: '_rhfKey',
+  });
+  const watchedFestivals = useWatch({ control: arrayControl, name: 'festivals' }) ?? [];
 
   const load = useCallback(async () => {
     try {
@@ -83,8 +257,9 @@ export default function FestivalsSection() {
       } | null;
       // validateFestivalsStrict normalises on every save, so trust the shape here.
       const vals = j?.values?.festivals;
-      const loaded = Array.isArray(vals) ? (vals as Festival[]) : [];
-      setFestivals(sortFestivals(loaded));
+      const loadedList = Array.isArray(vals) ? (vals as Festival[]) : [];
+      form.reset({ festivals: sortFestivals(loadedList) });
+      setLoaded(true);
       // Vocabulary comes from the server so the dropdown can't drift from what
       // the controller will accept.
       const moodVals = j?.tts?.moods;
@@ -93,83 +268,86 @@ export default function FestivalsSection() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [adminFetch]);
+  }, [adminFetch, form]);
 
   useEffect(() => {
     if (!hydrated || needsAuth) return;
     void load();
   }, [hydrated, needsAuth, load]);
 
-  const save = async (updated: Festival[]) => {
+  // `moods` (and so the schema's vocabulary) arrives asynchronously. Once the
+  // real list lands, re-validate rather than remounting the form, which would
+  // drop an edit already in progress.
+  useEffect(() => {
+    void form.trigger();
+  }, [moods, form]);
+
+  const persist = useCallback(async (list: Festival[]) => {
     setBusy(true);
     try {
-      const payload = updated.map(f => ({
-        month: f.month,
-        day: f.day,
-        name: f.name,
-        mood: f.mood,
-        description: f.description || '',
-        windowDays: f.windowDays || 0,
-      }));
       const r = await adminFetch('/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ festivals: payload }),
+        body: JSON.stringify({ festivals: list }),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
-      setFestivals(sortFestivals(updated));
-      setEditing(null);
+      const j = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        fieldErrors?: Record<string, string>;
+      };
+      if (!r.ok) {
+        // A rule only the server can check still lands on the right input.
+        applyServerFieldErrors(form, j.fieldErrors);
+        throw new Error(j.error || `failed (${r.status})`);
+      }
+      form.reset({ festivals: sortFestivals(list) });
       setEditIdx(null);
-      notify.ok(`${updated.length} festival${updated.length === 1 ? '' : 's'} saved`);
+      setEditing(false);
+      notify.ok(`${list.length} festival${list.length === 1 ? '' : 's'} saved`);
     } catch (e) {
       notify.err(`Save failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }
-  };
+  }, [adminFetch, form]);
+
+  const commit = form.handleSubmit(values => persist(values.festivals));
 
   const startAdd = () => {
-    setEditing({ ...EMPTY_FESTIVAL });
-    setEditIdx(null);
+    append({ ...EMPTY_FESTIVAL });
+    // `fields.length` here is this render's (pre-append) count, i.e. exactly
+    // the index the new row lands at.
+    setEditIdx(fields.length);
+    setEditing(true);
+    // errors populate lazily, so without this the modal opens on a disabled
+    // Save with no message under the blank Name field explaining why.
+    void form.trigger('festivals');
   };
 
   const startEdit = (idx: number) => {
-    if (!festivals || !festivals[idx]) return;
-    setEditing({ ...festivals[idx] });
+    editSnapshot.current = watchedFestivals[idx] ?? null;
     setEditIdx(idx);
+    setEditing(false);
   };
 
   const cancelEdit = () => {
-    setEditing(null);
+    if (editIdx === null) return;
+    if (editing) {
+      removeField(editIdx);
+    } else if (editSnapshot.current) {
+      update(editIdx, editSnapshot.current);
+    }
     setEditIdx(null);
+    setEditing(false);
+    editSnapshot.current = null;
   };
 
-  const commitEdit = () => {
-    if (!festivals || !editing) return;
-    const name = editing.name.trim();
-    if (!name) {
-      notify.err('Name is required');
-      return;
-    }
-    let updated: Festival[];
-    if (editIdx !== null) {
-      updated = festivals.map((f, i) => (i === editIdx ? editing : f));
-    } else {
-      updated = [...festivals, editing];
-    }
-    void save(updated);
-  };
-
-  const remove = (idx: number) => {
-    if (!festivals) return;
-    const updated = festivals.filter((_, i) => i !== idx);
-    void save(updated);
-  };
-
-  const updateField = <K extends keyof Festival>(field: K, value: Festival[K]) => {
-    if (!editing) return;
-    setEditing({ ...editing, [field]: value });
+  const confirmRemove = () => {
+    if (confirmDelete == null) return;
+    const updated = watchedFestivals.filter((_, i) => i !== confirmDelete);
+    setConfirmDelete(null);
+    setEditIdx(null);
+    setEditing(false);
+    void persist(updated);
   };
 
   if (!hydrated || needsAuth) return null;
@@ -177,12 +355,12 @@ export default function FestivalsSection() {
   // Grouped into month sections, carrying the original index so a row click
   // edits the right entry.
   const now = new Date();
-  const timings = (festivals || []).map(f => festivalTiming(f, now));
+  const timings = watchedFestivals.map(f => festivalTiming(f, now));
   const nextIdx = timings.length
     ? timings.reduce((best, t, i) => (t.until < (timings[best]?.until ?? Infinity) ? i : best), 0)
     : -1;
   const months: Array<{ month: number; rows: Array<{ f: Festival; idx: number }> }> = [];
-  (festivals || []).forEach((f, idx) => {
+  watchedFestivals.forEach((f, idx) => {
     const last = months[months.length - 1];
     if (last && last.month === f.month) last.rows.push({ f, idx });
     else months.push({ month: f.month, rows: [{ f, idx }] });
@@ -194,9 +372,9 @@ export default function FestivalsSection() {
         eyebrow="festivals"
         title="Festival calendar."
         sub="Dates that set a mood, marked across the year. Add your local holidays, regional celebrations, or personal landmarks — the station leans into the nearest one as it comes around."
-        metrics={festivals ? [{ n: String(festivals.length), l: `date${festivals.length === 1 ? '' : 's'}`, accent: true }] : undefined}
+        metrics={loaded ? [{ n: String(watchedFestivals.length), l: `date${watchedFestivals.length === 1 ? '' : 's'}`, accent: true }] : undefined}
         actions={
-          <Btn tone="accent" className="min-h-9 sm:min-h-0" onClick={startAdd} disabled={festivals === null}>
+          <Btn tone="accent" className="min-h-9 sm:min-h-0" onClick={startAdd} disabled={!loaded}>
             Add festival
           </Btn>
         }
@@ -204,14 +382,14 @@ export default function FestivalsSection() {
 
       {err && <ErrorState error={err} onRetry={load} />}
 
-      {festivals === null && !err && <SkeletonRows rows={4} />}
+      {!loaded && !err && <SkeletonRows rows={4} />}
 
-      {festivals !== null && (
+      {loaded && (
         <Card
           title="Calendar"
-          sub={`${festivals.length} date${festivals.length === 1 ? '' : 's'} · click one to edit`}
+          sub={`${watchedFestivals.length} date${watchedFestivals.length === 1 ? '' : 's'} · click one to edit`}
         >
-          {festivals.length === 0 ? (
+          {watchedFestivals.length === 0 ? (
             <EmptyState
               title="Nothing on the calendar yet"
               description="Add your first date to get started."
@@ -270,14 +448,14 @@ export default function FestivalsSection() {
       )}
 
       <Modal
-        open={editing !== null}
+        open={editIdx !== null}
         onOpenChange={o => { if (!o) cancelEdit(); }}
-        title={editIdx !== null ? 'edit festival' : 'new festival'}
-        sub={editIdx !== null && editing ? editing.name : undefined}
+        title={editing ? 'new festival' : 'edit festival'}
+        sub={!editing && editIdx !== null ? watchedFestivals[editIdx]?.name : undefined}
         width={520}
         footer={
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
-            {editIdx !== null ? (
+            {!editing && editIdx !== null ? (
               <Btn sm tone="danger" className="min-h-9 sm:min-h-0" onClick={() => setConfirmDelete(editIdx)} disabled={busy}>
                 Remove
               </Btn>
@@ -290,122 +468,17 @@ export default function FestivalsSection() {
                 sm
                 tone="accent"
                 className="min-h-9 sm:min-h-0"
-                onClick={commitEdit}
-                disabled={busy || !editing?.name.trim()}
+                onClick={commit}
+                disabled={busy || !form.formState.isValid}
               >
-                {busy ? 'Saving…' : editIdx !== null ? 'Save changes' : 'Add festival'}
+                {busy ? 'Saving…' : editing ? 'Add festival' : 'Save changes'}
               </Btn>
             </div>
           </div>
         }
       >
-        {editing && (
-          <div className="grid gap-4">
-            <div className="field">
-              <Label htmlFor={`${fieldId}-name`}>Name</Label>
-              <Input
-                id={`${fieldId}-name`}
-                value={editing.name}
-                onChange={e => updateField('name', e.target.value)}
-                placeholder="e.g. New Year's Day"
-                maxLength={80}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="field">
-                <Label htmlFor={`${fieldId}-month`}>Month</Label>
-                <Select
-                  value={String(editing.month)}
-                  onValueChange={v => {
-                    // Clamp the day so Oct 31 → February can't leave an
-                    // impossible date in the form.
-                    const month = Number(v);
-                    setEditing(cur => cur && ({
-                      ...cur,
-                      month,
-                      day: Math.min(cur.day, DAYS_IN_MONTH(month)),
-                    }));
-                  }}
-                >
-                  <SelectTrigger id={`${fieldId}-month`} aria-label="Month">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONTH_NAMES.map((name, i) => (
-                      <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="field">
-                <Label htmlFor={`${fieldId}-day`}>Day</Label>
-                <Select
-                  value={String(editing.day)}
-                  onValueChange={v => updateField('day', Number(v))}
-                >
-                  <SelectTrigger id={`${fieldId}-day`} aria-label="Day">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: DAYS_IN_MONTH(editing.month) }, (_, i) => (
-                      <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="field">
-              <Label htmlFor={`${fieldId}-desc`}>Description <span className="text-muted">(optional)</span></Label>
-              <Input
-                id={`${fieldId}-desc`}
-                value={editing.description || ''}
-                onChange={e => updateField('description', e.target.value)}
-                placeholder="Short note about the festival"
-                maxLength={200}
-              />
-              <div className="field-hint mt-1">
-                A short note your DJ can weave into its chat while the festival is on.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="field">
-                <Label htmlFor={`${fieldId}-mood`}>Mood</Label>
-                <Select
-                  value={editing.mood}
-                  onValueChange={v => updateField('mood', v)}
-                >
-                  <SelectTrigger id={`${fieldId}-mood`} aria-label="Mood">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {moods.map(m => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="field">
-                <Label htmlFor={`${fieldId}-window`}>Window <span className="text-muted">(days)</span></Label>
-                <Input
-                  id={`${fieldId}-window`}
-                  type="number"
-                  min={0}
-                  max={14}
-                  value={String(editing.windowDays ?? 0)}
-                  onChange={e => updateField('windowDays', Math.max(0, Math.min(14, Number(e.target.value) || 0)))}
-                />
-              </div>
-            </div>
-            <div className="field-hint -mt-2">
-              Music and spoken tone shift into the mood for the days around the date — a 3-day
-              window covers a full week.
-            </div>
-          </div>
+        {editIdx !== null && (
+          <FestivalModalFields idx={editIdx} control={arrayControl} moods={moods} fieldId={fieldId} />
         )}
       </Modal>
 
@@ -414,15 +487,13 @@ export default function FestivalsSection() {
         onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}
         title="Remove festival"
         description={
-          confirmDelete != null && festivals
-            ? `Remove "${festivals[confirmDelete]?.name}" from the festival calendar?`
+          confirmDelete != null
+            ? `Remove "${watchedFestivals[confirmDelete]?.name}" from the festival calendar?`
             : ''
         }
         confirmLabel="Remove"
         danger
-        onConfirm={() => {
-          if (confirmDelete != null) { remove(confirmDelete); setConfirmDelete(null); }
-        }}
+        onConfirm={confirmRemove}
       />
     </section>
   );

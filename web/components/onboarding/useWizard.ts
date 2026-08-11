@@ -9,6 +9,7 @@ import {
   type LlmProvider,
   type ProviderDrafts,
 } from './providerState';
+import { fishAudioIssue } from '@/lib/schemas.generated';
 
 // Every step reads and writes through the `set` updater rather than its own
 // state, so the Review step can show the whole picture without prop-drilling.
@@ -120,19 +121,24 @@ export function useWizard() {
     if (i >= 0) setStepIdx(i);
   }, []);
 
+  // Provider drafts outlive the LLM step's RHF instance, so Back/Next and
+  // provider switches never reuse another provider's URL or bearer and never
+  // discard the draft the operator typed for a provider they return to.
+  const changeLlmProvider = useCallback((
+    current: WizardData['llm'],
+    nextProvider: LlmProvider,
+  ): WizardData['llm'] => {
+    const changed = llmDraftForProviderChange(current, nextProvider, providerDrafts.current);
+    providerDrafts.current = changed.drafts;
+    llmDiscoveryGeneration.current.invalidate();
+    llmTestGeneration.current.invalidate();
+    return changed.llm;
+  }, []);
+
   const patch = useCallback((p: Partial<WizardData> | ((d: WizardData) => Partial<WizardData>)) => {
     setData(d => {
       const incoming = typeof p === 'function' ? p(d) : p;
-      let next = { ...d, ...incoming };
-      if (next.llm.provider !== d.llm.provider) {
-        const changed = llmDraftForProviderChange(
-          d.llm,
-          next.llm.provider as LlmProvider,
-          providerDrafts.current,
-        );
-        providerDrafts.current = changed.drafts;
-        next = { ...next, llm: changed.llm };
-      }
+      const next = { ...d, ...incoming };
       if (
         next.llm.provider !== d.llm.provider
         || next.llm.apiKey !== d.llm.apiKey
@@ -158,7 +164,13 @@ export function useWizard() {
   // 401-handling. Both test helpers catch their own failures into the result
   // pill: a rejected or timed-out fetch must surface as a red pill, never as an
   // unhandled throw that wedges the button on "Testing…" (issue #682).
-  const testNavidrome = useCallback(async () => {
+  //
+  // Both now take the credentials/config as an explicit argument rather than
+  // reading `data.navidrome` / `data.llm` — each step owns its own
+  // react-hook-form instance and only writes back into `data` on Next, so the
+  // Test button (which must probe whatever is CURRENTLY typed, not the last
+  // committed value) hands over the step form's live values directly.
+  const testNavidrome = useCallback(async (creds: WizardData['navidrome']) => {
     // The browser→controller hop has no default timeout, so a request that
     // never answers wedges the button. 15s clears the 5s server-side Subsonic
     // probe with margin.
@@ -166,7 +178,7 @@ export function useWizard() {
       const r = await auth.adminFetch('/onboarding/test-navidrome', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(data.navidrome),
+        body: JSON.stringify(creds),
         signal: AbortSignal.timeout(15000),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; serverType?: string; serverVersion?: string; error?: string };
@@ -178,9 +190,9 @@ export function useWizard() {
       patch({ navidromeTest: result });
       return result;
     }
-  }, [auth, data.navidrome, patch]);
+  }, [auth, patch]);
 
-  const testLlm = useCallback(async () => {
+  const testLlm = useCallback(async (values: WizardData['llm']) => {
     // 60s client cap sits just above the controller's 45s generateText abort,
     // so a slow/unreachable model surfaces the server's error rather than a
     // bare client timeout — and the button can never hang forever.
@@ -189,7 +201,7 @@ export function useWizard() {
       const r = await auth.adminFetch('/onboarding/test-llm', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(data.llm),
+        body: JSON.stringify(values),
         signal: AbortSignal.timeout(60000),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; sample?: string; error?: string };
@@ -201,7 +213,7 @@ export function useWizard() {
       if (llmTestGeneration.current.isCurrent(generation)) patch({ llmTest: result });
       return result;
     }
-  }, [auth, data.llm, patch]);
+  }, [auth, patch]);
 
   // Probe a custom endpoint for its loaded model list so the operator can pick
   // the model instead of typing it. LiteLLM resolves a blank URL from the
@@ -250,18 +262,13 @@ export function useWizard() {
         data.tts.cloud.provider === 'fish-audio' ? 'FISH_API_KEY' : '';
       if (k) apiKeys[k] = data.tts.cloud.apiKey;
     }
-    if (data.tts.cloud.enabled && data.tts.cloud.provider === 'fish-audio') {
-      // The key may already come from the root environment, so only validate
-      // fields the wizard itself must persist for a usable Fish request.
-      const model = data.tts.cloud.model.trim();
-      const voice = data.tts.cloud.voice.trim();
-      if (!model || model.length > 100 || /[\r\n]/.test(model)) {
-        return { ok: false, error: 'Fish Audio model id must be 1–100 characters with no line breaks.' };
-      }
-      if (!voice || voice.length > 100 || /[\r\n]/.test(voice)) {
-        return { ok: false, error: 'Fish Audio voice reference id must be 1–100 characters with no line breaks.' };
-      }
-    }
+    // The key may already come from the root environment, so fishAudioIssue
+    // only judges the fields the wizard itself must persist for a usable Fish
+    // request. Same helper the controller's save handler runs — the two
+    // hand-rolled copies this replaces had already drifted in the message
+    // ('1-100' vs '1–100') before they could in logic.
+    const fishIssue = fishAudioIssue(data.tts.cloud);
+    if (fishIssue) return { ok: false, error: fishIssue };
 
     const body = {
       navidrome: data.navidrome,
@@ -303,6 +310,7 @@ export function useWizard() {
     next,
     back,
     goto,
+    changeLlmProvider,
     testNavidrome,
     testLlm,
     discoverCustomModels,

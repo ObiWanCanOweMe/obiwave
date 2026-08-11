@@ -7,6 +7,59 @@
 
 import { randomBytes } from 'node:crypto';
 import { DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../llm/internal/provider/capabilities.js';
+// The show shape's rules now live in the shared schema the admin form runs too.
+// Re-exported from this barrel (below) so its many importers don't move.
+import {
+  EXCLUDED_PLAYLISTS_PER_SHOW,
+  GUESTS_PER_SHOW,
+  PLAYLISTS_PER_SHOW,
+  SHOW_FILTER_VALUES_MAX,
+  SHOW_GENRE_MAX,
+  SHOW_ID_RE,
+  SHOW_ENERGY as SHOW_ENERGY_VALUES,
+  SHOW_VOCALS as SHOW_VOCALS_VALUES,
+  migrateLegacyShowFields,
+  repairEraWindow,
+  type EraWindow,
+} from '../schemas/show.js';
+import { SKILL_SLUG_RE as SKILL_SLUG_PATTERN } from '../schemas/skill.js';
+// The persona shape's rules — and the TTS voice slot's, which the station-wide
+// rescue slot shares — now live in the shared schema the admin form runs too.
+// Aliased below under the names the controller already used, so no call site
+// moved when this landed.
+import {
+  DJ_PROMPT_LIMIT as DJ_PROMPT_LIMIT_VALUE,
+  DJ_PROMPT_NAME_MAX as DJ_PROMPT_NAME_MAX_VALUE,
+  DJ_PROMPT_TEXT_MAX as DJ_PROMPT_TEXT_MAX_VALUE,
+  DJ_PROMPT_TEXT_MIN as DJ_PROMPT_TEXT_MIN_VALUE,
+  PERSONA_AVATAR_FILENAME_RE,
+  PERSONA_DIAL_NEUTRAL,
+  PERSONA_FREQUENCIES,
+  PERSONA_LIMIT as PERSONA_LIMIT_VALUE,
+  PERSONA_SCRIPT_LENGTHS,
+  PERSONA_SKILLS_LIMIT,
+  PERSONA_SOUL_MAX,
+  TTS_CHATTERBOX_VOICE_RE,
+  TTS_CLOUD_PROVIDERS as TTS_CLOUD_PROVIDER_VALUES,
+  TTS_ENGINES as TTS_ENGINE_VALUES,
+  TTS_GAIN_CLAMP_DB as TTS_GAIN_CLAMP_DB_VALUE,
+  TTS_KOKORO_VOICE_RE,
+  TTS_POCKET_VOICE_RE,
+  TTS_SPEED_DEFAULT as TTS_SPEED_DEFAULT_VALUE,
+  TTS_SPEED_MAX as TTS_SPEED_MAX_VALUE,
+  TTS_SPEED_MIN as TTS_SPEED_MIN_VALUE,
+  clampPersonaDial,
+  clampTtsGain as clampTtsGainFn,
+  clampTtsSpeed as clampTtsSpeedFn,
+} from '../schemas/persona.js';
+import {
+  SETTINGS_AAC_BITRATES,
+  SETTINGS_LOUDNESS_SOURCES,
+  SETTINGS_MP3_BITRATES,
+  SETTINGS_OPUS_BITRATES,
+  SETTINGS_SEARCH_KEY_PROVIDERS,
+  SETTINGS_SEARCH_PROVIDERS,
+} from '../schemas/settings.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -38,13 +91,13 @@ export const DJ_SOULS = [
 // hourlies, banter or segments) — only manual /dj/segment triggers, listener
 // requests and programme beats still speak. 'chatty' sits between the
 // historical moderate and aggressive.
-export const FREQUENCIES = ['silent', 'quiet', 'moderate', 'chatty', 'aggressive'];
+export const FREQUENCIES: readonly string[] = PERSONA_FREQUENCIES;
 
 // Per-persona verbosity, ascending. 'concise' is the historical default;
 // 'one-liner' cuts every segment to a single quick line, 'extended' roughly
 // doubles, 'storyteller' roughly triples for long-form monologues.
 // See llm/internal/prompts/system.ts LENGTH_PHRASES for the actual directives.
-export const SCRIPT_LENGTHS = ['one-liner', 'concise', 'extended', 'storyteller'];
+export const SCRIPT_LENGTHS: readonly string[] = PERSONA_SCRIPT_LENGTHS;
 
 // Per-persona tone dials. Each is 0-10 with 5 (DIAL_NEUTRAL) the default. A
 // model can't distinguish humour=6 from 7, so rather than inject a raw "7/10"
@@ -52,7 +105,7 @@ export const SCRIPT_LENGTHS = ['one-liner', 'concise', 'extended', 'storyteller'
 // away from neutral appends a style directive (personaToneDirectives below), so
 // a persona left at the defaults renders a byte-identical prompt to before.
 export const TONE_DIALS = ['humour', 'localColour', 'warmth'] as const;
-export const DIAL_NEUTRAL = 5;
+export const DIAL_NEUTRAL = PERSONA_DIAL_NEUTRAL;
 
 const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
   humour: {
@@ -70,11 +123,9 @@ const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
 };
 
 // Clamp any input to an integer 0-10, defaulting to neutral when unparseable.
-// The single chokepoint used by both normalizePersona and the seed roster.
-export function normalizeDial(v: unknown): number {
-  const n = Math.round(Number(v));
-  return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : DIAL_NEUTRAL;
-}
+// The single chokepoint used by both normalizePersona and the seed roster —
+// now defined in the shared schema, so the admin form clamps identically.
+export const normalizeDial = clampPersonaDial;
 
 // Pure: persona in, prompt fragment out. Returns '' when every dial sits in the
 // neutral band, so renderDjPrompt appends nothing and the default prompt is
@@ -92,23 +143,18 @@ export function personaToneDirectives(persona: unknown): string {
   return lines.length ? `\n\nTone:\n- ${lines.join('\n- ')}` : '';
 }
 
-// TTS engines. Every spoken segment is voiced by the on-air persona's own
-// `tts` config (see audio/tts.js); only jingle rendering falls back to the
-// global defaultEngine.
+// TTS engines. Every spoken segment is voiced by the on-air persona's own `tts`
+// config (audio/tts.js); only jingle rendering falls back to defaultEngine.
 //
-// `cloud` routes through the AI SDK (OpenAI / ElevenLabs speech models) —
-// see llm/speech.js. `piper`, `kokoro`, `chatterbox`, and `pocket-tts` are
-// local engines. `remote` is a first-class self-hosted HTTP engine: it POSTs
-// to a configurable /speak endpoint and gets the rendered audio back in the
-// response body (no shared volume, so the endpoint can live on any host),
-// gated on a /health probe. Configure the URL in settings.tts.remote.url.
-// Chatterbox and PocketTTS are opt-in — the
-// default controller image doesn't bundle either; build the image with
-// `--build-arg WITH_CHATTERBOX=1` or `--build-arg WITH_POCKETTTS=1` (see
-// docker/Dockerfile.controller) to include the runtime. The dispatcher gates
-// each engine on isAvailable() so settings can reference it safely even when
-// the runtime is absent (the engine just falls back to Piper).
-export const TTS_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'];
+// `cloud` routes through the AI SDK (llm/speech.js). `piper`, `kokoro`,
+// `chatterbox` and `pocket-tts` are local. `remote` is a self-hosted HTTP
+// engine: it POSTs to a configurable /speak endpoint and gets the audio back in
+// the response body — no shared volume, so it can live on any host — gated on a
+// /health probe. Chatterbox and PocketTTS are opt-in at image build time
+// (`--build-arg WITH_CHATTERBOX=1` / `WITH_POCKETTTS=1`). The dispatcher gates
+// every engine on isAvailable(), so settings can name one whose runtime is
+// absent and it simply falls back to Piper.
+export const TTS_ENGINES: readonly string[] = TTS_ENGINE_VALUES;
 
 // DJ-voice level trim, in dB. A per-engine gain levels the loudness gap between
 // TTS engines (only PocketTTS self-normalises today, so it sits quieter than
@@ -117,17 +163,12 @@ export const TTS_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'clou
 // annotation on say.txt/intro.txt (see audio/tts.ts:voiceGainDb +
 // broadcast/queue.ts) — the same mechanism the music loudness path uses. A
 // manual dial, not auto-normalisation, so the range is generous (±12 dB).
-export const TTS_GAIN_CLAMP_DB = 12;
+export const TTS_GAIN_CLAMP_DB = TTS_GAIN_CLAMP_DB_VALUE;
 
 // Coerce any value to a clean gain: finite number, clamped to ±TTS_GAIN_CLAMP_DB,
 // rounded to 0.1 dB (finer is inaudible and just bloats the annotate string).
 // Garbage / non-finite → 0 (unity, i.e. today's behaviour).
-export function clampTtsGain(v: unknown): number {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  const c = Math.max(-TTS_GAIN_CLAMP_DB, Math.min(TTS_GAIN_CLAMP_DB, n));
-  return Math.round(c * 10) / 10;
-}
+export const clampTtsGain = clampTtsGainFn;
 
 // Normalise a per-engine gain map to exactly one clean gain per known engine
 // (default 0). Drops unknown keys so a hand-edited settings.json can't smuggle
@@ -148,22 +189,14 @@ export function normalizeTtsGainMap(raw: unknown): Record<string, number> {
 // MULTIPLIER where 1.0 = no change (today's behaviour); lower = slower. Only
 // Piper/Kokoro/cloud honour it — chatterbox/pocket-tts workers ignore speed,
 // so their map entries are inert (kept for symmetry with the gain map).
-export const TTS_SPEED_MIN = 0.5;
-export const TTS_SPEED_MAX = 2.0;
-export const TTS_SPEED_DEFAULT = 1.0;
+export const TTS_SPEED_MIN = TTS_SPEED_MIN_VALUE;
+export const TTS_SPEED_MAX = TTS_SPEED_MAX_VALUE;
+export const TTS_SPEED_DEFAULT = TTS_SPEED_DEFAULT_VALUE;
 
 // Coerce any value to a clean speed multiplier: finite number, clamped to
 // [TTS_SPEED_MIN, TTS_SPEED_MAX], rounded to 0.05. Garbage / non-finite →
 // 1.0 (unity, i.e. today's behaviour).
-export function clampTtsSpeed(v: unknown): number {
-  // Treat unset (null/undefined/'') as unity, NOT as 0 — unlike gain, 0 is not
-  // this dial's default and would clamp to the 0.5 floor instead of no-change.
-  if (v === null || v === undefined || v === '') return TTS_SPEED_DEFAULT;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return TTS_SPEED_DEFAULT;
-  const c = Math.max(TTS_SPEED_MIN, Math.min(TTS_SPEED_MAX, n));
-  return Math.round(c * 20) / 20;
-}
+export const clampTtsSpeed = clampTtsSpeedFn;
 
 // Normalise a per-engine speed map to exactly one clean multiplier per known
 // engine (default 1.0). Drops unknown keys, mirroring normalizeTtsGainMap.
@@ -247,17 +280,14 @@ export const LLM_PROVIDERS = [
   'gateway',
 ];
 
-// Subset of LLM_PROVIDERS that can actually produce text embeddings — the
-// library tagger embeds every track (music/embeddings.ts). Two chat providers
-// still route chat ONLY: deepseek and the Vercel AI gateway have no embeddings
-// endpoint. Offering them in the embedding-provider picker silently fell through
-// to a local Ollama and failed with a misleading "can't reach <provider>" error
-// (#493). `openrouter` was originally in that chat-only set, but OpenRouter
-// shipped an OpenAI-compatible embeddings endpoint, so it's back in (#522) and
-// routes through llm/internal/provider/embedding.ts. `anthropic` was dropped —
-// it has no first-party embedding model and only worked by transparently routing
-// to OpenAI (needs OPENAI_API_KEY), which confused operators; pick OpenAI (or any
-// other embedding provider) directly instead.
+// Subset of LLM_PROVIDERS that can actually produce text embeddings. Chat-only
+// providers are excluded because offering them in the embedding picker fell
+// through to a local Ollama and failed with a misleading "can't reach
+// <provider>" (#493): deepseek and the Vercel AI gateway have no embeddings
+// endpoint, and `anthropic` has no first-party embedding model (it only worked
+// by transparently routing to OpenAI, which confused operators — pick OpenAI
+// directly). `openrouter` IS included: it shipped an OpenAI-compatible
+// embeddings endpoint (#522), routed through provider/embedding.ts.
 export const EMBEDDING_PROVIDERS = [
   'ollama',
   'openai-compatible',
@@ -348,13 +378,13 @@ export function clampMaxOutputTokens(raw: unknown, def: number): number {
 // band. Non-numeric/NaN falls back to `def`. Same 0-means-auto shape as
 // clampMaxOutputTokens above.
 //
-// The band is imported from the harness rather than restated here: it is a
-// property of the tool loop (a 0 budget corners the model at step 0 with an
-// empty candidate set; an unbounded one eats the shared deadline the recovery
-// legs need), and a second copy of the numbers would be free to drift from the
-// clamp discoveryStepsFor() applies. This is the one place settings reaches past
-// an `llm/` barrel: capabilities.ts imports nothing, while the llm/provider.js
-// barrel pulls in registry.ts, which imports settings — a cycle.
+// The band is imported from the harness rather than restated: it is a property
+// of the tool loop (a 0 budget corners the model at step 0 with an empty
+// candidate set; an unbounded one eats the shared deadline the recovery legs
+// need), and a second copy would be free to drift from discoveryStepsFor()'s
+// clamp. This is the one place settings reaches past an `llm/` barrel —
+// capabilities.ts imports nothing, while the llm/provider.js barrel pulls in
+// registry.ts, which imports settings: a cycle.
 export function clampDiscoverySteps(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
   const n = Math.floor(raw);
@@ -566,7 +596,7 @@ export function normalizeLlmProviderBaseUrls(
 // any self-hosted OpenAI-compatible speech server (Chatterbox, Qwen3 TTS,
 // VibeVoice, etc.) via the operator-supplied `tts.cloud.baseUrl` — mirrors the
 // LLM provider of the same name.
-export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
+export const TTS_CLOUD_PROVIDERS: readonly string[] = TTS_CLOUD_PROVIDER_VALUES;
 
 // Web-search backends for the segment director's `web-search` capability.
 // `duckduckgo` is the homelab default — DuckDuckGo's Instant Answer API is free
@@ -576,9 +606,8 @@ export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'opena
 // results; `brave` is Brave's Search API (metered, $5/mo free credits), and
 // `kagi` provides its own paid API. `searxng` is keyless self-hosted meta-search
 // via settings.search.baseUrl.
-export const SEARCH_PROVIDERS =
-  ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'] as const;
-export const SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi'] as const;
+export const SEARCH_PROVIDERS = SETTINGS_SEARCH_PROVIDERS;
+export const SEARCH_KEY_PROVIDERS = SETTINGS_SEARCH_KEY_PROVIDERS;
 export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
 
 const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
@@ -670,7 +699,6 @@ export const WEATHER_MOOD_DEFAULTS: Record<string, string> = {
 
 // --- Mood vocabulary validation (the seeded-but-editable pattern) ---
 export const MOODS_LIMIT = 40;
-export const MOOD_NAME_MAX = 40;
 export const MOOD_PROMPT_MAX = 200;
 
 // Normalise a raw mood name to the canonical id form (lowercase, [a-z0-9-]).
@@ -719,13 +747,18 @@ export function normalizeMoodMap(
 
 // Energy bands a show can pin as a soft music-steering filter. Mirrors the
 // tagger's per-track energy classes and the `tracksByMood` agent-tool filter.
-export const SHOW_ENERGY = ['low', 'medium', 'high'];
-
-// Vocal steering a show can pin. Unlike the list filters above this is ONE
-// value, because the three states are mutually exclusive and "both" is just no
+//
+// Vocal steering a show can pin. Unlike the list filters this is ONE value,
+// because the three states are mutually exclusive and "both" is just no
 // constraint — which is what '' means, and what every show that predates the
 // field carries. Backed by Demucs vocal ranges (music/show-filter.trackInstrumental).
-export const SHOW_VOCALS = ['instrumental', 'vocal'];
+//
+// Both now live in the shared show schema, which the admin form runs too
+// (controller/src/schemas/show.ts). Re-exported so the many existing importers
+// of this barrel don't move. Typed as readonly there; widened here because
+// callers do `SHOW_ENERGY.includes(x)` on unknown strings.
+export const SHOW_ENERGY: readonly string[] = SHOW_ENERGY_VALUES;
+export const SHOW_VOCALS: readonly string[] = SHOW_VOCALS_VALUES;
 
 // Default festival calendar — the seeded set the admin UI shows on first boot.
 // After the operator edits the list, persisted festivals replace these.
@@ -777,7 +810,7 @@ export const KOKORO_VOICE_LANGUAGES: Record<string, string> = {
   'z': 'Mandarin Chinese',
 };
 
-export const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]+$/;
+export const KOKORO_VOICE_RE = TTS_KOKORO_VOICE_RE;
 
 // Kokoro language override — the set of phonemizer languages the worker accepts.
 // The worker builds an espeak.EspeakG2P for the chosen language (see _phonemize
@@ -821,30 +854,36 @@ export const POCKET_TTS_VOICES = [
   { id: 'lola', label: 'Lola (ES, F)' },
   { id: 'rafael', label: 'Rafael (PT, M)' },
 ];
-export const POCKET_TTS_VOICE_RE = /^[a-z][a-z0-9_-]{0,39}$/;
+export const POCKET_TTS_VOICE_RE = TTS_POCKET_VOICE_RE;
 // Reference-WAV filenames live in the shared voice folder (config.voices.dir,
 // formerly config.chatterbox.voiceDir). Loose check — basename only, no path
 // separators, conservative character set, ends in .wav. Empty is also valid
 // (means "use the built-in default voice"). Used by both chatterbox and
 // pocket-tts since issue #213.
-export const CHATTERBOX_VOICE_RE = /^[A-Za-z0-9_.-]{1,80}\.wav$/;
-// Per-persona Piper voice — an `.onnx` model filename in the shared voice folder
-// (config.voices.dir), e.g. `en_US-amy-medium.onnx`, dropped alongside its
-// `.onnx.json` manifest. Basename only, no path separators. Empty is valid and
-// means "use the baked-in default voice" (issue #230).
-export const PIPER_VOICE_RE = /^[A-Za-z0-9_.-]{1,100}\.onnx$/;
-export const ID_RE = /^[a-z0-9_]{3,32}$/;
+export const CHATTERBOX_VOICE_RE = TTS_CHATTERBOX_VOICE_RE;
+// The entity-id pattern shows, personas and skill assignments all share. Its
+// one definition is SHOW_ID_RE in the shared show schema — a mirrored module
+// cannot import a common one (gen-schemas.ts rejects every specifier but
+// 'zod'), so it is homed in the first feature that needed it. Whoever converts
+// personas should decide its permanent home.
+export const ID_RE = SHOW_ID_RE;
 // Persona avatar filename — `<personaId>.(png|jpg|jpeg|webp)`. The id segment
 // reuses ID_RE's shape so an avatar field can never reference a basename
 // outside the persona-avatars directory. Empty is also valid (no avatar set).
-export const AVATAR_FILENAME_RE = /^[a-z0-9_]{3,32}\.(png|jpe?g|webp)$/;
+export const AVATAR_FILENAME_RE = PERSONA_AVATAR_FILENAME_RE;
 // Skill slugs (e.g. 'weather', 'random-facts'). The skills registry is the
-// source of truth for which slugs exist; settings only checks the shape.
-export const SKILL_SLUG_RE = /^[a-z0-9-]{1,40}$/;
+// source of truth for which slugs exist; settings only checks the shape — and
+// now checks the SAME shape, aliasing the pattern in the shared skill schema
+// (skills/loader.ts's SLUG_RE is the third name for it). The separate pattern
+// this replaces (`/^[a-z0-9-]{1,40}$/`) disagreed in both directions: it
+// accepted `-nope`, which no skill can be called, and rejected a real
+// 41–49-char slug, so a legitimately-named skill could not be assigned to a
+// persona at all.
+export const SKILL_SLUG_RE = SKILL_SLUG_PATTERN;
 
 // Exported for the community-persona install route (routes/personas.ts), which
 // gives a friendly 409 before settings.update() would throw on an oversize roster.
-export const PERSONA_LIMIT = 48;
+export const PERSONA_LIMIT = PERSONA_LIMIT_VALUE;
 // Persona `soul` — the character sketch injected into EVERY free-text DJ
 // generation call, so each char is a recurring per-call token cost. Bounded
 // rather than unbounded for that reason alone; nothing structural depends on
@@ -854,8 +893,8 @@ export const PERSONA_LIMIT = 48;
 // is NOT the speaking seat (the multi-voice cast blocks, the cloud-TTS
 // delivery hint) clamp it further at their own boundary — see soulBrief() in
 // llm/internal/core/pure.ts.
-export const SOUL_MAX = 2000;
-export const SHOWS_LIMIT = 64;
+export const SOUL_MAX = PERSONA_SOUL_MAX;
+export { SHOWS_LIMIT } from '../schemas/show.js';
 // Show `topic` — the standing brief the DJ works from while the show is on air.
 // Injected into the pick prompts (picker.ts / dj-agent schemas) and the
 // programme producer plan, so like SOUL_MAX it is a recurring per-call token
@@ -863,43 +902,37 @@ export const SHOWS_LIMIT = 64;
 // carry the same amount of detail as a persona sketch. Keep in lockstep with
 // TOPIC_MAX in web/components/admin/shows/types.ts and the AI-fill draft schema
 // in llm/internal/prompts/generate.ts.
-export const SHOW_TOPIC_MAX = 2000;
+// Definition lives in the shared schema; the rationale above stays here.
+export { SHOW_TOPIC_MAX } from '../schemas/show.js';
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
-export const GUESTS_PER_SHOW = 3;
-export const PLAYLISTS_PER_SHOW = 10;
-export const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
+export { GUESTS_PER_SHOW, PLAYLISTS_PER_SHOW, EXCLUDED_PLAYLISTS_PER_SHOW };
 // Values per multi-select music filter (moods / genres / eras). Within one
-// attribute the values OR together at pick time; across attributes they AND.
-// Raised 6 → 15: the AND-across argument for keeping it small never applied
-// WITHIN an attribute, and genre is where it bites — a strict alt/punk show
-// has to name every library tag it wants (Punk Rock, Emo, Pop Punk,
-// Post-Hardcore, Emo Pop, …) because matching only REFINES, never broadens
-// (see trackGenres/genreMatches in music/show-filter.ts), so 6 forced the
-// operator to either drop valid tags or retag the library.
+// attribute the values OR at pick time; across attributes they AND.
 //
-// What made 6 load-bearing was cost, not meaning: every genre used to cost a
-// getGenres() round trip to resolve (music/subsonic.ts) plus two discovery
-// fetches per genre in each pool builder, all sequential. Both are bounded now
-// — getGenres is TTL-cached and the per-genre fetches run through mapPool — so
-// the wall-clock of a pick no longer scales with this number. The per-genre
-// size budgets already divide a FIXED total (randomSize / genreSetSize in
-// music/picker.ts + broadcast/scheduler.ts), so the pool doesn't grow either.
-// Keep in lockstep with FILTER_VALUES_MAX in
-// web/components/admin/shows/types.ts (pinned by scripts/show-filter-cap.test.ts).
-export const SHOW_FILTER_VALUES_MAX = 15;
+// The cap can be generous because neither cost nor pool size scales with it:
+// getGenres() is TTL-cached, the per-genre discovery fetches run through
+// mapPool, and the per-genre size budgets divide a FIXED total (randomSize /
+// genreSetSize). It needs to be generous because genre matching only REFINES,
+// never broadens (trackGenres/genreMatches in music/show-filter.ts), so a strict
+// alt/punk show must name every library tag it wants — Punk Rock, Emo, Pop Punk,
+// Post-Hardcore, … — or retag the library.
+//
+// Keep in lockstep with FILTER_VALUES_MAX in web/components/admin/shows/types.ts
+// (pinned by scripts/show-filter-cap.test.ts).
+export { SHOW_FILTER_VALUES_MAX };
 // Must comfortably exceed a realistic skill library: unticking one skill on an
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
-export const SKILLS_PER_PERSONA_LIMIT = 64;
+export const SKILLS_PER_PERSONA_LIMIT = PERSONA_SKILLS_LIMIT;
 // Prompt-template library (djPrompts). Text bounds match the historical
 // single-djPrompt rule — keep them in lockstep with PROMPT_MIN/PROMPT_MAX in
 // web/components/admin/personas/constants.ts.
-export const DJ_PROMPT_LIMIT = 20;
-export const DJ_PROMPT_NAME_MAX = 60;
-export const DJ_PROMPT_TEXT_MIN = 50;
-export const DJ_PROMPT_TEXT_MAX = 4000;
+export const DJ_PROMPT_LIMIT = DJ_PROMPT_LIMIT_VALUE;
+export const DJ_PROMPT_NAME_MAX = DJ_PROMPT_NAME_MAX_VALUE;
+export const DJ_PROMPT_TEXT_MIN = DJ_PROMPT_TEXT_MIN_VALUE;
+export const DJ_PROMPT_TEXT_MAX = DJ_PROMPT_TEXT_MAX_VALUE;
 // Station house rules (djHouseRules) — operator rules appended to BOTH prompt
 // paths (renderDjPrompt and agentPersonaPreamble), unlike the djPrompt
 // template which only the scripted-talk path renders (issue #1182). No
@@ -930,21 +963,6 @@ export function coerceGuestPersonaIds(raw: unknown, hostId: string, personaIds: 
   return out;
 }
 
-export function coercePlaylistIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== 'string') continue;
-    const id = v.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    if (out.length >= PLAYLISTS_PER_SHOW) break;
-  }
-  return out;
-}
-
 // ── Multi-value music filters (#929) ────────────────────────────────────────
 // A show's Genre Lean / Mood / Energy / Era each hold a LIST of values: OR
 // within the attribute, AND across attributes, every value weighted equally.
@@ -956,7 +974,7 @@ export function coercePlaylistIds(raw: unknown): string[] {
 // One era window { fromYear, toYear } — at least one bound set; both-null
 // entries are meaningless and dropped. Multiple windows let a show span
 // non-adjacent decades ("90s + 2010s") — inexpressible as a single range.
-export type EraWindow = { fromYear: number | null; toYear: number | null };
+export type { EraWindow };
 
 // Webhook shape + event list now live in the shared schema, which the web form
 // runs too (controller/src/schemas/webhook.ts). Re-exported here so the many
@@ -1001,27 +1019,18 @@ export interface NormalizedShow {
   excludedPlaylistIds: string[];
 }
 
-function coerceEraWindow(raw: unknown): EraWindow | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { fromYear?: unknown; toYear?: unknown };
-  const fromYear = Number.isFinite(r.fromYear) ? Math.trunc(r.fromYear as number) : null;
-  const toYear = Number.isFinite(r.toYear) ? Math.trunc(r.toYear as number) : null;
-  if (fromYear == null && toYear == null) return null;
-  if (fromYear != null && toYear != null && fromYear > toYear) return null;
-  return { fromYear, toYear };
-}
-
-// Plural-first: `item[plural]` wins when it's an array; otherwise the legacy
-// singular value (if any) becomes a one-element list. Dedup + cap.
+// Dedup + cap over one already-plural list. Legacy singular fields (`mood`,
+// `genre`, `fromYear`/`toYear`, …) are folded into the plural keys by
+// migrateLegacyShowFields — the ONE home of the #929 migration, shared with
+// the schema's own preprocess and the lenient load path — rather than by a
+// second singular-fallback here, which is how the two migrations used to
+// drift.
 function coerceShowList<T>(
-  item: unknown,
-  plural: string,
-  singular: string,
+  raw: unknown,
   coerceOne: (v: unknown) => T | null,
   keyOf: (v: T) => string,
 ): T[] {
-  const rec = item as Record<string, unknown> | null | undefined;
-  const raw: unknown[] = Array.isArray(rec?.[plural]) ? (rec?.[plural] as unknown[]) : [rec?.[singular]];
+  if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
   const out: T[] = [];
   for (const v of raw) {
@@ -1042,28 +1051,23 @@ export function coerceShowMoods(item: unknown): string[] {
   // built — filtering against the seed defaults here would strip an operator's
   // custom moods). update()'s validateShowsStrict enforces the live vocabulary
   // on save; a stale mood string just matches nothing at runtime.
-  return coerceShowList(item, 'moods', 'mood',
+  return coerceShowList(migrateLegacyShowFields(item).moods,
     (v) => (typeof v === 'string' && v.trim() ? v.trim() : null),
     (v) => v);
 }
 
 export function coerceShowGenres(item: unknown): string[] {
-  // Legacy singular `genre` was one free-text field and operators crammed
-  // multiple genres into it comma-separated ("funk, soul, jazz-funk") — which
-  // never resolved against the library as one tag. Split it on migration so
-  // each becomes a real, individually-resolvable entry. Plural-array entries
-  // are taken as-is (the UI adds them one at a time).
-  const rec = (item ?? {}) as Record<string, unknown>;
-  const raw = Array.isArray(rec.genres)
-    ? rec.genres
-    : typeof rec.genre === 'string' ? rec.genre.split(',') : [];
-  return coerceShowList({ genres: raw }, 'genres', 'genre',
-    (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 64) : null),
+  // The comma-split of a legacy singular `genre` ("funk, soul, jazz-funk" —
+  // which never resolved against the library as one tag) lives in
+  // migrateLegacyShowFields; each piece becomes a real, individually-resolvable
+  // entry. Plural-array entries are taken as-is (the UI adds them one at a time).
+  return coerceShowList(migrateLegacyShowFields(item).genres,
+    (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, SHOW_GENRE_MAX) : null),
     (v) => v.toLowerCase());
 }
 
 export function coerceShowEnergies(item: unknown): string[] {
-  return coerceShowList(item, 'energies', 'energy',
+  return coerceShowList(migrateLegacyShowFields(item).energies,
     (v) => (typeof v === 'string' && SHOW_ENERGY.includes(v) ? v : null),
     (v) => v);
 }
@@ -1077,33 +1081,16 @@ export function coerceShowVocals(item: unknown): string {
 }
 
 export function coerceShowEras(item: unknown): EraWindow[] {
-  // Legacy singular is a pair of top-level keys, not one value — synthesize
-  // the window before handing off to the shared list coercer.
-  const rec = (item ?? {}) as Record<string, unknown>;
-  const raw = Array.isArray(rec.eras)
-    ? rec.eras
-    : [{ fromYear: rec.fromYear, toYear: rec.toYear }];
-  return coerceShowList({ eras: raw }, 'eras', 'era', coerceEraWindow,
+  // Window repair (year bounds, from<=to, numeric-string years) is the
+  // schema's own repairEraWindow, so this coercer can't disagree with the
+  // validator about what a valid window is.
+  return coerceShowList(migrateLegacyShowFields(item).eras, repairEraWindow,
     (e) => `${e.fromYear ?? ''}:${e.toYear ?? ''}`);
 }
 
-// A show can exclude tracks from one or more Navidrome playlists: any track
-// that appears in these playlists is dropped from the candidate pool at pick
-// time. Same shape/rules as coercePlaylistIds. Empty = no exclusions.
-export function coerceExcludedPlaylistIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== 'string') continue;
-    const id = v.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    if (out.length >= EXCLUDED_PLAYLISTS_PER_SHOW) break;
-  }
-  return out;
-}
+// The playlist-anchor lists have no standalone coercers any more — the lenient
+// load path repairs them through schemas/show.ts repairShowForLoad like every
+// other list field.
 
 export function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
@@ -1116,26 +1103,18 @@ export function mintId(prefix) {
   return prefix + randomBytes(3).toString('hex');
 }
 
-// A blank 7-day x 24-hour grid. Keys 0 (Sunday) .. 6 (Saturday) match
-// JS Date.getDay(). Each value is an array[24] of showId|null.
-export function emptyWeek() {
-  const week = {};
-  for (let d = 0; d < 7; d++) week[d] = Array(24).fill(null);
-  return week;
-}
-
-// Timed schedule takeover (#930): pin one show for a bounded window, then the
-// weekly grid resumes. Epoch-ms so no station-zone interpretation is needed.
-export interface ScheduleOverride {
-  showId: string;
-  startedAt: number;
-  expiresAt: number;
-}
-
-// Bounds for POST /schedule/override's `minutes` — long enough for an all-day
-// takeover, short enough that a forgotten pin can't shadow the grid for days.
-export const OVERRIDE_MIN_MINUTES = 15;
-export const OVERRIDE_MAX_MINUTES = 720;
+// The weekly grid + timed takeover (#930) vocabulary now lives in the shared
+// schema (controller/src/schemas/schedule.ts) so the admin UI runs the same
+// bounds — TakeoverCard carried a hand-copied OVERRIDE_MIN/MAX_MINUTES pair.
+// Re-exported here so no existing import site moved.
+export {
+  emptyWeek,
+  OVERRIDE_MIN_MINUTES,
+  OVERRIDE_MAX_MINUTES,
+  SCHEDULE_DAYS,
+  SCHEDULE_HOURS,
+} from '../schemas/schedule.js';
+export type { ScheduleOverride, ScheduleWeek } from '../schemas/schedule.js';
 
 // Seed roster — three distinct DJs shipped on a fresh install (and used as the
 // migration fallback when a legacy `dj` block carries no real souls). Distinct
@@ -1183,15 +1162,17 @@ export const SEED_PERSONAS = [
 // /stream.mp3 mount. Matches the literal branches in radio.liq —
 // %mp3(bitrate=…) needs a parse-time int, so the encoder is pre-baked for
 // this small set. Add a branch in radio.liq if you add a value here.
-export const MP3_BITRATES = [64, 96, 128, 160, 192, 320] as const;
+// Homed in schemas/settings.ts (#1348) so the mirrored archive/stream schemas
+// and the browser can read them; re-exported here so no call site moved.
+export const MP3_BITRATES = SETTINGS_MP3_BITRATES;
 // Opus + AAC encoders share the same parse-time-literal constraint as %mp3, so
 // each is pre-baked for a small set in radio.liq. Add a branch there if you add
 // a value here.
-export const OPUS_BITRATES = [96, 128, 192, 256, 320] as const;
-export const AAC_BITRATES = [128, 192, 256] as const;
+export const OPUS_BITRATES = SETTINGS_OPUS_BITRATES;
+export const AAC_BITRATES = SETTINGS_AAC_BITRATES;
 
 // Where per-track loudness comes from (queue.applyLoudnessGain, issue #998):
 // an embedded ReplayGain tag (Navidrome's OpenSubsonic replayGain field),
 // the analyzer's measured LUFS, or tag-with-measured-fallback (the default).
-export const LOUDNESS_SOURCES = ['replaygain-then-measured', 'replaygain', 'measured'] as const;
+export const LOUDNESS_SOURCES = SETTINGS_LOUDNESS_SOURCES;
 export type LoudnessSource = (typeof LOUDNESS_SOURCES)[number];
