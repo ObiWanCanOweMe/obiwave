@@ -1091,7 +1091,7 @@ test('CUDA analyzer is mirrored, never rebuilt', () => {
   assert.doesNotMatch(buildMatrix, /subwave-analyzer-cuda/);
 });
 
-test('reusable CI deployment gate runs the CUDA mirror helper contract', () => {
+test('reusable CI deployment gate runs the CUDA mirror and pinned download contracts exactly once', () => {
   const deploymentCommand = ci.match(
     /- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/,
   )?.[1];
@@ -1099,6 +1099,13 @@ test('reusable CI deployment gate runs the CUDA mirror helper contract', () => {
   assert.match(
     deploymentCommand,
     /(?:^| )scripts\/release\/mirror-cuda-analyzer\.test\.mjs(?: |$)/,
+  );
+  assert.equal(
+    deploymentCommand.split(/\s+/).filter(
+      (argument) => argument === 'scripts/ci/pinned-download.test.mjs',
+    ).length,
+    1,
+    'pinned-download contract must run exactly once in mandatory PR CI',
   );
 });
 
