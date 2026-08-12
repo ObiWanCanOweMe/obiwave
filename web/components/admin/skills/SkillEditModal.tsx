@@ -35,6 +35,7 @@ import {
 import { skillSubmitUrl } from '../../../lib/repo';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
 import { TextField, TextareaField } from '@/lib/form-fields';
+import { Switch } from '@/components/ui/switch';
 
 // Only what this modal needs from GET /dj/skills; the full list type lives in
 // SkillsPanel.
@@ -98,6 +99,13 @@ interface SkillFileResponse {
   config?: Record<string, string | number>;
   label?: string;
   cooldown?: string;
+  cron?: string | null;
+  // Set when the file on disk carries an expression node-cron can't register.
+  // Only a hand-edited SKILL.md can produce one — every save route refuses it —
+  // and the scheduler's skip is logged where the operator won't see it, so the
+  // editor is the surface that has to say so.
+  cronInvalid?: boolean;
+  cronOnly?: boolean;
   context?: string;
   knownContextFields?: string[];
   window?: 'any' | 'commute';
@@ -119,6 +127,8 @@ interface SkillFormValues {
   name?: string;
   label: string;
   cooldown: string;
+  cron: string;
+  cronOnly: boolean;
   context: string[];
   tags: string[];
   brief: string;
@@ -156,6 +166,8 @@ function fileToFormValues(j: SkillFileResponse) {
   return {
     label: j.label || '',
     cooldown: j.cooldown || '',
+    cron: j.cron || '',
+    cronOnly: !!j.cronOnly,
     context: splitContext(j.context),
     window: (j.window === 'commute' ? 'commute' : 'any') as 'any' | 'commute',
     tags: Array.isArray(j.tags) ? j.tags : [],
@@ -181,6 +193,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const [custom, setCustom] = useState(mode === 'create' ? true : !!skill?.custom);
   const [configFields, setConfigFields] = useState<SkillConfigField[]>([]);
   const [hasTool, setHasTool] = useState(false);
+  const [cronInvalid, setCronInvalid] = useState(false);
   const [knownContext, setKnownContext] = useState<string[]>(CONTEXT_FIELDS_FALLBACK);
 
   // The skill's own declared knobs (news' feed/feedMaxItems, …) — runtime data
@@ -217,8 +230,8 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const form = useZodForm(
     schema,
     (mode === 'create'
-      ? { name: '', label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
-      : { label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      ? { name: '', label: '', cooldown: '', cron: '', cronOnly: false, context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      : { label: '', cooldown: '', cron: '', cronOnly: false, context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
     ) as DefaultValues<z.input<typeof schema>>,
   );
   const control = form.control as unknown as Control<SkillFormValues>;
@@ -272,6 +285,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         setCustom(!!j.custom);
         setConfigFields(Array.isArray(j.configFields) ? j.configFields : []);
         setHasTool(!!j.hasTool);
+        setCronInvalid(!!j.cronInvalid);
         setDefaults(j.defaults || null);
         setKnownContext(
           Array.isArray(j.knownContextFields) && j.knownContextFields.length
@@ -302,7 +316,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   // passthrough with no rendered control, so a disk-authored value that isn't
   // UPPER_SNAKE_CASE has nowhere else to surface, and a gated Save would
   // otherwise never say why.
-  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'context', 'tags', 'window', 'brief'];
+  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'cron', 'cronOnly', 'context', 'tags', 'window', 'brief'];
   const blockingIssue = (() => {
     const entry = Object.entries(form.formState.errors).find(
       ([key, err]) => err && !FIELDS_WITH_INLINE_ERRORS.includes(key),
@@ -729,6 +743,54 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               </div>
             </div>
 
+            {/* Cron timer — optional dedicated schedule that fires the skill immediately */}
+            <div className="sw-section">
+              <div style={sectionLabel}>CRON TIMER — FIRE ON A FIXED SCHEDULE</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 16 }}>
+                <TextField
+                  control={control}
+                  name="cron"
+                  label="Cron expression"
+                  placeholder="0 * * * *"
+                  className="w-50"
+                />
+              </div>
+              {cronInvalid && (
+                <div style={{ fontSize: 12, color: 'var(--danger, #e5484d)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                  This skill&apos;s SKILL.md carries a cron expression the scheduler can&apos;t run, so no timer is registered for it. Fix or clear the field to save.
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min); a leading seconds field is accepted too. Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — but unlike Run Now it still stands down when the station voice is off, a programme is on air, nobody is listening, the daily token budget is spent, or the skill is disabled / not assigned to the on-air DJ. Uses the station timezone set in Settings.
+              </div>
+              <Controller
+                control={control}
+                name="cronOnly"
+                render={({ field }) => {
+                  const baseId = `${uid}-cron-only`;
+                  const aria = fieldAria(baseId);
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
+                      <Switch
+                        {...aria.controlProps}
+                        checked={!!field.value}
+                        onCheckedChange={field.onChange}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                      <label {...aria.labelProps} style={{ ...sectionLabel, cursor: 'pointer' }}>
+                        ONLY FIRE ON THE CRON TIMER
+                      </label>
+                    </div>
+                  );
+                }}
+              />
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                Off by default: the skill stays eligible for the DJ&apos;s normal between-track random picks in addition to firing on the schedule above. Turn this on for a skill written around a specific moment (a running joke tied to a particular time) so it never airs at any other time.
+              </div>
+            </div>
+
+            {/* Window — custom skills only (built-in window isn't editable) */}
             {custom && (
               <div className="sw-section">
                 <Controller

@@ -60,6 +60,7 @@ import {
   walkNavidrome,
 } from './tag-library/flags.js';
 import { llmTagInBatches, resolveTagConsumers } from './tag-library/tag.js';
+import { runPropagatedEnergyPass } from './propagated-energy.js';
 
 
 // Close (and TRUNCATE-checkpoint) the library DB on every exit path — this CLI
@@ -564,6 +565,19 @@ async function main() {
       console.log(`[tag] propagation self-check failed: ${err?.message || err}`);
     }
     lap('eval');
+
+    // ---- Audio-derived energy over the rows phases 3-4 just propagated -----
+    // A propagated energy is inherited from neighbours, not judged from this
+    // track; where the analyzer's stored mood cosines are decisive about the
+    // track's arousal, they overrule it (#1362). Runs here rather than inside
+    // the propagation loop so there is ONE correction path shared with the
+    // analysis pass — a library can gain audio scores long after it was
+    // tagged, and that case has to work too. Best-effort: never fails the run.
+    try {
+      runPropagatedEnergyPass();
+    } catch (err: any) {
+      console.log(`[tag] audio energy pass failed: ${err?.message || err}`);
+    }
   } else if (flags.skipTag) {
     console.log('[tag] --skip-tag: skipping embed + mood tagging (phases 1-4)');
   } // end forward "Tag moods" step (plan.forwardTag)

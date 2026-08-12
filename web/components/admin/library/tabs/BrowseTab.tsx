@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useDebounceValue } from 'usehooks-ts';
 import { X } from 'lucide-react';
 import { Card, Btn } from '../../ui';
 import { num } from '../../LibraryTaggingPanel';
@@ -39,11 +40,7 @@ export default function BrowseTab({
 
   // Debounce the free-text box only. Mood chips, sort and the year fields all
   // change one step at a time, so delaying the whole request just feels laggy.
-  const [debouncedQ, setDebouncedQ] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q), 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const [debouncedQ] = useDebounceValue(q, 250);
 
   const filters: BrowseKeyFilters = {
     moods, energy, vocal, genre, yearFrom, yearTo, q: debouncedQ.trim(), sort, page,

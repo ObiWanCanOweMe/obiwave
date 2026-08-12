@@ -142,4 +142,35 @@ const form = {
   assert.match(md, /^url: https:\/\/example\.com\/a\.xml\?x=1&y=2#top$/m, 'a URL stays bare');
 }
 
+// ── cron/cronOnly are OWNED, not preserved: a re-save must not duplicate them ─
+// Regression for a bug where cron/cronOnly were emitted by writeSkillFile but
+// missing from OWNED_FRONTMATTER_KEYS, so the preserve pass carried the OLD
+// values through alongside the newly-written ones — two `cron:` lines, which
+// breaks YAML parsing and pins the stale value via the legacy line-parser
+// fallback (parseFrontmatter's `malformed` path).
+{
+  await writeSkillFile({ kind: 'dabbers', brief: 'Say something.', cron: '0 8 * * *', cronOnly: true });
+  const cronFile = join(stateDir, 'skills', 'dabbers', 'SKILL.md');
+
+  await writeSkillFile({ kind: 'dabbers', brief: 'Say something.', cron: '0 9 * * *', cronOnly: true });
+  let md = readFileSync(cronFile, 'utf8');
+  const { parseFrontmatter } = await import('../src/skills/loader.js');
+  let { data, malformed } = parseFrontmatter(md);
+
+  assert.equal(malformed, undefined, `re-saved cron file is not valid YAML:\n${md}`);
+  assert.equal((md.match(/^cron:/gm) || []).length, 1, 'cron is written exactly once on a changed re-save');
+  assert.equal((md.match(/^cronOnly:/gm) || []).length, 1, 'cronOnly is written exactly once on a changed re-save');
+  assert.equal(data.cron, '0 9 * * *', 'the new cron expression wins, not the stale carried one');
+
+  // Operator clears both fields — they must actually disappear, not persist
+  // via the preserve pass reading them back out of the file being replaced.
+  await writeSkillFile({ kind: 'dabbers', brief: 'Say something.' });
+  md = readFileSync(cronFile, 'utf8');
+  ({ data, malformed } = parseFrontmatter(md));
+
+  assert.equal(malformed, undefined, `cleared cron file is not valid YAML:\n${md}`);
+  assert.doesNotMatch(md, /cron/, 'cron and cronOnly are both gone once cleared');
+  assert.equal(data.cron, undefined, 'cron cannot be resurrected from a stale carried line');
+}
+
 console.log('skill-scaffold-preserve.test.ts — all assertions passed');

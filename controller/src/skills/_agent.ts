@@ -37,6 +37,7 @@ import { buildContextLines, CONTEXT_FIELDS, lengthMode, lengthPhrase } from '../
 import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
+import { skillEligible } from './eligibility.js';
 import * as sfx from '../broadcast/sfx.js';
 
 // The capability registry now lives entirely in skills/loader.js, which loads
@@ -203,12 +204,19 @@ function availableCapabilities(ctx, now: Date) {
   const persona = settings.getEffectivePersona(now);
   const out: ReturnType<typeof allCapabilities> = [];
   for (const cap of allCapabilities()) {
-    // Seeded built-ins are enabled unless explicitly turned off; operator skills
-    // are DISCOVERED-BUT-DISABLED — they must be explicitly enabled before they
-    // can air, so dropping a folder never auto-airs unreviewed content/code.
-    const isEnabled = cap.seeded ? enabled[cap.skill] !== false : enabled[cap.skill] === true;
-    if (!isEnabled) continue;
-    if (persona?.skills && !persona.skills.includes(cap.skill)) continue;
+    // Enabled + owned-by-the-on-air-persona. Both rules live in
+    // skills/eligibility.ts because the cron timer owes the same two answers
+    // and reaches runCapability() without passing through here.
+    if (!skillEligible({
+      seeded: cap.seeded,
+      skill: cap.skill,
+      enabled,
+      personaSkills: persona?.skills,
+    }).allowed) continue;
+    // cronOnly withholds the skill from the autonomous director entirely — it
+    // fires only when its dedicated cron task calls runCapability() directly
+    // (scheduler.ts syncSkillCrons), which bypasses this function altogether.
+    if (cap.cronOnly) continue;
     if (now.getTime() - (lastFired.get(cap.kind) || 0) < cap.cooldownMs) continue;
     // Window gating: custom skills opt into commute-hours-only firing via
     // `window: commute` in their SKILL.md frontmatter. (No built-in is

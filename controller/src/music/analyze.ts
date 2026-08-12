@@ -18,6 +18,7 @@ import * as settings from '../settings.js';
 import { config } from '../config.js';
 import { deriveVocalFromLyrics, clipRangesToTail, type LyricVocalResult } from './lyric-vocal.js';
 import { runAudioMoodPass } from './audio-moods.js';
+import { runPropagatedEnergyPass } from './propagated-energy.js';
 import { reportProgress, makeEventLogger } from './tagger-progress.js';
 import { quietGateDecision, type QuietState } from './analyze-quiet-pure.js';
 import { backfillDecision, failureCountsAgainstTrack, SYSTEMIC_FAILURE_RUN } from './analyze-capability.js';
@@ -211,6 +212,15 @@ async function scoreAudioMoods(): Promise<void> {
     await runAudioMoodPass();
   } catch (err: any) {
     console.error(`[audio-moods] pass failed (non-fatal): ${err?.message || err}`);
+  }
+  // Strictly after the mood pass: the energy correction reads the same stored
+  // cosines and calibrates against the same library-wide distribution, so it
+  // wants this run's scores on disk first. Separately wrapped — a failure here
+  // must not cost the mood labels the pass just wrote.
+  try {
+    runPropagatedEnergyPass();
+  } catch (err: any) {
+    console.error(`[audio-energy] pass failed (non-fatal): ${err?.message || err}`);
   }
 }
 

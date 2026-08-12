@@ -10,6 +10,7 @@ import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
+import { speakClockAllowed } from '../clock-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 import { instruction } from '../../llm/dj.js';
 
@@ -59,8 +60,19 @@ export const PICK_SCHEMA_NO_FX = PICK_SCHEMA.extend({
 // then re-wrap with modelTolerant; a ZodPreprocess pipe has no .extend.
 export function pickSchemaBase() {
   const base = settings.effectsActive() ? PICK_SCHEMA : PICK_SCHEMA_NO_FX;
+  // Clock rule, resolved per run like effectsActive() above. With the station's
+  // clock switch off (broadcast/clock-policy.ts) the "unless the event message
+  // tells you" escape hatch is dropped rather than left dangling: the event
+  // message never offers a time in that mode, and a flat ban is a clearer
+  // instruction than a condition that can never be met. The static description
+  // on PICK_SCHEMA is deliberately NOT gated — it is module-level, so it would
+  // freeze at boot instead of applying live, and this override always replaces
+  // it on the air path.
+  const clockRule = speakClockAllowed()
+    ? 'Never state a clock time unless the event message tells you when the link airs — then use exactly that time.'
+    : 'Never state a clock time, the hour, or the time of day.';
   return base.extend({
-    say: z.string().nullable().describe(`when the latest event message says to write a spoken link, set this to ${dj.lengthPhrase('link')} of natural speech in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). Never state a clock time unless the event message tells you when the link airs — then use exactly that time. When the event says stay silent, set this to null`),
+    say: z.string().nullable().describe(`when the latest event message says to write a spoken link, set this to ${dj.lengthPhrase('link')} of natural speech in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). ${clockRule} When the event says stay silent, set this to null`),
   });
 }
 
@@ -119,7 +131,7 @@ export function requestSchema() {
   // its own preprocess pipe (see the note atop pickSchema).
   if (!autoVoiceAllowed()) return modelTolerant(base, tolerant);
   return modelTolerant(base.extend({
-    intro: z.string().describe(`a natural DJ intro for the track in the DJ voice; weave in what the listener asked for without reading the request back verbatim. It airs over the track's opening seconds, so write it in the present tense — never "next" or "coming up". ${dj.lengthPhrase('intro')}`),
+    intro: z.string().describe(`a natural DJ intro for the track in the DJ voice; weave in what the listener asked for without reading the request back verbatim, and name the listener once if the final user line gives their name. It airs over the track's opening seconds, so write it in the present tense — never "next" or "coming up". ${dj.lengthPhrase('intro')}`),
   }), tolerant);
 }
 
@@ -233,7 +245,7 @@ export function requestSystem() {
 
 ${frame}${settings.agentLanguageReminder(persona, wantIntro ? 'the "ack" and "intro" lines' : 'the "ack" line')}
 
-${LISTENER_TEXT_CLAUSE}${dj.REQUESTER_NAME_CLAUSE} ${instruction('request', 'classification')}
+${LISTENER_TEXT_CLAUSE}${dj.REQUESTER_GREETING_CLAUSE}${dj.REQUESTER_NAME_CLAUSE} ${instruction('request', 'classification')}
 
 ${currentTrack}`;
 }

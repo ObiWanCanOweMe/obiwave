@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Trash2, Palette, Clock, CalendarDays, Volume2 } from 'lucide-react';
 import {
-  useController, useFieldArray, type Control,
+  useController, useFieldArray, useWatch, type Control,
 } from 'react-hook-form';
 import { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
@@ -18,6 +18,7 @@ import { Field, FieldLabel, FieldError } from '@/components/ui/field';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '../ui/select';
+import { Input } from '@/components/ui/input';
 import { SkeletonCards } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/error-state';
 import FestivalsSection from './FestivalsSection';
@@ -29,6 +30,9 @@ import {
   SETTINGS_MOOD_NAME_MAX,
   SETTINGS_MOOD_PROMPT_MAX,
 } from '@/lib/schemas.generated';
+import { VoicePreviewButton } from './tts/VoicePreviewButton';
+import { defaultEngineVoice } from './tts/defaultVoice';
+import { ENGINE_META } from './tts/engineMeta';
 
 interface MoodEntry {
   name: string;
@@ -43,6 +47,16 @@ interface MoodsFormValues {
   schedule: Record<string, string>;
   weather: Record<string, string>;
   corrections: Correction[];
+}
+interface TestVoiceDefaults {
+  engine: string;
+  voice: string;
+  cloudProvider?: string;
+  cloudModel?: string;
+  speed?: number;
+  // Kokoro's language code, so the test sample auditions the same voice the
+  // Settings → TTS "Play sample" button does.
+  lang?: string;
 }
 
 // The 8 fixed day-periods (controller context.ts getTimeContext) — only each
@@ -150,6 +164,11 @@ export default function MoodsPanel() {
   const rawTab = searchParams.get('tab');
   const tab: TabId = (TAB_IDS as string[]).includes(rawTab ?? '') ? (rawTab as TabId) : 'vocab';
 
+  // The station's default voice, used to speak the "Test corrections" sample —
+  // resolved from settings.tts on load, never edited here.
+  const [previewVoice, setPreviewVoice] = useState<TestVoiceDefaults>({ engine: 'piper', voice: '' });
+  const [testText, setTestText] = useState('');
+
   // The PERSISTED mood list, deliberately not the live Vocabulary tab value:
   // it is both the vocabulary the schedule/weather cards validate against and
   // the options their Selects offer. `saveSchedule`/`saveWeather` post their
@@ -193,6 +212,10 @@ export default function MoodsPanel() {
     name: 'corrections',
     keyName: '_rhfKey',
   });
+  // Live (unsaved-included) corrections for the "Test corrections" preview —
+  // watched rather than read once, so an edit to the list above updates the
+  // sample without a save round trip first.
+  const liveCorrections = useWatch({ control: arrayControl, name: 'corrections' }) ?? [];
 
   // Swapping the resolver doesn't re-run it against already-computed error
   // state, so re-validate whenever the schema is rebuilt from a fresh
@@ -210,7 +233,15 @@ export default function MoodsPanel() {
           moods?: unknown;
           moodSchedule?: unknown;
           weatherMoods?: unknown;
-          tts?: { corrections?: unknown };
+          tts?: {
+            corrections?: unknown;
+            defaultEngine?: string;
+            kokoro?: { voice?: string; lang?: string };
+            chatterbox?: { referenceVoice?: string };
+            pocketTts?: { voice?: string };
+            cloud?: { provider?: string; model?: string; voice?: string };
+            speed?: Record<string, number>;
+          };
         };
       } | null;
       const v = j?.values || {};
@@ -239,6 +270,20 @@ export default function MoodsPanel() {
       form.reset(next);
       setSavedMoodNames(loadedMoods.map(m => m.name));
       setLoaded(true);
+
+      // Which voice the "Test corrections" sample uses — the station's
+      // configured default engine, resolved through the one shared ladder
+      // (admin/tts/defaultVoice.ts) the Settings → TTS preview also walks.
+      const rawTts = v.tts || {};
+      const previewEngine = rawTts.defaultEngine || 'piper';
+      setPreviewVoice({
+        engine: previewEngine,
+        voice: defaultEngineVoice(previewEngine, rawTts),
+        cloudProvider: rawTts.cloud?.provider,
+        cloudModel: previewEngine === 'cloud' ? rawTts.cloud?.model : undefined,
+        speed: rawTts.speed?.[previewEngine],
+        lang: rawTts.kokoro?.lang || undefined,
+      });
       setErr(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -385,6 +430,9 @@ export default function MoodsPanel() {
   const scheduleCard = cardState('schedule');
   const weatherCard = cardState('weather');
   const correctionsCard = cardState('corrections');
+  const effectiveCorr = liveCorrections
+    .map(c => ({ from: (c.from ?? '').trim(), to: (c.to ?? '').trim() }))
+    .filter(c => c.from);
 
   return (
     <div className="grid gap-4">
@@ -535,70 +583,102 @@ export default function MoodsPanel() {
       {tab === 'festivals' && <FestivalsSection />}
 
       {tab === 'speech' && loaded && (
-        <Card title="Speech corrections" sub="how names and tricky words should sound">
-          <div className="field">
-            <div className="field-hint">
-              Find-and-replace rules we apply to every line before it’s spoken, for names and
-              words the voice tends to get wrong (<em>GHz</em> →<em> gigahertz</em>, <em>Hozier</em>{' '}
-              → <em>Ho-zeer</em>). Case doesn’t matter, and it matches whole words and phrases;
-              leave the spoken form empty to drop a word entirely. New rules kick in from the next
-              line — no restart needed.
-            </div>
-            <ScrollArea className="max-h-[360px]">
-              <div className="flex flex-col gap-3 pr-2">
-                {corrFields.map((field, idx) => (
-                  <div
-                    key={field._rhfKey}
-                    className="flex flex-col gap-2 border-b border-ink/10 pb-3 last:border-0 sm:flex-row sm:items-end sm:gap-3"
-                  >
-                    <TextField
-                      control={arrayControl}
-                      name={`corrections.${idx}.from`}
-                      label="Text on air"
-                      placeholder="text on air (e.g. GHz)"
-                      className="sm:flex-1"
-                      maxLength={CORRECTION_FROM_MAX}
-                    />
-                    <TextField
-                      control={arrayControl}
-                      name={`corrections.${idx}.to`}
-                      label="Spoken form"
-                      placeholder="spoken form (e.g. gigahertz)"
-                      description="leave empty to drop the word"
-                      maxLength={CORRECTION_TO_MAX}
-                      className="sm:flex-1"
-                    />
-                    <Btn
-                      sm
-                      title="Remove correction"
-                      className="size-9 shrink-0 self-start sm:self-end"
-                      onClick={() => removeCorr(idx)}
-                    >
-                      <Trash2 size={12} />
-                    </Btn>
-                  </div>
-                ))}
+        <>
+          <Card title="Speech corrections" sub="how names and tricky words should sound">
+            <div className="field">
+              <div className="field-hint">
+                Find-and-replace rules we apply to every line before it’s spoken, for names and
+                words the voice tends to get wrong (<em>GHz</em> →<em> gigahertz</em>, <em>Hozier</em>{' '}
+                → <em>Ho-zeer</em>). Case doesn’t matter, and it matches whole words and phrases;
+                leave the spoken form empty to drop a word entirely. New rules kick in from the next
+                line — no restart needed.
               </div>
-            </ScrollArea>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Btn
-                className="min-h-9 sm:min-h-0"
-                disabled={corrFields.length >= CORRECTIONS_LIMIT}
-                onClick={() => appendCorr({ from: '', to: '' })}
-              >
-                Add correction
-              </Btn>
-              <Btn
-                tone="accent"
-                className="min-h-9 sm:min-h-0"
-                disabled={busy !== null || !correctionsCard.dirty || correctionsCard.invalid}
-                onClick={() => void saveCorrections()}
-              >
-                {busy === 'corrections' ? 'Saving…' : 'Save corrections'}
-              </Btn>
+              <ScrollArea className="max-h-[360px]">
+                <div className="flex flex-col gap-3 pr-2">
+                  {corrFields.map((field, idx) => (
+                    <div
+                      key={field._rhfKey}
+                      className="flex flex-col gap-2 border-b border-ink/10 pb-3 last:border-0 sm:flex-row sm:items-end sm:gap-3"
+                    >
+                      <TextField
+                        control={arrayControl}
+                        name={`corrections.${idx}.from`}
+                        label="Text on air"
+                        placeholder="text on air (e.g. GHz)"
+                        className="sm:flex-1"
+                        maxLength={CORRECTION_FROM_MAX}
+                      />
+                      <TextField
+                        control={arrayControl}
+                        name={`corrections.${idx}.to`}
+                        label="Spoken form"
+                        placeholder="spoken form (e.g. gigahertz)"
+                        description="leave empty to drop the word"
+                        maxLength={CORRECTION_TO_MAX}
+                        className="sm:flex-1"
+                      />
+                      <Btn
+                        sm
+                        title="Remove correction"
+                        className="size-9 shrink-0 self-start sm:self-end"
+                        onClick={() => removeCorr(idx)}
+                      >
+                        <Trash2 size={12} />
+                      </Btn>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Btn
+                  className="min-h-9 sm:min-h-0"
+                  disabled={corrFields.length >= CORRECTIONS_LIMIT}
+                  onClick={() => appendCorr({ from: '', to: '' })}
+                >
+                  Add correction
+                </Btn>
+                <Btn
+                  tone="accent"
+                  className="min-h-9 sm:min-h-0"
+                  disabled={busy !== null || !correctionsCard.dirty || correctionsCard.invalid}
+                  onClick={() => void saveCorrections()}
+                >
+                  {busy === 'corrections' ? 'Saving…' : 'Save corrections'}
+                </Btn>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+
+          <Card title="Test corrections" sub="hear a rule before saving, with the station's default voice">
+            <div className="field">
+              <div className="field-hint">
+                Uses the corrections list above exactly as it stands right now, unsaved
+                changes included, spoken by the station&apos;s default voice
+                ({ENGINE_META[previewVoice.engine]?.label || previewVoice.engine}).
+              </div>
+              <Input
+                aria-label="Test sentence"
+                value={testText}
+                onChange={e => setTestText(e.target.value)}
+                placeholder="Type a line using a word you corrected…"
+                maxLength={200}
+              />
+              <VoicePreviewButton
+                className="mt-3"
+                engine={previewVoice.engine}
+                voice={previewVoice.voice}
+                cloudProvider={previewVoice.cloudProvider}
+                cloudModel={previewVoice.cloudModel}
+                speed={previewVoice.speed}
+                lang={previewVoice.lang}
+                text={testText}
+                corrections={effectiveCorr}
+                disabled={!testText.trim()}
+                adminFetch={adminFetch}
+              />
+            </div>
+          </Card>
+        </>
       )}
     </div>
   );

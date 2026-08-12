@@ -6,10 +6,27 @@
    picker immediately. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebounceValue } from 'usehooks-ts';
 import {
-  Plus, X, Search, ArrowUp, ArrowDown, ChevronRight, ChevronUp, ChevronDown,
-  GripVertical, RefreshCw, Trash2, FolderOpen, FilePlus2, Save,
+  Plus, X, Search, ChevronRight, ChevronUp, ChevronDown,
+  RefreshCw, Trash2, FolderOpen, FilePlus2, Save,
 } from 'lucide-react';
+import {
+  DndContext,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { Announcements, DragEndEvent } from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { Controller, useWatch } from 'react-hook-form';
 import type { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
@@ -28,9 +45,8 @@ import {
   Eyeb,
   IconBtn,
   Tog,
-  energyBgClass,
-  energyLabel,
 } from './playlist-builder/bits';
+import { TrackRow } from './playlist-builder/TrackRow';
 import { runGenerationJob } from './playlist-builder/generate';
 import type {
   ArcShape,
@@ -42,7 +58,6 @@ import type {
   View,
 } from './playlist-builder/types';
 import {
-  API,
   ARCS,
   BPM_MAX,
   BPM_MIN,
@@ -202,7 +217,17 @@ export default function PlaylistBuilderPanel() {
   const [artistResults, setArtistResults] = useState<string[] | null>(null);
   const [genreList, setGenreList] = useState<{ value: string; songCount: number }[] | null>(null);
 
-  const dragIndex = useRef<number | null>(null);
+  // The three suggestion boxes below all search /dj/search on a 250ms debounce
+  // and all ignore a query under two characters. Blanking the term is what
+  // clears the dropdown, and it happens off the RAW query so backspacing feels
+  // instant; only a term long enough to search waits for the debounce.
+  const [debouncedSeedQuery] = useDebounceValue(seedQuery, 250);
+  const [debouncedAddQuery] = useDebounceValue(addQuery, 250);
+  const [debouncedArtistQuery] = useDebounceValue(artistQuery, 250);
+  const seedTerm = seedQuery.trim().length < 2 ? '' : debouncedSeedQuery.trim();
+  const addTerm = addQuery.trim().length < 2 ? '' : debouncedAddQuery.trim();
+  const artistTerm = artistQuery.trim().length < 2 ? '' : debouncedArtistQuery.trim();
+
   const toastTimer = useRef<number | null>(null);
   const lastMode = useRef<GenMode>('fresh');
   const generatingRef = useRef(false);
@@ -377,34 +402,35 @@ export default function PlaylistBuilderPanel() {
   }, [tracks, adminFetch, buildBody, flash, name]);
 
   // Seed search; `stale` guards a slow response clobbering a newer query.
+  // Only the FETCH waits on the debounce — a query that falls under two
+  // characters clears the dropdown off the raw value, so backspacing out of a
+  // search doesn't leave suggestions hanging for another 250ms.
   useEffect(() => {
-    const q = seedQuery.trim();
-    if (q.length < 2) { setSeedResults(null); return; }
+    if (!seedTerm) { setSeedResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=8`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(seedTerm)}&limit=8`);
         const j = await r.json();
         if (!stale) setSeedResults(j.results || j.songs || j.tracks || []);
       } catch { if (!stale) setSeedResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [seedQuery, adminFetch]);
+    })();
+    return () => { stale = true; };
+  }, [seedTerm, adminFetch]);
 
   // Manual add search (debounced, same staleness guard)
   useEffect(() => {
-    const q = addQuery.trim();
-    if (q.length < 2) { setAddResults(null); return; }
+    if (!addTerm) { setAddResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=10`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(addTerm)}&limit=10`);
         const j = await r.json();
         if (!stale) setAddResults(j.results || j.songs || j.tracks || []);
       } catch { if (!stale) setAddResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [addQuery, adminFetch]);
+    })();
+    return () => { stale = true; };
+  }, [addTerm, adminFetch]);
 
   // Genre vocabulary — fetched once on first focus; suggestions filter locally.
   const loadGenres = useCallback(async () => {
@@ -427,12 +453,11 @@ export default function PlaylistBuilderPanel() {
 
   // Artist-filter search (debounced) — suggests distinct artist credits.
   useEffect(() => {
-    const q = artistQuery.trim();
-    if (q.length < 2) { setArtistResults(null); return; }
+    if (!artistTerm) { setArtistResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=20`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(artistTerm)}&limit=20`);
         const j = await r.json();
         const seen = new Set(recipeValues.artists.map(a => a.toLowerCase()));
         const names: string[] = [];
@@ -443,9 +468,9 @@ export default function PlaylistBuilderPanel() {
         }
         if (!stale) setArtistResults(names);
       } catch { if (!stale) setArtistResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [artistQuery, adminFetch, recipeValues.artists]);
+    })();
+    return () => { stale = true; };
+  }, [artistTerm, adminFetch, recipeValues.artists]);
 
   // Distinct artists in the seed results — the "seed the artist" rows.
   const seedArtists = useMemo(() => {
@@ -471,6 +496,59 @@ export default function PlaylistBuilderPanel() {
     });
   };
   const removeAt = (i: number) => setTracks(prev => prev.filter((_, idx) => idx !== i));
+
+  // A sortable id has to be unique and survive a reorder, and a track id is
+  // neither: the same song can legitimately sit in the deck twice (that is what
+  // the DUPLICATE badge marks), and an index-derived id renames every row below
+  // the one that moved. The deck's own objects are the stable identity — a move
+  // splices them, it doesn't rebuild them — so the uid is minted per object and
+  // parked in a WeakMap. It doubles as the React key, which is why a reorder no
+  // longer remounts the rows below it and re-fetches their artwork.
+  const uids = useRef(new WeakMap<DraftTrack, string>());
+  const nextUid = useRef(0);
+  const uidOf = (t: DraftTrack): string => {
+    let u = uids.current.get(t);
+    if (!u) { u = `row-${nextUid.current++}`; uids.current.set(t, u); }
+    return u;
+  };
+  const rowIds = tracks.map(uidOf);
+
+  // Mouse and touch are separate sensors on purpose. One PointerSensor would
+  // have to claim the touch gesture the moment a finger lands to be able to
+  // drag, which costs the list its scroll; the delay makes a press-and-hold the
+  // drag and leaves a plain swipe scrolling.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = rowIds.indexOf(String(active.id));
+    const to = rowIds.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    move(from, to);
+  };
+
+  // dnd-kit announces "item 3" by default; a deck of songs should say which
+  // song. Positions are 1-based to match the number column on screen.
+  const announce = (id: string, at: number | null): string => {
+    const i = rowIds.indexOf(id);
+    const name = tracks[i]?.title || 'Track';
+    return at == null ? name : `${name}, position ${at + 1} of ${tracks.length}`;
+  };
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${announce(String(active.id), rowIds.indexOf(String(active.id)))}.`,
+    onDragOver: ({ active, over }) => (over
+      ? `${announce(String(active.id), null)} moved to position ${rowIds.indexOf(String(over.id)) + 1} of ${tracks.length}.`
+      : undefined),
+    onDragEnd: ({ active, over }) => (over
+      ? `${announce(String(active.id), null)} dropped at position ${rowIds.indexOf(String(over.id)) + 1} of ${tracks.length}.`
+      : `${announce(String(active.id), null)} returned to its place.`),
+    onDragCancel: ({ active }) => `Reordering cancelled. ${announce(String(active.id), null)} returned to its place.`,
+  };
+
   const addTrack = (t: RawTrackRow) => {
     setTracks(prev => [...prev, rowToDraft(t)]);
     setAddQuery('');
@@ -1185,71 +1263,30 @@ export default function PlaylistBuilderPanel() {
 
                 <ScrollArea ref={listRef} className="flex-1">
                   <div className="pb-8">
-                  {tracks.map((t, i) => (
-                    <div
-                      key={`${t.id}-${i}`}
-                      data-row={i}
-                      draggable
-                      onDragStart={() => { dragIndex.current = i; }}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={() => { if (dragIndex.current != null) move(dragIndex.current, i); dragIndex.current = null; }}
-                      className={cn(
-                        'group grid grid-cols-[24px_44px_minmax(0,1fr)_auto] items-center gap-3 border-b border-separator-soft px-4 py-[9px] transition-colors hover:bg-ink-soft sm:grid-cols-[18px_24px_44px_minmax(0,1fr)_auto] sm:px-6',
-                        hotRow === i && 'bg-vermilion/10',
-                      )}
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      modifiers={[restrictToVerticalAxis]}
+                      onDragEnd={onDragEnd}
+                      accessibility={{ announcements }}
                     >
-                      <div className="hidden cursor-grab place-items-center text-muted sm:grid">
-                        <GripVertical className="size-4" />
-                      </div>
-                      <div className="text-right font-mono text-xs text-muted">{i + 1}</div>
-                      <img
-                        src={`${API}/cover/${encodeURIComponent(t.id)}`}
-                        alt=""
-                        loading="lazy"
-                        className="size-11 border border-ink bg-ink-soft object-cover"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold">{t.title}</span>
-                          {dupeIds.has(t.id) && (
-                            <span className="flex-none border border-[var(--accent)] px-1 py-px font-mono text-[9px] font-bold tracking-[0.08em] text-vermilion">DUPLICATE</span>
-                          )}
-                        </div>
-                        <div className="mt-[3px] truncate font-mono text-[11px] text-muted">
-                          {t.artist}{t.album ? ` · ${t.album}` : ''}
-                        </div>
-                        {((t.moods && t.moods.length > 0) || t.instrumental === true) && (
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            {(t.moods || []).slice(0, 2).map(m => (
-                              <span key={m} className="border border-separator-soft px-[5px] py-px font-mono text-[9px] tracking-[0.04em] text-muted uppercase">{m}</span>
-                            ))}
-                            {t.instrumental === true && (
-                              <span className="border border-separator-soft px-[5px] py-px font-mono text-[9px] tracking-[0.04em] text-muted uppercase">instrumental</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {/* Beside three 30px icon buttons this block is ~170px;
-                          stacked it costs 90px and the title keeps the rest. */}
-                      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
-                        <div className="flex flex-col items-end gap-[3px]">
-                          <span className="font-mono text-xs text-ink">{fmtDur(t.durationSec || 0)}</span>
-                          <span className="flex items-center gap-[5px] font-mono text-[10px] text-muted">
-                            <span className={cn('inline-block size-[7px]', energyBgClass(t.energy))} />
-                            {energyLabel(t.energy)}{t.year ? ` · ${t.year}` : ''}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-0.5 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
-                          {/* The drag grip is `sm:` only, so on mobile these are
-                              the only way to move a row: size them for a thumb. */}
-                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => move(i, i - 1)} disabled={i === 0} title="Move up"><ArrowUp className="size-[15px]" /></IconBtn>
-                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => move(i, i + 1)} disabled={i === tracks.length - 1} title="Move down"><ArrowDown className="size-[15px]" /></IconBtn>
-                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => removeAt(i)} title="Remove"><X className="size-[15px]" /></IconBtn>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
+                        {tracks.map((t, i) => (
+                          <TrackRow
+                            key={uidOf(t)}
+                            id={uidOf(t)}
+                            track={t}
+                            index={i}
+                            total={tracks.length}
+                            duplicate={dupeIds.has(t.id)}
+                            hot={hotRow === i}
+                            onMove={move}
+                            onRemove={removeAt}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
+                  </div>
                 </ScrollArea>
               </div>
             )}

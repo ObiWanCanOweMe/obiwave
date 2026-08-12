@@ -213,6 +213,14 @@ export const config = {
     // controller learns to air the link OVER the bed rather than over the next
     // song. Mirrors jinglePlayingFile; same {filename, startedAt} shape.
     bedPlayingFile: `${STATE_DIR}/bed-playing.json`,
+    // Written by radio.liq the moment voice_queue/intro_queue starts a spoken
+    // clip: {voiceId, channel, filename, startedAt}. `voiceId` is the id the
+    // controller stamped into the clip's `annotate:` URI (airVoice), which is
+    // how a marker is matched back to the segment that produced it — and how
+    // the silent lead-in clip, which carries no id, is skipped. This is the
+    // ONLY signal that says "the words are on the stream now": everything else
+    // the controller knows about a segment is handoff-time (issue #1382).
+    voicePlayingFile: `${STATE_DIR}/voice-playing.json`,
     // Written by radio.liq's starve guard (#1300 bug 7): {starved, since, at},
     // unix SECONDS. `at` is a heartbeat refreshed every tick WHILE starved, so
     // the controller can tell a live outage from a marker left behind by a
