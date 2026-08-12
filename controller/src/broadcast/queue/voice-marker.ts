@@ -165,7 +165,9 @@ export function awaitVoiceAir(
       _waiters.delete(voiceId);
       resolve(null);
     }, timeoutMs);
-    timer.unref?.();
+    // Unlike the background poller, this is the terminal owner of the Promise
+    // returned to the caller. Keep it referenced until the waiter resolves so
+    // completion never depends on an unrelated server, cron, or test handle.
     _waiters.set(voiceId, { resolve, timer });
   });
 }
