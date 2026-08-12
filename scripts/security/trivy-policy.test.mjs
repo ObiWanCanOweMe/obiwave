@@ -25,6 +25,7 @@ const V16_REVISION_3_TAG = 'v1.6.0-obiwave.3';
 const V16_REVISION_4_TAG = 'v1.6.0-obiwave.4';
 const V17_TAG = 'v1.7.0-obiwave.1';
 const V17_REVISION_2_TAG = 'v1.7.0-obiwave.2';
+const V18_TAG = 'v1.8.0-obiwave.1';
 const TAG = V13_TAG;
 const IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 const V13_CUDA_DIGEST = 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72';
@@ -35,6 +36,7 @@ const V16_REVISION_3_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587
 const V16_REVISION_4_CUDA_DIGEST = 'sha256:cdf74b46d05a40d453b69541644b4e9e7c587617100a7484a616e358efd3c341';
 const V17_CUDA_DIGEST = 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b';
 const V17_REVISION_2_CUDA_DIGEST = 'sha256:8fc7c81ea43a118d1c9d79da14986efa4876674745ac6ed6af166c202439990b';
+const V18_CUDA_DIGEST = 'sha256:72269fbf8c578c4ff6b6e02fbcd04f893d6e92c3e28d51760a6109b47feb5e56';
 const CUDA_PLATFORM_IMAGE_ID = 'sha256:e18b84e364d5168189966097d629eddccc94cf9c5b7e73a443e0b1e8fcd3e7f2';
 const checkedInAcceptance = JSON.parse(
   await readFile(new URL('../../security/trivy-acceptance.json', import.meta.url), 'utf8'),
@@ -863,6 +865,7 @@ test('a CUDA platform image ID cannot substitute for the pinned repository diges
 test('each supported release accepts only its pinned CUDA repository digest', () => {
   assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_TAG], V17_CUDA_DIGEST);
   assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_REVISION_2_TAG], V17_REVISION_2_CUDA_DIGEST);
+  assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V18_TAG], V18_CUDA_DIGEST);
   for (const [tag, cudaDigest] of [
     [V13_TAG, V13_CUDA_DIGEST],
     [V15_TAG, V15_CUDA_DIGEST],
@@ -872,6 +875,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
     [V16_REVISION_4_TAG, V16_REVISION_4_CUDA_DIGEST],
     [V17_TAG, V17_CUDA_DIGEST],
     [V17_REVISION_2_TAG, V17_REVISION_2_CUDA_DIGEST],
+    [V18_TAG, V18_CUDA_DIGEST],
   ]) {
     const summary = validateReports({
       tag,
@@ -900,6 +904,8 @@ test('cross-release CUDA digests fail closed', () => {
     [V16_REVISION_4_TAG, V15_CUDA_DIGEST],
     [V17_TAG, V16_CUDA_DIGEST],
     [V17_REVISION_2_TAG, V16_CUDA_DIGEST],
+    [V18_TAG, V17_CUDA_DIGEST],
+    [V18_TAG, V16_CUDA_DIGEST],
   ]) {
     const error = validationError({
       tag,

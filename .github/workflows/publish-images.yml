@@ -128,9 +128,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # Stagger the pushes. All 11 images push 4 tags each to ghcr.io, and when
-      # several finish their layer uploads in the same window GHCR answers the
-      # manifest PUT with a 403 "secondary rate limit" (hit on the v1.7.0 run —
+      # Stagger the pushes. Ten images are source-built and push their immutable
+      # release tag; the eleventh is the exact upstream CUDA analyzer mirror.
+      # When several builds finish their layer uploads in the same window, GHCR
+      # answers the manifest PUT with a 403 "secondary rate limit" (hit on the v1.7.0 run —
       # subwave-analyzer-heavy failed at `exporting to image` after the layers
       # were already up, and a re-run of that job alone passed unchanged). The
       # builds have very different durations, so capping concurrency spreads the
