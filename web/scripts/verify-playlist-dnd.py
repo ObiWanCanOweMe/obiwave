@@ -111,16 +111,27 @@ def mouse_drag(page, frm, to):
 
 
 def settle(page):
-    """A scroll still in flight moves the rows under a synthetic finger and
-    fakes an overshoot — wait for window.scrollY to stop changing."""
+    """Wait for both scroll and layout to stop moving under a synthetic finger.
+
+    The recipe panel hydrates asynchronously above the deck. On a phone-sized
+    viewport that can grow the document after scrollY has already held steady
+    for one sample; scroll anchoring then advances scrollY while keeping the
+    rows visually fixed, which dnd-kit correctly observes as movement during a
+    later synthetic drag. Require a sustained stable document height too.
+    """
     last = None
-    for _ in range(40):
-        y = page.evaluate("window.scrollY")
-        if y == last:
-            return y
-        last = y
+    stable = 0
+    for _ in range(60):
+        state = page.evaluate("[window.scrollY, document.documentElement.scrollHeight]")
+        if state == last:
+            stable += 1
+            if stable >= 20:  # 2s: spans the panel's deferred data hydration.
+                return state[0]
+        else:
+            stable = 0
+        last = state
         page.wait_for_timeout(100)
-    return last
+    return last[0] if last else page.evaluate("window.scrollY")
 
 
 def touch_drag(page, cdp, frm, to):
