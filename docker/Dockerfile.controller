@@ -8,6 +8,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     espeak-ng libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+COPY docker/download-pinned-asset.sh /usr/local/lib/subwave/download-pinned-asset.sh
+
 # Retry policy for the model/binary pulls below — GitHub releases and HF's xet
 # bridge intermittently 429/5xx in CI, and one blip fails the release build.
 # ARG (not ENV) so it stays build-time only.
@@ -19,11 +21,13 @@ ARG PIPER_VERSION=2023.11.14-2
 ARG TARGETARCH
 RUN cd /tmp && \
     case "${TARGETARCH}" in \
-      amd64|"") piper_arch=x86_64 ;; \
-      arm64)    piper_arch=aarch64 ;; \
+      amd64|"") piper_arch=x86_64; piper_sha256=a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992 ;; \
+      arm64)    piper_arch=aarch64; piper_sha256=fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH} for Piper" >&2; exit 1 ;; \
     esac && \
-    wget -q ${WGET_RETRY} https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${piper_arch}.tar.gz && \
+    /bin/sh /usr/local/lib/subwave/download-pinned-asset.sh \
+      "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${piper_arch}.tar.gz" \
+      "${piper_sha256}" "piper_linux_${piper_arch}.tar.gz" && \
     tar -xzf piper_linux_${piper_arch}.tar.gz -C /opt && \
     ln -s /opt/piper/piper /usr/local/bin/piper && \
     rm piper_linux_${piper_arch}.tar.gz
