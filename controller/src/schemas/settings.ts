@@ -492,6 +492,17 @@ export const djHouseRulesSchema = settingsTrimmedString(
 );
 
 /**
+ * Deliberately NOT settingsBoolLike(): this key's branch has always been the
+ * strict `typeof !== 'boolean'` refusal, the same posture `requests`' booleans
+ * take, and loosening it to `!!value` here would be a behaviour change smuggled
+ * in with a conversion. A hand-edited settings.json is unaffected either way —
+ * load() coerces a non-boolean to the default, so only a PATCH is refused.
+ */
+export const djSpeakClockSchema = z.boolean({
+  error: 'djSpeakClock must be a boolean',
+});
+
+/**
  * Trim FIRST, then a strict pair — ' en-GB ' saves, 'en-gb' does not.
  *
  * Not settingsStrictOneOf: that tests the raw value, which is right for

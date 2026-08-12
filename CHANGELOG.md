@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.8.0](https://github.com/perminder-klair/subwave/compare/v1.7.0...v1.8.0) (2026-08-12)
+
+
+### Features
+
+* **broadcast:** stamp DJ speech at air time, not handoff ([#1382](https://github.com/perminder-klair/subwave/issues/1382)) ([#1390](https://github.com/perminder-klair/subwave/issues/1390)) ([735b3fd](https://github.com/perminder-klair/subwave/commit/735b3fd59fc8292b4d8319f78d809f1eabb4b9ac))
+* **debug:** merge State dir + DJ voices into one read-only state tree ([#1392](https://github.com/perminder-klair/subwave/issues/1392)) ([9ce8a61](https://github.com/perminder-klair/subwave/commit/9ce8a613ca7bbd25ce639580532a792e395afdcc))
+* **dj:** add a station switch to keep the clock off air ([#1324](https://github.com/perminder-klair/subwave/issues/1324)) ([a3bb65e](https://github.com/perminder-klair/subwave/commit/a3bb65ec6c0e9fa4d337670678c2e05d6f195e48))
+* show the next queue transition in the admin header once it's armed ([#1372](https://github.com/perminder-klair/subwave/issues/1372)) ([f9897b0](https://github.com/perminder-klair/subwave/commit/f9897b01adf0fc4b557503c5fdef8220f3a72e37))
+* **skills:** optional per-skill cron timer ([#1379](https://github.com/perminder-klair/subwave/issues/1379)) ([178ad05](https://github.com/perminder-klair/subwave/commit/178ad053aa4e23cb4bdb24b956d1429b75d5af3f))
+* Test corrections button in Moods → Speech tab ([#1350](https://github.com/perminder-klair/subwave/issues/1350)) ([ffd5d94](https://github.com/perminder-klair/subwave/commit/ffd5d945fac1a2c95041a663d696522413024bb7))
+* **webhooks:** tell consumers speech is coming, not just that it started ([#1382](https://github.com/perminder-klair/subwave/issues/1382)) ([#1393](https://github.com/perminder-klair/subwave/issues/1393)) ([5746158](https://github.com/perminder-klair/subwave/commit/57461583f5b6a61fd8c72130f71e9f8a02c95a7d))
+* **web:** move playlist reorder onto dnd-kit (touch + keyboard) ([#1387](https://github.com/perminder-klair/subwave/issues/1387)) ([5025f20](https://github.com/perminder-klair/subwave/commit/5025f20374aa5439a927e37a08f4a5a52546f69d))
+* **web:** sort persona roster by on-air status and name ([#1371](https://github.com/perminder-klair/subwave/issues/1371)) ([f39e6a7](https://github.com/perminder-klair/subwave/commit/f39e6a7d4652da850f27f0c7507e67c21de0b3e3))
+
+
+### Bug Fixes
+
+* **dj:** say the requester's name on air ([#1384](https://github.com/perminder-klair/subwave/issues/1384)) ([3933236](https://github.com/perminder-klair/subwave/commit/3933236b6de60aad134329c3ab0978011b162ab9))
+* **tagging:** calibrate audio moods per label and derive energy for propagated tracks ([#1386](https://github.com/perminder-klair/subwave/issues/1386)) ([319bfc8](https://github.com/perminder-klair/subwave/commit/319bfc8808c6ed2d8304bb04a437dbb2611b9f8d))
+* **tts:** cloud fallback targets are engine + provider, on both trigger paths ([#1378](https://github.com/perminder-klair/subwave/issues/1378)) ([544a3fc](https://github.com/perminder-klair/subwave/commit/544a3fca5ab8c8d9b802781c02fafd51cba9f4f6)), closes [#1345](https://github.com/perminder-klair/subwave/issues/1345)
+* **web:** confirm a schedule booking, the one board write that said nothing ([#1389](https://github.com/perminder-klair/subwave/issues/1389)) ([46eb5ce](https://github.com/perminder-klair/subwave/commit/46eb5cea46e7b1e199a0458c7d46e873db5b47fc))
+
+
+### Documentation
+
+* split CLAUDE.md into invariants plus scoped references ([#1395](https://github.com/perminder-klair/subwave/issues/1395)) ([04b537e](https://github.com/perminder-klair/subwave/commit/04b537e63eb045215dbfb91c0953f2310c949663))
+
+
+### Refactors
+
+* **web:** adopt usehooks-ts for debounce, clipboard, clock and media-query ([#1388](https://github.com/perminder-klair/subwave/issues/1388)) ([bf357ff](https://github.com/perminder-klair/subwave/commit/bf357ffa82b8ab1ba3491bf23e04f73b86cd4855))
+
 ## [1.7.0](https://github.com/perminder-klair/subwave/compare/v1.6.0...v1.7.0) (2026-08-11)
 
 

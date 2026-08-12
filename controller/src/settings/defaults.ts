@@ -161,6 +161,15 @@ export const DEFAULTS = {
   // appended to EVERY spoken-output prompt — both renderDjPrompt and
   // agentPersonaPreamble, which the djPrompt template never reaches (#1182).
   djHouseRules: '',
+  // Station clock switch. false = the wall clock stays off air: no time of day
+  // in links, idents, hand-overs, ad-libs, banter or programme beats, and the
+  // automatic top-of-the-hour time check stands down. Daypart colour survives
+  // ("after dark", "weekend", "late night", and the Period line) because that
+  // is atmosphere rather than a clock reading. Manual /dj/segment triggers stay
+  // exempt, so the operator's "Time check" pad still fires and still speaks the
+  // time: off means "stop doing this unprompted". Policy lives in exactly one
+  // place — broadcast/clock-policy.ts. Applies live; no restart.
+  djSpeakClock: true,
   // One persona is active at a time; a scheduled show can override who is on air.
   personas: SEED_PERSONAS,
   activePersonaId: SEED_PERSONAS[0].id,

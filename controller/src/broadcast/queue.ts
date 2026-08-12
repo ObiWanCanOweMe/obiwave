@@ -67,6 +67,7 @@ import {
   formatAgo,
   knownDurationSec,
   linkClockDrifted,
+  nextTransitionLabel,
   pickLeadSec,
   pickLinkInterval,
   playAlreadyRecorded,
@@ -86,7 +87,29 @@ import {
   airVoice,
   speechDurationMs,
   writeHandoff,
+  type QueuedVoice,
+  type VoiceHandoff,
 } from './queue/voice-io.js';
+import { notifyQueued, notifySpoken } from './voice-events.js';
+
+// Everything the outside world is told about ONE spoken segment, held in a
+// single value because it is now read twice — once when the clip is committed
+// (onQueued) and once when it airs (onSpoken). Two hand-built copies at each of
+// the four call sites is exactly the drift #1382 removed.
+interface SegmentDesc {
+  kind: string;
+  /** Which handoff file carried the clip — the caller picked it, so it says
+   *  so rather than letting the payload re-derive it from `kind` and get a
+   *  boundary-deferred ident (say-kind, intro channel) wrong. */
+  channel: 'say' | 'intro';
+  text: string;
+  meta?: TurnMeta;
+  persona?: Persona | null;
+  /** Booth-log line when it differs from the spoken text (banter prefixes the speaker). */
+  logText?: string | null;
+  /** Whether this segment also fires the legacy dj.say/dj.link event. */
+  legacy?: boolean;
+}
 
 // Re-exported so every existing `from './queue.js'` import keeps working.
 export { BACKFILL_DEDUP_MAX_GAP_MS, boundaryCarriesTrackVoice, playAlreadyRecorded, shouldDropStaleLink } from './queue/pure.js';
@@ -1239,17 +1262,90 @@ class Queue {
       const targetFile = kind === 'link'
         ? config.liquidsoap.introFile
         : config.liquidsoap.sayFile;
-      await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona));
-      this.log(kind, text);
-      session.appendTurn({ role: 'segment', kind, text, meta });
-      // The auto-DJ link channel is its own event; everything else (station
-      // IDs, weather, hourly) is `dj.say`. Operators that pipe these into
-      // Discord usually want to filter the chatty link stream separately.
-      webhooks.notify(kind === 'link' ? 'dj.link' : 'dj.say',
-        kind === 'link' ? { text } : { text, kind });
+      const seg: SegmentDesc = { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona };
+      const handoff = await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona), {
+        onQueued: q => this.onQueued(q, seg),
+      });
+      // Bookkeeping runs when the words reach the stream, not when the file was
+      // handed over (#1382) — the same rule announceAtNextTrack already states:
+      // the DJ's memory, and everything downstream of it, should reflect what
+      // aired. On a mixer that writes no marker this resolves immediately with a
+      // null stamp, which is byte-for-byte the old timing.
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Announce failed: ${(err as Error).message}`);
     }
+  }
+
+  // Everything a spoken segment owes once it is ON AIR, run from the one place
+  // that knows when that happened (#1382).
+  //
+  // The four sites that air a segment (announce, announceExchange,
+  // airPendingVoice, airIntro) all used to do this inline, immediately after the
+  // handoff file was written — which is a poll, a queue and a duck ramp before
+  // any of it is true. They also drifted: three published slightly different
+  // webhook payloads for the same thing.
+  //
+  // `handoff.aired` resolves with the live-edge stamp from the mixer's marker,
+  // or immediately with null on a station whose Liquidsoap doesn't write one —
+  // in which case this is exactly the old timing and the old (unstamped) data.
+  // It never rejects, so there is no path where a segment airs and the booth log
+  // never hears about it.
+  // The pre-air half of the same bookkeeping: announce that speech is COMING.
+  // Passed to airVoice as a callback because the commitment happens inside it,
+  // before the handoff this method's caller is awaiting has resolved — the
+  // whole value of the event is that it lands early. Nothing is logged or
+  // persisted here: this is a forecast, and the booth log records what aired.
+  onQueued(q: QueuedVoice, { kind, channel, text, meta = {}, persona = null }: SegmentDesc) {
+    try {
+      notifyQueued({
+        voiceId: q.voiceId,
+        kind,
+        channel,
+        text,
+        durationMs: q.clipMs,
+        estimatedAirInMs: q.estimatedAirInMs,
+        personaId: persona?.id ?? (meta.personaId as string | undefined) ?? null,
+        personaName: persona?.name ?? (meta.personaName as string | undefined) ?? null,
+      });
+    } catch (err) {
+      this.log('error', `Queued-voice notify failed: ${(err as Error).message}`);
+    }
+  }
+
+  onSpoken(handoff: VoiceHandoff, {
+    kind, channel, text, meta = {}, persona = null, logText = null, legacy = true,
+  }: SegmentDesc) {
+    void handoff.aired.then(airedAt => {
+      try {
+        this.log(kind, logText ?? text);
+        session.appendTurn({
+          role: 'segment',
+          kind,
+          text,
+          // Live-edge, like every other timestamp the controller publishes: a
+          // player showing this line to a LISTENER has to add
+          // stream.bufferSeconds on top (#1114). Absent when unmeasured, so a
+          // consumer can tell "not known" from "aired at the epoch".
+          meta: airedAt != null
+            ? { ...meta, airedAt: new Date(airedAt).toISOString() }
+            : meta,
+        });
+        notifySpoken({
+          voiceId: handoff.voiceId,
+          kind,
+          channel,
+          text,
+          durationMs: handoff.clipMs,
+          airedAt,
+          legacy,
+          personaId: persona?.id ?? (meta.personaId as string | undefined) ?? null,
+          personaName: persona?.name ?? (meta.personaName as string | undefined) ?? null,
+        });
+      } catch (err) {
+        this.log('error', `Post-air bookkeeping failed: ${(err as Error).message}`);
+      }
+    });
   }
 
   // Air a short multi-voice exchange (guest-show banter): every line renders
@@ -1273,12 +1369,22 @@ class Queue {
     }
     for (const l of rendered) {
       try {
-        await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona));
-        this.log(kind, `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`);
-        session.appendTurn({
-          role: 'segment', kind, text: l.text,
+        const seg: SegmentDesc = {
+          kind,
+          channel: 'say',
+          text: l.text,
+          persona: l.persona,
+          logText: `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`,
           meta: { personaId: l.persona?.id, personaName: l.persona?.name },
+          // The aggregate dj.say below covers the legacy channel for the whole
+          // exchange; voice.start/voice.end still fire per line, because each
+          // line is its own real speech window.
+          legacy: false,
+        };
+        const handoff = await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona), {
+          onQueued: q => this.onQueued(q, seg),
         });
+        this.onSpoken(handoff, seg);
       } catch (err) {
         this.log('error', `Exchange line failed to air: ${(err as Error).message}`);
       }
@@ -1398,10 +1504,13 @@ class Queue {
     this._pendingVoice = null;
     if (!existsSync(p.wavPath)) return;
     try {
-      await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona));
-      this.log(p.kind, p.text);
-      session.appendTurn({ role: 'segment', kind: p.kind, text: p.text, meta: p.meta });
-      webhooks.notify('dj.say', { text: p.text, kind: p.kind });
+      // Deferred idents ride the INTRO file (light duck at a track boundary),
+      // whatever their kind — see announceAtNextTrack.
+      const seg: SegmentDesc = { kind: p.kind, channel: 'intro', text: p.text, meta: p.meta, persona: p.persona };
+      const handoff = await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona), {
+        onQueued: q => this.onQueued(q, seg),
+      });
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Air pending voice failed: ${(err as Error).message}`);
     }
@@ -1482,20 +1591,25 @@ class Queue {
       // gain trim is per-persona, so re-resolving here would apply one DJ's
       // trim to another DJ's audio. This was the last voiceGainDb call site
       // still resolving from the wall clock.
-      await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined));
-      this.persist();
-      this.log(kind, item.introScript!);
-      session.appendTurn({
-        role: 'segment', kind, text: item.introScript!,
+      const seg: SegmentDesc = {
+        kind,
+        channel: kind === 'link' ? 'intro' : 'say',
+        text: item.introScript!,
+        persona: item.introPersona || null,
         // Attribute the turn so windowMessages() can name the real speaker when
         // it wasn't the session's own persona (a link written by the outgoing
         // DJ airing just after the roll).
         meta: item.introPersona
           ? { personaId: item.introPersona.id, personaName: item.introPersona.name }
           : {},
+      };
+      const handoff = await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined), {
+        onQueued: q => this.onQueued(q, seg),
       });
-      webhooks.notify(kind === 'link' ? 'dj.link' : 'dj.say',
-        kind === 'link' ? { text: item.introScript } : { text: item.introScript, kind });
+      // Not deferred: introAired is already set and the queue state has to reach
+      // disk whether or not the words are audible yet.
+      this.persist();
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Air intro failed: ${(err as Error).message}`);
     }
@@ -2309,6 +2423,11 @@ class Queue {
       current: this.current ? mapItem(this.current) : null,
       upcoming: this.upcoming.map(mapItem),
       history: this.history.map(mapItem),
+      // One operator-facing answer for the imminent FINALISED seam. Effect
+      // flags live on opposite sides of the pair and remain proposals until
+      // the incoming item drains, so derive + gate this here rather than
+      // making the dashboard reverse-engineer mixer precedence/lifecycle.
+      nextTransition: nextTransitionLabel(this.current, this.upcoming[0]),
       djLog: this.djLog.slice(0, 50),
       autoPick: this.autoPick,
       autoLink: this.autoLink,

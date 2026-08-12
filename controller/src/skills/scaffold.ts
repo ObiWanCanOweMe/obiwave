@@ -66,6 +66,8 @@ interface SkillFileFields {
   kind: string;             // == the slug for a custom skill
   label?: string;
   cooldown?: string;
+  cron?: string;            // cron expression for a dedicated timer (bypasses normal gating)
+  cronOnly?: boolean;       // withhold from random selection — fires ONLY on the cron timer
   contextFields?: string[]; // "right now" fields the segment may mention (#471)
   window?: 'any' | 'commute'; // custom skills only — emitted when 'commute'
   requiresKey?: string;       // custom skills only — env var the skill needs
@@ -109,6 +111,8 @@ export async function writeSkillFile(fields: SkillFileFields): Promise<void> {
   const lines = ['---', line('name', kind)];
   if (fields.label) lines.push(line('label', fields.label));
   if (fields.cooldown) lines.push(line('cooldown', fields.cooldown));
+  if (fields.cron) lines.push(line('cron', fields.cron));
+  if (fields.cronOnly) lines.push('cronOnly: true');
   // The "right now" fields this segment may weave in (issue #471).
   if (fields.contextFields && fields.contextFields.length) lines.push(line('context', fields.contextFields.join(', ')));
   // Custom-skill knobs. `window: any` is the loader default, so only the

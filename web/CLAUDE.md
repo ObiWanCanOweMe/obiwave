@@ -40,3 +40,5 @@ in `public/screenshots/gallery/`, defined in `lib/press-run-plates.ts` (every
 skin at least once, every built-in theme exactly once). When a skin's look
 changes, re-capture against a running station:
 `cd web && npm i --no-save playwright sharp && npx tsx scripts/capture-gallery.mjs`.
+
+**Codec selection (browsers → Icecast).** `AudioFormat` covers MP3, Opus, AAC, and FLAC. `usePlayer` intersects the station-advertised mounts with browser decodability, restores the listener's station-scoped preference, and leaves MP3 as the universal floor. Optional formats are enabled only by explicit station flags; a failed optional mount is removed from availability and the session falls back to MP3. Every initial tune, manual format switch, and watchdog reconnect passes the chosen mount through `withStreamAuth(apiUrl, ...)`. `useStationFeed` delays listener-facing track and spoken-line changes by `stream.bufferSecondsByFormat[activeFormat]`, falling back to legacy `stream.bufferSeconds`; operator surfaces remain at the live edge. `useMediaSession` wires lock-screen / headphone / CarPlay controls and artwork from `/cover/:id`.

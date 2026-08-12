@@ -339,6 +339,16 @@ async function loadSkillDir(dir: string, slug: string, { seeded }: { seeded: boo
     // The skill's own frontmatter, handed to the tool as its 4th arg so a skill
     // can read its own knobs (e.g. news' feed / feedMaxItems).
     config: data,
+    // Cron expression — when set, the scheduler registers a dedicated cron that
+    // fires this skill on that schedule, bypassing frequency/cooldown gating (same
+    // posture as the operator override). Stored raw; scheduler validates + registers.
+    cronExpression: data.cron ? String(data.cron).trim() : undefined,
+    // When true, withheld from the autonomous director's random selection
+    // (availableCapabilities() in skills/_agent.ts) — fires ONLY on its cron
+    // timer. Meaningless without a cron expression, but read independently so
+    // a skill that later loses its cron line doesn't silently start firing at
+    // random again without the operator noticing the coupled field too.
+    cronOnly: String(data.cronOnly).trim().toLowerCase() === 'true',
     // Operator-editable knobs this skill declares for itself (tool.mjs
     // `configFields`). Drives the admin editor's settings section — see
     // config-fields.ts. Empty for a prompt-only or undeclared skill.

@@ -4,7 +4,7 @@
 // override who is on air for its hour); the system prompt is a library of
 // global templates, '' = the built-in default. Everything POSTs to /settings
 // and applies live — no mixer restart.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import {
   useFieldArray,
@@ -35,6 +35,7 @@ import {
 import { PersonaHero } from './personas/PersonaHero';
 import { SystemPromptModal } from './personas/SystemPromptModal';
 import { PersonaRoster } from './personas/PersonaRoster';
+import { orderPersonaRoster } from './personas/roster-order';
 import { PersonaEditor } from './personas/PersonaEditor';
 
 // The RHF resolver is the two shared schemas the controller validates against,
@@ -294,6 +295,21 @@ export default function PersonasPanel() {
   const personas = watch('personas');
   const djPrompts = watch('djPrompts');
 
+  // A scheduled show can override the default; fall back to the default
+  // selection on controllers predating the onAir field.
+  const onAirPersonaId = data?.onAir?.personaId || activePersonaId;
+  // Display order for the roster AND the editor's counter, so both name the
+  // same slot. The memo is load-bearing, not an optimisation: removing a
+  // persona hands `watch` one frame where the dropped index is still counted
+  // but holds only the editor's registered fields — no `skills`, no `id`.
+  // Recomputing on that frame renders a card for it and throws on
+  // `p.skills.length`; the memo re-uses the last good order until the array
+  // settles. Sits above the loading guards so the hook order never varies.
+  const roster = useMemo(
+    () => orderPersonaRoster(personas, onAirPersonaId),
+    [personas, onAirPersonaId],
+  );
+
   // The textarea's maxLength already enforces the house-rules cap; this guards
   // a pasted-over-limit edge.
   const promptsOk = !form.formState.errors.djPrompts
@@ -461,11 +477,9 @@ export default function PersonasPanel() {
   }
 
   const activePersona = personas.find(p => p.id === activePersonaId);
-  // A scheduled show can override the default; fall back to the default
-  // selection on controllers predating the onAir field.
-  const onAirPersonaId = data?.onAir?.personaId || activePersonaId;
   const onAirPersona = personas.find(p => p.id === onAirPersonaId) || activePersona;
   const onAirShow = data?.onAir?.show || null;
+  const focusedPosition = roster.find(e => e.index === safeIdx)?.position ?? safeIdx + 1;
   const focusedOk = !isPersonaInvalid(safeIdx);
   // Drives the confirm on ×/Escape: closing the editor keeps edits pending in
   // `personas`, which is how unsaved state used to ride along on the next save.
@@ -509,7 +523,7 @@ export default function PersonasPanel() {
       />
 
       <PersonaRoster
-        personas={personas}
+        roster={roster}
         activePersonaId={activePersonaId}
         onAirPersonaId={onAirPersonaId}
         avatarTick={avatarTick}
@@ -607,8 +621,9 @@ export default function PersonasPanel() {
       <PersonaEditor
         persona={focused}
         index={safeIdx}
+        position={focusedPosition}
         control={control}
-        personaCount={personas.length}
+        personaCount={roster.length}
         activePersonaId={activePersonaId}
         onAirPersonaId={onAirPersonaId}
         data={data}

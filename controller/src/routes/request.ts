@@ -16,7 +16,7 @@ import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName, stillInFlight, screenAck, guardIntro } from '../util/request-guard.js';
+import { stripScriptedOpener, cleanRequesterName, stillInFlight, screenAck, guardIntro, isNamedRequester, sorryNoMatch } from '../util/request-guard.js';
 import {
   pickStrictCandidate,
   strictFailureMessage,
@@ -254,7 +254,9 @@ async function resolveRequest(entry) {
     const cur = queue.current?.track || null;
     session.appendTurn({
       role: 'event', kind: 'request',
-      text: `Listener "${requester}" requests: "${text}"`
+      // The pick agent reads this window for hours, so an unsigned request must
+      // not leave the string 'anon' sitting in it as if it were a name (#1347).
+      text: `${isNamedRequester(requester) ? `Listener "${requester}" requests` : 'An unnamed listener requests'}: "${text}"`
         + (cur ? ` (currently playing "${cur.title}" by ${cur.artist}${cur.id ? ` [id: ${cur.id}]` : ''})` : ''),
     });
   } catch (err) {
@@ -644,7 +646,7 @@ async function resolveRequest(entry) {
 
   if (!pick) {
     queue.log('miss', `Nothing matched "${text}"`);
-    return failed(`Sorry ${requester}, nothing in the crates matched that.`);
+    return failed(sorryNoMatch(requester));
   }
 
   // Near-miss flag: the listener named an artist but the track we're airing
@@ -746,7 +748,7 @@ async function resolveRequest(entry) {
     // Never-play blocklist refused the pick — decline with the standard
     // not-found copy so the block doesn't leak to the listener.
     entry.pickSource = `${pickSource}:blocked`;
-    return failed(`Sorry ${requester}, nothing in the crates matched that.`);
+    return failed(sorryNoMatch(requester));
   }
   if (pos === -1) {
     const dupAck = queue.dedupAck(pick.id);

@@ -72,6 +72,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # Caddy — the loopback edge.
 COPY --from=caddybin /usr/bin/caddy /usr/local/bin/caddy
 
+COPY docker/download-pinned-asset.sh /usr/local/lib/subwave/download-pinned-asset.sh
+
 ARG WGET_RETRY="--tries=5 --retry-connrefused --waitretry=10 --timeout=60 --retry-on-http-error=429,500,502,503,504"
 
 # --- Piper (default TTS, ~30ms/word) ---------------------------------------
@@ -80,11 +82,13 @@ ARG PIPER_VERSION=2023.11.14-2
 ARG TARGETARCH
 RUN cd /tmp && \
     case "${TARGETARCH}" in \
-      amd64|"") piper_arch=x86_64 ;; \
-      arm64)    piper_arch=aarch64 ;; \
+      amd64|"") piper_arch=x86_64; piper_sha256=a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992 ;; \
+      arm64)    piper_arch=aarch64; piper_sha256=fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH} for Piper" >&2; exit 1 ;; \
     esac && \
-    wget -q ${WGET_RETRY} https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${piper_arch}.tar.gz && \
+    /bin/sh /usr/local/lib/subwave/download-pinned-asset.sh \
+      "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${piper_arch}.tar.gz" \
+      "${piper_sha256}" "piper_linux_${piper_arch}.tar.gz" && \
     tar -xzf piper_linux_${piper_arch}.tar.gz -C /opt && \
     ln -s /opt/piper/piper /usr/local/bin/piper && \
     rm piper_linux_${piper_arch}.tar.gz
@@ -107,10 +111,14 @@ RUN uv venv --python 3.12 /opt/kokoro/venv && \
       kokoro-onnx==0.5.0 soundfile==0.12.1 misaki==0.9.4 && \
     /opt/kokoro/venv/bin/python -c "import kokoro_onnx, misaki; from misaki import espeak"
 RUN mkdir -p /opt/kokoro/models && \
-    wget -q ${WGET_RETRY} -O /opt/kokoro/models/kokoro-v1.0.onnx \
-      https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx && \
-    wget -q ${WGET_RETRY} -O /opt/kokoro/models/voices-v1.0.bin \
-      https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+    /bin/sh /usr/local/lib/subwave/download-pinned-asset.sh \
+      "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx" \
+      "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5" \
+      "/opt/kokoro/models/kokoro-v1.0.onnx" && \
+    /bin/sh /usr/local/lib/subwave/download-pinned-asset.sh \
+      "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin" \
+      "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d" \
+      "/opt/kokoro/models/voices-v1.0.bin"
 ENV KOKORO_MODEL=/opt/kokoro/models/kokoro-v1.0.onnx \
     KOKORO_VOICES=/opt/kokoro/models/voices-v1.0.bin \
     KOKORO_PYTHON=/opt/kokoro/venv/bin/python
