@@ -25,6 +25,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -273,6 +275,75 @@ test('pool mode skips generation and backs off when grounded data is unavailable
 
   await agenticTick({ time: {}, clock: {} });
   assert.equal(attempts(), before + 1, 'the unavailable skill is backed off on the next scheduler tick');
+});
+
+test('agent mode stands down when recovery produces an object without any data-tool call', async () => {
+  const requests: Array<{ tools: string[]; hasResponseFormat: boolean }> = [];
+  const invented = {
+    reason: 'I can fill this from memory',
+    air: true,
+    text: 'An invented segment with no fetched source.',
+    sfx: null,
+  };
+  const gateway = createServer((req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      const tools = (body.tools || []).map((entry: { function?: { name?: string } }) => entry.function?.name || '');
+      requests.push({ tools, hasResponseFormat: !!body.response_format });
+      const emit = tools.includes('emit');
+      const message = emit
+        ? {
+            role: 'assistant', content: null,
+            tool_calls: [{
+              id: 'call_emit', type: 'function',
+              function: { name: 'emit', arguments: JSON.stringify(invented) },
+            }],
+          }
+        : { role: 'assistant', content: body.response_format ? JSON.stringify(invented) : 'I already know enough.' };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: `chatcmpl-${requests.length}`,
+        object: 'chat.completion',
+        created: 1,
+        model: body.model || 'vendor/model',
+        choices: [{ index: 0, message, finish_reason: emit ? 'tool_calls' : 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const settings = await import('../src/settings.js');
+    const attempts = () => existsSync(DRY_WELL_ATTEMPTS)
+      ? readFileSync(DRY_WELL_ATTEMPTS, 'utf8').trim().split('\n').filter(Boolean).length
+      : 0;
+    const before = attempts();
+    const baseUrl = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}/v1`;
+    await settings.update({
+      llm: {
+        pickerAgent: true,
+        provider: 'litellm',
+        model: 'vendor/model',
+        baseUrl,
+        apiKey: 'test-token',
+        agentTimeoutMs: 5_000,
+        fallback: { enabled: false },
+      },
+    });
+
+    const run = await runCapability('dry-well', { time: {}, clock: {} });
+    assert.equal(attempts(), before, 'the real data tool was never executed');
+    assert.ok(requests.some(r => r.hasResponseFormat), 'the native agent path returned an object without exploring');
+    assert.ok(requests.some(r => r.tools.includes('emit')), 'the real terminal structured-output path completed');
+    assert.equal(run.aired, false);
+    assert.equal(run.text, null);
+    assert.match(String(run.reason), /no source material/i);
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()));
+  }
 });
 
 test("a skill's own requiresData export survives the loader", async () => {

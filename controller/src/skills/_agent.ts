@@ -808,7 +808,10 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
         if (why) blocked = why; else usableSeen = true;
       },
     }));
-    if (!usableSeen && blocked) return standDown(blocked);
+    if (mayAbstain && !usableSeen) {
+      return standDown(blocked
+        ?? 'the agent called no data tool, so there was no source material to ground the segment');
+    }
   }
 
   // An explicit decline. Only reachable when the schema offered `air` at all,
