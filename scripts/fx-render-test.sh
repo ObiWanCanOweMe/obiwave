@@ -598,14 +598,19 @@ def t(a, b) =
   log("XDUR: transition d=#{d} (a stamped 12, default 4)")
   add(normalize=false, [fade.out(duration=d, a.source), fade.in(duration=d, b.source)])
 end
-music = cross(duration=4., t, q)
+music = cross(duration=4., persist_override=true, t, q)
 output.file(%wav, fallible=true, "/work/xdur.wav", music)
 clock.assign_new(sync="none", [music])
 thread.run(delay=30., fun() -> shutdown())
 LIQ
   liq xdur.liq | grep -E "XDUR|rror" || true
   echo "output duration (78 = buffer followed a's stamp; 86 = it didn't):"
-  ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/xdur.wav"
+  local duration
+  duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/xdur.wav")
+  echo "$duration"
+  awk -v duration="$duration" 'BEGIN { exit !(duration >= 77.9 && duration <= 78.1) }' \
+    || { echo "XDUR FAIL — stamped duration did not size the outgoing buffer"; return 1; }
+  echo "XDUR PASS — stamped duration sizes the outgoing buffer"
 }
 
 case "${1:-}" in
