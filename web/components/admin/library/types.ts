@@ -67,6 +67,19 @@ export interface BrowseResponse {
 
 export interface UntaggedResponse { rows: Track[]; nextCursor: string | null }
 
+export interface EraYearTrackResult {
+  id: string;
+  originalYear: number | null;
+  originalYearSource: string | null;
+}
+
+export interface OriginalYearResponse {
+  ok: boolean;
+  updated: number;
+  cleared: boolean;
+  tracks: EraYearTrackResult[];
+}
+
 // Never-play blocklist (GET /library/blocklist). name/artist/album are display
 // snapshots taken at block time, so rendering needs no Navidrome re-lookup.
 export type BlockType = 'track' | 'album' | 'artist';

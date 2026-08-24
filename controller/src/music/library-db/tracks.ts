@@ -258,10 +258,11 @@ export function setOriginalYear(id: string, year: number | null): void {
 // The old embedding stays available to similarity search, but is marked dirty
 // so the next tag pass replaces its stale `Era:` line. Dropping it immediately
 // would create a hole in the KNN pool until that pass completes.
-export function setManualOriginalYear(id: string, year: number | null): void {
+export function setManualOriginalYear(id: string, year: number | null): boolean {
   const eraBefore = storedEra(id);
+  let changed = false;
   if (year != null) {
-    requireDb()
+    changed = requireDb()
       .prepare(
         `UPDATE tracks SET
            original_year            = ?,
@@ -269,7 +270,7 @@ export function setManualOriginalYear(id: string, year: number | null): void {
            original_year_checked_at = ?
          WHERE id = ?`,
       )
-      .run(year, new Date().toISOString(), id);
+      .run(year, new Date().toISOString(), id).changes > 0;
   } else {
     // Clearing removes an OVERRIDE, so it only touches rows that hold one.
     // The route's applyToAlbum loop runs this over every album track, and a
@@ -277,7 +278,7 @@ export function setManualOriginalYear(id: string, year: number | null): void {
     // RESOLUTION, not an override. Nulling those would read as unknown-year
     // everywhere (era filter, DJ line, /now-playing) until a manual
     // enrichment pass, so a non-manual row is a no-op here.
-    requireDb()
+    changed = requireDb()
       .prepare(
         `UPDATE tracks SET
            original_year            = NULL,
@@ -285,9 +286,10 @@ export function setManualOriginalYear(id: string, year: number | null): void {
            original_year_checked_at = NULL
          WHERE id = ? AND original_year_source = 'manual'`,
       )
-      .run(id);
+      .run(id).changes > 0;
   }
   markTextVectorDirtyIfEraChanged(id, eraBefore);
+  return changed;
 }
 
 export function upsertTrackEnrichment(id: string, enrich: TrackEnrichment): void {

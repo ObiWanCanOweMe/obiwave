@@ -1023,6 +1023,7 @@ router.post(
         if (!targets.length) return res.status(404).json({ error: 'album has no tracks' });
       }
 
+      let updated = 0;
       for (const t of targets) {
         // An album sibling may be new to library-db — the row has to exist
         // before there is an original_year column to set on it.
@@ -1034,7 +1035,7 @@ router.post(
           genres: subsonic.songGenres(t),
           duration: t.duration ?? null,
         });
-        db.setManualOriginalYear(t.id, originalYear);
+        if (db.setManualOriginalYear(t.id, originalYear)) updated += 1;
       }
 
       const scope = applyToAlbum ? `album "${song.album}" (${targets.length} tracks)` : `"${song.title}"`;
@@ -1044,20 +1045,26 @@ router.post(
 
       res.json({
         ok: true,
-        updated: targets.length,
+        updated,
         originalYear,
         cleared: originalYear == null,
         album: applyToAlbum ? (song.album ?? null) : null,
-        tracks: targets.map((t) => ({
-          id: t.id,
-          title: t.title,
-          artist: t.artist,
-          year: t.year ?? null,
-          // What era filtering, the DJ line and the picker will read from now
-          // on — echoed back so the editor can show the effect rather than the
-          // input, which is the whole point of the override.
-          eraYear: db.resolvedEraYearForTrack(t.id),
-        })),
+        tracks: targets.map((t) => {
+          const persisted = db.getTrack(t.id)!;
+          return {
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            year: t.year ?? null,
+            // The request is not authoritative on an album-wide clear: an
+            // automatic MusicBrainz/album-tag sibling is deliberately a no-op.
+            // Return the persisted value + owner so every cache row can mirror
+            // SQLite immediately instead of waiting for a reload.
+            originalYear: persisted.originalYear,
+            originalYearSource: persisted.originalYearSource,
+            eraYear: db.resolvedEraYearForTrack(t.id),
+          };
+        }),
       });
     } catch (err) {
       queue.log('error', `/library/original-year failed: ${err.message}`);

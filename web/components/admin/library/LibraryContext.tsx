@@ -14,7 +14,7 @@ import {
   useQueryErrorToast,
 } from './queries';
 import type {
-  BlockEntry, BlockRef, BlockType, BrowseResponse, LikeIndex, Track,
+  BlockEntry, BlockRef, BlockType, BrowseResponse, LikeIndex, OriginalYearResponse, Track,
 } from './types';
 
 // Per-call cap on POST /library/blocklist/check, matching the controller's.
@@ -497,20 +497,32 @@ export function LibraryProvider({
         body: JSON.stringify({ id: track.id, originalYear, applyToAlbum }),
       });
       const j = (await r.json().catch(() => ({}))) as
-        { ok?: boolean; updated?: number; cleared?: boolean; error?: string; tracks?: Array<{ id: string }> };
+        Partial<OriginalYearResponse> & {
+          error?: string;
+          tracks?: Array<{ id: string; originalYear?: number | null; originalYearSource?: string | null }>;
+        };
       if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
       const n = j.updated ?? 1;
-      const scope = applyToAlbum ? `${n} album track${n === 1 ? '' : 's'}` : 'track';
-      notify.ok(originalYear == null
-        ? `cleared the year override · ${scope}`
+      const scope = applyToAlbum ? `${n} album track${n === 1 ? '' : 's'}` : `${n} track${n === 1 ? '' : 's'}`;
+      notify.ok(originalYear == null && n === 0
+        ? `no year overrides to clear · ${scope}`
+        : originalYear == null
+          ? `cleared the year override · ${scope}`
         : `era year ${originalYear} · ${scope}`);
       flash(track.id);
+      const authoritative = j.tracks?.every((t) =>
+        'originalYear' in t && 'originalYearSource' in t)
+        ? j.tracks as OriginalYearResponse['tracks']
+        : [{
+            id: track.id,
+            originalYear,
+            originalYearSource: originalYear == null ? null : 'manual',
+          }];
       applyEraYearEvent(qc, {
-        originalYear,
-        // Current controllers return the authoritative target set. The
-        // fallback keeps a newer web build safe against an older controller:
-        // patch the selected row only instead of guessing album identity.
-        trackIds: j.tracks?.map((t) => t.id) ?? [track.id],
+        // The fallback keeps a newer web build safe against an older controller:
+        // patch the selected row only instead of guessing album identity or
+        // stamping the request onto automatic siblings.
+        tracks: authoritative,
       });
     } catch (err) {
       notify.err(errorMessage(err));

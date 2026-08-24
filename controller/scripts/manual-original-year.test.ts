@@ -17,8 +17,11 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import express from 'express';
 
 const stateDir = mkdtempSync(join(tmpdir(), 'subwave-manual-era-'));
 process.env.STATE_DIR = stateDir;
@@ -230,6 +233,71 @@ test('clearing only removes an actual override — a resolved sibling is untouch
   const tag = db.getTrack('sib-tag')!;
   assert.equal(tag.originalYear, 1973);
   assert.equal(tag.originalYearSource, 'album-tag');
+});
+
+test('album clear response reports only changed rows and returns every persisted era value', async () => {
+  const songs = [
+    { id: 'route-manual', title: 'Manual', artist: 'Artist', album: 'Mixed Sources', albumId: 'mixed', year: 2015 },
+    { id: 'route-mb', title: 'MusicBrainz', artist: 'Artist', album: 'Mixed Sources', albumId: 'mixed', year: 2015 },
+    { id: 'route-tag', title: 'Album Tag', artist: 'Artist', album: 'Mixed Sources', albumId: 'mixed', year: 2015 },
+  ];
+  db.upsertTrackMeta('route-manual', { ...songs[0], originalYear: 1970 });
+  db.setManualOriginalYear('route-manual', 1971);
+  db.upsertTrackMeta('route-mb', { ...songs[1], originalYear: null, isCompilation: true });
+  db.setOriginalYear('route-mb', 1972);
+  db.upsertTrackMeta('route-tag', { ...songs[2], originalYear: 1973 });
+
+  let navidrome: Server | null = null;
+  let routeServer: Server | null = null;
+  const { config } = await import('../src/config.js');
+  const previousUrl = config.navidrome.url;
+  try {
+    navidrome = createServer((req, res) => {
+      const subsonic = req.url?.startsWith('/rest/getSong')
+        ? { status: 'ok', song: songs[0] }
+        : { status: 'ok', album: { song: songs } };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ 'subsonic-response': subsonic }));
+    });
+    await new Promise<void>((resolve) => navidrome!.listen(0, '127.0.0.1', resolve));
+    config.navidrome.url = `http://127.0.0.1:${(navidrome.address() as AddressInfo).port}`;
+
+    const { router } = await import('../src/routes/library.js');
+    const app = express();
+    app.use(express.json());
+    app.use(router);
+    routeServer = createServer(app);
+    await new Promise<void>((resolve) => routeServer!.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${(routeServer.address() as AddressInfo).port}`;
+
+    const response = await fetch(`${origin}/library/original-year`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'route-manual', originalYear: null, applyToAlbum: true }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as {
+      updated: number;
+      tracks: Array<{ id: string; originalYear?: number | null; originalYearSource?: string | null }>;
+    };
+    assert.deepEqual({
+      updated: body.updated,
+      tracks: body.tracks.map(({ id, originalYear, originalYearSource }) => (
+        { id, originalYear, originalYearSource }
+      )),
+    }, {
+      updated: 1,
+      tracks: [
+        { id: 'route-manual', originalYear: null, originalYearSource: null },
+        { id: 'route-mb', originalYear: 1972, originalYearSource: 'musicbrainz' },
+        { id: 'route-tag', originalYear: 1973, originalYearSource: 'album-tag' },
+      ],
+    });
+  } finally {
+    config.navidrome.url = previousUrl;
+    if (routeServer) await new Promise<void>((resolve) => routeServer!.close(() => resolve()));
+    if (navidrome) await new Promise<void>((resolve) => navidrome!.close(() => resolve()));
+  }
 });
 
 test('a genuine compilation still reaches MusicBrainz, and MB still wins over the tag', () => {

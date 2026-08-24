@@ -7,23 +7,45 @@ import { applyEraYearEvent, libraryKeys, rowsOf } from './queries';
 import type { Track } from './types';
 
 const qc = new QueryClient();
-const target: Track = { id: 'target', title: 'Song A', artist: 'Artist A', album: 'Greatest Hits' };
-const sibling: Track = { id: 'sibling', title: 'Song B', artist: 'Artist A', album: 'Greatest Hits' };
+const target: Track = {
+  id: 'target', title: 'Song A', artist: 'Artist A', album: 'Greatest Hits',
+  originalYear: 1978, originalYearSource: 'manual',
+};
+const sibling: Track = {
+  id: 'sibling', title: 'Song B', artist: 'Artist A', album: 'Greatest Hits',
+  originalYear: 1972, originalYearSource: 'musicbrainz',
+};
+const tagged: Track = {
+  id: 'tagged', title: 'Song D', artist: 'Artist A', album: 'Greatest Hits',
+  originalYear: 1973, originalYearSource: 'album-tag',
+};
 const namesake: Track = { id: 'namesake', title: 'Song C', artist: 'Artist B', album: 'Greatest Hits' };
 
-qc.setQueryData(libraryKeys.recent(), [target, sibling, namesake]);
+qc.setQueryData(libraryKeys.recent(), [target, sibling, tagged, namesake]);
 
 applyEraYearEvent(qc, {
-  originalYear: 1978,
-  // The endpoint returns the authoritative target ids. Album titles are not
-  // identities: unrelated artists commonly publish records with this name.
-  trackIds: ['target', 'sibling'],
+  tracks: [
+    { id: 'target', originalYear: null, originalYearSource: null },
+    { id: 'sibling', originalYear: 1972, originalYearSource: 'musicbrainz' },
+    { id: 'tagged', originalYear: 1973, originalYearSource: 'album-tag' },
+  ],
 });
 
 const rows = rowsOf(qc.getQueryData(libraryKeys.recent()));
-assert.equal(rows.find((r) => r.id === 'target')?.originalYear, 1978);
-assert.equal(rows.find((r) => r.id === 'sibling')?.originalYear, 1978);
+assert.deepEqual(
+  rows.filter((r) => r.id !== 'namesake').map((r) => ({
+    id: r.id,
+    originalYear: r.originalYear,
+    originalYearSource: r.originalYearSource,
+  })),
+  [
+    { id: 'target', originalYear: null, originalYearSource: null },
+    { id: 'sibling', originalYear: 1972, originalYearSource: 'musicbrainz' },
+    { id: 'tagged', originalYear: 1973, originalYearSource: 'album-tag' },
+  ],
+  'a mixed-source clear must patch each row from the authoritative server value',
+);
 assert.equal(rows.find((r) => r.id === 'namesake')?.originalYear, undefined,
   'a same-title album outside the server response must remain untouched');
 
-console.log('era-year cache targeting passed');
+console.log('authoritative era-year cache patching passed');
