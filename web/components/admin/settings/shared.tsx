@@ -129,6 +129,7 @@ export interface LlmForm {
   toolChoice: string;
   pickerAgent: boolean;
   noRepeatWindow: string;
+  artistVarietyWindow: string;
   requestWebResolve: boolean;
   strictRequests: boolean;
   agentTimeoutMs: number;
@@ -211,6 +212,7 @@ export interface StreamForm {
   aacEnabled: boolean;
   aacBitrate: string;
   bitrate: string;
+  bufferSeconds: string;
   oggIcyMetadata: boolean;
   idleWhenEmpty: boolean;
   idleAfterMinutes: string;
@@ -303,6 +305,7 @@ export interface SettingsData {
       aacEnabled?: boolean;
       aacBitrate?: number;
       bitrate?: number;
+      bufferSeconds?: number;
       oggIcyMetadata?: boolean;
       idleWhenEmpty?: boolean;
       idleAfterMinutes?: number;

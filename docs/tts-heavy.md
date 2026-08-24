@@ -143,7 +143,12 @@ depends on your install, and the admin panel names the right one for yours:
 ### Heavy analysis on an NVIDIA GPU (CUDA)
 
 On a host with an NVIDIA card, the heavy stack can run CLAP + Demucs on the GPU
-instead of pinning your CPU cores — a big speed-up on deep library ingestion.
+— a big speed-up on deep library ingestion. Audio decode/resampling and the
+baseline bpm/key/loudness/structure pass remain CPU work; CUDA accelerates the
+model stages rather than replacing the whole analyzer. A sounds-like backfill
+over tracks whose baseline analysis is already current skips those baseline
+features, and batches each track's CLAP windows into one CUDA model call.
+
 It's a compose overlay, not an `.env` toggle (a GPU device reservation can't be
 switched from `.env`):
 

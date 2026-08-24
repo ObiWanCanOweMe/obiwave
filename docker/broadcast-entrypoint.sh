@@ -92,6 +92,22 @@ bootstrap_state_dirs() {
     return 0
 }
 
+# Listener buffer depth comes only from the controller-written handoff. An env
+# override would change Icecast's real burst without changing /now-playing or
+# voice-event timing, putting every listener-facing clock on the wrong offset.
+read_state_num() {
+    # $1 = filename, $2 = fallback. Non-numeric or missing → fallback.
+    _v=$(cat "$STATE_DIR/$1" 2>/dev/null || true)
+    case "$_v" in
+        ''|*[!0-9]*) echo "$2" ;;
+        *) echo "$_v" ;;
+    esac
+}
+
+stream_buffer_seconds() {
+    read_state_num liquidsoap_stream_buffer_seconds.txt 22
+}
+
 # Sourcing with SUBWAVE_BROADCAST_LIB=1 defines the helpers above WITHOUT
 # booting a station, so scripts/state-bootstrap.test.ts can drive them.
 if [ "${SUBWAVE_BROADCAST_LIB:-}" = "1" ]; then

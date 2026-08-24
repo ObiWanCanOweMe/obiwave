@@ -57,13 +57,36 @@ export function getFestivalContext(date = new Date()) {
 }
 
 // Weather via Open-Meteo (no API key required)
-let weatherCache: { data: any; fetchedAt: number } = { data: null, fetchedAt: 0 };
+let weatherCache: { data: any; fetchedAt: number; configKey: string } = {
+  data: null,
+  fetchedAt: 0,
+  configKey: '',
+};
 const WEATHER_TTL_MS = 30 * 60 * 1000;
+
+// Weather is settings-layer state, so read the live settings cache directly.
+// The old config.weather mirror was refreshed by POST /settings and at boot,
+// but not by onboarding or backup restore — both of which call settings.update()
+// directly. That left the saved location and the running forecast out of sync
+// until a controller restart.
+function weatherConfig() {
+  return getSettings().weather || config.weather;
+}
+
+function weatherConfigKey(weather: ReturnType<typeof weatherConfig>) {
+  return [
+    weather.lat,
+    weather.lng,
+    weather.units,
+    weather.locationName,
+    weather.onAirLocation,
+  ].join('\u0000');
+}
 
 // Force the next getWeather() call to re-fetch — used when the user changes
 // their location in /settings.
 export function invalidateWeatherCache() {
-  weatherCache = { data: null, fetchedAt: 0 };
+  weatherCache = { data: null, fetchedAt: 0, configKey: '' };
 }
 
 // The place the weather readout is ATTRIBUTED to — the broad on-air location,
@@ -74,21 +97,27 @@ export function invalidateWeatherCache() {
 // Keeping the precise locationName out of it is what stops a station's public
 // URL from naming its operator's town.
 //
-// Fed config.weather rather than the settings cache so this module keeps
-// deriving weather from the same mirrored block as lat/lng/units.
-function attributedLocation() {
-  return resolveOnAirLocation({ weather: config.weather });
+// Fed the same live weather block as the forecast query so its attributed
+// location and coordinates cannot drift across settings writers.
+function attributedLocation(weather = weatherConfig()) {
+  return resolveOnAirLocation({ weather });
 }
 
 export async function getWeather() {
-  if (weatherCache.data && Date.now() - weatherCache.fetchedAt < WEATHER_TTL_MS) {
+  const weather = weatherConfig();
+  const configKey = weatherConfigKey(weather);
+  if (
+    weatherCache.data &&
+    weatherCache.configKey === configKey &&
+    Date.now() - weatherCache.fetchedAt < WEATHER_TTL_MS
+  ) {
     return weatherCache.data;
   }
-  const imperial = config.weather.units === 'imperial';
+  const imperial = weather.units === 'imperial';
   const tempUnit = imperial ? 'F' : 'C';
   try {
     const unitParam = imperial ? '&temperature_unit=fahrenheit' : '';
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${config.weather.lat}&longitude=${config.weather.lng}&current=temperature_2m,weather_code,is_day${unitParam}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${weather.lat}&longitude=${weather.lng}&current=temperature_2m,weather_code,is_day${unitParam}`;
     const res = await fetchWithTimeout(url, { timeoutMs: 10_000 });
     const data = await res.json() as any;
     const code = data.current.weather_code;
@@ -99,12 +128,12 @@ export async function getWeather() {
       temp: Math.round(data.current.temperature_2m),
       tempUnit,
       isDay: data.current.is_day === 1,
-      location: attributedLocation(),
+      location: attributedLocation(weather),
     };
-    weatherCache = { data: result, fetchedAt: Date.now() };
+    weatherCache = { data: result, fetchedAt: Date.now(), configKey };
     return result;
   } catch {
-    return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation() };
+    return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation(weather) };
   }
 }
 
@@ -204,7 +233,7 @@ const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
 // latitude, so a southern-hemisphere station (negative lat) reads July as
 // winter, not summer (issue: Buenos Aires DJ talking about "summer" and "heat"
 // in July). The southern seasons are the northern ones shifted six months.
-function seasonFor(month /* 1-12 */, lat = config.weather.lat) {
+function seasonFor(month /* 1-12 */, lat = weatherConfig().lat) {
   const m = lat < 0 ? ((month + 5) % 12) + 1 : month;
   if (m === 12 || m <= 2) return 'winter';
   if (m <= 5) return 'spring';

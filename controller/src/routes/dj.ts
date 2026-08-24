@@ -797,8 +797,11 @@ router.post('/dj/skill', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'name is required' });
   }
   try {
-    const spoken = await runCapability(name, await getFullContext());
-    res.json({ ok: true, name, spoken });
+    // `aired: false` is a 200, not an error: the skill ran, looked at what it
+    // fetched, and had nothing worth saying (issue #1412). The operator gets
+    // the reason — the alternative was a fabricated line or an opaque 500.
+    const run = await runCapability(name, await getFullContext());
+    res.json({ ok: true, name, aired: run.aired, spoken: run.text, reason: run.reason });
   } catch (err) {
     queue.log('error', `/dj/skill ${name} failed: ${err.message}`);
     res.status(500).json({ error: err.message });
@@ -891,6 +894,10 @@ function toAdminRow(s: AdminSong) {
     artist: s.artist,
     album: s.album,
     year: s.year ?? null,
+    originalYear: tag?.originalYear ?? null,
+    originalYearSource: tag?.originalYearSource ?? null,
+    isCompilation: tag?.isCompilation ?? null,
+    eraUntrusted: tag?.eraUntrusted ?? null,
     genre: s.genre ?? null,
     duration: s.duration ?? null,
     // path lets getLocalPath() use the on-disk file when MUSIC_LIBRARY_PATH

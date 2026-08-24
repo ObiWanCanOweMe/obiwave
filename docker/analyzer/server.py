@@ -441,6 +441,9 @@ class AnalyzeRequest(BaseModel):
     # persists the Demucs stems it already computes as FLAC into this dir —
     # implies the separation pass even when `vocal` wasn't requested.
     stems_dir: str | None = None
+    # CLAP backfill for a track whose baseline analysis is already current.
+    # Skips every non-embedding feature in the worker.
+    embedding_only: bool = False
 
 
 @app.post("/analyze")
@@ -459,6 +462,8 @@ async def analyze(req: AnalyzeRequest):
         payload["complete"] = req.complete
     if req.stems_dir is not None:
         payload["stems_dir"] = req.stems_dir
+    if req.embedding_only:
+        payload["embedding_only"] = True
     msg = await analyzer_worker.request(payload)
     if not msg.get("ok"):
         raise HTTPException(500, msg.get("error") or "analyze failed")

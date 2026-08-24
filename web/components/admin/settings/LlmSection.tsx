@@ -272,6 +272,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         toolChoice: form.llm.toolChoice,
         pickerAgent: form.llm.pickerAgent,
         noRepeatWindow: Math.max(0, parseInt(form.llm.noRepeatWindow, 10) || 0),
+        artistVarietyWindow: Math.max(0, parseInt(form.llm.artistVarietyWindow, 10) || 0),
         requestWebResolve: form.llm.requestWebResolve,
         strictRequests: form.llm.strictRequests,
         agentTimeoutMs: form.llm.agentTimeoutMs,
@@ -1102,7 +1103,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             <Input
               type="number"
               min={5}
-              max={180}
+              max={300}
               step={5}
               value={Math.round(form.llm.agentTimeoutMs / 1000)}
               onChange={(e: ChangeEvent<HTMLInputElement>) =>
@@ -1115,7 +1116,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               How long an agent pick or listener request may run before falling
               back to the stateless picker. Slow reasoning models often need
               20&ndash;40s per pick; lower it for snappier fallbacks on a fast
-              model. 5&ndash;180s.
+              model. 5&ndash;300s.
             </div>
           </div>
         )}
@@ -1211,6 +1212,31 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             window. Auto-scales down on a small library so it never blocks everything;
             on a big library, raise it — it is the station&apos;s long memory.
             {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;1000.
+          </div>
+        </div>
+
+        <div className="field mt-4">
+          <Label>Artist spacing (slots)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={25}
+            step={1}
+            value={form.llm.artistVarietyWindow}
+            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+              setForm(f => ({ ...f, llm: { ...f.llm, artistVarietyWindow: e.target.value } }))
+            }
+            placeholder="5"
+            className="max-w-[200px]"
+          />
+          <div className="field-hint">
+            How many slots the DJ waits before returning to an artist. The pick is
+            re-taken from the run&apos;s other candidates when it lands inside the
+            window &mdash; and quietly stands if nothing fresher turned up, so this
+            never costs you a track. Raise it on a deep library where one artist
+            keeps circling back; lower it if the DJ is reaching too far from the
+            show&apos;s sound. {' '}<strong>0 = off</strong>, though an artist can
+            never follow itself whatever this says. 0&ndash;25.
           </div>
         </div>
       </Card>

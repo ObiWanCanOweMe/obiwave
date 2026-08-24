@@ -43,8 +43,9 @@ import {
   sameEra,
 } from './types';
 import type { EraWindow, Persona, PlaylistIndexStatus, Show, ShowsFormValues, SkillOption, ThemeOption } from './types';
-import { hasAnyMusicFilter } from './lib';
+import { hasAnyMusicFilter, showPayload } from './lib';
 import { ChipRow } from './ChipRow';
+import { displayedMatchingTracks, type CandidateDiagnostic } from './candidate-diagnostic';
 
 // The footer names the field the schema objected to; the schema's own keys are
 // developer-facing, so the common ones get an operator-facing label.
@@ -158,6 +159,22 @@ export function ShowEditor({
   const vocalsCtl = useController({ control, name: path('vocals') });
   const genresCtl = useController({ control, name: path('genres') });
   const maxTrackSecondsCtl = useController({ control, name: path('maxTrackSeconds') });
+
+  const candidateKey = JSON.stringify(showPayload(show));
+  const [candidateBusy, setCandidateBusy] = useState(false);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
+  const [candidateReport, setCandidateReport] = useState<{ key: string; value: CandidateDiagnostic } | null>(null);
+  const visibleCandidateReport = candidateReport?.key === candidateKey ? candidateReport.value : null;
+  const calculateCandidates = async () => {
+    setCandidateBusy(true); setCandidateError(null);
+    try {
+      const r = await adminFetch('/shows/candidates', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ show: showPayload(show) }) });
+      const j = await r.json().catch(() => ({})) as CandidateDiagnostic & { error?: string };
+      if (!r.ok) throw new Error(j.error || 'failed (' + r.status + ')');
+      setCandidateReport({ key: candidateKey, value: j });
+    } catch (err) { setCandidateError(err instanceof Error ? err.message : String(err)); }
+    finally { setCandidateBusy(false); }
+  };
 
   // The editor is remounted per show (keyed by id at the call site), so this
   // resets on switch — it's a text buffer, not form data.
@@ -568,6 +585,7 @@ export function ShowEditor({
             (auto) follows the station&apos;s own mood instead of pinning one.
           </span>
 
+
           <Field>
             <PlaylistIdsField
               control={control}
@@ -611,6 +629,41 @@ export function ShowEditor({
                 here (up to 10).
               </span>
             </PlaylistIdsField>
+          </Field>
+          <Field>
+            <FieldTitle>matching tracks</FieldTitle>
+            <FieldDescription>
+              See how many tracks fit the music filters above. Excluded playlists
+              are already removed from the count. Live picks also account for
+              recent plays and the track already on air.
+            </FieldDescription>
+            <div className="mt-2 flex items-center gap-2">
+              <Btn className="min-h-9 sm:min-h-0" onClick={calculateCandidates} disabled={!valid || candidateBusy}>
+                {candidateBusy ? 'Counting…' : 'Count matching tracks'}
+              </Btn>
+              {!valid && <span className="field-hint">Finish the required show fields first.</span>}
+            </div>
+            {candidateError && <span role="alert" className="field-hint text-vermilion">Could not count matching tracks: {candidateError}</span>}
+            {visibleCandidateReport && (
+              <div className="mt-2 grid gap-1 border border-ink bg-[var(--muted)] p-3 text-sm">
+                {hasAnyMusicFilter(show) ? (
+                  <>
+                    <span>
+                      <strong>{displayedMatchingTracks(visibleCandidateReport).toLocaleString()}</strong>{' '}
+                      tracks match these music filters after excluded playlists{visibleCandidateReport.strict
+                        ? ', and form this show’s selection pool.'
+                        : '. With Strict filter off, the DJ prefers them but can go outside them for flow.'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="field-hint">No music filters selected. Add a mood, era, energy, vocal type, or genre to count matches.</span>
+                )}
+                {visibleCandidateReport.playlist && (
+                  <span className="field-hint">Playlist anchor: {visibleCandidateReport.playlist.total.toLocaleString()} tracks · {visibleCandidateReport.playlist.matchingFilters.toLocaleString()} match these filters · {visibleCandidateReport.playlist.afterExclusions.toLocaleString()} after exclusions</span>
+                )}
+                {visibleCandidateReport.warnings.map(warning => <span key={warning} className="field-hint text-vermilion">{warning}</span>)}
+              </div>
+            )}
           </Field>
 
           {scopedRuleCount > 0 && (

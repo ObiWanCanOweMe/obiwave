@@ -361,6 +361,13 @@ read_state_num() {
 	esac
 }
 
+# Keep the listener-time offset under controller ownership. Accepting an env
+# override here would make the Icecast burst disagree with /now-playing and
+# voice-event timing even though all four processes share this container.
+stream_buffer_seconds() {
+	read_state_num liquidsoap_stream_buffer_seconds.txt 22
+}
+
 render_icecast() {
 	ICECAST_STATE_DIR="$STATE_DIR" \
 	ICECAST_TEMPLATE="$TEMPLATE" \
