@@ -1,3 +1,5 @@
+import React from 'react';
+
 export default function QueueHeldBadge({ sent }: { sent?: boolean }) {
   if (sent === true) return null;
 
