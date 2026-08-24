@@ -155,6 +155,7 @@ export default function SettingsPanel() {
         aacEnabled: v.stream?.aacEnabled ?? false,
         aacBitrate: String(v.stream?.aacBitrate ?? 192),
         bitrate: String(v.stream?.bitrate ?? 192),
+        bufferSeconds: String(v.stream?.bufferSeconds ?? 22),
         oggIcyMetadata: v.stream?.oggIcyMetadata ?? true,
         idleWhenEmpty: v.stream?.idleWhenEmpty ?? false,
         idleAfterMinutes: String(v.stream?.idleAfterMinutes ?? 10),
@@ -278,6 +279,7 @@ export default function SettingsPanel() {
         // seeding the OLD default here means opening Settings and saving any
         // LLM field silently persists it over the new one.
         noRepeatWindow: String(typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 250),
+        artistVarietyWindow: String(typeof v.llm?.artistVarietyWindow === 'number' ? v.llm.artistVarietyWindow : 5),
         requestWebResolve: !!v.llm?.requestWebResolve,
         strictRequests: !!v.llm?.strictRequests,
         agentTimeoutMs: typeof v.llm?.agentTimeoutMs === 'number' ? v.llm.agentTimeoutMs : 45000,
@@ -1468,6 +1470,55 @@ export default function SettingsPanel() {
                     Higher bitrate = better quality, more listener bandwidth
                     (current: {data?.values?.stream?.bitrate ?? '—'} kbps). 192 kbps is the
                     original default.
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {form && (
+              <Card title="Listener buffer" sub="all stream mounts">
+                <div className="field">
+                  <div className="flex items-center gap-2">
+                    <Label>Listener buffer</Label>
+                    <Pill tone="ink">restart required</Pill>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      className="mono-num w-28"
+                      aria-label="Listener buffer (seconds)"
+                      type="number"
+                      min={0}
+                      max={60}
+                      step={1}
+                      value={form.stream.bufferSeconds}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setForm(f =>
+                          f
+                            ? { ...f, stream: { ...f.stream, bufferSeconds: e.target.value } }
+                            : f,
+                        )
+                      }
+                    />
+                    <span className="text-[12px] text-muted">seconds</span>
+                    <Btn
+                      sm
+                      onClick={() =>
+                        saveSettings({
+                          stream: { bufferSeconds: Number(form.stream.bufferSeconds) },
+                        })
+                      }
+                      disabled={busy}
+                    >
+                      Save listener buffer
+                    </Btn>
+                  </div>
+                  <SettingsFieldError path="stream.bufferSeconds" errors={fieldErrors} />
+                  <div className="field-hint">
+                    Icecast primes this much audio when a listener connects. Lower values start
+                    closer to live and shorten idle wake-up, but leave less immediate cushion
+                    for network stalls; 0 disables the connect burst. Applies on the next
+                    broadcast restart. Current: {data?.values?.stream?.bufferSeconds ?? '—'}
+                    {' '}seconds.
                   </div>
                 </div>
               </Card>

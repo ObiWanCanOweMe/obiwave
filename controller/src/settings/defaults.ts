@@ -2,6 +2,9 @@
 // pure helpers that read them. Part of the settings/ split — see ../settings.ts.
 
 import { config } from '../config.js';
+// Pure policy constant — artist-guard.ts imports only music/recency.ts, which
+// imports nothing, so this stays a leaf and can't cycle back through settings.
+import { ARTIST_VARIETY_WINDOW } from '../broadcast/dj-agent/artist-guard.js';
 import {
   BEDS_CROSS_SEC_BOUNDS,
   BEDS_THRESHOLD_SEC_BOUNDS,
@@ -158,8 +161,9 @@ export const DEFAULTS = {
   djPrompts: [],
   activeDjPromptId: '',
   // Per-station rules (TTS control tags, "spell out numbers", orthography)
-  // appended to EVERY spoken-output prompt — both renderDjPrompt and
-  // agentPersonaPreamble, which the djPrompt template never reaches (#1182).
+  // appended to EVERY spoken-output prompt — renderDjPrompt, agentPersonaPreamble
+  // and the multi-voice cast prompts (castHouseRulesBlock), none of which the
+  // djPrompt template reaches (#1182, #1420).
   djHouseRules: '',
   // Station clock switch. false = the wall clock stays off air: no time of day
   // in links, idents, hand-overs, ad-libs, banter or programme beats, and the
@@ -323,6 +327,12 @@ export const DEFAULTS = {
     // Clamped to library size at use so a small catalogue never fully blocks; 0
     // disables. Listener requests are exempt. See music/recency.ts.
     noRepeatWindow: config.queue.noRepeatWindow,
+    // Artist spacing, in slots: the agent path re-picks when its choice repeats
+    // an artist from the last N slots, not just the one on air. Soft by design —
+    // if the run surfaced nothing fresher the original pick stands, so this
+    // never costs the station a slot. 0 leaves only the back-to-back guard,
+    // which is always on. See broadcast/dj-agent/artist-guard.ts.
+    artistVarietyWindow: ARTIST_VARIETY_WINDOW,
     // Gives the listener-request agent (never the per-track picker) an
     // `identifyRequestedTrack` tool that resolves a DESCRIBED track via web search
     // and matches it locally. Off by default: needs a search provider and costs a

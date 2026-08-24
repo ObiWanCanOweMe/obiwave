@@ -10,6 +10,14 @@ import { buildContextLines, decoratePrompt, randomSeed } from './context.js';
 import { speakClockAllowed } from '../../../broadcast/clock-policy.js';
 import { isNamedRequester } from '../../../util/request-guard.js';
 import { introBudgetPhrase, introMsFor, firstVocalMsFor, bpmKeyFor } from './intro-budget.js';
+import { trackEraYear } from '../../../music/show-filter.js';
+import { trackFeelSuffix } from './track-feel.js';
+
+// The feel note appended to a track line (track-feel.ts) is a STEER, not copy.
+// Without this the model reads the label out — "high-energy" spoken flat is
+// worse than the guess it replaces, and it is the same failure as speaking a
+// raw BPM.
+const FEEL_CLAUSE = ' A feel note after a track line tells you how the track actually sounds — let it steer your wording, never say it out loud.';
 
 // Real-world context the generic between-track generators are allowed to weave
 // in. Weather is deliberately EXCLUDED (issue #471): ambient weather stapled to
@@ -92,7 +100,15 @@ export async function generateIntro({ track, context, requestedBy = null, reques
   if (artistMiss) {
     ctxLines.push(`IMPORTANT: We do NOT have "${artistMiss}" in the library. The track now starting is NOT by them — it's a fitting substitute for the moment. Do not imply or claim the track is by "${artistMiss}".`);
   }
-  ctxLines.push(`Now starting: "${track.title}" by ${track.artist}${track.album ? ` from ${track.album}` : ''}${track.year ? ` (${track.year})` : ''}`);
+  // Era year, never the raw `year` (issue #1418) — this line is what the DJ
+  // reads on air, so a reissue anthology's date here has the station announce
+  // "2012" over a 1964 Stax single. trackEraYear applies the #842 precedence
+  // and falls back to the plain year off-library. Unknown says nothing at all:
+  // omitting the year is the #842 "leave it out rather than assert the wrong
+  // decade" rule reaching the microphone.
+  const eraYear = trackEraYear(track);
+  const feelSuffix = trackFeelSuffix(track);
+  ctxLines.push(`Now starting: "${track.title}" by ${track.artist}${track.album ? ` from ${track.album}` : ''}${eraYear ? ` (${eraYear})` : ''}${feelSuffix}`);
 
   // Talk-within-the-intro (A.3 phase 1): when the track's intro runway is
   // known, budget the line to land before the vocals. Advisory + additive —
@@ -110,6 +126,7 @@ export async function generateIntro({ track, context, requestedBy = null, reques
   if (namedBy) rules.push(REQUESTER_GREETING_CLAUSE.trim() + REQUESTER_NAME_CLAUSE);
   rules.push("This is a listener request — keep the focus on what they asked for and the track now starting; don't back-announce or talk about the track that was just playing.");
   rules.push(AIR_TIME_CLAUSE.trim());
+  if (feelSuffix) rules.push(FEEL_CLAUSE.trim());
   if (artistMiss) {
     rules.push(`The listener asked for "${artistMiss}", but we don't have them — briefly own that ("no ${artistMiss} in the crates", or similar), then introduce what's actually playing as a worthy stand-in. Never pretend the track is by "${artistMiss}".`);
   }
@@ -243,7 +260,8 @@ export async function generateLink({ previous, current, context, clockIsAirTime 
   // a track one older than reality). We intro the track NOW STARTING instead, so
   // the line is always correct whatever played before it. (`previous` is still
   // accepted for the tempo/key mix nod below — a vague feel, never a name.)
-  if (current?.title) ctxLines.push(`Now playing: "${current.title}" by ${current.artist || 'unknown'}`);
+  const feelSuffix = trackFeelSuffix(current);
+  if (current?.title) ctxLines.push(`Now playing: "${current.title}" by ${current.artist || 'unknown'}${feelSuffix}`);
 
   // DJ-mode personas lean harder into teasing the track's feel / artist.
   const djMode = !!speaker?.djMode;
@@ -264,7 +282,8 @@ export async function generateLink({ previous, current, context, clockIsAirTime 
   // phrase to "skip the spoken intro" on vocals-immediate tracks — the
   // deterministic backstop would drop the line anyway; better not to write it.
   const budget = introBudgetPhrase(introMsFor(current), firstVocalMsFor(current));
-  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}\n\n${ctxLines.join('\n')}`;
+  const feelClause = feelSuffix ? FEEL_CLAUSE : '';
+  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}${feelClause}\n\n${ctxLines.join('\n')}`;
 
   return djText({
     system: djSystem(speaker),

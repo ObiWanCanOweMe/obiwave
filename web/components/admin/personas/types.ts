@@ -52,7 +52,8 @@ export interface FormState {
   djPrompts: DjPromptPreset[];
   activeDjPromptId: string;
   // Station house rules — appended to EVERY spoken-output prompt, including
-  // the agent paths the template never reaches (issue #1182). '' = off.
+  // the agent and multi-voice cast paths the template never reaches
+  // (issues #1182, #1420). '' = off.
   djHouseRules: string;
 }
 

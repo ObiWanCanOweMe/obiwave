@@ -2,10 +2,13 @@
 // Uses the proper salt+token auth (not plaintext password).
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { config } from '../config.js';
 import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
+import { trackEraYear } from './show-filter.js';
+import { albumEraSuspect } from './era-suspect.js';
 
 function buildAuth() {
   const salt = crypto.randomBytes(8).toString('hex');
@@ -714,6 +717,12 @@ export async function getStructuredLyrics(
 // rips). The walk (tag-library.walkNavidrome) turns these into per-track
 // original-year/compilation columns; the raw fields ride here so policy stays
 // out of the client.
+//
+// `albumEraUntrusted` (#1418) is the ONE judgement made here rather than
+// downstream, and only because the inputs exist nowhere else: deciding whether
+// an album is a reissue anthology needs the album record AND its full track
+// list in the same place, which is exactly this loop and nothing after it. The
+// judgement itself still lives in music/era-suspect.ts — this only feeds it.
 export async function* iterateAllSongs() {
   let offset = 0;
   const BATCH = 500;
@@ -727,8 +736,25 @@ export async function* iterateAllSongs() {
         const ord = r.album?.originalReleaseDate?.year;
         const originalYear = Number.isFinite(ord) && ord > 0 ? ord : null;
         // Same station-archive drop as getAlbum() (issue #273).
-        for (const s of rejectArchive(r.album?.song || [])) {
-          yield { ...s, albumIsCompilation: isCompilation, albumOriginalYear: originalYear };
+        const songs = rejectArchive(r.album?.song || []);
+        const suspicion = albumEraSuspect({
+          isCompilation,
+          albumArtist: r.album?.artist ?? album.artist ?? null,
+          title: r.album?.name ?? album.name ?? null,
+          year: Number.isFinite(r.album?.year) ? r.album.year : null,
+          // Raw strings, one per KEPT song — era-suspect owns the lead-artist
+          // normalisation, and counting over the kept set stops a dropped
+          // station-archive entry inflating the album into a false anthology.
+          trackArtists: songs.map((s) => s.artist),
+        });
+        for (const s of songs) {
+          yield {
+            ...s,
+            albumIsCompilation: isCompilation,
+            albumOriginalYear: originalYear,
+            albumEraUntrusted: suspicion.suspect,
+            albumEraReason: suspicion.reason,
+          };
         }
       } catch (err) {
         console.error(`[subsonic] getAlbum(${album.id}) failed: ${err.message}`);
@@ -835,8 +861,12 @@ export function getCoverArtUrl(id, size = 512) {
 // Library is AAC 256 kbps m4a from gamdl; without `raw`, Navidrome would
 // transcode to ~192 kbps MP3 on the way out, adding a lossy generation before
 // Liquidsoap's own MP3 re-encode. Liquidsoap decodes m4a/AAC via ffmpeg.
-export function getStreamUrl(songId) {
-  return `subhttp:${buildUrl('stream', { id: songId, format: 'raw' })}`;
+export function getStreamUrl(songId, resolveProbeId: string | null = null) {
+  const url = buildUrl('stream', { id: songId, format: 'raw' });
+  // The fragment reaches proto_subhttp but curl never sends it to Navidrome.
+  // It identifies this exact handoff, avoiding stale song-id outcomes.
+  const probe = resolveProbeId ? `#subwave_probe=${encodeURIComponent(resolveProbeId)}` : '';
+  return `subhttp:${url}${probe}`;
 }
 
 // Plain HTTP stream URL (no `subhttp:` prefix) with auth baked into the query
@@ -849,15 +879,25 @@ export function getRawStreamUrl(songId: string): string {
 // Returns the local file path if Navidrome and the controller share the music
 // volume — much more efficient than streaming over HTTP for the radio.
 // Set MUSIC_LIBRARY_PATH to mount your library inside the controller container.
+//
+// The path is only ever a GUESS. Navidrome's Subsonic `path` is synthetic —
+// built from tags, not read off disk — so it routinely disagrees with the real
+// layout (the API says `Frank Zappa/Chunga's Revenge/…` while the folder is
+// `Frank Zappa/Chunga's Revenge (1970)/…`). A guess handed to Liquidsoap
+// resolves to nothing and takes the queued pick down with it (#1405), so the
+// guess is CHECKED here and a miss falls back to the stream URL: local-file
+// mode then speeds up the tracks whose paths do line up instead of breaking
+// every track whose paths don't.
 export function getLocalPath(song) {
   const libRoot = process.env.MUSIC_LIBRARY_PATH;
   if (!libRoot || !song.path) return null;
-  return `${libRoot}/${song.path}`;
+  const local = `${libRoot}/${song.path}`;
+  return fs.existsSync(local) ? local : null;
 }
 
 // Best URI for Liquidsoap — local file if available, otherwise stream URL
-export function getPlayableUri(song) {
-  return getLocalPath(song) || getStreamUrl(song.id);
+export function getPlayableUri(song, resolveProbeId: string | null = null) {
+  return getLocalPath(song) || getStreamUrl(song.id, resolveProbeId);
 }
 
 // Liquidsoap `annotate:` URI — embeds metadata up front so on_track_change
@@ -868,14 +908,22 @@ export function getPlayableUri(song) {
 export function escAnnotate(s) {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
-export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null } = {}) {
+export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null } = {}) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
   ];
-  if (song.year) fields.push(`year="${escAnnotate(song.year)}"`);
+  // Era year, never the raw `year` (issue #1418). A reissue anthology carries
+  // the reissue's date, so a 1964 Stax single annotates as 2012 and every
+  // surface downstream of the metadata inherits it. trackEraYear applies the
+  // #842 precedence (resolved original year wins; an unresolved compilation
+  // reads as unknown) and falls back to the plain year for off-library tracks,
+  // which is the pre-#1418 behaviour. Unknown emits NO year field rather than
+  // a wrong one.
+  const eraYear = trackEraYear(song);
+  if (eraYear) fields.push(`year="${escAnnotate(eraYear)}"`);
   const genres = songGenres(song);
   if (genres.length) fields.push(`genre="${escAnnotate(genres.join(', '))}"`);
   // DJ-mode adaptive blend: the queue stashes a per-transition crossfade length
@@ -953,7 +1001,7 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
   if (opts.cueInSec != null && opts.cueInSec > 0) {
     fields.push(`liq_cue_in="${escAnnotate(opts.cueInSec)}"`);
   }
-  return `annotate:${fields.join(',')}:${getPlayableUri(song)}`;
+  return `annotate:${fields.join(',')}:${getPlayableUri(song, opts.resolveProbeId ?? null)}`;
 }
 
 // Annotate URI for a pre-rendered transition CLIP (stem-blend transitions).

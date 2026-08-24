@@ -298,6 +298,59 @@ TAKEOVER_SHOW_NAME = "Verify Takeover Show"
 
 
 @check
+def stream_buffer(page):
+    """The listener buffer control round-trips the advertised Icecast depth.
+
+    This is the timing value that listener-facing titles and voice events use,
+    so the UI must save through the real /settings route and surface the
+    controller's existing 0-60 validation rather than applying a second rule.
+    """
+    original = json.loads(api("/settings"))["values"]["stream"]["bufferSeconds"]
+
+    try:
+        page.goto(f"{WEB}/admin/settings?section=danger")
+        page.wait_for_selector("text=Stream MP3 bitrate")
+
+        seconds = page.get_by_label("Listener buffer (seconds)")
+        assert seconds.input_value() == str(original), (
+            f"buffer field hydrated as {seconds.input_value()!r}, want {original!r}"
+        )
+
+        # The controller owns the range. Prove its fieldErrors response lands
+        # beside this input and the rejected value is not persisted.
+        seconds.fill("61")
+        with page.expect_response(
+            lambda r: r.url.endswith("/settings") and r.request.method == "POST"
+        ) as refused_info:
+            page.get_by_role("button", name="Save listener buffer").click()
+        assert refused_info.value.status == 400, (
+            f"out-of-range save returned HTTP {refused_info.value.status}, want 400"
+        )
+        field = seconds.locator(
+            "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' field ')][1]"
+        )
+        field.get_by_text("stream.bufferSeconds must be a number between 0 and 60").wait_for()
+        after_refusal = json.loads(api("/settings"))["values"]["stream"]["bufferSeconds"]
+        assert after_refusal == original, "rejected buffer value was persisted"
+
+        # A valid save persists the exact value and reports the broadcast
+        # restart the Icecast template needs before the new burst takes effect.
+        seconds.fill("17")
+        with page.expect_response(
+            lambda r: r.url.endswith("/settings") and r.request.method == "POST"
+        ) as saved_info:
+            page.get_by_role("button", name="Save listener buffer").click()
+        saved = saved_info.value
+        assert saved.status == 200, f"valid save returned HTTP {saved.status}, want 200"
+        assert saved.json().get("requiresRestart") is True, "save did not request a restart"
+        stored = json.loads(api("/settings"))["values"]["stream"]["bufferSeconds"]
+        assert stored == 17, f"buffer save stored {stored!r}, want 17"
+        page.get_by_text("Pending settings need a restart to apply.").wait_for()
+    finally:
+        api_write("POST", "/settings", {"stream": {"bufferSeconds": original}})
+
+
+@check
 def takeover(page):
     """TakeoverCard (Task 2) renders NOTHING to interact with — not "Pin a
     show", not "Takeover minutes" — when `shows.length === 0`

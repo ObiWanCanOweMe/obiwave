@@ -34,9 +34,9 @@ import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
-import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
+import { recencyWindowsForLibrary, effectiveNoRepeatWindow } from '../music/recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
-import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
+import { ARTIST_VARIETY_WINDOW, runArtistGuard } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
@@ -368,61 +368,38 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // plays, because a re-pick that knows only the on-air artist keeps returning to
   // whoever ranks next-highest — the every-other-slot repeat this guard exists
   // to prevent.
-  const curArtist = artistRootKey(current || {});
-  if (curArtist && artistRootKey(song) === curArtist) {
-    const { alt, dropped, starved } = alternativeCandidates<any>(
-      extras.seen, curArtist, queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
-    );
-    let altSong: any = null;
-    if (alt.size) {
-      const repicked = await repickFromSeen({
-        seen: alt, badId: null, wantLink, showAt,
-        playlistResolved: !!playlistTracks?.length,
-        reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
-      });
-      // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
-      // to the alternatives by construction (z.enum), and reading it back out of
-      // the narrower map is what keeps that true if the schema ever gains a
-      // tolerance for ids it didn't offer.
-      altSong = repicked?.id ? alt.get(repicked.id) : null;
-      if (altSong) {
-        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
-        object = repicked;
-        song = altSong;
-      }
-    }
-    if (!altSong) {
-      // Pool rescue. This enqueues (and links, and records its own session turn)
-      // on success, so there is nothing left for this run to do — return true
-      // and let runTrackEvent treat the slot as filled. `enqueuePick`'s dedup
-      // still applies: a pool pick that collides with something already queued
-      // reports 'collision' and we fall through to the relaxation below rather
-      // than silently dropping the slot.
-      const rescued = await pickViaPool(
-        queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
-        { avoidArtist: song.artist },
-      );
-      // Why the rescue ran, phrased for the booth log: the run either surfaced
-      // no other artist at all, or surfaced some and the constrained re-pick
-      // call over them failed — two different stations of the same rescue.
-      const runWasThin = alt.size
-        ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
-        : 'every agent candidate was that artist';
-      if (rescued === 'queued') {
-        logEvent('pick.artistGuard', { relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
-        return true;
-      }
-      // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
-      // from 'collision' (it produced a pick that deduped against something
-      // already queued) — an operator reading #1187-style reports must be able
-      // to tell "the library really had nothing" from "a request slipped in
-      // mid-pick".
-      const reason = alt.size ? 'repick-failed' : 'no-other-artist';
-      logEvent('pick.artistGuard', { relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
-      queue.log('picker', `back-to-back artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
-    }
+  //
+  // #1406 widened the ENTRY condition to that same window. Until then it only
+  // narrowed the re-pick pool, so the guard never fired on a pick three slots
+  // after the same artist and the window was never consulted — every occurrence
+  // legal, and the same artist across a whole morning show. The two causes are
+  // escalated differently on purpose (see below): back-to-back is a fault worth
+  // a pool rescue, spacing is a preference that yields to the run.
+  const varietyWindow = settings.get().llm?.artistVarietyWindow ?? ARTIST_VARIETY_WINDOW;
+  const guarded = await runArtistGuard<any>({
+    song, object, current,
+    seen: extras.seen,
+    // Every queue read stays here; the policy module is handed values only.
+    recentRoots: queue.neighbourArtistRoots(varietyWindow),
+    window: varietyWindow,
+    repick: (alt, reason) => repickFromSeen({
+      seen: alt, badId: null, wantLink, showAt,
+      playlistResolved: !!playlistTracks?.length,
+      reason,
+    }),
+    poolRescue: (avoidArtist) => pickViaPool(
+      queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
+      { avoidArtist },
+    ),
+    log: (line) => queue.log('picker', line),
+    logEvent,
+  });
+  // The pool rescue enqueues, links and records its own session turn, so a
+  // rescued slot is a filled slot — runTrackEvent must treat it as done.
+  if (guarded.kind === 'rescued') return true;
+  if (guarded.kind === 'repicked') {
+    object = guarded.object;
+    song = guarded.song;
   }
 
   const rawSay = typeof object.say === 'string' ? object.say.trim() : '';

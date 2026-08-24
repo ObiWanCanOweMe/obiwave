@@ -414,6 +414,9 @@ export interface AnalyzeRequestOpts {
   // worker persists its Demucs stems (head + tail) as FLAC into this dir on
   // the shared volume; implies the separation even without `vocal`.
   stems_dir?: string;
+  // The track's baseline analysis is already current; compute only its CLAP
+  // vector. Wire-named because both backends receive the options verbatim.
+  embedding_only?: boolean;
 }
 
 // Write a request to the local stdio worker and resolve its response. The

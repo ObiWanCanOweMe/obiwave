@@ -95,6 +95,10 @@ export interface QueueItem {
   queuedAt?: string;
   sent?: boolean;
   confirmedInLiquidsoap?: boolean;
+  // Unique per-handoff token carried in a subhttp URL fragment. Liquidsoap's
+  // protocol records ready/failed against it, so queue membership is never
+  // mistaken for resolution state.
+  resolveProbeId?: string;
   transitionSfx?: string;
   startedAt?: string;
   endedAt?: string;

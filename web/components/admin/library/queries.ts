@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import { errorMessage, notify } from '../../../lib/notify';
-import type { BlockRef, Energy, LikedSort, SearchMode, Sort, TagEvent, Track, Vocal } from './types';
+import type { BlockRef, Energy, EraYearTrackResult, LikedSort, SearchMode, Sort, TagEvent, Track, Vocal } from './types';
 
 // The query-key factory and the cache-wide row operations. Deliberately imports
 // nothing from LibraryContext — the two hooks that need adminFetch live in
@@ -111,6 +111,25 @@ export function patchAllRows(qc: QueryClient, fn: (t: Track) => Track) {
  */
 export function applyBlockMarks(qc: QueryClient, marks: Record<string, BlockRef | null>) {
   patchAllRows(qc, t => (t.id in marks ? { ...t, blockedBy: marks[t.id] } : t));
+}
+
+/**
+ * A manual era-year override landed (#1418). The endpoint returns every target
+ * with its persisted value + source, so a mixed-source album clear keeps the
+ * automatic MusicBrainz/album-tag siblings authoritative in cache. Targeting
+ * still uses ids rather than album titles — unrelated artists commonly publish
+ * namesakes.
+ */
+export function applyEraYearEvent(qc: QueryClient, ev: {
+  tracks: EraYearTrackResult[];
+}) {
+  const tracks = new Map(ev.tracks.map(track => [track.id, track]));
+
+  patchAllRows(qc, r => (!tracks.has(r.id) ? r : {
+    ...r,
+    originalYear: tracks.get(r.id)!.originalYear,
+    originalYearSource: tracks.get(r.id)!.originalYearSource,
+  }));
 }
 
 /**

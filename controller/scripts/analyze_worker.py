@@ -681,6 +681,15 @@ def estimate_sections(y, sr, librosa, chroma=None):
 # so a worker with embeddings DISABLED never needs torch/transformers/onnx and
 # the librosa-only venv keeps working.
 # ---------------------------------------------------------------------------
+def clap_batch_enabled(mode, device):
+    """Only the published CUDA transformers path benefits from window batching.
+
+    CPU torch keeps the old one-window memory envelope, and arbitrary ONNX
+    exports may not have a dynamic batch axis.
+    """
+    return mode == "transformers" and device == "cuda"
+
+
 class ClapEmbedder:
     def __init__(self):
         self.mode = None
@@ -725,41 +734,29 @@ class ClapEmbedder:
             self.mode = "transformers"
             log(f"CLAP transformers model loaded: {hf_id}")
 
-    def embed(self, y48, sr):
+    def _embed_onnx(self, y48, sr):
         import numpy as np
 
-        return_tensors = "np" if self.mode == "onnx" else "pt"
         # transformers renamed the ClapProcessor audio kwarg `audios` → `audio`
         # and turned the old name into a hard error (not just a warning) in
         # recent releases. Try the new name, fall back to the old one so this
         # works against whatever transformers the analyzer venv resolved.
         try:
             inputs = self.processor(
-                audio=y48, sampling_rate=sr, return_tensors=return_tensors
+                audio=y48, sampling_rate=sr, return_tensors="np"
             )
         except (TypeError, ValueError):
             inputs = self.processor(
-                audios=y48, sampling_rate=sr, return_tensors=return_tensors
+                audios=y48, sampling_rate=sr, return_tensors="np"
             )
         feats = inputs["input_features"]
+        feats_np = np.asarray(feats, dtype=np.float32)
+        out = self.session.run(None, {self.input_name: feats_np})
+        return np.asarray(out[0]).reshape(-1)
 
-        if self.mode == "onnx":
-            feats_np = np.asarray(feats, dtype=np.float32)
-            out = self.session.run(None, {self.input_name: feats_np})
-            vec = np.asarray(out[0]).reshape(-1)
-        else:
-            import torch
-
-            feats = feats.to(resolve_device())
-            with torch.no_grad():
-                emb = self.model.get_audio_features(input_features=feats)
-            # transformers ≤4.x returns the projected 512-d audio-features
-            # tensor directly; 5.x returns a BaseModelOutputWithPooling whose
-            # .pooler_output is that same projected embedding. Unwrap the new
-            # shape so this works against whatever the analyzer venv resolved.
-            if hasattr(emb, "pooler_output"):
-                emb = emb.pooler_output
-            vec = emb.cpu().numpy().reshape(-1)
+    @staticmethod
+    def _normalise(vec):
+        import numpy as np
 
         if vec.shape[0] != CLAP_EMBED_DIM:
             raise RuntimeError(
@@ -770,6 +767,65 @@ class ClapEmbedder:
         if norm > 0:
             vec = vec / norm
         return [float(x) for x in vec]
+
+    def _embed_transformers(self, windows, sr):
+        import numpy as np
+        import torch
+
+        audio = list(windows)
+        try:
+            inputs = self.processor(
+                audio=audio, sampling_rate=sr, return_tensors="pt"
+            )
+        except (TypeError, ValueError):
+            inputs = self.processor(
+                audios=audio, sampling_rate=sr, return_tensors="pt"
+            )
+        feats = inputs["input_features"].to(resolve_device())
+        with torch.no_grad():
+            emb = self.model.get_audio_features(input_features=feats)
+        # transformers ≤4.x returns the projected tensor directly; 5.x wraps
+        # it in BaseModelOutputWithPooling.
+        if hasattr(emb, "pooler_output"):
+            emb = emb.pooler_output
+        rows = np.asarray(emb.cpu().numpy())
+        if rows.ndim == 1:
+            rows = rows.reshape(1, -1)
+        if rows.shape[0] != len(audio):
+            raise RuntimeError(
+                f"unexpected CLAP embedding batch {rows.shape[0]} (want {len(audio)})"
+            )
+        return [self._normalise(row) for row in rows]
+
+    def embed_many(self, windows, sr):
+        """Embed one track's windows, batching only the CUDA model forward."""
+        if not windows:
+            return []
+        if self.mode == "onnx":
+            return [self._normalise(self._embed_onnx(window, sr)) for window in windows]
+        if not self.batches_windows():
+            return [self._embed_transformers([window], sr)[0] for window in windows]
+        try:
+            return self._embed_transformers(windows, sr)
+        except Exception as ex:  # noqa: BLE001 - preserve the old memory envelope
+            log(f"CLAP window batch failed ({ex}); retrying sequentially")
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - cache release is best-effort
+                pass
+            return [self._embed_transformers([window], sr)[0] for window in windows]
+
+    def batches_windows(self):
+        """Whether decoded windows should be retained for one model batch."""
+        return self.mode == "transformers" and clap_batch_enabled(
+            self.mode, resolve_device()
+        )
+
+    def embed(self, y48, sr):
+        """Compatibility surface for callers that genuinely have one window."""
+        return self.embed_many([y48], sr)[0]
 
     def _resolve_text_model(self):
         """The CLAP text tower. In transformers mode it's the loaded ClapModel;
@@ -854,6 +910,8 @@ def embed_windows(embedder, path, librosa, duration_s):
     header-duration probe (0.0 = unknown → leading window only)."""
     import numpy as np
 
+    batch_windows = embedder.batches_windows()
+    windows = []
     vecs = []
     for offset in clap_window_offsets(duration_s, ANALYZE_SECONDS):
         try:
@@ -867,7 +925,17 @@ def embed_windows(embedder, path, librosa, duration_s):
             continue
         if offset > 0 and len(y48) < CLAP_SR * 5:
             continue  # truncated tail of a byte-capped download
-        vecs.append(np.asarray(embedder.embed(y48, CLAP_SR), dtype=np.float64))
+        if batch_windows:
+            windows.append(y48)
+        else:
+            # Preserve the CPU/ONNX one-window memory envelope: decode, embed,
+            # and release each window before moving to the next offset.
+            vecs.append(np.asarray(embedder.embed(y48, CLAP_SR), dtype=np.float64))
+    if batch_windows:
+        vecs = [
+            np.asarray(vec, dtype=np.float64)
+            for vec in embedder.embed_many(windows, CLAP_SR)
+        ]
     if not vecs:
         return None
     mean = np.mean(vecs, axis=0)
@@ -1575,7 +1643,10 @@ def measure_loudness(y, sr):
         return None, None
 
 
-def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None, stems_dir=None):
+def analyze(
+    librosa, url=None, path=None, embed=None, vocal=None, complete=None,
+    stems_dir=None, embedding_only=False,
+):
     import numpy as np
 
     # A controller-provided path is pre-fetched onto the shared volume and
@@ -1607,11 +1678,6 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
             log(f"duration probe failed ({e})")
             duration_s = 0.0
 
-        # Decode once WITH channels (a mono file still comes back 1-D): the
-        # loudness meter needs real stereo for a correct BS.1770 channel sum
-        # (issue #998); every other feature works off the mono downmix.
-        y_src, sr = load_audio(librosa, path, sr=ANALYZE_SR, mono=False, duration=ANALYZE_SECONDS)
-        y = librosa.to_mono(y_src)
         # CLAP wants 48 kHz mono — decode fresh copies at that rate from the
         # SAME file (still present here, before the finally removes owned
         # temps), windowed across the track (see embed_windows). A model/
@@ -1627,6 +1693,20 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
             except Exception as e:  # noqa: BLE001 — embedding is best-effort
                 log(f"audio embedding failed: {e}")
                 audio_embedding = None
+        # A sounds-like backfill over an otherwise-current track needs only the
+        # CLAP vector. Returning here avoids re-running every CPU acoustic
+        # feature (and Demucs via an env default) merely to fill that one column.
+        if embedding_only:
+            return {"audio_embedding": audio_embedding} if audio_embedding is not None else {}
+        # Decode once WITH channels (a mono file still comes back 1-D): the
+        # loudness meter needs real stereo for a correct BS.1770 channel sum
+        # (issue #998); every other baseline feature works off the mono downmix.
+        # This deliberately follows the embedding-only return above: a CLAP
+        # backfill must not pay for the baseline window it will not consume.
+        y_src, sr = load_audio(
+            librosa, path, sr=ANALYZE_SR, mono=False, duration=ANALYZE_SECONDS
+        )
+        y = librosa.to_mono(y_src)
         # Outro (tail) features — only meaningful off a complete file; a
         # byte-capped download's "tail" is mid-song. Best-effort like the rest.
         # With an UNKNOWN completeness (old caller) the original path's
@@ -1940,6 +2020,7 @@ def main():
                     librosa, url=url, path=path,
                     embed=req.get("embed"), vocal=req.get("vocal"),
                     complete=req.get("complete"), stems_dir=req.get("stems_dir"),
+                    embedding_only=req.get("embedding_only") is True,
                 )
                 # If a getter stamped the clock, this request DID use a model —
                 # re-stamp so the countdown starts from the end of the work, not

@@ -26,6 +26,7 @@ import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
 import { cleanupOldVoices } from '../audio/tts.js';
 import { shouldFire } from './dj-gate.js';
+import { banterTickPlan, banterCronExpression } from './banter-policy.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { optionalSegmentsAllowed } from './dj-budget.js';
@@ -654,20 +655,56 @@ export async function runBanter() {
   });
 }
 
-// Minimum quiet gap before an exchange: banter is the longest spoken break we
-// air, so it shouldn't pile onto a talk break the listener just heard.
-const BANTER_MIN_GAP_MS = 5 * 60_000;
+// Slot bookkeeping for the banter WINDOW (banter-policy.ts). The tick runs
+// every minute for ten minutes after each slot opens, so it needs to remember
+// two things: which slot has already spoken (one exchange per slot — and the
+// claim is taken BEFORE the await, since rendering a multi-voice exchange
+// outlasts a minute and a second tick would otherwise start a concurrent one),
+// and which slot it has already reported standing down for, so a per-minute
+// tick logs the reason once rather than ten times.
+let banterFiredSlot: string | null = null;
+let banterLoggedSlot: string | null = null;
 
-async function banterTick() {
+// Whether a banter tick may consider firing at all: the show opted in, it has
+// the roster an exchange needs, the frequency rung allows this slot, someone is
+// listening, and the daily token budget isn't spent. Collapsed into one flag for
+// banterTickPlan, which owns the window/gap/logging state machine — the same
+// split as skillCronAllowed below, and for the same reason: the rule is worth
+// pinning, and it can't be if it reads live settings and listener state itself.
+function banterEligible(now: Date): boolean {
   const { show, guests } = settings.getOnAirRoster();
-  if (!show?.banter || !guests.length) return;  // solo show, or banter not opted in
-  if (!shouldFire('banter')) return;
-  if (!djCallsAllowed()) return;  // nobody listening — save the tokens and the breath
-  if (!optionalSegmentsAllowed()) return;  // over the daily token budget — mute optional segments
-  // Every standalone talk break counts — idents, hourly, handoff, banter AND
-  // the segment-director spots (weather/news/…). Track-tied links don't, or a
-  // chatty DJ-mode station would never banter.
-  if (Date.now() - queue.getLastTalkBreakAt() < BANTER_MIN_GAP_MS) return;
+  if (!show?.banter || !guests.length) return false;  // solo show, or not opted in
+  if (!shouldFire('banter', now)) return false;
+  if (!djCallsAllowed()) return false;  // nobody listening — save the tokens and the breath
+  if (!optionalSegmentsAllowed()) return false;  // over the daily token budget
+  return true;
+}
+
+// A guest-show exchange, gated on the quiet gap. Fires the FIRST minute of its
+// window where the gap is clear rather than only at the minute the slot opens —
+// a boundary-deferred ident airing at :19:35 used to cancel the :20 exchange
+// outright (and with it the whole hour on `moderate`, which has one slot), when
+// what it should do is postpone it to :24:35 (#1419).
+//
+// Every standalone talk break sets the gap — idents, hourly, handoff, banter AND
+// the segment-director spots (weather/news/…). Track-tied links don't, or a
+// chatty DJ-mode station would never banter (queue.getLastTalkBreakAt).
+async function banterTick() {
+  const now = new Date();
+  const plan = banterTickPlan({
+    now,
+    eligible: banterEligible(now),
+    lastTalkBreakAt: queue.getLastTalkBreakAt(),
+    firedSlot: banterFiredSlot,
+    loggedSlot: banterLoggedSlot,
+  });
+  if (plan.act === 'skip') return;
+  if (plan.act === 'wait') {
+    if (plan.markLogged) banterLoggedSlot = plan.markLogged;
+    if (plan.log) queue.log('scheduler', plan.log);
+    return;
+  }
+  banterFiredSlot = plan.slotKey;  // claim the slot before any await — see above
   try {
     await runBanter();
   } catch (err) {
@@ -1036,10 +1073,15 @@ export function startScheduler() {
   // both there stacked two voice segments on each other (issue #310).
   cron.schedule('15,30,45 * * * *', stationId);
 
-  // Guest-show banter at :20/:50 — minutes no other wall-clock talker owns
-  // (same issue-#310 reasoning as the ident slots). The handler gates on the
-  // show's banter toggle, the live roster, frequency, listeners and budget.
-  cron.schedule('20,50 * * * *', banterTick);
+  // Guest-show banter: slots OPEN at :20/:50 — minutes no other wall-clock
+  // talker owns (same issue-#310 reasoning as the ident slots) — and each stays
+  // open for BANTER_WINDOW_MINUTES, so the tick runs every minute across both
+  // windows. That tail is what stops an off-clock talk break (a
+  // boundary-deferred ident, a zero-floor segment spot) from cancelling the
+  // exchange outright instead of postponing it (#1419). The handler gates on
+  // the show's banter toggle, the live roster, frequency, listeners, budget and
+  // the quiet gap, and fires at most once per slot.
+  cron.schedule(banterCronExpression(), banterTick);
 
   // Programme beats: feature mid-hour, outro in the final minutes of the
   // show's last hour — dispatched on STATION-zone minute windows (see
