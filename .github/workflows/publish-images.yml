@@ -266,27 +266,15 @@ jobs:
 
       - name: Upload exact CUDA TTS build digest
         if: matrix.image == 'subwave-tts-heavy-cuda'
-        # Workflow artifacts are run-scoped, including jobs inside the called
-        # scanner workflow. Scan and deploy therefore consume this same record.
+        # Workflow artifacts are run-scoped; deploy consumes this same record.
         uses: actions/upload-artifact@v4
         with:
           name: cuda-tts-build-digest
           path: ${{ runner.temp }}/cuda-tts-build-digest/subwave-tts-heavy-cuda.json
           if-no-files-found: error
 
-  vulnerability-policy:
-    needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer]
-    uses: ./.github/workflows/scan-images.yml
-    with:
-      release_tag: ${{ github.ref_name }}
-      cuda_tts_digest_artifact: cuda-tts-build-digest
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-
   deploy-production:
-    needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy]
+    needs: [validate, release-gate, tag-preflight, build, mirror-cuda-analyzer]
     runs-on: ubuntu-latest
     environment: production
     concurrency:

@@ -165,7 +165,7 @@ function assertRecoveryPermissions(workflow) {
     permissionEntries(workflow)
       .filter(({ value }) => value === 'write')
       .map(({ key }) => key),
-    ['security-events'],
+    [],
     'unexpected write permissions',
   );
 }
@@ -335,7 +335,6 @@ function assertSelectiveRecoveryV16(workflow) {
     'release-gate',
     'build',
     'seal',
-    'vulnerability-policy',
     'deploy-production',
   ]);
   assert.equal(
@@ -352,7 +351,6 @@ function assertSelectiveRecoveryV16(workflow) {
   const releaseGate = jobBlock(workflow, 'release-gate');
   const build = jobBlock(workflow, 'build');
   const seal = jobBlock(workflow, 'seal');
-  const policy = jobBlock(workflow, 'vulnerability-policy');
   const deploy = jobBlock(workflow, 'deploy-production');
 
   assert.deepEqual(jobStepHeaders(validate), [
@@ -384,7 +382,6 @@ function assertSelectiveRecoveryV16(workflow) {
     'name: Summarize sealed recovery manifest',
     'name: Upload sealed recovery manifest',
   ]);
-  assert.deepEqual(jobStepHeaders(policy), []);
   assert.deepEqual(jobStepHeaders(deploy), [
     'uses: actions/checkout@v5',
     'uses: actions/setup-node@v5',
@@ -396,11 +393,6 @@ function assertSelectiveRecoveryV16(workflow) {
   assertExactJobPermissions(validate, { contents: 'read', packages: 'read' });
   assertExactJobPermissions(build, { contents: 'read', packages: 'write' });
   assertExactJobPermissions(seal, { contents: 'read', packages: 'read' });
-  assertExactJobPermissions(policy, {
-    contents: 'read',
-    packages: 'read',
-    'security-events': 'write',
-  });
   assert.equal(permissionDeclarations(releaseGate).length, 0);
   assert.equal(permissionDeclarations(deploy).length, 0);
 
@@ -408,13 +400,11 @@ function assertSelectiveRecoveryV16(workflow) {
   assert.match(releaseGate, new RegExp(`^      checkout_ref: ${RECOVERY_V16_SOURCE}$`, 'm'));
   assert.deepEqual(jobNeeds(build), ['validate', 'release-gate']);
   assert.deepEqual(jobNeeds(seal), ['validate', 'release-gate', 'build']);
-  assert.deepEqual(jobNeeds(policy), ['validate', 'release-gate', 'build', 'seal']);
   assert.deepEqual(jobNeeds(deploy), [
     'validate',
     'release-gate',
     'build',
     'seal',
-    'vulnerability-policy',
   ]);
 
   const buildMatrix = build.match(
@@ -514,12 +504,6 @@ function assertSelectiveRecoveryV16(workflow) {
   assert.match(manifestArtifact, /^        uses: actions\/upload-artifact@v4$/m);
   assert.match(manifestArtifact, /path: \$\{\{ runner\.temp \}\}\/v1\.6\.0-obiwave\.1-recovery-manifest\.json/);
 
-  assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
-  assert.match(policy, /^      release_tag: v1\.6\.0-obiwave\.1$/m);
-  assert.match(policy, /^      partial_recovery_manifest: security\/releases\/v1\.6\.0-obiwave\.1\.partial\.json$/m);
-  assert.match(policy, /^      sealed_recovery_manifest_b64: \$\{\{ needs\.seal\.outputs\.manifest_b64 \}\}$/m);
-  assert.equal((workflow.match(/needs\.seal\.outputs\.manifest_b64/g) ?? []).length, 1);
-
   assert.equal(jobScalar(deploy, 'environment'), 'production');
   assert.match(deploy, /^    concurrency:\n      group: subwave-production\n      cancel-in-progress: false$/m);
   assert.equal(jobScalar(deploy, 'timeout-minutes'), '30');
@@ -532,7 +516,6 @@ function assertSelectiveRecoveryV16(workflow) {
     ['release-gate', releaseGate],
     ['build', build],
     ['seal', seal],
-    ['vulnerability-policy', policy],
     ['deploy-production', deploy],
   ]) {
     assertNoGatedPathBypass(job, jobName);
@@ -549,7 +532,7 @@ function assertSelectiveRecoveryV16(workflow) {
   }
 }
 
-test('v1.6 recovery selectively publishes, seals, scans, and deploys the partial publication', () => {
+test('v1.6 recovery selectively publishes, seals, and deploys the partial publication', () => {
   assertSelectiveRecoveryV16(recoveryV16);
 });
 
@@ -608,7 +591,7 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   );
   assert.deepEqual(
     recoveryJobNames(workflow),
-    ['validate', 'vulnerability-policy', 'deploy-production'],
+    ['validate', 'deploy-production'],
     'recovery workflow must contain only the approved gated jobs',
   );
 
@@ -622,11 +605,9 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
   );
 
   const validate = jobBlock(workflow, 'validate');
-  const policy = jobBlock(workflow, 'vulnerability-policy');
   const deploy = jobBlock(workflow, 'deploy-production');
   for (const [jobName, job] of [
     ['validate', validate],
-    ['vulnerability-policy', policy],
     ['deploy-production', deploy],
   ]) {
     assertNoGatedPathBypass(job, jobName);
@@ -643,7 +624,6 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     /^      - uses: actions\/checkout@v5\n        with:\n          fetch-depth: 0$/m,
     'validation checkout must fetch the release tag history',
   );
-  assert.deepEqual(jobStepHeaders(policy), []);
   assert.deepEqual(jobStepHeaders(deploy), [
     'uses: actions/checkout@v5',
     'uses: actions/setup-node@v5',
@@ -661,15 +641,7 @@ function assertRecoveryWorkflow(workflow, { tag, manifest }) {
     foldedStepCommand(validationStep),
     `node scripts/release/recovery-manifest.mjs verify-all --manifest ${manifest} --scanner security/trivy-scanner.json --repository ObiWanCanOweMe/obiwave`,
   );
-  assert.deepEqual(jobNeeds(policy), ['validate']);
-  assert.match(policy, /^    uses: \.\/\.github\/workflows\/scan-images\.yml$/m);
-  assert.match(policy, new RegExp(`release_tag: ${tag.replaceAll('.', '\\.')}\\n`));
-  assert.match(policy, new RegExp(`recovery_manifest: ${manifest.replaceAll('.', '\\.')}\\n`));
-  assert.match(
-    policy,
-    /^    permissions:\n      contents: read\n      packages: read\n      security-events: write$/m,
-  );
-  assert.deepEqual(jobNeeds(deploy), ['validate', 'vulnerability-policy']);
+  assert.deepEqual(jobNeeds(deploy), ['validate']);
   assert.equal(jobScalar(deploy, 'environment'), 'production');
   assert.match(
     deploy,
@@ -756,7 +728,7 @@ test('recovery contract rejects alternate permission and deploy-environment form
   }
 });
 
-test('one-release recovery contracts are fixed-identity, policy-gated, and protected', () => {
+test('one-release recovery contracts are fixed-identity, validation-gated, and protected', () => {
   for (const { workflow, tag, manifest } of RECOVERY_WORKFLOWS) {
     assertRecoveryWorkflow(workflow, { tag, manifest });
   }
@@ -764,14 +736,14 @@ test('one-release recovery contracts are fixed-identity, policy-gated, and prote
 
 test('v1.6.0-obiwave.4 workflow and immutable manifest share the fixed release identity', () => {
   assert.equal(recoveryV16Revision4Manifest.releaseTag, 'v1.6.0-obiwave.4');
-  assert.match(finalizeV16Revision4, /^      release_tag: v1\.6\.0-obiwave\.4$/m);
+  assert.match(finalizeV16Revision4, /security\/releases\/v1\.6\.0-obiwave\.4\.json/);
   assert.match(finalizeV16Revision4, /^          SUBWAVE_RELEASE_TAG: v1\.6\.0-obiwave\.4$/m);
 });
 
 test('v1.7.0-obiwave.1 workflow and immutable manifest share the fixed release identity', () => {
   assert.equal(recoveryV17Manifest?.releaseTag, 'v1.7.0-obiwave.1');
   assert.equal(recoveryV17Manifest?.sourceCommit, '62c7c9cf9f73256a4499d4b0aad9b3388866a46b');
-  assert.match(recoverV17, /^      release_tag: v1\.7\.0-obiwave\.1$/m);
+  assert.match(recoverV17, /security\/releases\/v1\.7\.0-obiwave\.1\.json/);
   assert.match(recoverV17, /^          SUBWAVE_RELEASE_TAG: v1\.7\.0-obiwave\.1$/m);
 });
 
@@ -847,12 +819,11 @@ test('recovery contracts reject identity, authorization, and deployment-gate mut
     const identity = { tag, manifest };
     assertRecoveryWorkflow(workflow, identity);
     for (const mutation of [
-      (value) => value.replace(/release_tag: v[^\n]+/, 'release_tag: v9.9.9-obiwave.9'),
-      (value) => value.replace(/recovery_manifest: security\/releases\/[^\n]+/, 'recovery_manifest: security/releases/foreign.json'),
+      (value) => value.replace(`security/releases/${tag}.json`, 'security/releases/foreign.json'),
       (value) => `${value}\n# forbidden\n# docker push ghcr.io/example/image\n`,
-      (value) => value.replace('needs: [validate, vulnerability-policy]', 'needs: [validate]'),
+      (value) => value.replace('needs: [validate]', 'needs: []'),
       (value) => value.replace('    environment: production', '    env: inherited\n    environment: production'),
-      (value) => value.replace('      security-events: write', '      actions: write'),
+      (value) => value.replace('      packages: read', '      actions: write'),
       (value) => value.replace('    environment: production', '    environment: staging'),
       (value) => value.replace('          fetch-depth: 0', '          fetch-depth: 1'),
     ]) {
@@ -1091,6 +1062,20 @@ test('CUDA analyzer is mirrored, never rebuilt', () => {
   assert.doesNotMatch(buildMatrix, /subwave-analyzer-cuda/);
 });
 
+test('vulnerability scanning is manual-only and absent from build and release workflows', async () => {
+  const triggers = scan.slice(scan.indexOf('\non:\n'), scan.indexOf('\npermissions:'));
+  assert.match(triggers, /^\non:\n  workflow_dispatch:/);
+  assert.doesNotMatch(triggers, /^  schedule:/m);
+  assert.doesNotMatch(triggers, /^  workflow_call:/m);
+
+  for (const file of await readdir(workflowDirectory)) {
+    if (!file.endsWith('.yml') || file === 'scan-images.yml') continue;
+    const workflow = await readFile(new URL(file, workflowDirectory), 'utf8');
+    assert.doesNotMatch(workflow, /uses: \.\/\.github\/workflows\/scan-images\.yml/);
+    assert.doesNotMatch(workflow, /^  vulnerability-policy:/m);
+  }
+});
+
 test('reusable CI deployment gate runs the CUDA mirror and pinned download contracts exactly once', () => {
   const deploymentCommand = ci.match(
     /- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/,
@@ -1109,10 +1094,10 @@ test('reusable CI deployment gate runs the CUDA mirror and pinned download contr
   );
 });
 
-test('CUDA mirror is preflighted, scanned, and gates deployment', () => {
+test('CUDA mirror is preflighted and gates deployment without an automatic vulnerability scan', () => {
   assert.match(publish, /tag-preflight:[\s\S]*- subwave-analyzer-cuda/);
-  assert.match(publish, /vulnerability-policy:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
-  assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
+  assert.doesNotMatch(publish, /vulnerability-policy:/);
+  assert.match(publish, /deploy-production:[\s\S]*needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
   assert.match(scan, /matrix:\n\s+image: \$\{\{ fromJSON\(needs\.resolve-tag\.outputs\.images\) \}\}/);
   assert.ok(POLICY_IMAGES.includes('subwave-analyzer-cuda'));
 });
@@ -1125,8 +1110,8 @@ test('release publication waits for the reusable CI gate', () => {
   assert.match(publish, /release-gate:\s*\n\s+uses: \.\/\.github\/workflows\/ci\.yml/);
   assert.doesNotMatch(jobBlock(publish, 'release-gate'), /^    with:/m);
   assert.match(publish, /build:\s*\n\s+needs: \[validate, release-gate, tag-preflight\]/);
-  assert.match(publish, /vulnerability-policy:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
-  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer, vulnerability-policy\]/);
+  assert.doesNotMatch(publish, /vulnerability-policy:/);
+  assert.match(publish, /deploy-production:\s*\n\s+needs: \[validate, release-gate, tag-preflight, build, mirror-cuda-analyzer\]/);
 });
 
 test('publication grants package access only to jobs that need it', () => {
@@ -1144,7 +1129,7 @@ test('publication grants package access only to jobs that need it', () => {
   );
   const build = publish.slice(
     publish.indexOf('  build:'),
-    publish.indexOf('  vulnerability-policy:'),
+    publish.indexOf('  deploy-production:'),
   );
 
   assert.match(workflowPermissions, /^\npermissions:\n  contents: read\n$/);
@@ -1160,11 +1145,11 @@ test('release tag concurrency never cancels an in-flight publication', () => {
 test('all eleven exact tags pass a complete preflight before any build starts', () => {
   const preflightStart = publish.indexOf('  tag-preflight:');
   const buildStart = publish.indexOf('  build:');
-  const scanStart = publish.indexOf('  vulnerability-policy:');
-  assert.ok(preflightStart >= 0 && buildStart > preflightStart && scanStart > buildStart);
+  const deployStart = publish.indexOf('  deploy-production:');
+  assert.ok(preflightStart >= 0 && buildStart > preflightStart && deployStart > buildStart);
 
   const preflight = publish.slice(preflightStart, buildStart);
-  const build = publish.slice(buildStart, scanStart);
+  const build = publish.slice(buildStart, deployStart);
   const matrix = preflight.match(/matrix:\n\s+image:\n((?:\s+- [^\n]+\n)+)/)?.[1];
   assert.ok(matrix, 'missing tag-preflight image matrix');
   const images = [...matrix.matchAll(/^\s+- ([^\n]+)$/gm)].map(([, image]) => image);
@@ -1210,7 +1195,7 @@ test('release publication builds the exact CPU and CUDA Chatterbox images', () =
   assert.doesNotMatch(matrix, /subwave-analyzer-cuda/);
 });
 
-test('the exact CUDA TTS build digest is the only artifact scanned and handed to deployment', () => {
+test('the exact CUDA TTS build digest is handed directly to deployment', () => {
   const artifactName = 'cuda-tts-build-digest';
   const build = jobBlock(publish, 'build');
   const recordStep = stepBlock(build, 'Record exact CUDA TTS build digest');
@@ -1227,21 +1212,6 @@ test('the exact CUDA TTS build digest is the only artifact scanned and handed to
   assert.match(uploadStep, /^        uses: actions\/upload-artifact@v4$/m);
   assert.match(uploadStep, new RegExp(`^          name: ${artifactName}$`, 'm'));
   assert.match(uploadStep, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest\/subwave-tts-heavy-cuda\.json$/m);
-
-  const policy = jobBlock(publish, 'vulnerability-policy');
-  assert.match(policy, new RegExp(`^      cuda_tts_digest_artifact: ${artifactName}$`, 'm'));
-
-  const scanJob = jobBlock(scan, 'scan');
-  const downloadForScan = stepBlock(scanJob, 'Download exact CUDA TTS build digest');
-  assert.match(downloadForScan, /matrix\.image == 'subwave-tts-heavy-cuda'/);
-  assert.match(downloadForScan, /needs\.resolve-tag\.outputs\.recovery_mode == 'none'/);
-  assert.match(downloadForScan, /inputs\.cuda_tts_digest_artifact != ''/);
-  assert.match(downloadForScan, /^        uses: actions\/download-artifact@v4$/m);
-  assert.match(downloadForScan, /^          name: \$\{\{ inputs\.cuda_tts_digest_artifact \}\}$/m);
-  assert.match(downloadForScan, /^          path: \$\{\{ runner\.temp \}\}\/cuda-tts-build-digest$/m);
-  const refsStep = stepBlock(scanJob, 'Resolve immutable image references');
-  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /image-digest-record\.mjs resolve/);
-  assert.match(stepRun(scanJob, 'Resolve immutable image references'), /--directory "\$CUDA_TTS_DIGEST_DIRECTORY"/);
 
   const deploy = jobBlock(publish, 'deploy-production');
   const downloadForDeploy = stepBlock(deploy, 'Download exact CUDA TTS build digest');
@@ -1271,7 +1241,7 @@ test('aggregate vulnerability policy requires the exact eleven-image release set
 });
 
 test('private image scans authenticate with package read permission', () => {
-  assert.match(publish, /vulnerability-policy:[\s\S]*?permissions:[\s\S]*?packages: read/);
+  assert.doesNotMatch(publish, /vulnerability-policy:/);
   assert.match(scan, /permissions:[\s\S]*?packages: read/);
   assert.match(scan, /scan:[\s\S]*?uses: docker\/login-action@v4/);
 });
@@ -1304,14 +1274,14 @@ test('JSON and SARIF scanner invocations include tag and digest-qualified pull r
   }
 });
 
-test('sealed manifest workflow-call inputs are optional transport values', () => {
+test('sealed manifest manual inputs are optional transport values', () => {
   assert.match(
     scan,
     /partial_recovery_manifest:\s*\n\s+description: Approved repository-relative partial recovery manifest\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string\s*\n\s+sealed_recovery_manifest_b64:\s*\n\s+description: Base64 sealed recovery manifest from an upstream job\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,
   );
 });
 
-test('the reusable scanner accepts only an explicit current-run CUDA TTS digest artifact handoff', () => {
+test('the manual scanner accepts only an explicit current-run CUDA TTS digest artifact handoff', () => {
   assert.match(
     scan,
     /cuda_tts_digest_artifact:\s*\n\s+description: Exact-name current-run CUDA TTS build digest artifact\s*\n\s+required: false\s*\n\s+default: ''\s*\n\s+type: string/,

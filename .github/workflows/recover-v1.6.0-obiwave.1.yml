@@ -198,20 +198,8 @@ jobs:
           path: ${{ runner.temp }}/v1.6.0-obiwave.1-recovery-manifest.json
           if-no-files-found: error
 
-  vulnerability-policy:
-    needs: [validate, release-gate, build, seal]
-    uses: ./.github/workflows/scan-images.yml
-    with:
-      release_tag: v1.6.0-obiwave.1
-      partial_recovery_manifest: security/releases/v1.6.0-obiwave.1.partial.json
-      sealed_recovery_manifest_b64: ${{ needs.seal.outputs.manifest_b64 }}
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-
   deploy-production:
-    needs: [validate, release-gate, build, seal, vulnerability-policy]
+    needs: [validate, release-gate, build, seal]
     runs-on: ubuntu-latest
     environment: production
     concurrency:

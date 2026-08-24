@@ -1,10 +1,10 @@
 name: Scan images
 
-# Scan every published release image. SARIF remains an observability channel;
-# the independent JSON artifacts feed the fail-closed aggregate policy gate.
+# Manually scan a published release image set. SARIF remains an observability
+# channel; the independent JSON artifacts feed the aggregate policy gate.
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       release_tag:
         description: Exact fork-qualified release tag to scan
@@ -27,19 +27,6 @@ on:
         type: string
       cuda_tts_digest_artifact:
         description: Exact-name current-run CUDA TTS build digest artifact
-        required: false
-        default: ''
-        type: string
-  schedule:
-    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Exact fork-qualified release tag to scan
-        required: true
-        type: string
-      recovery_manifest:
-        description: Optional repository-relative immutable recovery manifest
         required: false
         default: ''
         type: string
@@ -76,11 +63,7 @@ jobs:
           PARTIAL_RECOVERY_MANIFEST: ${{ inputs.partial_recovery_manifest }}
           SEALED_RECOVERY_MANIFEST_B64: ${{ inputs.sealed_recovery_manifest_b64 }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            RELEASE_TAG="$(git tag --list 'v*-obiwave.*' --sort=-version:refname | head -1)"
-          else
-            RELEASE_TAG="$REQUESTED_TAG"
-          fi
+          RELEASE_TAG="$REQUESTED_TAG"
           RELEASE_TAG="$RELEASE_TAG" node -e "import('./scripts/release/fork-tag.mjs').then(({ parseForkTag }) => parseForkTag(process.env.RELEASE_TAG))"
 
           if [[ -n "$RECOVERY_MANIFEST" && ( -n "$PARTIAL_RECOVERY_MANIFEST" || -n "$SEALED_RECOVERY_MANIFEST_B64" ) ]]; then

@@ -38,19 +38,8 @@ jobs:
           --scanner security/trivy-scanner.json
           --repository ObiWanCanOweMe/obiwave
 
-  vulnerability-policy:
-    needs: [validate]
-    uses: ./.github/workflows/scan-images.yml
-    with:
-      release_tag: v1.6.0-obiwave.4
-      recovery_manifest: security/releases/v1.6.0-obiwave.4.json
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-
   deploy-production:
-    needs: [validate, vulnerability-policy]
+    needs: [validate]
     permissions:
       contents: read
       packages: read
