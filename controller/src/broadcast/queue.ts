@@ -167,7 +167,7 @@ class Queue {
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
   _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
   _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
-  _pendingJingles = new Map<string, number>(); // manual jingle presses handed over but not yet heard — see playJingle
+  _pendingJingles = new Map<string, number>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
 
   // Snapshot upcoming/current/history to disk. The queue is otherwise purely
   // in-memory, so a controller restart (every `--build controller` rebuild)
@@ -1875,8 +1875,14 @@ class Queue {
     this.retirePendingJingles();
     if (this._pendingJingles.has(filename)) return { ok: false as const, reason: 'already-queued' as const };
     if (this._pendingJingles.size >= PENDING_JINGLE_MAX) return { ok: false as const, reason: 'queue-full' as const };
-    await writeHandoff(config.liquidsoap.jingleFile, jingles.jingleUri(path), { maxWaitMs: 5000 });
-    this._pendingJingles.set(filename, Date.now());
+    const reservedAt = Date.now();
+    this._pendingJingles.set(filename, reservedAt);
+    try {
+      await writeHandoff(config.liquidsoap.jingleFile, jingles.jingleUri(path), { maxWaitMs: 5000 });
+    } catch (err) {
+      if (this._pendingJingles.get(filename) === reservedAt) this._pendingJingles.delete(filename);
+      throw err;
+    }
     // The sidecar's own script, not the hashed filename: every other segment
     // turn in the booth log and the DJ's chat history carries prose, and
     // `jingle_a1b2c3d4.wav` reads as noise next to them (playSfx logs its

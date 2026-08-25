@@ -90,6 +90,34 @@ test('a repeat press of an un-aired jingle is refused, not stacked', async () =>
   await markAired(other);
 });
 
+test('simultaneous repeat presses reserve the jingle before its handoff', async () => {
+  const handoff = join(STATE, 'jingle-now.txt');
+  writeFileSync(handoff, 'occupied');
+  let handoffs = 0;
+  const consume = setInterval(() => {
+    if (!existsSync(handoff)) return;
+    if (readFileSync(handoff, 'utf8') !== 'occupied') handoffs += 1;
+    rmSync(handoff);
+  }, 10);
+
+  try {
+    const results = await Promise.all([
+      queue.playJingle(filename),
+      queue.playJingle(filename),
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(results.filter(result => result.ok).length, 1);
+    assert.equal(
+      results.filter(result => !result.ok && result.reason === 'already-queued').length,
+      1,
+    );
+    assert.equal(handoffs, 1, 'only one priority handoff was queued');
+  } finally {
+    clearInterval(consume);
+    await markAired(filename);
+  }
+});
+
 test('manual jingle rejects when its priority handoff cannot be written', async () => {
   const livePath = config.liquidsoap.jingleFile;
   config.liquidsoap.jingleFile = join(STATE, 'missing-parent', 'jingle-now.txt');
