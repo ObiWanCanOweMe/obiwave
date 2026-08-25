@@ -17,6 +17,7 @@ import urllib.request
 import wave
 
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
@@ -58,13 +59,14 @@ def api_write(method, path, body=None, ok_statuses=(200, 204)):
         raise
 
 
-def assert_verify_stack():
+def assert_throwaway_stack():
     if API != "http://localhost:7791" or WEB != "http://localhost:7793":
         sys.exit("refusing to run: API/WEB are not the verify stack's ports")
     try:
-        api("/health")
+        health = api("/health")
     except Exception as error:
         sys.exit(f"verify stack not reachable at {API}: {error}")
+    assert_dummy_backend_provenance(health)
 
 
 DESTRUCTIVE_CHECKS = {
@@ -3058,32 +3060,41 @@ def imaging_mutations_refresh(page):
         page.get_by_text("The sounds between the songs.", exact=True).wait_for(state="visible")
 
         page.get_by_role("tab", name="SFX").click()
+        page.wait_for_url("**/admin/imaging?tab=sfx")
         page.get_by_text(sfx_name, exact=True).wait_for(state="visible")
         assert request_count(page, "/sfx", authenticated=True) == sfx_initial + 1, page.request_log
+
+        page.get_by_role("tab", name="Beds").click()
+        page.wait_for_url("**/admin/imaging?tab=beds")
+        page.get_by_text(bed_name, exact=True).wait_for(state="visible")
+        assert request_count(page, "/beds", authenticated=True) == beds_initial + 1, page.request_log
+
+        # A query-parameter soft navigation can commit by remounting Imaging
+        # after the destination tab is already visible. Enter each destructive
+        # view through a completed document navigation before opening Radix's
+        # portal, so the real click cannot race that pending remount.
+        page.goto(f"{WEB}/admin/imaging?tab=sfx", wait_until="domcontentloaded")
+        page.get_by_text(sfx_name, exact=True).wait_for(state="visible")
         row = page.get_by_text(sfx_name, exact=True).locator("xpath=ancestor::div[contains(@class,'grid-cols-1')][1]")
         row.get_by_role("button", name="Delete effect").click()
-        alert = page.get_by_role("alertdialog")
+        alert = page.locator('.v3-alert-content[role="alertdialog"][data-state="open"]')
         alert.get_by_text(f'Delete the sound effect "{sfx_name}"?', exact=False).wait_for(state="visible")
         with page.expect_response(
             lambda response: is_admin_request(response.request, f"/sfx/{sfx_name}", "DELETE")
         ):
-            # Radix's opening portal can detach during Playwright's automatic
-            # scroll-to-actionability pass. Dispatch the real DOM click after
-            # proving the semantic dialog instead of racing that scroll.
-            alert.get_by_role("button", name="Delete").dispatch_event("click")
+            alert.get_by_role("button", name="Delete").click()
         page.get_by_text(sfx_name, exact=True).wait_for(state="detached")
 
-        page.get_by_role("tab", name="Beds").click()
+        page.goto(f"{WEB}/admin/imaging?tab=beds", wait_until="domcontentloaded")
         page.get_by_text(bed_name, exact=True).wait_for(state="visible")
-        assert request_count(page, "/beds", authenticated=True) == beds_initial + 1, page.request_log
         row = page.get_by_text(bed_name, exact=True).locator("xpath=ancestor::div[contains(@class,'grid-cols-1')][1]")
         row.get_by_role("button", name="Delete bed").click()
-        alert = page.get_by_role("alertdialog")
+        alert = page.locator('.v3-alert-content[role="alertdialog"][data-state="open"]')
         alert.get_by_text(f'Delete the bed "{bed_name}"?', exact=False).wait_for(state="visible")
         with page.expect_response(
             lambda response: is_admin_request(response.request, f"/beds/{bed_name}", "DELETE")
         ):
-            alert.get_by_role("button", name="Delete").dispatch_event("click")
+            alert.get_by_role("button", name="Delete").click()
         page.get_by_text(bed_name, exact=True).wait_for(state="detached")
     finally:
         api_write("DELETE", f"/sfx/{sfx_name}", ok_statuses=(200, 400, 404))
@@ -4658,7 +4669,7 @@ def main():
     unknown = [name for name in names if name not in CHECKS]
     if unknown:
         sys.exit(f"unknown check(s): {', '.join(unknown)} — have {', '.join(CHECKS)}")
-    assert_verify_stack()
+    assert_throwaway_stack()
     assert_destructive_opt_in(names)
     failed = []
     with sync_playwright() as playwright:
