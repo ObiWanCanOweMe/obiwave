@@ -393,6 +393,7 @@ jingle_now_queue.on_metadata(synchronous=false, fun (m) -> begin
     data=json.stringify(compact=true, {
       filename = fname,
       durationSec = jingle_duration(fname),
+      origin = "manual",
       startedAt = time()
     }),
     atomic=true,
@@ -1082,6 +1083,7 @@ music =
         data=json.stringify(compact=true, {
           filename = m["filename"],
           durationSec = jingle_duration(m["filename"]),
+          origin = "automatic",
           startedAt = time()
         }),
         atomic=true,
