@@ -7,7 +7,7 @@
 // AiFill box and the local genreDraft buffer — neither is form data).
 
 import type { ChangeEvent, ReactNode, RefObject } from 'react';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useController, type Control, type FieldErrors, type UseFormTrigger } from 'react-hook-form';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
@@ -21,6 +21,7 @@ import {
   SelectGroup,
 } from '../../ui/select';
 import { Card, Btn, Eyebrow } from '../ui';
+import { TagField } from '../TagField';
 import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { AiFill } from '../AiFill';
 import GenreSuggest from '../GenreSuggest';
@@ -37,6 +38,9 @@ import {
   NAME_MAX,
   EXCLUDED_PLAYLISTS_MAX,
   PLAYLISTS_MAX,
+  TAGS_MAX,
+  TAG_MAX,
+  TAG_RE,
   TOPIC_MAX,
   VOCAL_OPTIONS,
   eraLabelOf,
@@ -46,6 +50,7 @@ import type { EraWindow, Persona, PlaylistIndexStatus, Show, ShowsFormValues, Sk
 import { hasAnyMusicFilter, showPayload } from './lib';
 import { ChipRow } from './ChipRow';
 import { displayedMatchingTracks, type CandidateDiagnostic } from './candidate-diagnostic';
+import { fetchShowCandidates, useShowBlocklistQuery } from './queries';
 
 // The footer names the field the schema objected to; the schema's own keys are
 // developer-facing, so the common ones get an operator-facing label.
@@ -94,6 +99,9 @@ interface ShowEditorProps {
   skills: SkillOption[];
   activeThemeId: string;
   genres: string[];
+  // Tags already used by the OTHER shows, offered as one-click adds so the
+  // vocabulary converges instead of accumulating near-duplicates.
+  tagSuggestions: string[];
   playlists: { id: string; name: string; songCount: number | null }[];
   // Only 'ready' means /dj/playlists actually answered, so an id absent from
   // `playlists` can't be called missing while the index is merely unknown.
@@ -113,12 +121,14 @@ interface ShowEditorProps {
 }
 
 export function ShowEditor({
-  show, index, control, trigger, errors, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists,
+  show, index, control, trigger, errors, editorRef, personas, moods, themes, skills, activeThemeId, genres, tagSuggestions, playlists,
   playlistsStatus, apiBase,
   adminFetch, minTrackSeconds, busy, isNew, valid, onApplyDraft,
   onSave, onClose, onRemove,
 }: ShowEditorProps) {
   const uid = useId();
+  const [tagDraftBlocked, setTagDraftBlocked] = useState(false);
+  const editorValid = valid && !tagDraftBlocked;
   // `index` is a runtime number, not a literal, so a plain template-literal
   // expression widens to `string` — cast to the template-literal type
   // FieldPath<ShowsFormValues> actually needs so every call site below
@@ -159,6 +169,7 @@ export function ShowEditor({
   const vocalsCtl = useController({ control, name: path('vocals') });
   const genresCtl = useController({ control, name: path('genres') });
   const maxTrackSecondsCtl = useController({ control, name: path('maxTrackSeconds') });
+  const tagsCtl = useController({ control, name: path('tags') });
 
   const candidateKey = JSON.stringify(showPayload(show));
   const [candidateBusy, setCandidateBusy] = useState(false);
@@ -168,9 +179,7 @@ export function ShowEditor({
   const calculateCandidates = async () => {
     setCandidateBusy(true); setCandidateError(null);
     try {
-      const r = await adminFetch('/shows/candidates', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ show: showPayload(show) }) });
-      const j = await r.json().catch(() => ({})) as CandidateDiagnostic & { error?: string };
-      if (!r.ok) throw new Error(j.error || 'failed (' + r.status + ')');
+      const j = await fetchShowCandidates(adminFetch, show);
       setCandidateReport({ key: candidateKey, value: j });
     } catch (err) { setCandidateError(err instanceof Error ? err.message : String(err)); }
     finally { setCandidateBusy(false); }
@@ -179,14 +188,22 @@ export function ShowEditor({
   // The editor is remounted per show (keyed by id at the call site), so this
   // resets on switch — it's a text buffer, not form data.
   const [genreDraft, setGenreDraft] = useState('');
-  const addGenre = (g: string) => {
+  const addGenre = (g: string, { keepDraft = false } = {}) => {
     const v = g.trim().slice(0, 64);
     const current = genresCtl.field.value ?? [];
     if (!v || current.length >= FILTER_VALUES_MAX) return;
-    if (current.some((x: string) => x.toLowerCase() === v.toLowerCase())) { setGenreDraft(''); return; }
+    if (current.some((x: string) => x.toLowerCase() === v.toLowerCase())) {
+      if (!keepDraft) setGenreDraft('');
+      return;
+    }
     genresCtl.field.onChange([...current, v]);
-    setGenreDraft('');
+    if (!keepDraft) setGenreDraft('');
   };
+  // A suggestion chip narrows the list it came from, so clearing the draft on
+  // click would throw the user back to "popular genres" after every pick —
+  // retyping "trance" once per trance sub-genre. Committing the typed
+  // text (Enter/Add) still clears: there the draft *is* the thing consumed.
+  const addGenreFromSuggestion = (g: string) => addGenre(g, { keepDraft: true });
   // Genres no track carries. The controller resolves free text onto the nearest
   // library tag, silently broadening the show ("Pop Punk" → "Pop") or dropping the
   // filter — invisible on air unless said here. Mirrors show-filter.normGenre so UI
@@ -201,20 +218,9 @@ export function ShowEditor({
   // Discoverability hint only: blocklist rules scoped to this show are edited
   // on Library → Blocked, not here — but a filter that silently loses to a rule
   // there would be baffling without a pointer. Best-effort, 0 hides the line.
-  const [scopedRuleCount, setScopedRuleCount] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await adminFetch('/library/blocklist');
-        if (!r.ok || cancelled) return;
-        const j = await r.json() as { rules?: Array<{ showIds?: string[] }> };
-        if (cancelled) return;
-        setScopedRuleCount((j.rules || []).filter(ru => ru.showIds?.includes(show.id)).length);
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [adminFetch, show.id]);
+  const blocklistQuery = useShowBlocklistQuery(adminFetch, true);
+  const scopedRuleCount = (blocklistQuery.data || [])
+    .filter(rule => rule.showIds?.includes(show.id)).length;
 
   const guestIds: string[] = guestsCtl.field.value ?? [];
   const eras: EraWindow[] = erasCtl.field.value ?? [];
@@ -230,6 +236,7 @@ export function ShowEditor({
   const vocalsAria = fieldAria(`${uid}-${path('vocals')}`, vocalsCtl.fieldState.error, { hasDescription: true });
   const genresAria = fieldAria(`${uid}-${path('genres')}`, genresCtl.fieldState.error, { hasDescription: true });
   const maxTrackSecondsAria = fieldAria(`${uid}-${path('maxTrackSeconds')}`, maxTrackSecondsCtl.fieldState.error, { hasDescription: true });
+  const tagsAria = fieldAria(`${uid}-${path('tags')}`, tagsCtl.fieldState.error, { hasDescription: true });
 
   return (
     <EditorDialog
@@ -244,11 +251,13 @@ export function ShowEditor({
               <span
                 className={cn(
                   'size-1.5 flex-none rounded-full',
-                  valid ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
+                  editorValid ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
                 )}
               />
               <span className="min-w-0">
-                {gateIssue
+                {tagDraftBlocked
+                  ? <span className="text-[var(--danger)]">tags: finish or correct the pending tag</span>
+                  : gateIssue
                   ? <span className="text-[var(--danger)]">{gateIssue}</span>
                   : 'saves this show · schedule it on the grid, then Save schedule'}
               </span>
@@ -263,8 +272,8 @@ export function ShowEditor({
               id: 'save',
               label: busy ? 'Saving…' : 'Save show',
               tone: 'accent',
-              onClick: onSave,
-              disabled: busy || !valid,
+              onClick: () => { if (!tagDraftBlocked) onSave(); },
+              disabled: busy || !editorValid,
             },
           ]}
         />
@@ -287,6 +296,32 @@ export function ShowEditor({
           )}
           <TextField control={control} name={path('name')} label="show name" placeholder="e.g. The Late Shift" maxLength={NAME_MAX} />
           <span className="field-hint -mt-2">{show.name.trim().length}/{NAME_MAX}</span>
+
+          {/* Sits in Identity, not Music: a tag files the show for the operator
+              and reaches nothing on air — not the picker, not the DJ agent, not
+              any public route. Grouping it with the music filters would read as
+              one more thing that steers what plays. */}
+          <Field data-invalid={tagsAria.invalid || undefined}>
+            <FieldTitle {...tagsAria.labelledByProps}>tags</FieldTitle>
+            <div {...tagsAria.groupProps}>
+              <TagField
+                value={tagsCtl.field.value || []}
+                onChange={tagsCtl.field.onChange}
+                pattern={TAG_RE}
+                max={TAGS_MAX}
+                charMax={TAG_MAX}
+                suggestions={tagSuggestions}
+                noun="show"
+                onDraftBlockedChange={setTagDraftBlocked}
+                disabled={busy}
+              />
+            </div>
+            <FieldDescription {...tagsAria.descriptionProps}>
+              Freeform filing for the show list — by daypart, by season, by
+              whatever you group on. Up to {TAGS_MAX}. Nothing on air reads them.
+            </FieldDescription>
+            <FieldError {...tagsAria.errorProps} errors={tagsCtl.fieldState.error ? [tagsCtl.fieldState.error] : undefined} />
+          </Field>
 
           {/* Raw Controller, not SelectField — see the comment on personaIdCtl
               above: switching the host has to re-trigger `guestPersonaIds`'
@@ -567,7 +602,9 @@ export function ShowEditor({
           <GenreSuggest
             adminFetch={adminFetch}
             value={genreDraft}
-            onSelect={addGenre}
+            selected={showGenres}
+            onSelect={addGenreFromSuggestion}
+            disabled={showGenres.length >= FILTER_VALUES_MAX}
           />
 
           <SwitchField

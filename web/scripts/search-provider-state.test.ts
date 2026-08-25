@@ -125,6 +125,13 @@ const useState = (initial: unknown) => {
 const dependencyMocks = new Map<string, unknown>([
   ['react', { useState }],
   ['../../../lib/notify', { errorMessage: (error: unknown) => String(error) }],
+  ['../../../lib/admin-query', {
+    adminResponse: (
+      adminFetch: (path: string, init?: RequestInit) => Promise<Response>,
+      path: string,
+      init?: RequestInit,
+    ) => adminFetch(path, init),
+  }],
   ['../../ui/input', { Input: components.Input }],
   ['../../ui/label', { Label: components.Label }],
   ['../../ui/select', {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, useState, type ChangeEvent } from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { TtsSection } from '../components/admin/settings/TtsSection.tsx';
@@ -91,8 +92,19 @@ async function renderTtsSection(
     });
   }
 
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, refetchOnWindowFocus: false, staleTime: 30_000 },
+    },
+  });
   let renderer!: ReactTestRenderer;
-  await act(async () => { renderer = create(createElement(Harness)); });
+  await act(async () => {
+    renderer = create(createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(Harness),
+    ));
+  });
   const input = () => renderer.root.findAllByType('input').find(node => node.props.type === 'password')!;
   const saveButton = renderer.root.findAllByType('button').find(node => textContent(node).includes('Save TTS settings'))!;
   return {

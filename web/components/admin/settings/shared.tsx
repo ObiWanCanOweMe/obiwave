@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { m } from 'motion/react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { adminResponse } from '../../../lib/admin-query';
 import { cn } from '../../../lib/cn';
 import type { StationLocale } from '../../../lib/format';
 import type { EngineAvailability } from '../tts/engineMeta';
@@ -257,9 +258,15 @@ export interface RequestsForm {
   onePendingPerIp: boolean;
 }
 
+export interface SilenceTrimForm {
+  enabled: boolean;
+  minGapMs: string;
+}
+
 export interface FormState {
   crossfadeDuration: string;
   maxTrackSeconds: string;
+  silenceTrim: SilenceTrimForm;
   transitions: TransitionsForm;
   archive: ArchiveForm;
   stream: StreamForm;
@@ -311,6 +318,7 @@ export interface SettingsData {
       idleAfterMinutes?: number;
     };
     loudness?: { targetLufs?: number; maxBoostDb?: number; source?: LoudnessSource };
+    silenceTrim?: { enabled?: boolean; minGapMs?: number };
     station?: string;
     stationDescription?: string;
     timezone?: string;
@@ -356,7 +364,7 @@ export interface SettingsData {
       enrichment?: Partial<EmbeddingEnrichmentForm>;
     };
     sfx?: { enabled?: boolean };
-    beds?: { enabled?: boolean; thresholdSec?: number; crossSec?: number };
+    beds?: { enabled?: boolean; requestIntros?: boolean; thresholdSec?: number; crossSec?: number };
     ui?: { boothBuddy?: boolean; skin?: string; tuneInOverlay?: boolean };
     privacy?: {
       privatePlayer?: boolean;
@@ -742,8 +750,8 @@ export function PreviewButton({ path, adminFetch, label = 'Play' }: PreviewButto
     if (state === 'loading') return;
     setState('loading');
     try {
-      const r = await adminFetch(path);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // admin-query-imperative: protected-audio-preview
+      const r = await adminResponse(adminFetch, path);
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);

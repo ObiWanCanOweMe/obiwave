@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 
@@ -228,6 +229,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
     },
     history: { replaceState: () => {} },
     btoa: (value: string) => Buffer.from(value).toString('base64'),
+    addEventListener: () => {},
+    removeEventListener: () => {},
   };
   const fakeDocument = {
     body: { nodeType: 1, style: {} },
@@ -280,8 +283,17 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
   };
 
   try {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, refetchOnWindowFocus: false, staleTime: 30_000 },
+      },
+    });
     await act(async () => {
-      renderer = create(createElement(LibraryPanel));
+      renderer = create(createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(LibraryPanel),
+      ));
       await flush();
     });
     assert.equal(likedRequests.length, 1, 'entering Liked mode starts its first owned request');

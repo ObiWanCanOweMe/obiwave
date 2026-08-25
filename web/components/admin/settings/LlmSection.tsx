@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { AsyncResultGeneration } from '../../../lib/asyncResultGeneration';
 import { runManagedKeyProbe } from '../../../lib/managedKeyProbe';
+import { adminResponse } from '../../../lib/admin-query';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -173,7 +174,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const saveKey = async (envVar: string, value: string): Promise<boolean> => {
     if (!value.trim()) return true;
     try {
-      const r = await adminFetch('/settings/secrets', {
+      const r = await adminResponse(adminFetch, '/settings/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [envVar]: value.trim() }),
@@ -203,7 +204,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     await runManagedKeyProbe({
       generation: generationState,
       test: async () => {
-        const r = await adminFetch('/settings/secrets/test', {
+        const r = await adminResponse(adminFetch, '/settings/secrets/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key: envVar, value: value.trim() }),
@@ -241,7 +242,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     setTesting(true);
     setResult(null);
     try {
-      const r = await adminFetch('/settings/llm/probe-compat', {
+      const r = await adminResponse(adminFetch, '/settings/llm/probe-compat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leg, provider, apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }),

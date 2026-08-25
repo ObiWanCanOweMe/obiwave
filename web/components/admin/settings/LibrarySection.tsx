@@ -3,6 +3,7 @@
 import type { ChangeEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
+import { adminResponse } from '../../../lib/admin-query';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
@@ -61,7 +62,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
   const saveKey = async (envVar: string, value: string): Promise<boolean> => {
     if (!value.trim()) return true;
     try {
-      const r = await adminFetch('/settings/secrets', {
+      const r = await adminResponse(adminFetch, '/settings/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [envVar]: value.trim() }),
@@ -198,7 +199,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
     setProbing(true);
     setProbe(null);
     try {
-      const r = await adminFetch('/settings/embedding/probe', {
+      const r = await adminResponse(adminFetch, '/settings/embedding/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(probeBody()),
@@ -220,7 +221,8 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
       let model = 'nomic-embed-text';
       try {
         const d = await (
-          await adminFetch('/settings/llm/discover', {
+          // admin-query-imperative: locca-discovery-probe
+          await adminResponse(adminFetch, '/settings/llm/discover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ baseUrl: url }),
@@ -230,7 +232,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
       } catch {
         /* discovery is best-effort — fall through and probe with the default model */
       }
-      const r = await adminFetch('/settings/embedding/probe', {
+      const r = await adminResponse(adminFetch, '/settings/embedding/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: 'locca', baseUrl: url, model }),

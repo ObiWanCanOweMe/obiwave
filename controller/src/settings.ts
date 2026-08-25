@@ -989,8 +989,20 @@ export async function load() {
     },
     beds: {
       enabled: typeof stored.beds?.enabled === 'boolean' ? stored.beds.enabled : DEFAULTS.beds.enabled,
+      requestIntros: typeof stored.beds?.requestIntros === 'boolean' ? stored.beds.requestIntros : DEFAULTS.beds.requestIntros,
       thresholdSec: Number.isFinite(stored.beds?.thresholdSec) ? stored.beds.thresholdSec : DEFAULTS.beds.thresholdSec,
       crossSec: Number.isFinite(stored.beds?.crossSec) ? stored.beds.crossSec : DEFAULTS.beds.crossSec,
+    },
+    silenceTrim: {
+      enabled:
+        typeof stored.silenceTrim?.enabled === 'boolean'
+          ? stored.silenceTrim.enabled
+          : DEFAULTS.silenceTrim.enabled,
+      minGapMs: Number.isInteger(stored.silenceTrim?.minGapMs) &&
+        stored.silenceTrim.minGapMs >= BOUNDS.silenceTrimMinGapMs.min &&
+        stored.silenceTrim.minGapMs <= BOUNDS.silenceTrimMinGapMs.max
+        ? stored.silenceTrim.minGapMs
+        : DEFAULTS.silenceTrim.minGapMs,
     },
     webhooks: normalizeWebhooks(stored.webhooks),
     webhooksPolicy: {
@@ -1933,17 +1945,33 @@ export async function update(patch) {
   if ('beds' in patch) {
     const bd = parseSettingsPatchKey<{
       enabled?: boolean;
+      requestIntros?: boolean;
       thresholdSec?: number;
       crossSec?: number;
     }>('beds', patch.beds);
     if (bd.enabled !== undefined) {
       next.beds.enabled = bd.enabled;
     }
+    if (bd.requestIntros !== undefined) {
+      next.beds.requestIntros = bd.requestIntros;
+    }
     if (bd.thresholdSec !== undefined) {
       next.beds.thresholdSec = bd.thresholdSec;
     }
     if (bd.crossSec !== undefined) {
       next.beds.crossSec = bd.crossSec;
+    }
+  }
+  if ('silenceTrim' in patch) {
+    const st = parseSettingsPatchKey<{
+      enabled?: boolean;
+      minGapMs?: number;
+    }>('silenceTrim', patch.silenceTrim);
+    if (st.enabled !== undefined) {
+      next.silenceTrim.enabled = st.enabled;
+    }
+    if (st.minGapMs !== undefined) {
+      next.silenceTrim.minGapMs = st.minGapMs;
     }
   }
   if ('ui' in patch) {

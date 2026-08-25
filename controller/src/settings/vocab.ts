@@ -1033,6 +1033,9 @@ export interface NormalizedShow {
   playlistIds: string[];
   playlistStrict: boolean;
   excludedPlaylistIds: string[];
+  /** Operator organisation tags. Filters the admin list; steers nothing on
+   *  air, which is why resolveShow() does not carry them through. */
+  tags: string[];
 }
 
 // Dedup + cap over one already-plural list. Legacy singular fields (`mood`,
