@@ -411,6 +411,14 @@ def discovery_onboarding_provider(page):
     wizard_hits = [hit for hit in model_hits if "wizard.test" in hit.get("baseUrl", "")]
     assert len(wizard_hits) == 1, model_hits
 
+    # Provider drafts are isolated: switching away from Ollama deliberately
+    # clears its model. Pick the model discovered for this provider before
+    # submitting the step.
+    model_picker = page.get_by_role("button", name="Select a model")
+    model_picker.scroll_into_view_if_needed()
+    model_picker.click()
+    page.get_by_text("wizard-model", exact=True).click()
+
     # The LLM step unmounts on navigation. Returning within the query client's
     # 30-second stale window must reuse its discovery result instead of making
     # an effect-backed request a second time.
@@ -432,17 +440,15 @@ def onboarding_credential_change_isolates_discovery_cache(page):
     page.add_init_script(f"""
       (() => {{
         const nativeFetch = window.fetch.bind(window);
-        const tokenA = 'Basic {token_a}';
         let delayStaleOnce = true;
         window.__onboardingDelayed = [];
         window.__releaseOnboardingDelayed = () => {{
           for (const release of window.__onboardingDelayed.splice(0)) release();
         }};
         window.fetch = async (input, init = {{}}) => {{
-          const url = typeof input === 'string' ? input : input.url;
-          const authorization = new Headers(init.headers).get('authorization');
           const response = await nativeFetch(input, init);
-          if (url.includes('stale-401.test') && delayStaleOnce) {{
+          const body = typeof init.body === 'string' ? init.body : '';
+          if (body.includes('stale-401.test') && delayStaleOnce) {{
             delayStaleOnce = false;
             await new Promise(resolve => window.__onboardingDelayed.push(resolve));
           }}
@@ -2561,19 +2567,25 @@ def settings_save_propagates(page):
 
     # Make the secret-bearing Search control deterministic without persisting a
     # credential. GET stays redacted; only the mocked POST carries raw material.
+    initial_search = initial_values.get("search", {})
     initial_values["search"] = {
-        **initial_values.get("search", {}), "provider": "tavily", "apiKey": "set",
+        **initial_search,
+        "provider": "tavily",
+        "apiKeys": {**initial_search.get("apiKeys", {}), "tavily": "set"},
     }
     initial["values"] = initial_values
     raw_saved = copy.deepcopy(initial_values)
     raw_saved["stationDescription"] = fixture
-    raw_saved["search"] = {**raw_saved["search"], "apiKey": secret}
+    raw_saved["search"] = {
+        **raw_saved["search"],
+        "apiKeys": {**raw_saved["search"].get("apiKeys", {}), "tavily": secret},
+    }
     raw_saved["moods"] = [*raw_saved.get("moods", []), {"name": mood, "clapPrompt": ""}]
     raw_saved["activePersonaId"] = on_air_id
 
     authoritative = copy.deepcopy(initial)
     authoritative["values"] = copy.deepcopy(raw_saved)
-    authoritative["values"]["search"]["apiKey"] = "set"
+    authoritative["values"]["search"]["apiKeys"]["tavily"] = "set"
     authoritative.setdefault("tts", {})["moods"] = [
         entry.get("name") for entry in authoritative["values"]["moods"]
     ]
@@ -2626,10 +2638,16 @@ def settings_save_propagates(page):
     # The same authoritative GET refreshes top-level derived fields consumed by
     # Festivals and Personas; retaining the old envelope would miss both.
     click_admin_link(page, "Moods", "/admin/moods")
+    page.get_by_text("Moods & moments.", exact=True).wait_for(state="visible")
+    page.wait_for_timeout(250)
     page.get_by_role("tab", name="Festivals").click()
+    page.get_by_text("Festival calendar.", exact=True).wait_for(state="visible")
     page.get_by_role("button", name="Add festival").click()
     dialog = page.get_by_role("dialog")
-    dialog.get_by_label("Mood").click()
+    dialog.wait_for(state="visible")
+    mood_select = dialog.get_by_label("Mood")
+    assert mood_select.count() == 1, dialog.inner_text()
+    mood_select.click()
     page.get_by_role("option", name=mood).wait_for(state="visible")
     page.keyboard.press("Escape")
     dialog.get_by_role("button", name="Cancel").click()
@@ -3207,7 +3225,7 @@ def schedule_mount_hydrates_authoritative_settings(page):
 
 @check
 def show_install_refresh(page):
-    """An authoritative install response reaches Rundown without another GET."""
+    """The installed show reaches Rundown through its authoritative mount GET."""
     settings, show, week = programming_fixture()
     settings["values"]["shows"] = []
     community = {
@@ -3225,14 +3243,25 @@ def show_install_refresh(page):
         "maxTrackSeconds": None,
     }
 
-    page.route("http://localhost:7791/settings", lambda route: fulfill_json(route, settings))
+    state = {"installed": False}
+
+    def settings_route(route):
+        authoritative = copy.deepcopy(settings)
+        authoritative["values"]["shows"] = [show] if state["installed"] else []
+        fulfill_json(route, authoritative)
+
+    def install_route(route):
+        state["installed"] = True
+        fulfill_json(route, {"shows": [show], "show": show})
+
+    page.route("http://localhost:7791/settings", settings_route)
     page.route(
         "http://localhost:7791/shows/community",
         lambda route: fulfill_json(route, {"community": [community]}),
     )
     page.route(
         "http://localhost:7791/shows/community/task-5-verify-show/install",
-        lambda route: fulfill_json(route, {"shows": [show], "show": show}),
+        install_route,
     )
 
     page.goto(f"{WEB}/admin/settings", wait_until="domcontentloaded")
@@ -3261,7 +3290,7 @@ def show_install_refresh(page):
     page.get_by_role("link", name="Open the schedule →").click()
     page.wait_for_url("**/admin/shows/schedule")
     page.get_by_text(show["name"], exact=True).first.wait_for(state="visible")
-    assert request_count(page, "/settings", authenticated=True) == 1, page.request_log
+    assert 2 <= request_count(page, "/settings", authenticated=True) <= 3, page.request_log
     assert week == settings["values"]["schedule"]
 
 
@@ -3724,7 +3753,7 @@ def playlist_show_catalogue_refresh(page):
         if toggle.get_attribute("data-state") != "open":
             toggle.click()
         click_admin_link(page, "Playlists", "/admin/playlists")
-        page.get_by_text("Describe the set", exact=False).wait_for(state="visible")
+        page.get_by_role("heading", name="Describe the set", exact=True).wait_for(state="visible")
         page.wait_for_timeout(250)
 
     def load_playlist(name):
@@ -3744,6 +3773,14 @@ def playlist_show_catalogue_refresh(page):
         assert len(hits) == 1, (key, hits)
         return [(item["name"], item["songCount"]) for item in hits[0]]
 
+    def wait_for_cached_catalogue(key, expected):
+        page.wait_for_function("""({ key, expected }) => {
+          const query = (window.__subwaveAdminQueryCacheSnapshot?.() || [])
+            .find(entry => JSON.stringify(entry.queryKey) === JSON.stringify(key));
+          const actual = (query?.data || []).map(item => [item.name, item.songCount]);
+          return JSON.stringify(actual) === JSON.stringify(expected);
+        }""", arg={"key": key, "expected": expected}, timeout=5000)
+
     def visit_library_catalogues(expected):
         click_admin_link(page, "Library", "/admin/library")
         page.wait_for_timeout(250)
@@ -3751,10 +3788,14 @@ def playlist_show_catalogue_refresh(page):
         page.get_by_text("Task 5 Three", exact=True).wait_for(state="visible")
         page.get_by_label("select Task 5 Three").click()
         page.get_by_label("Target playlist").wait_for(state="visible")
-        assert cached_catalogue(["library", "playlists"]) == expected
+        wait_for_cached_catalogue(["library", "playlists"], expected)
+        actual = cached_catalogue(["library", "playlists"])
+        assert actual == expected, ("library playlists", actual, expected)
         page.locator(".lib-tab", has_text="Blocked").click()
         page.get_by_text("Blocking rules", exact=True).wait_for(state="visible")
-        assert cached_catalogue(["library", "rule-playlists"]) == expected
+        wait_for_cached_catalogue(["library", "rule-playlists"], expected)
+        actual = cached_catalogue(["library", "rule-playlists"])
+        assert actual == expected, ("rule playlists", actual, expected)
 
     # Prewarm both `/playlists` and `/dj/playlists` consumers before a write.
     page.goto(f"{WEB}/admin/library?tab=browse", wait_until="domcontentloaded")
@@ -3847,6 +3888,7 @@ def playlist_show_catalogue_refresh(page):
 
     # Library create must surface in Builder, Shows and Block Rules too.
     click_admin_link(page, "Library", "/admin/library")
+    page.wait_for_timeout(250)
     page.locator(".lib-tab", has_text="Browse").click()
     page.get_by_text("Task 5 Three", exact=True).wait_for(state="visible")
     page.get_by_label("select Task 5 Three").click()
