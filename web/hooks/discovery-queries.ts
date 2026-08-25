@@ -129,7 +129,7 @@ export function useModelDiscoveryQuery(rawInput: ModelDiscoveryInput, enabled: b
     () => normalizeModelDiscoveryInput({ owner, provider, leg, apiKey, baseUrl, ollamaUrl }),
     [owner, provider, leg, apiKey, baseUrl, ollamaUrl],
   );
-  const { input, refreshInput } = useDiscoveryInput(raw);
+  const { input, refreshInput, isRawTransition } = useDiscoveryInput(raw);
   const client = useQueryClient();
   const query = useAdminQuery<ModelDiscoveryResponse>({
     key: discoveryKeys.models(input), adminFetch,
@@ -149,9 +149,11 @@ export function useModelDiscoveryQuery(rawInput: ModelDiscoveryInput, enabled: b
     ).catch(() => {});
   }, [adminFetch, client, enabled, raw.provider, refreshInput]);
   return {
-    models: enabled && query.data?.ok ? (Array.isArray(query.data.models) ? query.data.models : []) : [],
+    models: enabled && !isRawTransition && query.data?.ok
+      ? (Array.isArray(query.data.models) ? query.data.models : [])
+      : [],
     loading: enabled && query.isFetching,
-    error: discoveryError(query.data, query.error, enabled),
+    error: discoveryError(query.data, query.error, enabled && !isRawTransition),
     refresh,
   };
 }
@@ -183,7 +185,7 @@ export function useVoiceDiscoveryQuery(rawInput: VoiceDiscoveryInput, enabled: b
   return {
     voices: enabled && !isRawTransition && query.data?.ok && Array.isArray(query.data.voices) ? query.data.voices : [],
     loading: enabled && query.isFetching,
-    error: discoveryError(query.data, query.error, enabled),
+    error: discoveryError(query.data, query.error, enabled && !isRawTransition),
     refresh,
   };
 }
