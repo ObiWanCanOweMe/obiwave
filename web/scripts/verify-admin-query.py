@@ -3062,7 +3062,15 @@ def imaging_mutations_refresh(page):
         assert request_count(page, "/sfx", authenticated=True) == sfx_initial + 1, page.request_log
         row = page.get_by_text(sfx_name, exact=True).locator("xpath=ancestor::div[contains(@class,'grid-cols-1')][1]")
         row.get_by_role("button", name="Delete effect").click()
-        page.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
+        alert = page.get_by_role("alertdialog")
+        alert.get_by_text(f'Delete the sound effect "{sfx_name}"?', exact=False).wait_for(state="visible")
+        with page.expect_response(
+            lambda response: is_admin_request(response.request, f"/sfx/{sfx_name}", "DELETE")
+        ):
+            # Radix's opening portal can detach during Playwright's automatic
+            # scroll-to-actionability pass. Dispatch the real DOM click after
+            # proving the semantic dialog instead of racing that scroll.
+            alert.get_by_role("button", name="Delete").dispatch_event("click")
         page.get_by_text(sfx_name, exact=True).wait_for(state="detached")
 
         page.get_by_role("tab", name="Beds").click()
@@ -3070,7 +3078,12 @@ def imaging_mutations_refresh(page):
         assert request_count(page, "/beds", authenticated=True) == beds_initial + 1, page.request_log
         row = page.get_by_text(bed_name, exact=True).locator("xpath=ancestor::div[contains(@class,'grid-cols-1')][1]")
         row.get_by_role("button", name="Delete bed").click()
-        page.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
+        alert = page.get_by_role("alertdialog")
+        alert.get_by_text(f'Delete the bed "{bed_name}"?', exact=False).wait_for(state="visible")
+        with page.expect_response(
+            lambda response: is_admin_request(response.request, f"/beds/{bed_name}", "DELETE")
+        ):
+            alert.get_by_role("button", name="Delete").dispatch_event("click")
         page.get_by_text(bed_name, exact=True).wait_for(state="detached")
     finally:
         api_write("DELETE", f"/sfx/{sfx_name}", ok_statuses=(200, 400, 404))
@@ -4027,9 +4040,12 @@ def skills_mutations_refresh(page):
         bundle.write(b"PK\x05\x06" + b"\x00" * 18)
         bundle.flush()
         with page.expect_response(
-            lambda response: is_admin_request(response.request, "/dj/skills/import", "POST")
+            lambda response: is_admin_request(response.request, "/dj/skills/community")
         ):
-            dialog.get_by_label("Import skill zip").set_input_files(bundle.name)
+            with page.expect_response(
+                lambda response: is_admin_request(response.request, "/dj/skills/import", "POST")
+            ):
+                dialog.get_by_label("Import skill zip").set_input_files(bundle.name)
     page.get_by_text("Task 6 Imported", exact=True).wait_for(state="visible")
     assert show_skill_names() == [
         "task-6-verify", "task-6-rescanned", "task-6-imported",
