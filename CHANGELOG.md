@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.10.0](https://github.com/perminder-klair/subwave/compare/v1.9.0...v1.10.0) (2026-08-25)
+
+
+### Features
+
+* **admin:** sort, filter and tag the shows and personas lists ([#1469](https://github.com/perminder-klair/subwave/issues/1469)) ([1ec7784](https://github.com/perminder-klair/subwave/commit/1ec7784fb7a39a27da7ca5b8b69a584195a23a79))
+* **audio:** trim dead air off track edges ([#1470](https://github.com/perminder-klair/subwave/issues/1470)) ([7c9654f](https://github.com/perminder-klair/subwave/commit/7c9654faaf87bf1977544ada447df7171e3910e9))
+* **beds:** front-pad listener request intros ([#1465](https://github.com/perminder-klair/subwave/issues/1465)) ([#1466](https://github.com/perminder-klair/subwave/issues/1466)) ([8a6ee9d](https://github.com/perminder-klair/subwave/commit/8a6ee9d469c6a411df71aab41701a7907766020c))
+* **jingles:** air a jingle on demand, at full level and any length ([#1468](https://github.com/perminder-klair/subwave/issues/1468)) ([1d6a426](https://github.com/perminder-klair/subwave/commit/1d6a426f84368aa97faee2ea8f78880286072709))
+
+
+### Bug Fixes
+
+* **admin:** keep the genre filter after picking a suggestion ([#1463](https://github.com/perminder-klair/subwave/issues/1463)) ([0861856](https://github.com/perminder-klair/subwave/commit/0861856fb437d719cac1286fe4e57b0477ee56af))
+* **analyzer:** fall back to URL for remote paths ([#1462](https://github.com/perminder-klair/subwave/issues/1462)) ([0765a09](https://github.com/perminder-klair/subwave/commit/0765a09052a6294215ab87ab6d857175f7165e7c))
+* **library:** store album/artist ids so album blocks actually hold ([#1467](https://github.com/perminder-klair/subwave/issues/1467)) ([1cf2bbd](https://github.com/perminder-klair/subwave/commit/1cf2bbd8240d9f4479a6cbfb6a3975edc84acca0))
+* **web:** press the platter deck as a 45, not an LP ([#1464](https://github.com/perminder-klair/subwave/issues/1464)) ([54745fe](https://github.com/perminder-klair/subwave/commit/54745fe510f63a158ae337ef76be230b25fce9c3))
+
+
+### Documentation
+
+* pin agent PR base to develop, track .codex config ([#1471](https://github.com/perminder-klair/subwave/issues/1471)) ([fa1748b](https://github.com/perminder-klair/subwave/commit/fa1748b25d739c9707418ad6a7534ae62632d2d3))
+
+
+### Refactors
+
+* **web:** extend TanStack Query across admin ([#1459](https://github.com/perminder-klair/subwave/issues/1459)) ([823c4fd](https://github.com/perminder-klair/subwave/commit/823c4fd6bc615069ecfc94651d101381f0d63021))
+
 ## [1.9.0](https://github.com/perminder-klair/subwave/compare/v1.8.0...v1.9.0) (2026-08-24)
 
 

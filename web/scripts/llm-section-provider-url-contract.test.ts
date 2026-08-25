@@ -6,6 +6,7 @@ const [
   ttsSource,
   librarySource,
   voiceHookSource,
+  discoveryQuerySource,
   settingsSource,
   routesSource,
   cloudSpeechSource,
@@ -14,6 +15,7 @@ const [
   readFile(new URL('../components/admin/settings/TtsSection.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/admin/settings/LibrarySection.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../hooks/useVoiceDiscovery.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../hooks/discovery-queries.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/settings.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/routes/settings/tts.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../controller/src/llm/internal/speech/cloud-speech.ts', import.meta.url), 'utf8'),
@@ -54,6 +56,7 @@ for (const [label, text] of [
   ['TtsSection.tsx', ttsSource],
   ['LibrarySection.tsx', librarySource],
   ['useVoiceDiscovery.ts', voiceHookSource],
+  ['discovery-queries.ts', discoveryQuerySource],
   ['settings.ts', settingsSource],
   ['routes/settings/tts.ts', routesSource],
   ['cloud-speech.ts', cloudSpeechSource],
@@ -93,7 +96,7 @@ assert.match(
 );
 assert.match(
   librarySource,
-  /adminFetch\('\/settings\/llm\/discover', \{[\s\S]*?method: 'POST',[\s\S]*?body: JSON\.stringify\(\{ baseUrl: url \}\)/,
+  /adminResponse\(adminFetch, '\/settings\/llm\/discover', \{[\s\S]*?method: 'POST',[\s\S]*?body: JSON\.stringify\(\{ baseUrl: url \}\)/,
   'direct Locca discovery must keep its unsaved URL in a POST body',
 );
 assert.doesNotMatch(librarySource, /settings\/llm\/discover\?baseUrl=/);
@@ -168,9 +171,13 @@ assert.match(
   /useVoiceDiscovery\(\{[\s\S]*?apiKey: isCompat \? compatKeyInput : cloudKeyInput,/,
   'voice discovery must receive the unsaved key owned by the selected TTS provider',
 );
-assert.match(voiceHookSource, /buildVoiceDiscoveryRequest\(\{/);
+assert.match(
+  discoveryQuerySource,
+  /function fetchVoices[\s\S]*?buildVoiceDiscoveryRequest\(input\)/,
+  'the Query-owned voice read must retain the body-only request builder',
+);
 assert.doesNotMatch(
-  voiceHookSource,
+  voiceHookSource + discoveryQuerySource,
   /settings\/tts\/voices\?\$\{params\}/,
   'voice discovery URL must not carry an unsaved server or credential',
 );

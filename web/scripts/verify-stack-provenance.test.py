@@ -103,6 +103,7 @@ class VerifierProvenanceTest(unittest.TestCase):
         cls.backend_thread = threading.Thread(target=cls.backend_server.serve_forever, daemon=True)
         cls.backend_thread.start()
         cls.verifiers = [
+            load_verifier("verify_admin_query", "verify-admin-query.py"),
             load_verifier("verify_forms", "verify-forms.py"),
             load_verifier("verify_library", "verify-library.py"),
             load_verifier("verify_query_cache", "verify-query-cache.py"),

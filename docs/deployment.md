@@ -418,7 +418,7 @@ Everything that survives `docker compose down` lives in `state/`:
 | `logs/` | Controller + Liquidsoap | Event logs |
 | `stems/` | Analyzer | Cached Demucs stem windows for stem-blend transitions — byte-budgeted by `audio.stemCacheGb` (Settings → Transitions) |
 | `transitions/` | Analyzer | Rendered stem-blend clips (swept after ~1h) |
-| `next.txt`, `say.txt`, `intro.txt`, `auto.m3u`, `now-playing.json` | Controller ⇄ Liquidsoap | File-based IPC (see `CLAUDE.md`) |
+| `next.txt`, `jingle-now.txt`, `say.txt`, `intro.txt`, `auto.m3u`, `now-playing.json` | Controller ⇄ Liquidsoap | File-based IPC (see `CLAUDE.md`) |
 
 Back up `state/` to back up everything. Don't `git clean -dffx` without
 checking — `state/` lives inside the repo by default (`STATE_DIR=./state`)
@@ -454,7 +454,8 @@ Three things to know before you do it:
 
 - **Mount it in the controller *and* the analyzer, at the identical path.**
   The controller hands the analyzer a filesystem *path*, not audio (the same
-  handoff that makes a remote analyzer need a matching mount — see
+  fast handoff a remote analyzer can fall back from for ordinary analysis, but
+  not for stem output — see
   ["Running the analyzer on another machine"](tts-heavy.md)). A stems mount
   that only one of them can see fails every write.
 - **Ownership sorts itself out on boot.** A fresh bind mount lands root-owned

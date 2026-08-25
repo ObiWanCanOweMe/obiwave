@@ -1,11 +1,15 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { notify, errorMessage } from '../../lib/notify';
 import { normalizeStationLocale } from '../../lib/format';
 import { useAdminAuth } from '../../lib/adminAuth';
+import {
+  AdminResponseError,
+  adminResponse,
+} from '../../lib/admin-query';
 import { V3AlertDialog } from '../ui/alert-dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -42,6 +46,10 @@ import { ThemeSection } from './settings/ThemeSection';
 import { ScrobbleSection } from './settings/ScrobbleSection';
 import { LikesSection } from './settings/LikesSection';
 import { NavidromeSection } from './settings/NavidromeSection';
+import {
+  useSettingsMutation,
+  useSettingsQuery,
+} from './settings/queries';
 
 const SECTIONS = [
   { id: 'station',  label: 'Station', hint: 'name · location · locale', icon: Radio },
@@ -94,12 +102,73 @@ function mergePatchErrors(
   return out;
 }
 
+const sameForm = (a: FormState, b: FormState) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Mark only the fields represented by a successful patch as clean. */
+function rebaselineSavedPatch(
+  baseline: FormState,
+  current: FormState,
+  patch: Record<string, unknown>,
+): FormState {
+  const next = JSON.parse(JSON.stringify(baseline)) as FormState;
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === 'object' && !Array.isArray(value);
+  const adopt = (
+    target: Record<string, unknown>,
+    source: Record<string, unknown>,
+    shape: Record<string, unknown>,
+  ) => {
+    for (const [key, value] of Object.entries(shape)) {
+      if (!(key in source)) continue;
+      if (isRecord(value) && isRecord(target[key]) && isRecord(source[key])) {
+        adopt(target[key], source[key], value);
+      } else {
+        target[key] = source[key];
+      }
+    }
+  };
+
+  const nextRecord = next as unknown as Record<string, unknown>;
+  const currentRecord = current as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'audio' && isRecord(value)) {
+      adopt(
+        next.transitions as unknown as Record<string, unknown>,
+        current.transitions as unknown as Record<string, unknown>,
+        value,
+      );
+      continue;
+    }
+    if (key === 'tts' && isRecord(value)) {
+      adopt(
+        next.tts as unknown as Record<string, unknown>,
+        current.tts as unknown as Record<string, unknown>,
+        value,
+      );
+      if (isRecord(value.kokoro) && 'lang' in value.kokoro) {
+        next.kokoroLang = current.kokoroLang;
+      }
+      continue;
+    }
+    adopt(nextRecord, currentRecord, { [key]: value });
+  }
+  return next;
+}
+
 export default function SettingsPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
-  const [data, setData] = useState<SettingsData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const settingsQuery = useSettingsQuery<SettingsData>({
+    adminFetch,
+    enabled: hydrated && !needsAuth,
+    refetchInterval: 3_000,
+  });
+  const data = settingsQuery.data ?? null;
+  const err = settingsQuery.error ? errorMessage(settingsQuery.error) : null;
+  const [commandBusy, setBusy] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+  const formBaselineRef = useRef<FormState | null>(null);
+  const appliedRevisionRef = useRef(0);
+  const pendingFormRevisionRef = useRef<{ revision: number; form: FormState } | null>(null);
   const [pendingRestart, setPendingRestart] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -107,14 +176,10 @@ export default function SettingsPanel() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const router = useRouter();
 
-  const refresh = async () => {
-    try {
-      const r = await adminFetch('/settings');
-      if (!r.ok) return;
-      const j = (await r.json()) as SettingsData;
-      setData(j); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-  };
+  const refresh = async () => { await settingsQuery.refetch(); };
+
+  const saveMutation = useSettingsMutation<SettingsData>({ adminFetch });
+  const busy = commandBusy || saveMutation.isPending;
 
   // Jingles / SFX / Beds now live on /admin/imaging; their old ?section
   // deep-links are forwarded so existing bookmarks survive. Read through
@@ -132,11 +197,15 @@ export default function SettingsPanel() {
   }, [router, searchParams]);
 
   useEffect(() => {
-    if (!data?.values || form) return;
+    if (!data?.values) return;
     const v = data.values;
-    setForm({
+    const nextForm: FormState = {
       crossfadeDuration: String(v.crossfadeDuration ?? ''),
       maxTrackSeconds: String(v.maxTrackSeconds ?? 0),
+      silenceTrim: {
+        enabled: v.silenceTrim?.enabled ?? false,
+        minGapMs: String(v.silenceTrim?.minGapMs ?? 1500),
+      },
       transitions: {
         pairDrain: v.transitions?.pairDrain ?? true,
         stemBlends: v.transitions?.stemBlends ?? false,
@@ -362,40 +431,33 @@ export default function SettingsPanel() {
         maxTracks: String(v.likes?.maxTracks ?? 10),
         windowDays: String(v.likes?.windowDays ?? 30),
       },
-    });
-  }, [data, form]);
-
-  useEffect(() => {
-    if (!hydrated || needsAuth) return;
-    refresh();
-    const id = setInterval(() => { refresh(); }, 3000);
-    return () => clearInterval(id);
-  }, [hydrated, needsAuth]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+    const revision = settingsQuery.dataUpdatedAt;
+    if (revision && appliedRevisionRef.current !== revision) {
+      pendingFormRevisionRef.current = { revision, form: nextForm };
+    }
+    const pending = pendingFormRevisionRef.current;
+    if (!pending) return;
+    const baseline = formBaselineRef.current;
+    const clean = !form || !baseline || sameForm(form, baseline);
+    if (!clean) return;
+    if (!form || !sameForm(form, pending.form)) setForm(pending.form);
+    formBaselineRef.current = pending.form;
+    appliedRevisionRef.current = pending.revision;
+    pendingFormRevisionRef.current = null;
+  }, [data, form, settingsQuery.dataUpdatedAt]);
 
   const saveSettings: SaveSettings = async (patch) => {
-    setBusy(true);
     try {
-      const r = await adminFetch('/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      const j = (await r.json().catch(() => ({}))) as {
-        error?: string;
-        requiresRestart?: boolean;
-        fieldErrors?: Record<string, string>;
-      };
-      if (!r.ok) {
-        // Land the failure on the inputs it belongs to. The toast still fires —
-        // a save button can be off-screen from the control that failed — but
-        // the operator now also sees WHICH field, without decoding a dotted
-        // path out of a sentence.
-        //
-        // Only the keys THIS patch carried are replaced, so a stale error from
-        // an unrelated section can't linger and a section that saved cleanly
-        // can't be blamed for another's failure.
-        setFieldErrors((prev) => mergePatchErrors(prev, patch, j.fieldErrors));
-        throw new Error(j.error || `failed (${r.status})`);
+      const j = await saveMutation.mutateAsync(patch);
+      // The refetch may resolve while this local form is still dirty against
+      // its old baseline. Mark only submitted fields clean: an edit in another
+      // settings section must continue to hold the queued revision back.
+      if (form) {
+        const baseline = formBaselineRef.current;
+        formBaselineRef.current = baseline
+          ? rebaselineSavedPatch(baseline, form, patch)
+          : form;
       }
       setFieldErrors((prev) => mergePatchErrors(prev, patch, undefined));
       const searchPatch = patch.search;
@@ -415,19 +477,23 @@ export default function SettingsPanel() {
         }
       }
       if (j.requiresRestart) setPendingRestart(true);
-      notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
-      await refresh();
+      if (j.refreshError) notify.err(`saved, but refresh failed: ${j.refreshError}`);
+      else notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       return true;
     } catch (e) {
+      const body = e instanceof AdminResponseError
+        ? e.body as { fieldErrors?: Record<string, string> }
+        : undefined;
+      setFieldErrors((prev) => mergePatchErrors(prev, patch, body?.fieldErrors));
       notify.err(errorMessage(e));
       return false;
-    } finally { setBusy(false); }
+    }
   };
 
   const restartMixer = async () => {
     setBusy(true);
     try {
-      const r = await adminFetch('/restart-mixer', { method: 'POST' });
+      const r = await adminResponse(adminFetch, '/restart-mixer', { method: 'POST' });
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       setPendingRestart(false);
@@ -440,7 +506,7 @@ export default function SettingsPanel() {
   const stopStream = async () => {
     setBusy(true);
     try {
-      const r = await adminFetch('/stream-stop', { method: 'POST' });
+      const r = await adminResponse(adminFetch, '/stream-stop', { method: 'POST' });
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       notify.ok('stream stopped, station is off air');
@@ -453,7 +519,7 @@ export default function SettingsPanel() {
   const startStream = async () => {
     setBusy(true);
     try {
-      const r = await adminFetch('/stream-start', { method: 'POST' });
+      const r = await adminResponse(adminFetch, '/stream-start', { method: 'POST' });
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       notify.ok('stream started, station is on air');
@@ -1034,6 +1100,79 @@ export default function SettingsPanel() {
                     album mixes or DJ sets that keep landing in rotation. Listener requests still
                     play any length, and a show can override this with its own limit (0 there means
                     unlimited). Applies on the next pick; no restart needed.
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {form && (
+              <Card title="Dead-air trim" sub="cut silent gaps off track edges">
+                <div className="grid gap-3">
+                  <div className="field">
+                    <Label>Trim silent edges</Label>
+                    <div className="flex items-center gap-2">
+                      <Seg
+                        options={[
+                          { id: 'on', label: 'On' },
+                          { id: 'off', label: 'Off' },
+                        ]}
+                        value={form.silenceTrim.enabled ? 'on' : 'off'}
+                        onChange={id =>
+                          setForm(f =>
+                            f ? { ...f, silenceTrim: { ...f.silenceTrim, enabled: id === 'on' } } : f,
+                          )
+                        }
+                      />
+                    </div>
+                    <SettingsFieldError path="silenceTrim.enabled" errors={fieldErrors} />
+                    <div className="field-hint">
+                      Some rips carry a chunk of silence before the music starts, or a long blank
+                      after it ends — on air that plays as dead air. With this on, the station
+                      skips past the silence and cuts away at the end instead of waiting it out.
+                      Needs the track analysed; unanalysed tracks play whole as before.
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <Label>Shortest gap worth cutting</Label>
+                    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                      <Input
+                        className="mono-num w-28"
+                        aria-label="Shortest gap worth cutting (milliseconds)"
+                        type="number"
+                        step={100}
+                        min={250}
+                        max={30000}
+                        value={form.silenceTrim.minGapMs}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          setForm(f =>
+                            f ? { ...f, silenceTrim: { ...f.silenceTrim, minGapMs: e.target.value } } : f,
+                          )
+                        }
+                      />
+                      <span className="text-[12px] text-muted">ms</span>
+                      <Btn
+                        sm
+                        onClick={() =>
+                          saveSettings({
+                            silenceTrim: {
+                              enabled: form.silenceTrim.enabled,
+                              minGapMs: parseInt(form.silenceTrim.minGapMs, 10) || 1500,
+                            },
+                          })
+                        }
+                        disabled={busy}
+                      >
+                        Save trim
+                      </Btn>
+                    </div>
+                    <SettingsFieldError path="silenceTrim.minGapMs" errors={fieldErrors} />
+                    <div className="field-hint">
+                      Anything shorter than this is left alone. Tracks often open a beat after
+                      zero, and albums that segue leave space between songs on purpose — raise
+                      this if your library is full of them, lower it to catch smaller gaps.
+                      Applies on the next pick; no restart needed.
+                    </div>
                   </div>
                 </div>
               </Card>
