@@ -83,6 +83,18 @@ def _kill_by_port(port):
     subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
 
 
+def _stop_spawned_process(proc, port):
+    """Stop the exact wrapper we spawned and its task-local listener."""
+    if proc.poll() is None:
+        proc.terminate()
+    _kill_by_port(port)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 def api(path):
     """Read state back through the controller, never through a toast."""
     out = subprocess.run(
@@ -1336,10 +1348,8 @@ def onboarding(page):
         # either would match this very Bash/subprocess wrapper's own cmdline
         # and take the calling shell down with it (exit 144).
         if web_proc is not None:
-            _kill_by_port(ONBOARD_WEB_PORT)
-            web_proc.wait(timeout=15)
-        _kill_by_port(ONBOARD_CONTROLLER_PORT)
-        controller_proc.wait(timeout=15)
+            _stop_spawned_process(web_proc, ONBOARD_WEB_PORT)
+        _stop_spawned_process(controller_proc, ONBOARD_CONTROLLER_PORT)
         shutil.rmtree(state_dir, ignore_errors=True)
         shutil.rmtree(dist_dir_abs, ignore_errors=True)
         # `next dev` with a non-default distDir still rewrites tsconfig.json
