@@ -70,29 +70,31 @@ WEB_DIR = Path(__file__).resolve().parents[1]
 CONTROLLER_DIR = WEB_DIR.parent / "controller"
 
 
-def _kill_by_port(port):
-    """Stop only the isolated listener on ``port`` on Linux or macOS."""
-    if shutil.which("lsof"):
-        out = subprocess.run(
-            ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
-            capture_output=True, text=True,
-        )
-        for raw_pid in out.stdout.split():
-            os.kill(int(raw_pid), signal.SIGTERM)
-        return
-    subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
+def _stop_spawned_process(proc, _port=None):
+    """Stop only the wrapper's private process group and reap the wrapper.
 
-
-def _stop_spawned_process(proc, port):
-    """Stop the exact wrapper we spawned and its task-local listener."""
-    if proc.poll() is None:
-        proc.terminate()
-    _kill_by_port(port)
+    ``_port`` remains accepted for the focused port-reuse regression, but it
+    is deliberately not an ownership boundary and must never select a PID.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
     try:
         proc.wait(timeout=15)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
         proc.wait(timeout=5)
+    else:
+        # The wrapper can exit before its child listener. Finish only that
+        # original group; an unrelated replacement listener has another PGID.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def api(path):
@@ -1214,6 +1216,7 @@ def onboarding(page):
         env=controller_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     web_proc = None
     try:
@@ -1240,6 +1243,7 @@ def onboarding(page):
             env=web_env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
         _wait_http(f"{ONBOARD_WEB}/onboarding")
 
@@ -1344,9 +1348,9 @@ def onboarding(page):
             f"expected /onboarding/save to carry no fieldErrors key at all, got {save_400}"
         )
     finally:
-        # Kill by port, never `pkill -f "tsx src/server.ts"` / "next dev" —
-        # either would match this very Bash/subprocess wrapper's own cmdline
-        # and take the calling shell down with it (exit 144).
+        # Each spawned wrapper owns a private process group. Never kill by
+        # fixed port or broad command line: either can target an unrelated
+        # process after PID/port reuse or match the calling shell itself.
         if web_proc is not None:
             _stop_spawned_process(web_proc, ONBOARD_WEB_PORT)
         _stop_spawned_process(controller_proc, ONBOARD_CONTROLLER_PORT)
