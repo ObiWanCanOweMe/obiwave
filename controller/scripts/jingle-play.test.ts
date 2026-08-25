@@ -3,13 +3,14 @@
 // marker hook (NOT on_meta, which never sees that source).
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const STATE = mkdtempSync(join(tmpdir(), 'subwave-jingle-play-'));
 process.env.STATE_DIR = STATE;
@@ -21,6 +22,40 @@ const { queue } = await import('../src/broadcast/queue.js');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RADIO_LIQ = join(here, '..', '..', 'liquidsoap', 'radio.liq');
+const QUEUE_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'queue.ts')).href;
+
+function makeJingleState(names: string[]) {
+  const state = mkdtempSync(join(tmpdir(), 'subwave-jingle-restart-'));
+  const dir = join(state, 'jingles');
+  mkdirSync(dir, { recursive: true });
+  for (const name of names) writeFileSync(join(dir, name), 'audio');
+  writeFileSync(join(state, 'jingles.json'), JSON.stringify({
+    items: Object.fromEntries(names.map(name => [name, { text: name }])),
+  }));
+  return state;
+}
+
+function runFreshController(state: string, sourceBody: string) {
+  const source = `
+    import { rmSync, writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    const { queue } = await import(${JSON.stringify(QUEUE_URL)});
+    ${sourceBody}
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', source],
+    {
+      cwd: join(here, '..'),
+      encoding: 'utf8',
+      env: { ...process.env, STATE_DIR: state },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const line = child.stdout.split('\n').find(value => value.startsWith('__RESULT__='));
+  assert.ok(line, child.stdout);
+  return JSON.parse(line.slice('__RESULT__='.length));
+}
 
 const URI = jingleUri('/var/sub-wave/jingles/jingle_a1b2c3d4.wav');
 assert.equal(URI, 'annotate:subwave_kind="jingle":/var/sub-wave/jingles/jingle_a1b2c3d4.wav');
@@ -129,6 +164,83 @@ test('manual jingle rejects when its priority handoff cannot be written', async 
   // A press that never reached the handoff leaves nothing pending behind it.
   assert.deepEqual(await queue.playJingle(filename), { ok: true });
   await markAired(filename);
+});
+
+test('a pending manual jingle survives a controller-only restart', () => {
+  const state = makeJingleState([filename]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
+
+    // Liquidsoap has consumed the handoff into its still-live FIFO, but has not
+    // aired it yet. Only the controller process restarts.
+    rmSync(join(state, 'jingle-now.txt'));
+    assert.deepEqual(runFreshController(state, `
+      queue.recover();
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: false, reason: 'already-queued' });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a later FIFO marker retires earlier aired jingles before replay', () => {
+  const state = makeJingleState([filename, other]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      await queue.playJingle(${JSON.stringify(other)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      const jingleDir = join(process.env.STATE_DIR, 'jingles');
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(jingleDir, ${JSON.stringify(filename)}),
+        startedAt: Date.now() / 1000,
+      }));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(jingleDir, ${JSON.stringify(other)}),
+        startedAt: Date.now() / 1000,
+      }));
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('aired FIFO entries do not consume the three-slot cap until TTL', () => {
+  const names = Array.from({ length: 6 }, (_, index) => `jingle_0000000${index}.wav`);
+  const state = makeJingleState(names);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const names = ${JSON.stringify(names)};
+      const jingleDir = join(process.env.STATE_DIR, 'jingles');
+      for (const name of names.slice(0, 3)) {
+        await queue.playJingle(name);
+        rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      }
+      // Liquidsoap advances through all three while its single marker is
+      // overwritten before the controller gets another reconciliation turn.
+      for (const name of names.slice(0, 3)) {
+        writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+          filename: join(jingleDir, name),
+          startedAt: Date.now() / 1000,
+        }));
+      }
+      const results = [];
+      for (const name of names.slice(3)) {
+        results.push(await queue.playJingle(name));
+        rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'), { force: true });
+      }
+      console.log('__RESULT__=' + JSON.stringify(results));
+    `), [{ ok: true }, { ok: true }, { ok: true }]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
 });
 
 const liq = readFileSync(RADIO_LIQ, 'utf8');

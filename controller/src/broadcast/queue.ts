@@ -99,7 +99,7 @@ import {
   airVoice,
   speechDurationMs,
   writeHandoff,
-  jingleAiredAtMs,
+  latestJingleMarker,
   type QueuedVoice,
   type VoiceHandoff,
 } from './queue/voice-io.js';
@@ -168,6 +168,7 @@ class Queue {
   _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
   _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
   _pendingJingles = new Map<string, number>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
+  _pendingJingleStateChain: Promise<void> = Promise.resolve(); // serialises the durable manual-jingle ledger
 
   // Snapshot upcoming/current/history to disk. The queue is otherwise purely
   // in-memory, so a controller restart (every `--build controller` rebuild)
@@ -214,6 +215,7 @@ class Queue {
   // key differs and the watcher reconciles normally (see onTrackStarted, which
   // drops any upcoming items Liquidsoap consumed while the controller was down).
   recover() {
+    this.recoverPendingJingles();
     if (!existsSync(config.queue.file)) return;
     try {
       const stored = JSON.parse(readFileSync(config.queue.file, 'utf8'));
@@ -1872,15 +1874,39 @@ class Queue {
     if (!filename) throw new Error('Jingle filename is required');
     const path = await jingles.getPath(filename);
     if (!path) throw new Error(`Unknown jingle: ${filename}`);
-    this.retirePendingJingles();
-    if (this._pendingJingles.has(filename)) return { ok: false as const, reason: 'already-queued' as const };
-    if (this._pendingJingles.size >= PENDING_JINGLE_MAX) return { ok: false as const, reason: 'queue-full' as const };
-    const reservedAt = Date.now();
-    this._pendingJingles.set(filename, reservedAt);
+    const reservation = await this.withPendingJingleState(async () => {
+      const retired = this.retirePendingJingles();
+      if (this._pendingJingles.has(filename)) {
+        if (retired) await this.persistPendingJingles();
+        return { ok: false as const, reason: 'already-queued' as const };
+      }
+      if (this._pendingJingles.size >= PENDING_JINGLE_MAX) {
+        if (retired) await this.persistPendingJingles();
+        return { ok: false as const, reason: 'queue-full' as const };
+      }
+      const reservedAt = Date.now();
+      this._pendingJingles.set(filename, reservedAt);
+      try {
+        // Commit the reservation before exposing the handoff. A crash can
+        // therefore produce a temporary false block, never a duplicate FIFO
+        // entry; the TTL is the bounded recovery for that narrow window.
+        await this.persistPendingJingles();
+      } catch (err) {
+        if (this._pendingJingles.get(filename) === reservedAt) this._pendingJingles.delete(filename);
+        throw err;
+      }
+      return { ok: true as const, reservedAt };
+    });
+    if (!reservation.ok) return reservation;
+    const { reservedAt } = reservation;
     try {
       await writeHandoff(config.liquidsoap.jingleFile, jingles.jingleUri(path), { maxWaitMs: 5000 });
     } catch (err) {
-      if (this._pendingJingles.get(filename) === reservedAt) this._pendingJingles.delete(filename);
+      await this.withPendingJingleState(async () => {
+        if (this._pendingJingles.get(filename) !== reservedAt) return;
+        this._pendingJingles.delete(filename);
+        await this.persistPendingJingles();
+      });
       throw err;
     }
     // The sidecar's own script, not the hashed filename: every other segment
@@ -1897,12 +1923,61 @@ class Queue {
   // will be. A mixer restart empties jingle_now_queue and loses the request
   // silently, so every entry has to expire on its own — the button must never
   // wedge shut on bookkeeping.
-  retirePendingJingles() {
+  retirePendingJingles(): boolean {
     const now = Date.now();
+    let changed = false;
     for (const [name, at] of this._pendingJingles) {
-      if (now - at > PENDING_JINGLE_TTL_MS || jingleAiredAtMs(name) >= at) {
+      if (now - at > PENDING_JINGLE_TTL_MS) {
         this._pendingJingles.delete(name);
+        changed = true;
       }
+    }
+    const marker = latestJingleMarker();
+    if (marker) {
+      const entries = [...this._pendingJingles];
+      const airedIndex = entries.findIndex(([name, at]) => (
+        name === marker.filename && marker.startedAtMs >= at
+      ));
+      if (airedIndex >= 0) {
+        for (const [name] of entries.slice(0, airedIndex + 1)) this._pendingJingles.delete(name);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  // The broadcast FIFO and this ledger have the same order. Keep mutations
+  // serial so two different simultaneous presses cannot race atomic snapshots
+  // and lose one reservation.
+  async withPendingJingleState<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this._pendingJingleStateChain.then(operation, operation);
+    this._pendingJingleStateChain = next.then(() => {}, () => {});
+    return next;
+  }
+
+  async persistPendingJingles() {
+    const pending = [...this._pendingJingles].map(([filename, reservedAt]) => ({ filename, reservedAt }));
+    await writeFileAtomic(config.queue.pendingJinglesFile, JSON.stringify({ pending }, null, 2));
+  }
+
+  recoverPendingJingles() {
+    if (!existsSync(config.queue.pendingJinglesFile)) return;
+    try {
+      const stored = JSON.parse(readFileSync(config.queue.pendingJinglesFile, 'utf8'));
+      const pending = Array.isArray(stored?.pending) ? stored.pending : [];
+      this._pendingJingles = new Map(pending
+        .filter((entry: { filename?: unknown; reservedAt?: unknown }) => (
+          typeof entry?.filename === 'string'
+          && Number.isFinite(entry?.reservedAt)
+          && Number(entry.reservedAt) > 0
+        ))
+        .map((entry: { filename: string; reservedAt: number }) => [entry.filename, entry.reservedAt]));
+      if (this.retirePendingJingles()) {
+        void this.withPendingJingleState(() => this.persistPendingJingles())
+          .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));
+      }
+    } catch (err) {
+      console.error('[queue] pending-jingles recover failed:', (err as Error).message);
     }
   }
 

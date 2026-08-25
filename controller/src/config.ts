@@ -246,6 +246,10 @@ export const config = {
     // The playback queue (upcoming/current/history) snapshotted to disk so a
     // controller restart doesn't lose tracks already handed to Liquidsoap.
     file: `${STATE_DIR}/queue.json`,
+    // Durable at-most-once reservations for manual jingle presses. Liquidsoap's
+    // priority FIFO survives a controller-only restart, so its controller-side
+    // dedupe state has to survive the same boundary.
+    pendingJinglesFile: `${STATE_DIR}/pending-jingles.json`,
     // Rolling 24h log of (id, artist, endedAt) for each track that aired.
     // Read by the picker to block tracks/artists played in the last N hours —
     // queue.history is capped at 50 (~3h) and only lives in-memory, which is

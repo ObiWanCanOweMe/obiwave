@@ -257,19 +257,20 @@ export function jingleWindow(): { clearAtMs: number; windowMs: number } {
   }
 }
 
-// When the marker last reported THIS jingle starting, or 0. Used by
-// queue.playJingle to retire a pending press once it has been heard. Matched on
-// the basename because the marker carries Liquidsoap's resolved path while the
-// caller holds a library filename.
-export function jingleAiredAtMs(filename: string): number {
+// The latest jingle marker as a library filename + start time. queue.playJingle
+// reconciles it against the ordered manual FIFO: when B airs, every pending
+// manual request through B has aired even if this single marker already
+// overwrote A. Automatic-rotate markers that predate a reservation are ignored
+// by that reconciliation.
+export function latestJingleMarker(): { filename: string; startedAtMs: number } | null {
   try {
     const m = JSON.parse(readFileSync(config.liquidsoap.jinglePlayingFile, 'utf8'));
-    if (typeof m?.filename !== 'string') return 0;
-    if (m.filename.split('/').pop() !== filename) return 0;
+    if (typeof m?.filename !== 'string') return null;
     const startedMs = Number(m?.startedAt) * 1000;
-    return Number.isFinite(startedMs) && startedMs > 0 ? startedMs : 0;
+    if (!Number.isFinite(startedMs) || startedMs <= 0) return null;
+    return { filename: m.filename.split('/').pop() || '', startedAtMs: startedMs };
   } catch {
-    return 0;
+    return null;
   }
 }
 
