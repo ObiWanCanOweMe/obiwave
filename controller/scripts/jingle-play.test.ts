@@ -37,7 +37,7 @@ function makeJingleState(names: string[]) {
 
 function runFreshController(state: string, sourceBody: string) {
   const source = `
-    import { rmSync, writeFileSync } from 'node:fs';
+    import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
     import { join } from 'node:path';
     const { queue } = await import(${JSON.stringify(QUEUE_URL)});
     ${sourceBody}
@@ -182,6 +182,95 @@ test('a pending manual jingle survives a controller-only restart', () => {
       const result = await queue.playJingle(${JSON.stringify(filename)});
       console.log('__RESULT__=' + JSON.stringify(result));
     `), { ok: false, reason: 'already-queued' });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('simultaneous different jingles are both durable across restart', () => {
+  const state = makeJingleState([filename, other]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const handoff = join(process.env.STATE_DIR, 'jingle-now.txt');
+      const consume = setInterval(() => {
+        if (existsSync(handoff)) rmSync(handoff);
+      }, 10);
+      try {
+        const results = await Promise.all([
+          queue.playJingle(${JSON.stringify(filename)}),
+          queue.playJingle(${JSON.stringify(other)}),
+        ]);
+        console.log('__RESULT__=' + JSON.stringify(results));
+      } finally {
+        clearInterval(consume);
+      }
+    `), [{ ok: true }, { ok: true }]);
+
+    assert.deepEqual(runFreshController(state, `
+      queue.recover();
+      const results = await Promise.all([
+        queue.playJingle(${JSON.stringify(filename)}),
+        queue.playJingle(${JSON.stringify(other)}),
+      ]);
+      console.log('__RESULT__=' + JSON.stringify(results));
+    `), [
+      { ok: false, reason: 'already-queued' },
+      { ok: false, reason: 'already-queued' },
+    ]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a failed handoff stays released after restart', () => {
+  const state = makeJingleState([filename]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const { config } = await import(${JSON.stringify(
+        pathToFileURL(join(here, '..', 'src', 'config.ts')).href,
+      )});
+      config.liquidsoap.jingleFile = join(process.env.STATE_DIR, 'missing-parent', 'jingle-now.txt');
+      let failed = false;
+      try {
+        await queue.playJingle(${JSON.stringify(filename)});
+      } catch {
+        failed = true;
+      }
+      console.log('__RESULT__=' + JSON.stringify({ failed }));
+    `), { failed: true });
+
+    assert.deepEqual(runFreshController(state, `
+      queue.recover();
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('TTL retirement remains released after another restart', () => {
+  const state = makeJingleState([filename]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
+    rmSync(join(state, 'jingle-now.txt'));
+
+    assert.deepEqual(runFreshController(state, `
+      const realNow = Date.now;
+      Date.now = () => realNow() + 31 * 60 * 1000;
+      queue.recover();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log('__RESULT__=' + JSON.stringify({ recovered: true }));
+    `), { recovered: true });
+
+    assert.deepEqual(runFreshController(state, `
+      queue.recover();
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
   } finally {
     rmSync(state, { recursive: true, force: true });
   }
