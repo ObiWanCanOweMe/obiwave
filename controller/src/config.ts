@@ -214,7 +214,8 @@ export const config = {
     // playlist hooks — NOT a branch of on_meta, which never sees either source.
     // They stage through separate temp dirs — see radio.liq's jingle_now_tmp_dir.
     // Both stamp `durationSec` (radio.liq's jingle_duration) so the collision
-    // guard can measure a clip in any container, not just RIFF.
+    // guard can measure a clip in any container, not just RIFF, and `origin`
+    // (`manual` or `automatic`) so only a manual feed retires its durable FIFO.
     jinglePlayingFile: `${STATE_DIR}/jingle-playing.json`,
     // Written by radio.liq when a track annotated `subwave_kind="bed"` starts
     // (broadcast/beds.ts). A bed carries no title/artist, so on_meta skips

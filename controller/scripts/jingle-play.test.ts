@@ -88,6 +88,7 @@ async function markAired(name: string) {
   writeFileSync(join(STATE, 'jingle-playing.json'), JSON.stringify({
     filename: join(jingleDir, name),
     durationSec: 4,
+    origin: 'manual',
     startedAt: Date.now() / 1000,
   }));
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -177,6 +178,35 @@ test('a pending manual jingle survives a controller-only restart', () => {
     // Liquidsoap has consumed the handoff into its still-live FIFO, but has not
     // aired it yet. Only the controller process restarts.
     rmSync(join(state, 'jingle-now.txt'));
+    assert.deepEqual(runFreshController(state, `
+      queue.recover();
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: false, reason: 'already-queued' });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('an automatic same-file marker cannot retire a pending manual request', () => {
+  const state = makeJingleState([filename]);
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const result = await queue.playJingle(${JSON.stringify(filename)});
+      console.log('__RESULT__=' + JSON.stringify(result));
+    `), { ok: true });
+
+    // Liquidsoap consumed the manual handoff but has not aired it. Its separate
+    // automatic rotate then happens to feed the same library file and overwrites
+    // the shared marker after the reservation timestamp.
+    rmSync(join(state, 'jingle-now.txt'));
+    writeFileSync(join(state, 'jingle-playing.json'), JSON.stringify({
+      filename: join(state, 'jingles', filename),
+      durationSec: 4,
+      startedAt: Date.now() / 1000,
+      origin: 'automatic',
+    }));
+
     assert.deepEqual(runFreshController(state, `
       queue.recover();
       const result = await queue.playJingle(${JSON.stringify(filename)});
@@ -287,10 +317,12 @@ test('a later FIFO marker retires earlier aired jingles before replay', () => {
       const jingleDir = join(process.env.STATE_DIR, 'jingles');
       writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
         filename: join(jingleDir, ${JSON.stringify(filename)}),
+        origin: 'manual',
         startedAt: Date.now() / 1000,
       }));
       writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
         filename: join(jingleDir, ${JSON.stringify(other)}),
+        origin: 'manual',
         startedAt: Date.now() / 1000,
       }));
       const result = await queue.playJingle(${JSON.stringify(filename)});
@@ -317,6 +349,7 @@ test('aired FIFO entries do not consume the three-slot cap until TTL', () => {
       for (const name of names.slice(0, 3)) {
         writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
           filename: join(jingleDir, name),
+          origin: 'manual',
           startedAt: Date.now() / 1000,
         }));
       }
@@ -349,6 +382,7 @@ assert.ok(
   'a multi-expression Liquidsoap callback must use a begin/end block',
 );
 assert.ok(branchBody.includes('jingle-playing.json'), 'writes the collision-guard marker');
+assert.ok(branchBody.includes('origin = "manual"'), 'manual marker identifies its FIFO origin');
 assert.ok(branchBody.includes('jingle_now_tmp_dir'), 'own temp dir — one per writer, #1240');
 assert.ok(!branchBody.includes('temp_dir=jingle_tmp_dir'), 'never shares the rotate writer staging dir');
 assert.ok(!branchBody.includes('now-playing.json'), 'an announcement is not a song');
@@ -371,6 +405,12 @@ assert.ok(gateWindow.includes('not bed_on_air()'), 'a jingle cannot split a bed 
 assert.ok(gateWindow.includes('time() > voice_until()'), 'a jingle cannot start over active speech');
 assert.ok(priorityFallback > liq.indexOf('rotate(weights=[1, jingle_ratio()]'),
   'manual priority wraps the automatic rotate so an automatic jingle cannot win first');
+
+const rotateMarkerHook = liq.indexOf('jingles.on_metadata(synchronous=false');
+const rotateMarkerBody = liq.slice(rotateMarkerHook, liq.indexOf('# A bed on air', rotateMarkerHook));
+assert.ok(rotateMarkerHook > 0, 'the automatic rotate marks its clips at feed time');
+assert.ok(rotateMarkerBody.includes('origin = "automatic"'),
+  'automatic marker identifies that it did not consume the manual FIFO');
 
 // The rotate must also stand down while a manual jingle is on air, or it stacks
 // a stinger on top of the announcement.

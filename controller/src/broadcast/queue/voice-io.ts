@@ -206,7 +206,8 @@ function mintVoiceId(): string {
 // is captured ABOVE that rotate, the incoming track's on_metadata fires while
 // the stinger is still audible in the crossfade, so a boundary-aired link or
 // ident talked straight over it. radio.liq announces each jingle by writing
-// jingle-playing.json ({filename, startedAt}) the moment it starts feeding;
+// jingle-playing.json ({filename, durationSec, origin, startedAt}) the moment
+// it starts feeding;
 // the clip stays audible for up to its own length plus the cross buffer.
 // Before any voice handoff, sleep out whatever remains of that window.
 //
@@ -228,6 +229,22 @@ const JINGLE_TAIL_MS = 1_000;      // fade tail + poll slack
 // check behind it is worse than the collision.
 const JINGLE_WAIT_CEILING_MS = 600_000;
 
+type JinglePlayingMarker = {
+  filename?: unknown;
+  durationSec?: unknown;
+  origin?: unknown;
+  startedAt?: unknown;
+};
+
+function readJingleMarker(): JinglePlayingMarker | null {
+  try {
+    const marker = JSON.parse(readFileSync(config.liquidsoap.jinglePlayingFile, 'utf8'));
+    return marker && typeof marker === 'object' ? marker : null;
+  } catch {
+    return null;
+  }
+}
+
 // How recent a bed-playing.json startedAt must be to count as a live edge in
 // onBedStarted. Detection latency is one 1.5s watcher tick; anything much
 // older is the previous bed's marker surviving a controller restart (the file
@@ -239,8 +256,9 @@ export const BED_MARKER_FRESH_MS = 10_000;
 // as the test seam for the marker's durationSec precedence.
 export function jingleWindow(): { clearAtMs: number; windowMs: number } {
   const none = { clearAtMs: 0, windowMs: 0 };
+  const m = readJingleMarker();
+  if (!m) return none;
   try {
-    const m = JSON.parse(readFileSync(config.liquidsoap.jinglePlayingFile, 'utf8'));
     const startedMs = Number(m?.startedAt) * 1000; // liquidsoap time() is unix seconds
     if (!Number.isFinite(startedMs) || startedMs <= 0) return none;
     // Liquidsoap's own measurement first (any container), then the RIFF parse
@@ -260,12 +278,17 @@ export function jingleWindow(): { clearAtMs: number; windowMs: number } {
 // The latest jingle marker as a library filename + start time. queue.playJingle
 // reconciles it against the ordered manual FIFO: when B airs, every pending
 // manual request through B has aired even if this single marker already
-// overwrote A. Automatic-rotate markers that predate a reservation are ignored
-// by that reconciliation.
+// overwrote A. Only origin="manual" can drive that reconciliation: the
+// automatic rotate can feed the same library file after a reservation without
+// consuming the manual FIFO. Legacy markers without an origin fail safe to the
+// bounded TTL.
 export function latestJingleMarker(): { filename: string; startedAtMs: number } | null {
+  const m = readJingleMarker();
   try {
-    const m = JSON.parse(readFileSync(config.liquidsoap.jinglePlayingFile, 'utf8'));
-    if (typeof m?.filename !== 'string') return null;
+    // Only the dedicated manual queue can prove that a durable manual
+    // reservation aired. Automatic and legacy origin-less markers still guard
+    // voice timing through jingleWindow, but retire only through the TTL.
+    if (m?.origin !== 'manual' || typeof m.filename !== 'string') return null;
     const startedMs = Number(m?.startedAt) * 1000;
     if (!Number.isFinite(startedMs) || startedMs <= 0) return null;
     return { filename: m.filename.split('/').pop() || '', startedAtMs: startedMs };

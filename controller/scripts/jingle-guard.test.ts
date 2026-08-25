@@ -15,7 +15,7 @@ const STATE = mkdtempSync(join(tmpdir(), 'subwave-jingle-guard-'));
 process.env.STATE_DIR = STATE;
 
 const { config } = await import('../src/config.js');
-const { jingleWaitMs, jingleWindow } = await import('../src/broadcast/queue/voice-io.js');
+const { jingleWaitMs, jingleWindow, latestJingleMarker } = await import('../src/broadcast/queue/voice-io.js');
 const settings = await import('../src/settings.js');
 
 const CROSS_SEC = Number(settings.get()?.crossfadeDuration) || 10;
@@ -108,6 +108,23 @@ test('an unmeasurable duration degrades rather than distorting the window', () =
     writeMarker({ filename: MP3, durationSec: bad, startedAt: NOW / 1000 });
     assert.equal(jingleWindow().windowMs, 15_000 + CROSS_MS + TAIL_MS, `durationSec=${bad}`);
   }
+});
+
+test('only a manual-origin marker can retire a manual reservation', () => {
+  writeMarker({ filename: WAV, startedAt: NOW / 1000, origin: 'manual' });
+  assert.deepEqual(latestJingleMarker(), {
+    filename: 'ident.wav',
+    startedAtMs: NOW,
+  });
+
+  writeMarker({ filename: WAV, startedAt: NOW / 1000, origin: 'automatic' });
+  assert.equal(latestJingleMarker(), null);
+
+  // Older broadcast images wrote no origin. Their marker must still protect
+  // voice timing, but cannot prove that a manual FIFO reservation aired.
+  writeMarker({ filename: WAV, startedAt: NOW / 1000 });
+  assert.equal(latestJingleMarker(), null);
+  assert.equal(jingleWindow().windowMs, 6_000 + CROSS_MS + TAIL_MS);
 });
 
 test('no marker, or an unreadable one, means nothing to wait for', () => {
