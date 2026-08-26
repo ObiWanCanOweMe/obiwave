@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { notify, errorMessage } from '../../lib/notify';
@@ -168,6 +168,57 @@ function mergePatchErrors(
  */
 const JUMP_MAX_FRAMES = 60;
 
+// These four sections own write-only credential inputs in component state.
+// Defer each expensive section until its first visit, then keep it mounted for
+// the life of SettingsPanel so navigation and search cannot destroy a draft.
+// Nothing here is persisted to TanStack Query or browser storage.
+const RETAINED_DRAFT_SECTIONS = new Set<SectionId>(['music', 'llm', 'tts', 'library']);
+
+interface RetainedDraftSectionProps {
+  section: SectionId;
+  active: boolean;
+  saveSlot: HTMLElement | null;
+  reportDirty: (id: string, dirty: boolean) => void;
+  advOpen: boolean;
+  setAdvOpen: (section: SectionId, open: boolean) => void;
+  children: ReactNode;
+}
+
+/** Keep a visited credential editor alive without letting its hidden SaveBar
+ * or Advanced state leak into whichever section is currently visible. */
+function RetainedDraftSection({
+  section,
+  active,
+  saveSlot,
+  reportDirty,
+  advOpen,
+  setAdvOpen,
+  children,
+}: RetainedDraftSectionProps) {
+  const reportSectionDirty = useCallback(
+    (id: string, dirty: boolean) => reportDirty(`${section}:${id}`, dirty),
+    [reportDirty, section],
+  );
+  const setSectionAdvOpen = useCallback(
+    (open: boolean) => setAdvOpen(section, open),
+    [section, setAdvOpen],
+  );
+  const chrome = useMemo(() => ({
+    saveSlot: active ? saveSlot : null,
+    reportDirty: reportSectionDirty,
+    advOpen,
+    setAdvOpen: setSectionAdvOpen,
+  }), [active, saveSlot, reportSectionDirty, advOpen, setSectionAdvOpen]);
+
+  return (
+    <SectionChromeProvider value={chrome}>
+      <div hidden={!active} data-settings-section={section}>
+        {children}
+      </div>
+    </SectionChromeProvider>
+  );
+}
+
 /**
  * Collector for the number boxes in a whole-block save.
  *
@@ -271,6 +322,7 @@ export default function SettingsPanel() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('station');
+  const [retainedSections, setRetainedSections] = useState<Partial<Record<SectionId, true>>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Portal target for the one sticky save bar. Null while nothing is unsaved,
   // which is what makes every section's SaveBar render nothing when clean.
@@ -284,6 +336,17 @@ export default function SettingsPanel() {
 
   const reportDirty = useCallback((id: string, dirty: boolean) => {
     setLocalDirty(prev => (!!prev[id] === dirty ? prev : { ...prev, [id]: dirty }));
+  }, []);
+
+  const setSectionAdvOpen = useCallback((section: SectionId, open: boolean) => {
+    setAdvOpen(prev => ({ ...prev, [section]: open }));
+  }, []);
+
+  const activateSection = useCallback((section: SectionId) => {
+    setActiveSection(section);
+    if (RETAINED_DRAFT_SECTIONS.has(section)) {
+      setRetainedSections(prev => prev[section] ? prev : { ...prev, [section]: true });
+    }
   }, []);
 
   const refresh = async () => { await settingsQuery.refetch(); };
@@ -303,8 +366,8 @@ export default function SettingsPanel() {
       router.replace(`/admin/imaging?tab=${s}`);
       return;
     }
-    if (s && SECTIONS.some(x => x.id === s)) setActiveSection(s as SectionId);
-  }, [router, searchParams]);
+    if (s && SECTIONS.some(x => x.id === s)) activateSection(s as SectionId);
+  }, [activateSection, router, searchParams]);
 
   useEffect(() => {
     if (!data?.values) return;
@@ -728,7 +791,9 @@ export default function SettingsPanel() {
   // A section can be dirty in either currency: form paths the panel diffs, or a
   // section-local edit it cannot see (Navidrome creds, which live in
   // setup-config.json rather than settings.json).
-  const hasLocalDirty = Object.values(localDirty).some(Boolean);
+  const hasLocalDirtyFor = (section: SectionId) => Object.entries(localDirty)
+    .some(([id, dirty]) => dirty && id.startsWith(`${section}:`));
+  const hasLocalDirty = hasLocalDirtyFor(activeSection);
   const sectionDirty = changedCount > 0 || hasLocalDirty;
   // Warn BEFORE the save, from the mirrored path list. The controller stays the
   // authority afterwards — its `requiresRestart` is what raises the persistent
@@ -763,7 +828,7 @@ export default function SettingsPanel() {
 
   /** Search result → switch section, open Advanced if needed, scroll and flash. */
   const jumpTo = useCallback(({ section, anchor, advanced }: SettingsJump) => {
-    setActiveSection(section);
+    activateSection(section);
     if (advanced) setAdvOpen(prev => ({ ...prev, [section]: true }));
     // The section swap and the disclosure both have to commit before the target
     // card exists to scroll to. A fixed delay is a bet against render time that
@@ -772,7 +837,9 @@ export default function SettingsPanel() {
     // card across frames instead, and give up only after JUMP_MAX_FRAMES.
     let frames = 0;
     const settle = () => {
-      const el = document.querySelector(`[data-card="${anchor}"]`);
+      const el = document.querySelector(
+        `[data-settings-section="${section}"] [data-card="${anchor}"]`,
+      ) ?? document.querySelector(`[data-card="${anchor}"]`);
       if (!(el instanceof HTMLElement)) {
         if (frames++ < JUMP_MAX_FRAMES) window.requestAnimationFrame(settle);
         return;
@@ -782,7 +849,7 @@ export default function SettingsPanel() {
       window.setTimeout(() => el.removeAttribute('data-flash'), 2600);
     };
     window.requestAnimationFrame(settle);
-  }, []);
+  }, [activateSection]);
 
   const chrome = useMemo(() => ({
     saveSlot,
@@ -801,16 +868,15 @@ export default function SettingsPanel() {
             {SECTIONS.filter(s => s.group === group).map(s => {
               const isActive = activeSection === s.id;
               const Icon = s.icon;
-              // A section not on screen can only be dirty in form paths — its
-              // own component is unmounted, so a section-local edit (music)
-              // shows a dot on the active section alone. That is accurate
-              // rather than approximate: leaving those sections discards them.
+              // Form drafts live in the panel; credential drafts live in the
+              // retained section component after its first visit. Both keep a
+              // section-owned marker while another section is visible.
               const dirty = dirtyPaths(form, baseline, s.formKeys).length > 0
-                || (isActive && hasLocalDirty);
+                || hasLocalDirtyFor(s.id);
               return (
                 <button
                   key={s.id}
-                  onClick={() => setActiveSection(s.id)}
+                  onClick={() => activateSection(s.id)}
                   className={cn(
                     'flex cursor-pointer items-center gap-2.5 border border-ink px-3 py-2.5 text-left font-[inherit] transition-colors',
                     isActive ? 'bg-ink text-bg' : 'bg-[var(--ink-soft)] text-ink hover:bg-ink/10',
@@ -901,17 +967,27 @@ export default function SettingsPanel() {
             setForm(prev => (prev ? updater(prev) : prev));
           return (
           <>
-            {activeSection === 'tts' && data.tts && (
-              <TtsSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.tts && data.tts && (
+              <RetainedDraftSection
+                section="tts" active={activeSection === 'tts'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.tts} setAdvOpen={setSectionAdvOpen}
+              >
+                <TtsSection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
-            {activeSection === 'llm' && data.llm && (
-              <LlmSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.llm && data.llm && (
+              <RetainedDraftSection
+                section="llm" active={activeSection === 'llm'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.llm} setAdvOpen={setSectionAdvOpen}
+              >
+                <LlmSection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
             {activeSection === 'search' && (
               <SearchSection
@@ -919,11 +995,16 @@ export default function SettingsPanel() {
                 saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch}
               />
             )}
-            {activeSection === 'library' && (
-              <LibrarySection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.library && (
+              <RetainedDraftSection
+                section="library" active={activeSection === 'library'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.library} setAdvOpen={setSectionAdvOpen}
+              >
+                <LibrarySection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
             {activeSection === 'station' && (
               <StationSection
@@ -931,8 +1012,13 @@ export default function SettingsPanel() {
                 saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
             )}
-            {activeSection === 'music' && (
-              <NavidromeSection data={data} adminFetch={adminFetch} refresh={refresh} />
+            {retainedSections.music && (
+              <RetainedDraftSection
+                section="music" active={activeSection === 'music'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.music} setAdvOpen={setSectionAdvOpen}
+              >
+                <NavidromeSection data={data} adminFetch={adminFetch} refresh={refresh} />
+              </RetainedDraftSection>
             )}
             {activeSection === 'theme' && (
               <ThemeSection
