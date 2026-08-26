@@ -107,10 +107,10 @@ export default function Clients() {
             username and password before anything reaches the controller), add its public
             address, open <strong>Station login</strong>, and enter the two fields. The
             station URL stays credential-free; the login is saved in the iOS Keychain or
-            Android&rsquo;s secure storage. API polls and artwork receive an in-memory
-            authenticated URL, while the audio stream gets an explicit{' '}
-            <code className="bs-code-inline">Authorization</code> header instead, because
-            iOS&rsquo;s AVPlayer silently drops{' '}
+            Android&rsquo;s secure storage. API polls, station-hosted artwork, and the audio
+            stream all receive an explicit{' '}
+            <code className="bs-code-inline">Authorization</code> header. A remote persona
+            avatar does not receive the station login. iOS&rsquo;s AVPlayer silently drops{' '}
             <code className="bs-code-inline">user:pass@</code> from a media URL. That is
             why such a station could fail in the app while the same address
             played fine in a browser. The same fields work for a station using

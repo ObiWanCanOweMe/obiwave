@@ -25,7 +25,8 @@
     "test:model-discovery-request": "node --experimental-strip-types scripts/model-discovery-request.test.ts",
     "test:admin-navigation-schedule": "node --experimental-strip-types scripts/admin-navigation-schedule-contract.test.ts",
     "test:llm-section-provider-url-contract": "node --experimental-strip-types scripts/llm-section-provider-url-contract.test.ts",
-    "test:search-provider": "node --experimental-strip-types scripts/search-provider-state.test.ts"
+    "test:search-provider": "node --experimental-strip-types scripts/search-provider-state.test.ts",
+    "test:manual-clients-auth": "node --experimental-strip-types scripts/manual-clients-auth.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
