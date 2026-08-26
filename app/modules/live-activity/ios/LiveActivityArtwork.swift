@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import UIKit
 
@@ -31,23 +30,14 @@ enum LiveActivityArtwork {
     return dir
   }
 
-  /// The key contains the credential-free station origin and the complete
-  /// logical artwork identity. Hash the whole value rather than sanitizing or
-  /// truncating it: lossy filenames let distinct private artwork collide, and
-  /// raw station/id details do not belong on disk.
-  private static func filename(for key: String) -> String {
-    let digest = SHA256.hash(data: Data(key.utf8))
-    return digest.map { String(format: "%02x", $0) }.joined() + ".img"
-  }
-
   /// The filename for `key` if it is already on disk, else nil. Called on the
   /// hot path so the activity can go out with art immediately when the track
   /// has been seen before, without waiting on a download.
   static func cachedName(for key: String?) -> String? {
     guard let key, !key.isEmpty, let dir = directory else { return nil }
-    let name = filename(for: key)
-    return FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
-      ? name : nil
+    return LiveActivityArtworkCacheIdentity.cachedName(for: key) { name in
+      FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+    }
   }
 
   /// Download `url` into the shared container under `key`. `completion` fires
@@ -85,7 +75,7 @@ enum LiveActivityArtwork {
         completion(nil)
         return
       }
-      let name = filename(for: key)
+      let name = LiveActivityArtworkCacheIdentity.filename(for: key)
       do {
         try data.write(to: dir.appendingPathComponent(name), options: .atomic)
       } catch {

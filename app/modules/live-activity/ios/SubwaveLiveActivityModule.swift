@@ -54,11 +54,9 @@ public class SubwaveLiveActivityModule: Module {
   /// The state last pushed, kept so a cover that lands after the fact can be
   /// re-pushed without the hook having to re-send everything.
   private var lastState: SubwaveLiveAttributes.ContentState?
-  /// The artwork key `lastState` belongs to. A download that completes after
-  /// the track has already changed is dropped rather than painting the
-  /// previous song's cover over the current one.
-  private var lastArtworkKey: String?
-  private var inFlightArtworkKey: String?
+  /// Artwork ownership is independent of ActivityKit so cached identity and
+  /// crossing download completions can be verified without an app build.
+  private var artworkOwnership = LiveActivityArtworkOwnership()
 
   public func definition() -> ModuleDefinition {
     Name("SubwaveLiveActivity")
@@ -132,8 +130,7 @@ public class SubwaveLiveActivityModule: Module {
       guard #available(iOS 17.0, *) else { return }
       await self.endAll()
       self.lastState = nil
-      self.lastArtworkKey = nil
-      self.inFlightArtworkKey = nil
+      self.artworkOwnership.reset()
     }
   }
 
@@ -141,7 +138,7 @@ public class SubwaveLiveActivityModule: Module {
 
   private func remember(_ content: SubwaveLiveAttributes.ContentState, key: String?) {
     lastState = content
-    lastArtworkKey = key
+    artworkOwnership.remember(key: key)
   }
 
   private func contentState(from state: LiveActivityState) -> SubwaveLiveAttributes.ContentState {
@@ -193,18 +190,15 @@ public class SubwaveLiveActivityModule: Module {
       let key = state.artworkKey, !key.isEmpty,
       let url = state.artworkUrl, !url.isEmpty,
       LiveActivityArtwork.cachedName(for: key) == nil,
-      inFlightArtworkKey != key
+      artworkOwnership.begin(key: key)
     else { return }
 
-    inFlightArtworkKey = key
     LiveActivityArtwork.fetch(key: key, url: url, headers: state.artworkHeaders) {
       [weak self] name in
       guard let self else { return }
       Task { @MainActor in
-        if self.inFlightArtworkKey == key {
-          self.inFlightArtworkKey = nil
-        }
-        guard let name, self.lastArtworkKey == key, var content = self.lastState else { return }
+        let ownsCurrentArtwork = self.artworkOwnership.complete(key: key)
+        guard let name, ownsCurrentArtwork, var content = self.lastState else { return }
         guard content.artwork != name else { return }
         content.artwork = name
         self.lastState = content
