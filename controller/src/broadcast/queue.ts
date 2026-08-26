@@ -1892,7 +1892,7 @@ class Queue {
     // authenticates the editorial event (retirePendingJingles below).
     const label = (await jingles.list()).find(j => j.filename === filename)?.text || filename;
     const reservation = await this.withPendingJingleState(async () => {
-      const retired = this.retirePendingJingles();
+      const retired = await this.retirePendingJingles();
       if (this._pendingJingles.has(filename)) {
         if (retired) await this.persistPendingJingles();
         return { ok: false as const, reason: 'already-queued' as const };
@@ -1934,7 +1934,7 @@ class Queue {
   // will be. A mixer restart empties jingle_now_queue and loses the request
   // silently, so every entry has to expire on its own — the button must never
   // wedge shut on bookkeeping.
-  retirePendingJingles(): boolean {
+  async retirePendingJingles(): Promise<boolean> {
     const now = Date.now();
     let changed = false;
     for (const [name, pending] of this._pendingJingles) {
@@ -1950,24 +1950,33 @@ class Queue {
         name === marker.filename && marker.startedAtMs >= pending.reservedAt
       ));
       if (airedIndex >= 0) {
-        for (const [name, pending] of entries.slice(0, airedIndex + 1)) {
-          this._pendingJingles.delete(name);
-          // A single marker may retire several FIFO entries if the controller
-          // missed earlier marker writes. Give every turn the durable
-          // reservation id, so a restart between the session and ledger writes
-          // cannot append it twice when recovery sees the same marker again.
-          const manualJingleId = `${name}:${pending.reservedAt}`;
-          const alreadyRecorded = session.getSession()?.messages?.some(
-            turn => turn?.meta?.manualJingleId === manualJingleId,
-          );
-          if (!alreadyRecorded) {
-            session.appendTurn({
-              role: 'segment',
-              kind: 'jingle',
-              text: pending.label,
-              meta: { manualJingleId },
-            });
+        const airedEntries = entries.slice(0, airedIndex + 1);
+        // The session is the durable editorial record.  Write it before
+        // releasing the independently persisted pending ledger: a crash after
+        // the ledger write must be recoverable by the reservation's id.
+        if (session.getSession()) {
+          for (const [name, pending] of airedEntries) {
+            // A single marker may retire several FIFO entries if the controller
+            // missed earlier marker writes. Give every turn the durable
+            // reservation id, so a restart between the session and ledger writes
+            // cannot append it twice when recovery sees the same marker again.
+            const manualJingleId = `${name}:${pending.reservedAt}`;
+            const alreadyRecorded = session.getSession()?.messages?.some(
+              turn => turn?.meta?.manualJingleId === manualJingleId,
+            );
+            if (!alreadyRecorded) {
+              session.appendTurn({
+                role: 'segment',
+                kind: 'jingle',
+                text: pending.label,
+                meta: { manualJingleId },
+              });
+            }
           }
+          if (!await session.persistNow()) return changed;
+        }
+        for (const [name] of airedEntries) {
+          this._pendingJingles.delete(name);
         }
         changed = true;
       }
@@ -1982,6 +1991,14 @@ class Queue {
     const next = this._pendingJingleStateChain.then(operation, operation);
     this._pendingJingleStateChain = next.then(() => {}, () => {});
     return next;
+  }
+
+  async reconcilePendingJingles() {
+    return this.withPendingJingleState(async () => {
+      const changed = await this.retirePendingJingles();
+      if (changed) await this.persistPendingJingles();
+      return changed;
+    });
   }
 
   async persistPendingJingles() {
@@ -2006,10 +2023,8 @@ class Queue {
           // their air-time memory falls back to the readable filename.
           label: typeof entry.label === 'string' && entry.label ? entry.label : entry.filename,
         }]));
-      if (this.retirePendingJingles()) {
-        void this.withPendingJingleState(() => this.persistPendingJingles())
-          .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));
-      }
+      void this.reconcilePendingJingles()
+        .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));
     } catch (err) {
       console.error('[queue] pending-jingles recover failed:', (err as Error).message);
     }
@@ -2831,6 +2846,14 @@ class Queue {
     const tick = async () => {
       this._nowPlaying = await this.readNowPlayingFromDisk();
       this._nowPlayingFresh = true;
+      // The jingle marker is an independent Liquidsoap edge.  Poll it with
+      // now-playing so a lone manual press reaches prompt memory before a
+      // later automatic marker overwrites the shared file.
+      try {
+        await this.reconcilePendingJingles();
+      } catch (err) {
+        console.error('[queue] pending-jingles reconcile failed:', (err as Error).message);
+      }
       this.onTrackStarted(this._nowPlaying);
       // Beds ride the same tick rather than a poller of their own — a bed's
       // start is a track-boundary event like any other, and the 1.5s cadence is

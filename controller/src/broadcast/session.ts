@@ -221,18 +221,33 @@ function buildHandoff(prev: Session | null): string | null {
   return parts.join(' — ');
 }
 
-async function persist() {
-  if (!_session) return;
+async function persist(): Promise<boolean> {
+  if (!_session) return true;
   try {
     // Atomic replace — /debug and boot recovery read this file, and a crash
     // mid-write should leave the previous snapshot, not a truncated one.
     await writeFileAtomic(config.session.currentFile, JSON.stringify(_session, null, 2));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function schedulePersist() {
   if (_writeTimer) return;
   _writeTimer = setTimeout(() => { _writeTimer = null; persist(); }, PERSIST_DEBOUNCE_MS);
+}
+
+// Some cross-process handoffs have a second durable ledger.  When retiring one
+// of those entries, its session turn must reach disk before that ledger can be
+// removed; otherwise a crash in the debounce window loses an authenticated
+// on-air event.  Ordinary turns deliberately keep the coalesced write above.
+export async function persistNow(): Promise<boolean> {
+  if (_writeTimer) {
+    clearTimeout(_writeTimer);
+    _writeTimer = null;
+  }
+  return persist();
 }
 
 async function archive(s: Session | null) {

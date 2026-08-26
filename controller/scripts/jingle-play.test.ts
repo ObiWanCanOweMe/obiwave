@@ -130,7 +130,7 @@ test('manual jingle prompt memory is authenticated by the manual air marker exac
       ...(origin ? { origin } : {}),
       startedAt: Date.now() / 1000,
     }));
-    queue.retirePendingJingles();
+    await queue.retirePendingJingles();
     assert.deepEqual(manualJingleTurns(), [], `${origin || 'legacy'} marker is not a manual air event`);
   }
 
@@ -140,8 +140,8 @@ test('manual jingle prompt memory is authenticated by the manual air marker exac
     origin: 'manual',
     startedAt: Date.now() / 1000,
   }));
-  queue.retirePendingJingles();
-  queue.retirePendingJingles();
+  await queue.retirePendingJingles();
+  await queue.retirePendingJingles();
   assert.deepEqual(manualJingleTurns().map(turn => turn.text), ['Event announcement']);
 });
 
@@ -239,6 +239,102 @@ test('a pending manual jingle survives a controller-only restart', () => {
   }
 });
 
+test('the watcher records a lone manual jingle marker without another button press', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      queue.startWatcher();
+      await new Promise(resolve => setTimeout(resolve, 1700));
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+      process.exit(0);
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('an observed manual marker survives a later automatic marker overwrite', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      queue.startWatcher();
+      await new Promise(resolve => setTimeout(resolve, 1700));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'automatic',
+        startedAt: Date.now() / 1000,
+      }));
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+      process.exit(0);
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('an immediate exit after marker retirement cannot lose or duplicate the jingle turn', () => {
+  const state = makeJingleState([filename, other]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      // This retires the first reservation and writes the next ledger snapshot.
+      // Exit immediately: the old implementation let that snapshot land before
+      // session's debounced write, dropping the already-aired announcement.
+      await queue.playJingle(${JSON.stringify(other)});
+      console.log('__RESULT__=' + JSON.stringify(true));
+      process.exit(0);
+    `), true);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      await session.recover(${JSON.stringify(context)});
+      queue.recover();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
 test('a manual marker is remembered once across controller restart recovery', () => {
   const state = makeJingleState([filename, other]);
   const context = {
@@ -265,9 +361,8 @@ test('a manual marker is remembered once across controller restart recovery', ()
         startedAt: Date.now() / 1000,
       }));
       // The next FIFO press reconciles the prior marker and durably removes
-      // that reservation. Wait for session's intentionally debounced write.
+      // that reservation before returning.
       await queue.playJingle(${JSON.stringify(other)});
-      await new Promise(resolve => setTimeout(resolve, 1100));
       const turns = session.getSession().messages
         .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
         .map(turn => turn.text);
@@ -280,7 +375,7 @@ test('a manual marker is remembered once across controller restart recovery', ()
       await session.recover(context);
       queue.recover();
       // Re-reading the same marker after recovery cannot add another turn.
-      queue.retirePendingJingles();
+      await queue.retirePendingJingles();
       const turns = session.getSession().messages
         .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
         .map(turn => turn.text);
