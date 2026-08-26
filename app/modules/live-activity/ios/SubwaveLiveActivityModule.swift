@@ -57,6 +57,9 @@ public class SubwaveLiveActivityModule: Module {
   /// Artwork ownership is independent of ActivityKit so cached identity and
   /// crossing download completions can be verified without an app build.
   private var artworkOwnership = LiveActivityArtworkOwnership()
+  /// Async starts can complete after a React cleanup; only the newest command
+  /// may retain an ActivityKit request or module-owned state.
+  private var lifecycleOwnership = LiveActivityLifecycleOwnership()
 
   public func definition() -> ModuleDefinition {
     Name("SubwaveLiveActivity")
@@ -94,15 +97,18 @@ public class SubwaveLiveActivityModule: Module {
     AsyncFunction("start") { (config: LiveActivityConfig, state: LiveActivityState) -> Bool in
       guard #available(iOS 17.0, *) else { return false }
       guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
+      let lifecycleToken = self.lifecycleOwnership.begin()
       // Never stack. A station switch, a hot reload, or an activity left over
       // from a previous run all land here, and two on-air cards claiming
       // different songs is worse than a beat of no card at all.
       await self.endAll()
+      guard self.lifecycleOwnership.owns(lifecycleToken) else { return false }
 
       let attributes = SubwaveLiveAttributes(station: config.station, accent: config.accent)
       let content = self.contentState(from: state)
+      let activity: Activity<SubwaveLiveAttributes>
       do {
-        _ = try Activity.request(
+        activity = try Activity.request(
           attributes: attributes,
           content: ActivityContent(state: content, staleDate: self.staleDate(for: content)),
           pushType: nil
@@ -111,6 +117,10 @@ public class SubwaveLiveActivityModule: Module {
         // Throws when the listener is at the system activity limit, or has
         // revoked permission since `isSupported` was read. Not fatal, and not
         // worth an alert: the lock screen still has the Now Playing card.
+        return false
+      }
+      guard self.lifecycleOwnership.owns(lifecycleToken) else {
+        await activity.end(nil, dismissalPolicy: .immediate)
         return false
       }
       self.remember(content, key: state.artworkKey)
@@ -128,7 +138,9 @@ public class SubwaveLiveActivityModule: Module {
 
     AsyncFunction("stop") { () in
       guard #available(iOS 17.0, *) else { return }
+      let lifecycleToken = self.lifecycleOwnership.begin()
       await self.endAll()
+      guard self.lifecycleOwnership.owns(lifecycleToken) else { return }
       self.lastState = nil
       self.artworkOwnership.reset()
     }

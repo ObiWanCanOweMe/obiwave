@@ -22,6 +22,7 @@ import {
   updateLiveActivity,
   type LiveActivityState,
 } from '../../modules/live-activity';
+import { LiveActivityLifecycle } from './live-activity-lifecycle';
 import { useTalking } from '@/hooks/useTalking';
 import type { TrackLike } from '@/hooks/useTrackLike';
 import { resolveAirCard } from '@/lib/air-card';
@@ -113,6 +114,13 @@ export function useLiveActivity({
   // this seeds the ref that `start` reads on the very first mount.
   const stateRef = useRef(state);
   const startedRef = useRef(false);
+  const lifecycleRef = useRef<LiveActivityLifecycle | null>(null);
+  if (lifecycleRef.current === null) {
+    lifecycleRef.current = new LiveActivityLifecycle({
+      start: startLiveActivity,
+      stop: stopLiveActivity,
+    });
+  }
   useEffect(() => {
     stateRef.current = state;
     if (!startedRef.current) return;
@@ -127,13 +135,13 @@ export function useLiveActivity({
     if (!supported || !api || !tunedIn) return;
     let cancelled = false;
     void (async () => {
-      const ok = await startLiveActivity({ station, accent }, stateRef.current);
+      const ok = await lifecycleRef.current!.start({ station, accent }, stateRef.current);
       if (!cancelled) startedRef.current = ok;
     })();
     return () => {
       cancelled = true;
       startedRef.current = false;
-      void stopLiveActivity();
+      void lifecycleRef.current!.stop();
     };
   }, [supported, api, tunedIn, station, accent]);
 

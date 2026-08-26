@@ -49,3 +49,20 @@ struct LiveActivityArtworkOwnership {
     inFlightKey = nil
   }
 }
+
+/// Monotonic ownership for async ActivityKit lifecycle commands. A start waits
+/// for `endAll()`, which means a later stop or replacement start can overtake
+/// it. Only the newest command may keep a requested activity or mutate the
+/// module's remembered state.
+struct LiveActivityLifecycleOwnership {
+  private var generation = 0
+
+  mutating func begin() -> Int {
+    generation += 1
+    return generation
+  }
+
+  func owns(_ token: Int) -> Bool {
+    generation == token
+  }
+}

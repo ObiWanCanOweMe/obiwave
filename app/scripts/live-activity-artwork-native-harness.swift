@@ -70,6 +70,22 @@ struct LiveActivityArtworkNativeHarness {
     require(ownership.complete(key: avatarBKey), "current station B completion was rejected")
     require(ownership.inFlightKey == nil, "station B ownership was not cleared on completion")
 
-    print("live-activity native artwork identity/ownership contract: ok")
+    // ActivityKit calls can overlap while a start is awaiting endAll(). A stale
+    // completion must lose ownership, while the latest start/stop command keeps
+    // it. This pure token contract is shared by the native module so it is
+    // testable without compiling the iOS target.
+    var lifecycle = LiveActivityLifecycleOwnership()
+    let oldStart = lifecycle.begin()
+    let cleanup = lifecycle.begin()
+    require(!lifecycle.owns(oldStart), "cleanup did not cancel the stale start")
+    require(lifecycle.owns(cleanup), "cleanup lost lifecycle ownership")
+    let replacementStart = lifecycle.begin()
+    require(!lifecycle.owns(cleanup), "replacement start did not cancel cleanup")
+    require(
+      lifecycle.owns(replacementStart),
+      "replacement start did not retain lifecycle ownership"
+    )
+
+    print("live-activity native artwork/lifecycle ownership contract: ok")
   }
 }
