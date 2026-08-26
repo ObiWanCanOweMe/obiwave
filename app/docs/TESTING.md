@@ -46,8 +46,14 @@ which makes two source edits:
 
 - **Expo Go does not work** — native modules (RNTP, Skia, Reanimated worklets)
   ship compiled code. You must build a **dev client**.
-- **Stream is MP3 only** (`{base}/stream.mp3`), same universal-floor choice as
-  the web player. No Opus/Ogg.
+- **MP3 is the universal stream floor** (`{base}/stream.mp3`), and the default
+  for every station. The SIGNAL picker can offer station-advertised AAC, Opus,
+  and FLAC mounts, with the preference stored per credential-free station base
+  URL. It only offers formats the current platform can decode: Android supports
+  all four; iOS supports MP3 and AAC because AVPlayer cannot demux the Ogg Opus
+  or FLAC mounts. A missing/unsupported mount falls back to MP3. Google Cast
+  always loads the MP3 mount (and is unavailable for credentialed streams,
+  because Cast cannot carry the station's authorization header).
 - **No backend needed for testing** — the app defaults to the public
   `getsubwave.com` station, which is live. Onboarding pre-fills it.
 - **Base URL is fully runtime** — there are no hardcoded station URLs in source.
