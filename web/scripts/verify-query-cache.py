@@ -6,7 +6,10 @@ the change is FOR (cache reuse across a tab switch, request de-duplication)
 plus the cross-tab cache writes and the no-retry-storm guarantee.
 
 Same isolated verify stack, same ports, same throwaway-stack assertion — see
-verify-library.py's docstring. Run it the same way:
+verify-library.py's docstring. It requires the same fresh marker-bound
+`verify-library-fixture.py seed` setup and rejects database state from any
+other run.
+Run it the same way:
 
     python3 web/scripts/verify-query-cache.py [check ...]
 """
@@ -26,6 +29,7 @@ from verify_stack import assert_dummy_backend_provenance
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
 AUTH = base64.b64encode(b"test:test").decode()
+FIXTURE_HELPER = pathlib.Path(__file__).with_name("verify-library-fixture.py")
 
 ROW = ".lib-row"
 TITLE = ".lib-title"
@@ -66,6 +70,17 @@ def api_write(method, path, body=None, ok_statuses=(200, 201, 204, 404)):
         raise
 
 
+def assert_owned_library_fixture():
+    result = subprocess.run(
+        [sys.executable, str(FIXTURE_HELPER), "assert"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        sys.exit(result.stdout + result.stderr)
+
+
 def assert_throwaway_stack():
     if API != "http://localhost:7791" or WEB != "http://localhost:7793":
         sys.exit("refusing to run: API/WEB are not the verify stack's ports")
@@ -74,8 +89,19 @@ def assert_throwaway_stack():
     except Exception as e:
         sys.exit(f"verify stack not reachable at {API}: {e}")
     assert_dummy_backend_provenance(health)
-    if not (api("/library/browse?limit=1").get("rows") or []):
-        sys.exit("verify stack has an empty library.db — copy one into its STATE_DIR")
+    assert_owned_library_fixture()
+    browse = api("/library/browse?limit=60")
+    history = api("/library/history?limit=50&offset=50")
+    rows = browse.get("rows") or []
+    genres = {genre for row in rows for genre in row.get("genres", [])}
+    moods = {mood for row in rows for mood in row.get("moods", [])}
+    if not (
+        browse.get("total") == 60 and len(rows) == 60
+        and history.get("total") == 60 and len(history.get("rows") or []) == 10
+        and genres == {"Ambient", "Electronic", "House"}
+        and moods == {"bright", "calm", "driving", "night"}
+    ):
+        sys.exit("owned library fixture did not expose its fixed catalogue/paging contract")
 
 
 def new_page(pw):

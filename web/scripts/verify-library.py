@@ -10,13 +10,20 @@ Usage: python3 web/scripts/verify-library.py [check ...]
 Every check in CHECKS runs with no args; name one or more to run a subset.
 
 STACK. The isolated verify stack from the `verify` skill — controller on
-:7791, web dev server on :7793, admin creds test:test. The controller needs a
-seeded library.db in its STATE_DIR (copy one in; a fresh state dir indexes
-nothing and every row assertion fails). Search (/dj/search) and Tracks → All
-(/dj/recent) normally read Subsonic; this harness routes those two GETs to
-deterministic envelopes built from the copied library.db so the isolated stack
-never needs an operator's music-server credentials. Everything else answers
-from the controller directly.
+:7791, web dev server on :7793, admin creds test:test. Before booting the
+controller, create the fresh task-only fixture with:
+
+    SUBWAVE_VERIFY_STATE_DIR=/absolute/task/state \
+    STATE_DIR=/absolute/task/state \
+    SUBWAVE_VERIFY_PROVENANCE=subwave-verify-... \
+    SUBWAVE_VERIFY_ALLOW_STATE_CREATE=1 \
+    python3 web/scripts/verify-library-fixture.py seed
+
+The verifier requires that marker-bound manifest and refuses any database not
+created for the current run. Search (/dj/search) and Tracks → All (/dj/recent)
+normally read Subsonic; this harness routes those two GETs to deterministic
+envelopes built from the owned fixture. Everything else answers from the
+controller directly.
 
 Unlike verify-forms.py these checks are read-mostly, so there is no
 SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE gate — but assert_throwaway_stack() still
@@ -34,6 +41,9 @@ the only way to tell "loaded but empty" from "still loading".
 """
 import base64
 import json
+from pathlib import Path
+import os
+import subprocess
 import sys
 import traceback
 import urllib.error
@@ -46,6 +56,7 @@ from verify_stack import assert_dummy_backend_provenance
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
 AUTH = base64.b64encode(b"test:test").decode()
+FIXTURE_HELPER = Path(__file__).with_name("verify-library-fixture.py")
 
 # Rows are divs; history reuses only the title class.
 ROW = ".lib-row"
@@ -95,6 +106,19 @@ def api_write(method, path, body=None, ok_statuses=(200, 201, 204, 404)):
         raise
 
 
+def assert_owned_library_fixture():
+    """Require the fresh, marker-bound fixture before controller mutations."""
+    result = subprocess.run(
+        [sys.executable, str(FIXTURE_HELPER), "assert"],
+        env=os.environ,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        sys.exit(result.stdout + result.stderr)
+
+
 def assert_throwaway_stack():
     """Refuse to run against anything but the isolated verify stack.
 
@@ -108,12 +132,22 @@ def assert_throwaway_stack():
     except Exception as e:
         sys.exit(f"verify stack not reachable at {API}: {e}")
     assert_dummy_backend_provenance(health)
-    rows = api("/library/browse?limit=1").get("rows") or []
-    if not rows:
-        sys.exit(
-            "verify stack has an empty library.db — copy one into its STATE_DIR, "
-            "or every row assertion below fails for the wrong reason"
-        )
+    assert_owned_library_fixture()
+    browse = api("/library/browse?limit=60")
+    history_first = api("/library/history?limit=50&offset=0")
+    history_second = api("/library/history?limit=50&offset=50")
+    rows = browse.get("rows") or []
+    genres = {genre for row in rows for genre in row.get("genres", [])}
+    moods = {mood for row in rows for mood in row.get("moods", [])}
+    if not (
+        browse.get("total") == 60 and len(rows) == 60
+        and history_first.get("total") == 60
+        and len(history_first.get("rows") or []) == 50
+        and len(history_second.get("rows") or []) == 10
+        and genres == {"Ambient", "Electronic", "House"}
+        and moods == {"bright", "calm", "driving", "night"}
+    ):
+        sys.exit("owned library fixture did not expose its fixed 60-track contract")
 
 
 def new_page(pw):
@@ -150,11 +184,11 @@ def mode_button(page, label):
 def stub_subsonic_library_modes(page):
     """Keep the two Subsonic-backed tabs deterministic on the isolated stack.
 
-    The verify controller deliberately points NAVIDROME_URL at a dead loopback
-    port so it can never inherit or mutate an operator's music server. These
-    route fixtures replace only the two read envelopes normally supplied by
-    that server; their rows still come from the isolated controller's copied
-    library.db, and Search still exercises offset paging and append behavior.
+    The verify controller points NAVIDROME_URL at the task-owned loopback
+    dummy, never at an operator's music server. These route fixtures replace
+    only the two read envelopes normally supplied by that dummy; their rows
+    still come from the isolated controller's synthetic fixture, and Search
+    still exercises offset paging and append behavior.
     """
     rows = api("/library/browse?limit=100").get("rows") or []
     assert len(rows) > 50, "fixture library needs more than one Search page"
@@ -217,10 +251,9 @@ def search_modes(page):
     more = page.get_by_role("button", name="Load more", exact=True)
     if more.count():
         more.first.click()
-        # Generous: this is the only wait in the suite that goes over the
-        # network to the operator's Subsonic host rather than to library.db,
-        # and a remote Navidrome's second search page has been seen to take
-        # well over a minute. A tighter bound flakes and reads as a regression.
+        # Generous: this is the only paged route fixture in the suite, and its
+        # second page still traverses the real browser request/append path.
+        # The request remains local to the task-owned stack.
         page.wait_for_function(
             "(n) => document.querySelectorAll('.lib-row').length > n",
             arg=first, timeout=180_000,
@@ -349,8 +382,16 @@ def blocked_marks(page):
         page.get_by_role("button", name="Never play this track", exact=True).click()
         page.wait_for_selector(f"{ROW} {BLOCKED_BADGE}", timeout=60_000)
 
+        # POST /library/blocklist resolves its display metadata from the
+        # task-owned Subsonic stub before persisting the id entry. The record
+        # returned by the authoritative local API, rather than the pre-click
+        # browse snapshot, is therefore the exact text the Blocked tab must
+        # render. (The ID is the invariant across both sources.)
+        entries = api("/library/blocklist").get("entries") or []
+        entry = next((item for item in entries if item.get("type") == "track" and item.get("id") == track["id"]), None)
+        assert entry, "block action succeeded in the row but produced no matching local blocklist entry"
         goto_tab(page, "?tab=blocked", wait=TITLE)
-        assert page.get_by_text(track.get("title") or track["id"], exact=False).count() >= 1, \
+        assert page.get_by_text(entry.get("name") or track["id"], exact=False).count() >= 1, \
             "blocked entry did not appear on the Blocked tab"
     finally:
         api_write("DELETE", f"/library/blocklist/track/{track['id']}")

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -128,6 +129,60 @@ class SpawnedCleanupOwnershipTest(unittest.TestCase):
             wait_for_port(port, False)
         finally:
             stop_group(wrapper)
+
+
+class OnboardingGeneratedFileCleanupTest(unittest.TestCase):
+    def test_error_cleanup_preserves_concurrent_generated_file_edits(self):
+        """The real onboarding finally path must not reset another writer's files.
+
+        A temporary Git repository makes the old `git checkout -- …` behavior
+        observable without ever editing this worktree.  The controller launch
+        is intentionally pointed at an empty directory and `_wait_http` fails
+        immediately, so this drives the onboarding ERROR cleanup path before a
+        browser or a second web server starts.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            repo = Path(root)
+            web_dir = repo / "web"
+            controller_dir = repo / "controller"
+            web_dir.mkdir()
+            controller_dir.mkdir()
+            tsconfig = web_dir / "tsconfig.json"
+            next_env = web_dir / "next-env.d.ts"
+            tsconfig.write_bytes(b'{"compilerOptions":{"strict":true}}\n')
+            next_env.write_bytes(b'/// <reference types="next" />\n')
+            tsconfig.chmod(0o644)
+            next_env.chmod(0o644)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "web/tsconfig.json", "web/next-env.d.ts"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git", "-c", "user.name=Verifier", "-c", "user.email=verifier@example.invalid",
+                    "commit", "-qm", "fixture baseline",
+                ],
+                cwd=repo,
+                check=True,
+            )
+
+            # Sentinel edits represent another author changing these files
+            # while onboarding owns only its temporary Next process.
+            tsconfig.write_bytes(b'// concurrent tsconfig sentinel\n')
+            tsconfig.chmod(0o640)
+            next_env.unlink()
+
+            with mock.patch.object(VERIFY_FORMS, "WEB_DIR", web_dir), \
+                 mock.patch.object(VERIFY_FORMS, "CONTROLLER_DIR", controller_dir), \
+                 mock.patch.object(
+                     VERIFY_FORMS,
+                     "_wait_http",
+                     side_effect=RuntimeError("forced onboarding startup failure"),
+                 ):
+                with self.assertRaisesRegex(RuntimeError, "forced onboarding startup failure"):
+                    VERIFY_FORMS.onboarding(None)
+
+            self.assertEqual(tsconfig.read_bytes(), b'// concurrent tsconfig sentinel\n')
+            self.assertEqual(tsconfig.stat().st_mode & 0o777, 0o640)
+            self.assertFalse(next_env.exists(), "cleanup recreated another writer's deleted file")
 
 
 if __name__ == "__main__":

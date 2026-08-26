@@ -1134,8 +1134,8 @@ def onboarding(page):
     Boots its OWN throwaway controller (port 7795, a fresh temp STATE_DIR, a
     loopback dummy NAVIDROME_URL, and critically no Navidrome credentials —
     their absence is what makes needsSetup true) and its OWN second Next dev
-    server (port 7796). Both are
-    started and stopped by THIS check, in a `finally`, so this file stays
+    server (port 7796) from a copied temporary web source. Both are started
+    and stopped by THIS check, in a `finally`, so this file stays
     runnable as a whole against a freshly booted stack (Task 13's job) with no
     manual step for anyone to forget — that was Task 5's bar.
 
@@ -1150,23 +1150,15 @@ def onboarding(page):
        retargeted per request; a second `next dev` process, pointed at 7795
        from the start, is the only way.
     2. A second `next dev` in the SAME source tree collides with the first:
-       Next's dev server refuses to start a second instance sharing one
-       `.next/dev/lock` file ("Another next dev server is already running",
-       confirmed by actually hitting it). The lock path is keyed off
-       `distDir`, so this needs its own — `next.config.js` reads
-       `SUBWAVE_NEXT_DIST_DIR` (falls back to plain `.next` for every other
-       invocation) for exactly this. Building instead of a second dev server
-       was considered and rejected: `next build` overwrites the SHARED
-       `.next/` output the :7793 dev server is serving from, corrupting it
-       for every other check in this file (this is the documented "don't
-       `npm run build` while dev server runs" gotcha, and it would fire here
-       even though the intent is isolation, since both processes would
-       default to the same `.next` without the distDir override).
-       `next dev` (not `next start`) is also needed because this worktree's
-       `node_modules` is a symlink — Turbopack panics resolving it
-       ("Symlink […]/node_modules is invalid"), so this launches with
-       `--webpack`, same as every other worktree dev invocation until a real
-       `npm install` replaces the symlink.
+       Next's dev server shares one `.next/dev/lock` and also rewrites the
+       tracked generated inputs `tsconfig.json` and `next-env.d.ts`. Instead
+       of trying to restore those mutable files, this check copies `web/` to
+       a private temp root (preserving the installed `node_modules` symlink)
+       and excludes every `.next` directory. All generated output and locks
+       then remain in that copied source and removal of the private root
+       cannot overwrite a concurrent edit in the worktree. `next dev` (not
+       `next start`) is still needed because the copied `node_modules` is a
+       symlink, so this launches with `--webpack` as before.
 
     Runnable standalone: `python3 web/scripts/verify-forms.py onboarding`.
     Needs nothing pre-booted beyond the repo + node_modules every other check
@@ -1187,19 +1179,17 @@ def onboarding(page):
     curl, not just cited.
     """
     state_dir = tempfile.mkdtemp(prefix="subwave-onboarding-verify-")
-    # Next's `distDir` is ALWAYS resolved relative to the project root
-    # (path.join(projectDir, distDir)) — handing it an absolute /tmp path
-    # doesn't escape that, it just gets joined as another path SEGMENT
-    # (path.join('/a/b', '/tmp/c') === '/a/b/tmp/c' in Node, no special
-    # leading-slash handling), so the real build output silently lands under
-    # web/tmp/... instead of the tempdir this script thinks it owns and
-    # cleans up — confirmed the hard way: an early version of this check left
-    # exactly that behind, and it was picking up `npm run lint` because the
-    # relative name is a real leftover directory in the repo, not the actual
-    # temp path. A plain relative name, cleaned up via its OWN absolute path
-    # (WEB_DIR / name), avoids the mismatch entirely.
-    dist_dir_name = f".next-onboarding-verify-{os.getpid()}"
-    dist_dir_abs = WEB_DIR / dist_dir_name
+    web_root = Path(tempfile.mkdtemp(prefix="subwave-onboarding-web-verify-"))
+    onboarding_web_dir = web_root / "web"
+    # Copy code/config into a private root but preserve symlinked dependencies;
+    # this is what prevents Next from ever touching the tracked worktree
+    # generated files, including when startup or cleanup raises.
+    shutil.copytree(
+        WEB_DIR,
+        onboarding_web_dir,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".next", ".next-onboarding-verify-*"),
+    )
 
     controller_env = dict(os.environ)
     controller_env.update({
@@ -1248,11 +1238,10 @@ def onboarding(page):
         web_env = dict(os.environ)
         web_env.update({
             "NEXT_PUBLIC_API_URL": ONBOARD_API,
-            "SUBWAVE_NEXT_DIST_DIR": dist_dir_name,
         })
         web_proc = subprocess.Popen(
             ["npx", "next", "dev", "-p", str(ONBOARD_WEB_PORT), "--webpack"],
-            cwd=str(WEB_DIR),
+            cwd=str(onboarding_web_dir),
             env=web_env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1368,14 +1357,7 @@ def onboarding(page):
             _stop_spawned_process(web_proc, ONBOARD_WEB_PORT)
         _stop_spawned_process(controller_proc, ONBOARD_CONTROLLER_PORT)
         shutil.rmtree(state_dir, ignore_errors=True)
-        shutil.rmtree(dist_dir_abs, ignore_errors=True)
-        # `next dev` with a non-default distDir still rewrites tsconfig.json
-        # and next-env.d.ts (both tracked files) to reference it — restore
-        # them so this check leaves the working tree exactly as it found it.
-        subprocess.run(
-            ["git", "checkout", "--", "web/tsconfig.json", "web/next-env.d.ts"],
-            cwd=str(WEB_DIR.parent), capture_output=True,
-        )
+        shutil.rmtree(web_root, ignore_errors=True)
 
 
 PERSONA_VERIFY_NAME = "Verify Persona"
