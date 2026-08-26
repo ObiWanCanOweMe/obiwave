@@ -17,6 +17,7 @@ import { Card, Btn, Pill, Seg } from '../ui';
 import { ProviderSelector } from '../llm/ProviderSelector';
 import { ModelCombobox } from '../llm/ModelCombobox';
 import { LLM_ENV_VARS, llmProviderLabel } from '../llm/providerMeta';
+import { Advanced } from './section-chrome';
 import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult, KEY_HINTS,
   type SectionProps,
@@ -674,6 +675,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
+      <Advanced note="tuning, the fallback chain, the picker and the daily budget">
       <Card title="Fallback" sub="backup when the primary is offline">
         <div className="grid gap-[18px]">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
@@ -1335,6 +1337,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           </div>
         )}
       </Card>
+      </Advanced>
 
       <SaveBar
         note={`Active model: ${data.llm?.active}. Applies to the next LLM call, no restart needed.`}
@@ -1343,6 +1346,14 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         saveLabel="Save LLM provider"
         errors={fieldErrors}
         ownedKeys={['llm']}
+        // All four key boxes are component-local — the panel diffs FormState
+        // and cannot see them, so a pasted key alone would leave the section
+        // "clean" and unmount the very button that saves it. The managed pair
+        // has a Test-and-save path too; the compat pair only has this button.
+        dirty={!!(
+          primaryKeyInput.trim() || fallbackKeyInput.trim()
+          || compatKeyInput.trim() || compatFallbackKeyInput.trim()
+        )}
       />
 
       {/* The SAFE outcome (keep the embedding pin) is the default; only the explicit

@@ -145,15 +145,23 @@ export async function generateStationId({ recap = null, context = null, recentOp
   const djName = speaker?.name || 'your host';
   const stationName = settings.get().station;
   const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
-  // Loose clock only: an ident is generated at the cron tick but airs after
+  // Daypart only: an ident is generated at the cron tick but airs after
   // LLM + TTS + voice-queue latency — an exact "18:15" routinely lands on air
-  // minutes late (issue #864). Time-of-day colour is fine; minutes are not.
+  // minutes late (issue #864). "Keep it loose, never the exact minutes" was
+  // not enough: shown "Local time: 3:49 pm", the model kept the hour and
+  // dropped the minutes, and "three in the afternoon" aired at 3:50 — the
+  // one number that is about to turn over. So the allowed reading is
+  // computed in code (context.clock.spokenDaypart, "in the afternoon") and
+  // the hour is banned outright, not just the minutes.
   //
   // The nudge has to move with the field, not just alongside it: withholding
   // the Local time line while still telling the model to nod at the clock is
   // how you get an invented one (broadcast/clock-policy.ts).
+  const daypart = context?.clock?.spokenDaypart;
   const clockNudge = speakClockAllowed()
-    ? ` If you nod to the clock, keep it loose — the time of day, never the exact minutes (this airs a few minutes after you write it).`
+    ? (daypart
+        ? ` If you nod to the clock, say only "${daypart}" — never the hour and never the minutes (this airs a few minutes after you write it, and the hour may have changed by then).`
+        : ` If you nod to the clock, name only the part of the day (morning, afternoon, evening, night) — never the hour and never the minutes (this airs a few minutes after you write it, and the hour may have changed by then).`)
     : '';
   ctxLines.push(`Task: ${lengthPhrase('stationId', speaker)} for ${stationName} with ${djName}. A little understated.${clockNudge}`);
   return djText({
@@ -189,25 +197,23 @@ export async function generateSignoff({ personaOut, personaIn, showIn = null, co
   });
 }
 
-export async function generateHandoffGreeting({ personaIn, personaOut, signoffText = null, showIn = null, episodeAngle = null, context = null, recap = null, recentOpeners = null }: any) {
+export function handoffGreetingPrompt({ personaIn, personaOut, showIn = null, episodeAngle = null, context = null, recap = null, recentOpeners = null }: any) {
   const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
   const inName = personaIn?.name || 'your host';
   const outName = personaOut?.name || 'the previous host';
-  // The predecessor's actual sign-off rides in the prompt so the greeting can
-  // genuinely respond to it ("Cheers Johnny…") rather than a generic hello.
-  if (signoffText) {
-    const clipped = String(signoffText).replace(/\s+/g, ' ').trim().slice(0, 240);
-    if (clipped) ctxLines.push(`${outName} just signed off with: "${clipped}"`);
-  }
   // Programme shows: this greeting doubles as the episode's intro, so the
   // producer's angle rides in (broadcast/programme.ts skips the standalone
   // intro when a handoff opened the show).
   const angleClause = showIn && episodeAngle ? ` Today's episode angle: ${episodeAngle} — set it up as you open.` : '';
   const showClause = showIn ? ` You're kicking off "${showIn}".${angleClause}` : '';
-  ctxLines.push(`Task: you're ${inName}, just taking over the mic from ${outName}. Acknowledge ${outName} warmly and naturally — a quick nod to what they said if it fits — then ease into your shift.${showClause} ${lengthPhrase('link', personaIn)}. Keep it easy and in character; you're stepping up to the decks, not reading a bulletin.`);
+  ctxLines.push(`Task: you're ${inName}, just taking over the mic from ${outName}. Acknowledge ${outName} warmly and naturally by name, then ease into your own shift without continuing their topic.${showClause} ${lengthPhrase('link', personaIn)}. Keep it easy and in character; you're stepping up to the decks, not reading a bulletin.`);
+  return decoratePrompt(ctxLines.join('\n'), { kind: 'handoff', recap, recentOpeners });
+}
+
+export async function generateHandoffGreeting(args: any) {
   return djText({
-    system: djSystem(personaIn),
-    prompt: decoratePrompt(ctxLines.join('\n'), { kind: 'handoff', recap, recentOpeners }),
+    system: djSystem(args.personaIn),
+    prompt: handoffGreetingPrompt(args),
     temperature: 0.95, topP: 0.92, repeatPenalty: 1.2, seed: randomSeed(),
     kind: 'generateHandoffGreeting',
   });

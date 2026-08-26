@@ -11,6 +11,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup,
 } from '../../ui/select';
 import { Card, Btn, Seg } from '../ui';
+import { Advanced } from './section-chrome';
 import { EmbeddingProviderSelector } from '../embedding/EmbeddingProviderSelector';
 import { ModelCombobox } from '../llm/ModelCombobox';
 import { LLM_ENV_VARS, llmProviderLabel } from '../llm/providerMeta';
@@ -146,7 +147,6 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
   >(null);
   const [probing, setProbing] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   // Local servers (llama.cpp/locca) need a dedicated embedding endpoint; cloud
   // and Ollama providers serve embeddings on the same endpoint as chat.
   const needsServerUrl = effectiveProvider === 'locca' || effectiveProvider === 'openai-compatible';
@@ -627,15 +627,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
       {/* No run button: the bulk tagger is launched from the Library page's
           "Start tagging" flow. */}
 
-      <button
-        type="button"
-        onClick={() => setAdvancedOpen(o => !o)}
-        className="mb-1 w-fit text-[11px] font-bold tracking-[0.14em] text-muted uppercase hover:text-ink"
-      >
-        {advancedOpen ? '▾' : '▸'} Advanced: seed count, propagation, enrichment
-      </button>
-      {advancedOpen && (
-        <>
+      <Advanced note="seed count, propagation thresholds and enrichment">
       <Card title="Seed phase" sub="how many tracks to LLM-tag">
         <div className="grid gap-[18px]">
           <div className="field">
@@ -854,8 +846,7 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
           </div>
         </div>
       </Card>
-        </>
-      )}
+      </Advanced>
 
       <SaveBar
         note={`Saved values apply the next time the bulk tagger runs. Current run (if any) keeps its own snapshot.${
@@ -868,6 +859,10 @@ export function LibrarySection({ data, form, setForm, busy, saveSettings, adminF
         saveLabel="Save library tagger"
         errors={fieldErrors}
         ownedKeys={['embedding', 'audio']}
+        // Both key boxes are component-local — the panel diffs FormState and
+        // cannot see them, so a pasted key alone would leave the section
+        // "clean" and unmount the very button that saves it.
+        dirty={!!(embeddingKeyInput.trim() || compatEmbedKeyInput.trim())}
       />
     </>
   );

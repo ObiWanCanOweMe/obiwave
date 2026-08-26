@@ -336,9 +336,10 @@ export const COMPOSE_BYO_YML = `# SUB/WAVE — production without the bundled re
 # The web image is baked for same-origin /api + /stream.mp3, so point your proxy
 # at ONE hostname and replicate docker/Caddyfile's route table:
 #   /api/listener-auth → 404 / deny         (do this one FIRST — see below)
-#   /stream.mp3  → host:\${ICECAST_PORT}      (disable buffering for live audio)
-#   /api/*       → host:\${CONTROLLER_PORT}   (strip the /api prefix)
-#   everything   → host:\${WEB_PORT}
+#   /stream*                 → host:\${ICECAST_PORT}      (keep path; disable buffering)
+#   /listen.pls /listen.m3u  → host:\${CONTROLLER_PORT}   (keep path)
+#   /api/*                   → host:\${CONTROLLER_PORT}   (strip the /api prefix)
+#   everything               → host:\${WEB_PORT}
 # Split hostnames need a web rebuild with NEXT_PUBLIC_API_URL /
 # NEXT_PUBLIC_STREAM_URL (baked at build time).
 #
@@ -998,7 +999,11 @@ SITE_URL=
 # ICECAST_RELAY_PASSWORD=
 
 # Max concurrent listeners across all mounts (icecast <limits><clients>).
-# Unset → 100. Lower it to bound bandwidth on a small host.
+# Unset → whatever admin → Settings → Danger zone → Max listeners says
+# (default 100). Setting it here OVERRIDES that field, which is why the
+# broadcast log names the source it used on every boot. Prefer the admin
+# field unless you deploy 12-factor style; on the AIO image the field is the
+# only way in, since there is no .env there at all.
 # ICECAST_MAX_CLIENTS=
 
 # ───────── Real listener IPs behind a proxy ─────────
@@ -1201,4 +1206,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.10.0`; // x-release-please-version
+export const CLI_VERSION = `1.11.0`; // x-release-please-version

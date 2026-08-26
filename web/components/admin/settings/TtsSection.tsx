@@ -19,6 +19,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
 } from '../../ui/select';
 import { Card, Btn, Pill, Seg } from '../ui';
+import { Advanced } from './section-chrome';
 import { EngineSelector } from '../tts/EngineSelector';
 import { CloudProviderSelector } from '../tts/CloudProviderSelector';
 import { cloudProviderLabel, resolveKeyPresence } from '../tts/cloudProviderMeta';
@@ -1464,6 +1465,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
       {/* The operator's explicit rescue, ahead of the hardcoded
           default-engine → Piper → Kokoro floor. */}
+      <Advanced note="the rescue voice for a persona whose own engine fails">
       <Card
         title="Fallback voice"
         sub="what speaks when a persona's engine fails"
@@ -1524,6 +1526,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           </div>
         )}
       </Card>
+      </Advanced>
 
       <SaveBar
         note={ttsDirty
@@ -1532,6 +1535,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         busy={busy}
         onSave={save}
         saveLabel="Save TTS settings"
+        // Both key boxes are component-local — the panel diffs FormState and
+        // cannot see them, so a pasted key alone would leave the section
+        // "clean" and unmount the very button that saves it.
+        dirty={!!(cloudKeyInput.trim() || compatKeyInput.trim())}
       />
     </>
   );

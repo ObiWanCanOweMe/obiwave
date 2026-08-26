@@ -1,52 +1,14 @@
 // Native port of web/web/hooks/useMediaSession.ts (the metadata half).
 //
-// Pushes current-track metadata to the OS lock screen / CarPlay / Android Auto
-// via TrackPlayer.updateNowPlayingMetadata. Artwork is the /cover/:id proxy.
-// While the DJ is talking (a voice turn landed in the last 15s) we swap in the
-// persona avatar + name, exactly like the web. Remote control HANDLERS live in
-// service.ts (headless); this hook only owns the displayed metadata.
+// The talking decision and shared card strings live in useTalking and
+// lib/air-card so the OS media card and Live Activity cannot drift.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import TrackPlayer from 'react-native-track-player';
+import { useTalking } from '@/hooks/useTalking';
+import { resolveAirCard } from '@/lib/air-card';
 import type { StationApi } from '@/lib/api';
 import type { ActiveShow, NowPlayingTrack, SessionTurn } from '@/lib/types';
-
-const TALKING_LINGER_MS = 15_000;
-
-const VOICE_TURN_KINDS = new Set([
-  'voice',
-  'segment',
-  'link',
-  'intro',
-  'station-id',
-  'weather',
-  'hourly',
-  'say',
-]);
-
-function isVoiceTurn(turn: SessionTurn | undefined): boolean {
-  if (!turn) return false;
-  const kind = (turn.kind || '').toLowerCase();
-  if (VOICE_TURN_KINDS.has(kind)) return true;
-  const role = (turn.role || '').toLowerCase();
-  return role === 'voice' || role === 'segment';
-}
-
-function lastVoiceTurnTime(feed: SessionTurn[] | undefined): number | null {
-  if (!feed?.length) return null;
-  for (let i = feed.length - 1; i >= 0; i--) {
-    const turn = feed[i];
-    if (!isVoiceTurn(turn)) continue;
-    const t =
-      typeof turn?.t === 'number'
-        ? turn.t
-        : typeof turn?.t === 'string'
-          ? Date.parse(turn.t)
-          : NaN;
-    return Number.isFinite(t) ? t : null;
-  }
-  return null;
-}
 
 export interface UseNowPlayingInfoParams {
   api: StationApi | null;
@@ -63,60 +25,20 @@ export function useNowPlayingInfo({
   boothFeed,
   activeShow,
 }: UseNowPlayingInfoParams): void {
-  const [talking, setTalking] = useState(false);
-  const lastVoiceTs = useMemo(() => lastVoiceTurnTime(boothFeed), [boothFeed]);
+  const talking = useTalking(boothFeed);
+  const card = api ? resolveAirCard({ api, nowPlaying, activeShow, talking }) : null;
 
-  const personaName = activeShow?.persona?.name ?? null;
-  const personaAvatar = activeShow?.persona?.avatar ?? null;
-
-  useEffect(() => {
-    if (lastVoiceTs == null) {
-      setTalking(false);
-      return;
-    }
-    const remaining = TALKING_LINGER_MS - (Date.now() - lastVoiceTs);
-    if (remaining <= 0) {
-      setTalking(false);
-      return;
-    }
-    setTalking(true);
-    const id = setTimeout(() => setTalking(false), remaining);
-    return () => clearTimeout(id);
-  }, [lastVoiceTs]);
+  const title = card?.title;
+  const artist = card?.artist;
+  const album = card?.album;
+  // RNTP metadata accepts only a URL string, not request headers. Never
+  // recreate a credential URL or make an unauthenticated private request.
+  const artwork = card?.artworkHeaders ? undefined : card?.artworkUrl;
 
   useEffect(() => {
-    if (!api || !tunedIn) return;
-    const coverSource = nowPlaying?.subsonic_id ? api.cover(nowPlaying.subsonic_id) : undefined;
-    const avatarSource = personaAvatar ? api.avatar(personaAvatar) : undefined;
-    const useAvatar = talking && !!avatarSource?.uri;
-
-    const title = nowPlaying?.title || 'SUB/WAVE';
-    const artist = useAvatar
-      ? personaName || nowPlaying?.artist || 'Live broadcast'
-      : nowPlaying?.artist || 'Live broadcast';
-    const album = nowPlaying?.album || 'SUB/WAVE';
-    const artworkSource = useAvatar ? avatarSource : coverSource;
-    // RNTP metadata accepts only a URL string, not request headers. Never
-    // recreate a credential URL or make an unauthenticated private request.
-    const artwork = artworkSource?.headers ? undefined : artworkSource?.uri;
-
-    TrackPlayer.updateNowPlayingMetadata({
-      title,
-      artist,
-      album,
-      artwork,
-    }).catch(() => {
+    if (!api || !tunedIn || !title) return;
+    TrackPlayer.updateNowPlayingMetadata({ title, artist, album, artwork }).catch(() => {
       /* no active track yet — ignored */
     });
-  }, [
-    api,
-    tunedIn,
-    nowPlaying?.title,
-    nowPlaying?.artist,
-    nowPlaying?.album,
-    nowPlaying?.subsonic_id,
-    talking,
-    personaAvatar,
-    personaName,
-  ]);
+  }, [api, tunedIn, title, artist, album, artwork]);
 }

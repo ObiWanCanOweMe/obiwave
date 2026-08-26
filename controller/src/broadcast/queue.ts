@@ -33,11 +33,13 @@ import * as beds from './beds.js';
 import * as bedPolicy from './bed-policy.js';
 import * as session from './session.js';
 import type { TurnMeta } from './session.js';
-import { getFullContext, energyForDaypart } from '../context.js';
+import type { PromptMemoryEntry } from './prompt-memory.js';
+import { getFullContext, getClockContext, energyForDaypart } from '../context.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
+import { stationIdDaypartDrifted } from './clock-policy.js';
 import * as webhooks from './webhooks.js';
 import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
@@ -69,6 +71,7 @@ import {
   EMPTY_DJ_QUEUE_CLEAR_THRESHOLD,
   PICK_SHOW_LOOKAHEAD_SEC,
   boundaryCarriesTrackVoice,
+  exchangeSegment,
   formatAgo,
   knownDurationSec,
   linkClockDrifted,
@@ -165,7 +168,7 @@ class Queue {
   _emptyDjQueueStreak = 0;      // consecutive reconcile checks seeing an empty dj_queue while sent items remain — see reconcileWithDjQueue
   _resolveFailStreak = 0;       // consecutive pushes Liquidsoap never resolved — re-pick budget, see onPushResolveFailed
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
-  _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
+  _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; daypart: string | null; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
   _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
   _pendingJingles = new Map<string, number>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
   _pendingJingleStateChain: Promise<void> = Promise.resolve(); // serialises the durable manual-jingle ledger
@@ -336,11 +339,13 @@ class Queue {
   // null when nothing relevant has aired. Wider window catches slow-firing
   // kinds (hourly, station ID) so the DJ doesn't echo something it said
   // an hour ago.
-  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140 } = {}) {
+  // `prior` reads the session a hard roll just archived instead of the live one
+  // — the mic-pass sign-off is the single caller (session.priorPromptMemory).
+  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140, prior = false } = {}) {
     const cutoff = Date.now() - withinMinutes * 60_000;
     const seenDedupe = new Set<string>();
-    const picked: DjLogEntry[] = [];
-    for (const entry of this.djLog) {
+    const picked: PromptMemoryEntry[] = [];
+    for (const entry of prior ? session.priorPromptMemory() : session.promptMemory()) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
       if (new Date(entry.t).getTime() < cutoff) break;
       if (DEDUPE_KINDS.has(entry.kind)) {
@@ -387,10 +392,10 @@ class Queue {
   // First ~5 words of recent DJ utterances — fed to the prompt as an
   // explicit "don't open with any of these" list. Catches repeated openers
   // that the recap text alone glosses over.
-  getRecentOpeners(n = 6) {
+  getRecentOpeners(n = 6, { prior = false } = {}) {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const entry of this.djLog) {
+    for (const entry of prior ? session.priorPromptMemory() : session.promptMemory()) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
       const msg = (entry.message || '').replace(/^["'\s]+/, '').replace(/\s+/g, ' ').trim();
       if (!msg) continue;
@@ -1539,18 +1544,7 @@ class Queue {
     }
     for (const l of rendered) {
       try {
-        const seg: SegmentDesc = {
-          kind,
-          channel: 'say',
-          text: l.text,
-          persona: l.persona,
-          logText: `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`,
-          meta: { personaId: l.persona?.id, personaName: l.persona?.name },
-          // The aggregate dj.say below covers the legacy channel for the whole
-          // exchange; voice.start/voice.end still fire per line, because each
-          // line is its own real speech window.
-          legacy: false,
-        };
+        const seg: SegmentDesc = exchangeSegment(l, kind);
         const handoff = await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona), {
           onQueued: q => this.onQueued(q, seg),
         });
@@ -1580,11 +1574,11 @@ class Queue {
   // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
   // time, so the DJ's memory reflects what reached the stream, not what was
   // merely scheduled.
-  async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
+  async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {}, daypart = null }: { persona?: Persona | null; meta?: TurnMeta; daypart?: string | null } = {}) {
     if (!text || !text.trim()) return;
     try {
       const wavPath = await speak(text, { kind, persona });
-      this._pendingVoice = { text, kind, wavPath, persona, meta, t: Date.now() };
+      this._pendingVoice = { text, kind, wavPath, persona, meta, daypart, t: Date.now() };
       this.log('scheduler', `Holding ${kind} for the next track boundary`);
     } catch (err) {
       this.log('error', `Deferred announce failed: ${(err as Error).message}`);
@@ -1651,6 +1645,16 @@ class Queue {
     // held again below, so a busy stretch can't keep re-deferring a dead ident.
     if (Date.now() - p.t > PENDING_VOICE_MAX_AGE_MS) {
       this.dropPendingVoice('waited too long for a track boundary');
+      return;
+    }
+    // A daypart offered at generation can cross its boundary while the WAV
+    // waits here (for example, an ident written at 17:45 airing after 18:00).
+    // The rendered words cannot be corrected, so apply the same fail-silent
+    // trade as the pick-link clock drift guard. No stamp means the ident was
+    // written with no permitted clock claim and remains eligible.
+    const liveDaypart = getClockContext().spokenDaypart;
+    if (stationIdDaypartDrifted(p.daypart, liveDaypart)) {
+      this.dropPendingVoice(`daypart changed from "${p.daypart}" to "${liveDaypart}" before air`);
       return;
     }
     // This boundary already speaks. The track's own line is tied to THIS song
