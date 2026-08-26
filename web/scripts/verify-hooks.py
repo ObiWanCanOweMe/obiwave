@@ -30,31 +30,64 @@ What it pins, and why each check is shaped the way it is:
 Prerequisites (per the `verify` skill — never point this at a real station):
 
     cd <worktree>/controller
-    STATE_DIR=<tmp>/state PORT=7795 ADMIN_USER=test ADMIN_PASS=test \
+    STATE_DIR=<tmp>/state PORT=7791 ADMIN_USER=test ADMIN_PASS=test \
       NODE_ENV=development NAVIDROME_URL=http://localhost:9999 \
       NAVIDROME_USER=x NAVIDROME_PASS=x npx tsx src/server.ts
 
     cd <worktree>/web
-    NEXT_PUBLIC_API_URL=http://localhost:7795 npx next dev -p 7796
+    NEXT_PUBLIC_API_URL=http://localhost:7791 npx next dev -p 7793
 
-The Browse checks need rows in the isolated state dir's library.db; copy one in
-(`cp state/library.db <tmp>/state/`) and set LIBRARY_TOTAL to its track count.
-Everything else runs against an empty one.
+The Browse checks need a task-owned library fixture with a non-empty `love`
+subset. Seed it locally; never copy a station database or its credentials into
+the verify state. Everything else runs against that same isolated state.
 """
 import base64
+import json
 import os
 import re
 import sys
+import urllib.parse
+import urllib.request
 
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
-WEB = os.environ.get("VERIFY_WEB", "http://localhost:7796")
-API = os.environ.get("VERIFY_API", "http://localhost:7795")
+WEB = os.environ.get("VERIFY_WEB", "http://localhost:7793")
+API = os.environ.get("VERIFY_API", "http://localhost:7791")
 AUTH = base64.b64encode(b"test:test").decode()
-# Formatted with a thousands separator by the Browse tab's counter.
-LIBRARY_TOTAL = os.environ.get("LIBRARY_TOTAL", "1,413")
-
 results: list[tuple[str, bool, str]] = []
+
+
+def assert_throwaway_stack() -> None:
+    """Prove this controller and the fixed loopback stub share a fresh marker."""
+    if API != "http://localhost:7791" or WEB != "http://localhost:7793":
+        sys.exit("refusing to run: API/WEB are not the isolated verify stack")
+    request = urllib.request.Request(
+        f"{API}/health", headers={"Authorization": f"Basic {AUTH}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            health = json.loads(response.read())
+    except Exception as error:  # noqa: BLE001 — no browser action without attestation
+        sys.exit(f"refusing to run: verify stack not reachable at {API}: {error}")
+    assert_dummy_backend_provenance(health)
+
+
+def browse_total(query: str | None = None) -> int:
+    """Read the isolated controller's count, rather than assuming a copied DB."""
+    params = {"limit": "1"}
+    if query:
+        params["q"] = query
+    request = urllib.request.Request(
+        f"{API}/library/browse?{urllib.parse.urlencode(params)}",
+        headers={"Authorization": f"Basic {AUTH}"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        payload = json.loads(response.read())
+    total = payload.get("total")
+    if not isinstance(total, int):
+        raise RuntimeError(f"isolated browse response has no numeric total: {payload!r}")
+    return total
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -68,6 +101,19 @@ def debounced_searches(page, seen: list[str]) -> None:
     def hits(fragment: str, since: int) -> list[str]:
         return [u for u in seen[since:] if fragment in u]
 
+    # The harness owns its library fixture; derive the rendered-count contract
+    # from it instead of borrowing a production library.db with a fixed 1,413
+    # rows. Its 53 matching rows make this a real narrowing assertion.
+    total = browse_total()
+    love_total = browse_total("love")
+    if not (0 < love_total < total):
+        raise RuntimeError(
+            "the isolated hooks fixture needs a non-empty 'love' subset "
+            f"smaller than its full library (got {love_total}/{total})"
+        )
+    total_label = f"{total:,}"
+    love_label = f"{love_total:,}"
+
     # ---- Library → Browse tab ----
     page.goto(f"{WEB}/admin/library", wait_until="networkidle")
     page.wait_for_timeout(1500)
@@ -78,10 +124,10 @@ def debounced_searches(page, seen: list[str]) -> None:
     box.wait_for(state="visible", timeout=15000)
     page.wait_for_function(
         "(total) => document.querySelector('main')?.innerText.includes('of ' + total)",
-        arg=LIBRARY_TOTAL,
+        arg=total_label,
         timeout=15000,
     )
-    check("browse: unfiltered list shows the whole library", True, f"'of {LIBRARY_TOTAL}'")
+    check("browse: unfiltered list shows the whole library", True, f"'of {total_label}'")
 
     mark = len(seen)
     box.click()
@@ -100,16 +146,16 @@ def debounced_searches(page, seen: list[str]) -> None:
     )
     check(
         "browse: the debounced term actually filters the rendered list",
-        "of 53" in page.locator("main").inner_text(),
-        "'1–50 of 53'",
+        f"of {love_label}" in page.locator("main").inner_text(),
+        f"narrowed to 'of {love_label}'",
     )
 
     box.fill("")
     page.wait_for_timeout(1200)
     check(
         "browse: clearing the box returns the unfiltered list",
-        f"of {LIBRARY_TOTAL}" in page.locator("main").inner_text(),
-        f"back to 'of {LIBRARY_TOTAL}'",
+        f"of {total_label}" in page.locator("main").inner_text(),
+        f"back to 'of {total_label}'",
     )
 
     # ---- Playlist Builder: seed + artist boxes ----
@@ -179,10 +225,10 @@ def clipboard_sites(page) -> None:
     check("CodeBlock: label reverts after ~1.4s",
           copy_btn.inner_text().strip().lower() == "copy", repr(copy_btn.inner_text().strip()))
 
-    # ---- Connect → Integrations (CopyUrl) ----
+    # ---- Connect → Stream URLs (CopyUrl) ----
     page.goto(f"{WEB}/admin/connect", wait_until="networkidle")
     page.wait_for_timeout(1500)
-    page.get_by_text("Integrations", exact=False).first.click()
+    page.get_by_text("Stream URLs", exact=False).first.click()
     page.wait_for_timeout(1200)
     url_btn = page.get_by_role("button", name=re.compile(r"^Copy$", re.I)).first
     url_btn.wait_for(state="visible", timeout=15000)
@@ -194,8 +240,8 @@ def clipboard_sites(page) -> None:
     check("Connect CopyUrl: shows the success toast",
           "copied" in page.locator("body").inner_text().lower(), "")
 
-    # ---- Connect → Endpoints (EndpointCard's curl), inside a <details> ----
-    page.get_by_text("Endpoints", exact=False).first.click()
+    # ---- Connect → API (EndpointCard's curl), inside a <details> ----
+    page.get_by_text("API", exact=True).first.click()
     page.wait_for_timeout(1000)
     page.locator("details summary").first.click()
     page.wait_for_timeout(600)
@@ -262,6 +308,7 @@ def clock_and_media_query(ctx, page) -> None:
 
 
 def main() -> int:
+    assert_throwaway_stack()
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         ctx = browser.new_context(

@@ -33,11 +33,13 @@ import * as beds from './beds.js';
 import * as bedPolicy from './bed-policy.js';
 import * as session from './session.js';
 import type { TurnMeta } from './session.js';
-import { getFullContext, energyForDaypart } from '../context.js';
+import type { PromptMemoryEntry } from './prompt-memory.js';
+import { getFullContext, getClockContext, energyForDaypart } from '../context.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
+import { stationIdDaypartDrifted } from './clock-policy.js';
 import * as webhooks from './webhooks.js';
 import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
@@ -69,6 +71,7 @@ import {
   EMPTY_DJ_QUEUE_CLEAR_THRESHOLD,
   PICK_SHOW_LOOKAHEAD_SEC,
   boundaryCarriesTrackVoice,
+  exchangeSegment,
   formatAgo,
   knownDurationSec,
   linkClockDrifted,
@@ -140,6 +143,14 @@ const PENDING_JINGLE_MAX = 3;
 // it never retires a press that is merely waiting for its boundary.
 const PENDING_JINGLE_TTL_MS = 30 * 60 * 1000;
 
+type PendingJingle = {
+  reservedAt: number;
+  // The announcement's editorial text is captured with the reservation. The
+  // marker only identifies a filename, and its JSON may outlive a jingle list
+  // edit or a controller restart.
+  label: string;
+};
+
 // transitions far more often — a working DJ talks across most of them.
 class Queue {
   upcoming: QueueItem[] = [];  // request items pushed by listeners, not yet playing
@@ -165,9 +176,9 @@ class Queue {
   _emptyDjQueueStreak = 0;      // consecutive reconcile checks seeing an empty dj_queue while sent items remain — see reconcileWithDjQueue
   _resolveFailStreak = 0;       // consecutive pushes Liquidsoap never resolved — re-pick budget, see onPushResolveFailed
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
-  _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
+  _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; daypart: string | null; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
   _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
-  _pendingJingles = new Map<string, number>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
+  _pendingJingles = new Map<string, PendingJingle>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
   _pendingJingleStateChain: Promise<void> = Promise.resolve(); // serialises the durable manual-jingle ledger
 
   // Snapshot upcoming/current/history to disk. The queue is otherwise purely
@@ -336,11 +347,13 @@ class Queue {
   // null when nothing relevant has aired. Wider window catches slow-firing
   // kinds (hourly, station ID) so the DJ doesn't echo something it said
   // an hour ago.
-  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140 } = {}) {
+  // `prior` reads the session a hard roll just archived instead of the live one
+  // — the mic-pass sign-off is the single caller (session.priorPromptMemory).
+  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140, prior = false } = {}) {
     const cutoff = Date.now() - withinMinutes * 60_000;
     const seenDedupe = new Set<string>();
-    const picked: DjLogEntry[] = [];
-    for (const entry of this.djLog) {
+    const picked: PromptMemoryEntry[] = [];
+    for (const entry of prior ? session.priorPromptMemory() : session.promptMemory()) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
       if (new Date(entry.t).getTime() < cutoff) break;
       if (DEDUPE_KINDS.has(entry.kind)) {
@@ -387,10 +400,10 @@ class Queue {
   // First ~5 words of recent DJ utterances — fed to the prompt as an
   // explicit "don't open with any of these" list. Catches repeated openers
   // that the recap text alone glosses over.
-  getRecentOpeners(n = 6) {
+  getRecentOpeners(n = 6, { prior = false } = {}) {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const entry of this.djLog) {
+    for (const entry of prior ? session.priorPromptMemory() : session.promptMemory()) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
       const msg = (entry.message || '').replace(/^["'\s]+/, '').replace(/\s+/g, ' ').trim();
       if (!msg) continue;
@@ -1539,18 +1552,7 @@ class Queue {
     }
     for (const l of rendered) {
       try {
-        const seg: SegmentDesc = {
-          kind,
-          channel: 'say',
-          text: l.text,
-          persona: l.persona,
-          logText: `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`,
-          meta: { personaId: l.persona?.id, personaName: l.persona?.name },
-          // The aggregate dj.say below covers the legacy channel for the whole
-          // exchange; voice.start/voice.end still fire per line, because each
-          // line is its own real speech window.
-          legacy: false,
-        };
+        const seg: SegmentDesc = exchangeSegment(l, kind);
         const handoff = await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona), {
           onQueued: q => this.onQueued(q, seg),
         });
@@ -1580,11 +1582,11 @@ class Queue {
   // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
   // time, so the DJ's memory reflects what reached the stream, not what was
   // merely scheduled.
-  async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
+  async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {}, daypart = null }: { persona?: Persona | null; meta?: TurnMeta; daypart?: string | null } = {}) {
     if (!text || !text.trim()) return;
     try {
       const wavPath = await speak(text, { kind, persona });
-      this._pendingVoice = { text, kind, wavPath, persona, meta, t: Date.now() };
+      this._pendingVoice = { text, kind, wavPath, persona, meta, daypart, t: Date.now() };
       this.log('scheduler', `Holding ${kind} for the next track boundary`);
     } catch (err) {
       this.log('error', `Deferred announce failed: ${(err as Error).message}`);
@@ -1651,6 +1653,16 @@ class Queue {
     // held again below, so a busy stretch can't keep re-deferring a dead ident.
     if (Date.now() - p.t > PENDING_VOICE_MAX_AGE_MS) {
       this.dropPendingVoice('waited too long for a track boundary');
+      return;
+    }
+    // A daypart offered at generation can cross its boundary while the WAV
+    // waits here (for example, an ident written at 17:45 airing after 18:00).
+    // The rendered words cannot be corrected, so apply the same fail-silent
+    // trade as the pick-link clock drift guard. No stamp means the ident was
+    // written with no permitted clock claim and remains eligible.
+    const liveDaypart = getClockContext().spokenDaypart;
+    if (stationIdDaypartDrifted(p.daypart, liveDaypart)) {
+      this.dropPendingVoice(`daypart changed from "${p.daypart}" to "${liveDaypart}" before air`);
       return;
     }
     // This boundary already speaks. The track's own line is tied to THIS song
@@ -1874,8 +1886,13 @@ class Queue {
     if (!filename) throw new Error('Jingle filename is required');
     const path = await jingles.getPath(filename);
     if (!path) throw new Error(`Unknown jingle: ${filename}`);
+    // Capture the prose with the durable FIFO reservation, but do not put it
+    // in prompt memory yet: the handoff can wait behind a safe boundary or be
+    // lost on a mixer restart. Only Liquidsoap's manual-origin air marker
+    // authenticates the editorial event (retirePendingJingles below).
+    const label = (await jingles.list()).find(j => j.filename === filename)?.text || filename;
     const reservation = await this.withPendingJingleState(async () => {
-      const retired = this.retirePendingJingles();
+      const retired = await this.retirePendingJingles();
       if (this._pendingJingles.has(filename)) {
         if (retired) await this.persistPendingJingles();
         return { ok: false as const, reason: 'already-queued' as const };
@@ -1885,14 +1902,14 @@ class Queue {
         return { ok: false as const, reason: 'queue-full' as const };
       }
       const reservedAt = Date.now();
-      this._pendingJingles.set(filename, reservedAt);
+      this._pendingJingles.set(filename, { reservedAt, label });
       try {
         // Commit the reservation before exposing the handoff. A crash can
         // therefore produce a temporary false block, never a duplicate FIFO
         // entry; the TTL is the bounded recovery for that narrow window.
         await this.persistPendingJingles();
       } catch (err) {
-        if (this._pendingJingles.get(filename) === reservedAt) this._pendingJingles.delete(filename);
+        if (this._pendingJingles.get(filename)?.reservedAt === reservedAt) this._pendingJingles.delete(filename);
         throw err;
       }
       return { ok: true as const, reservedAt };
@@ -1903,19 +1920,13 @@ class Queue {
       await writeHandoff(config.liquidsoap.jingleFile, jingles.jingleUri(path), { maxWaitMs: 5000 });
     } catch (err) {
       await this.withPendingJingleState(async () => {
-        if (this._pendingJingles.get(filename) !== reservedAt) return;
+        if (this._pendingJingles.get(filename)?.reservedAt !== reservedAt) return;
         this._pendingJingles.delete(filename);
         await this.persistPendingJingles();
       });
       throw err;
     }
-    // The sidecar's own script, not the hashed filename: every other segment
-    // turn in the booth log and the DJ's chat history carries prose, and
-    // `jingle_a1b2c3d4.wav` reads as noise next to them (playSfx logs its
-    // effect NAME for the same reason).
-    const label = (await jingles.list()).find(j => j.filename === filename)?.text || filename;
     this.log('jingle', `"${label}" queued — airs at the next safe boundary`);
-    session.appendTurn({ role: 'segment', kind: 'jingle', text: label });
     return { ok: true as const };
   }
 
@@ -1923,11 +1934,11 @@ class Queue {
   // will be. A mixer restart empties jingle_now_queue and loses the request
   // silently, so every entry has to expire on its own — the button must never
   // wedge shut on bookkeeping.
-  retirePendingJingles(): boolean {
+  async retirePendingJingles(): Promise<boolean> {
     const now = Date.now();
     let changed = false;
-    for (const [name, at] of this._pendingJingles) {
-      if (now - at > PENDING_JINGLE_TTL_MS) {
+    for (const [name, pending] of this._pendingJingles) {
+      if (now - pending.reservedAt > PENDING_JINGLE_TTL_MS) {
         this._pendingJingles.delete(name);
         changed = true;
       }
@@ -1935,11 +1946,38 @@ class Queue {
     const marker = latestJingleMarker();
     if (marker) {
       const entries = [...this._pendingJingles];
-      const airedIndex = entries.findIndex(([name, at]) => (
-        name === marker.filename && marker.startedAtMs >= at
+      const airedIndex = entries.findIndex(([name, pending]) => (
+        name === marker.filename && marker.startedAtMs >= pending.reservedAt
       ));
       if (airedIndex >= 0) {
-        for (const [name] of entries.slice(0, airedIndex + 1)) this._pendingJingles.delete(name);
+        const airedEntries = entries.slice(0, airedIndex + 1);
+        // The session is the durable editorial record.  Write it before
+        // releasing the independently persisted pending ledger: a crash after
+        // the ledger write must be recoverable by the reservation's id.
+        if (session.getSession()) {
+          for (const [name, pending] of airedEntries) {
+            // A single marker may retire several FIFO entries if the controller
+            // missed earlier marker writes. Give every turn the durable
+            // reservation id, so a restart between the session and ledger writes
+            // cannot append it twice when recovery sees the same marker again.
+            const manualJingleId = `${name}:${pending.reservedAt}`;
+            const alreadyRecorded = session.getSession()?.messages?.some(
+              turn => turn?.meta?.manualJingleId === manualJingleId,
+            );
+            if (!alreadyRecorded) {
+              session.appendTurn({
+                role: 'segment',
+                kind: 'jingle',
+                text: pending.label,
+                meta: { manualJingleId },
+              });
+            }
+          }
+          if (!await session.persistNow()) return changed;
+        }
+        for (const [name] of airedEntries) {
+          this._pendingJingles.delete(name);
+        }
         changed = true;
       }
     }
@@ -1955,8 +1993,16 @@ class Queue {
     return next;
   }
 
+  async reconcilePendingJingles() {
+    return this.withPendingJingleState(async () => {
+      const changed = await this.retirePendingJingles();
+      if (changed) await this.persistPendingJingles();
+      return changed;
+    });
+  }
+
   async persistPendingJingles() {
-    const pending = [...this._pendingJingles].map(([filename, reservedAt]) => ({ filename, reservedAt }));
+    const pending = [...this._pendingJingles].map(([filename, value]) => ({ filename, ...value }));
     await writeFileAtomic(config.queue.pendingJinglesFile, JSON.stringify({ pending }, null, 2));
   }
 
@@ -1971,11 +2017,14 @@ class Queue {
           && Number.isFinite(entry?.reservedAt)
           && Number(entry.reservedAt) > 0
         ))
-        .map((entry: { filename: string; reservedAt: number }) => [entry.filename, entry.reservedAt]));
-      if (this.retirePendingJingles()) {
-        void this.withPendingJingleState(() => this.persistPendingJingles())
-          .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));
-      }
+        .map((entry: { filename: string; reservedAt: number; label?: unknown }) => [entry.filename, {
+          reservedAt: entry.reservedAt,
+          // Pending ledgers written before this field existed remain valid;
+          // their air-time memory falls back to the readable filename.
+          label: typeof entry.label === 'string' && entry.label ? entry.label : entry.filename,
+        }]));
+      void this.reconcilePendingJingles()
+        .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));
     } catch (err) {
       console.error('[queue] pending-jingles recover failed:', (err as Error).message);
     }
@@ -2797,6 +2846,14 @@ class Queue {
     const tick = async () => {
       this._nowPlaying = await this.readNowPlayingFromDisk();
       this._nowPlayingFresh = true;
+      // The jingle marker is an independent Liquidsoap edge.  Poll it with
+      // now-playing so a lone manual press reaches prompt memory before a
+      // later automatic marker overwrites the shared file.
+      try {
+        await this.reconcilePendingJingles();
+      } catch (err) {
+        console.error('[queue] pending-jingles reconcile failed:', (err as Error).message);
+      }
       this.onTrackStarted(this._nowPlaying);
       // Beds ride the same tick rather than a poller of their own — a bed's
       // start is a track-boundary event like any other, and the 1.5s cadence is

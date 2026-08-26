@@ -17,7 +17,7 @@ import * as settings from '../settings.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type VocalMode } from '../music/show-filter.js';
 import { freshnessBiasedOrder } from '../music/airing.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
-import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
+import { filterExcludedPlaylistTracks, resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
 import { createPoolBuilder } from './auto-pool.js';
@@ -27,6 +27,7 @@ import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
 import { cleanupOldVoices } from '../audio/tts.js';
 import { shouldFire } from './dj-gate.js';
+import { speakClockAllowed, stationIdDaypartStamp } from './clock-policy.js';
 import { banterTickPlan, banterCronExpression } from './banter-policy.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
@@ -421,12 +422,13 @@ async function refreshAutoPlaylistInner() {
   // Excluded playlists (blocklist): drop every track from a blocklisted
   // playlist. The pick paths (picker.ts / the picker/ tools) apply this as a HARD
   // filter — an empty pool there just skips the LLM pick and coasts on this
-  // auto.m3u. This IS that coast, the last dead-air guard, so it mirrors the
-  // strict-playlist block above: never-starve if the blocklist would empty the
-  // pool (a mis-set "exclude everything" plays an excluded track over silence).
+  // auto.m3u. This IS that coast too, so the blocklist remains absolute even
+  // when every candidate is excluded: write an empty playlist and let the
+  // emergency source handle continuity rather than airing a forbidden track.
   if (excludedIds) {
-    const allowed = pool.filter((t: any) => t?.id && !excludedIds.has(t.id));
-    if (allowed.length) { pool.length = 0; pool.push(...allowed); }
+    const allowed = filterExcludedPlaylistTracks(pool, excludedIds);
+    pool.length = 0;
+    pool.push(...allowed);
   }
 
   // Loudness normalisation: the queue drain stamps liq_amplify per track, but
@@ -816,13 +818,20 @@ export async function runStationId({ atNextTrack = false } = {}) {
   return withTrace({ kind: 'station-id' }, async () => {
     const ctx = await getFullContext();
     const speaker = settings.pickOnAirSpeaker();
+    // Scheduled idents can wait across several track boundaries. Stamp the
+    // daypart being offered to the model so the queue can refuse a rendered
+    // clip if that fact changed before air. Immediate operator idents do not
+    // enter the deferred path, so the stamp is unnecessary there.
+    const daypart = atNextTrack
+      ? stationIdDaypartStamp(ctx.clock?.spokenDaypart, speakClockAllowed())
+      : null;
     const script = await dj.generateStationId({
       recap: queue.getDjRecap(),
       context: ctx,
       recentOpeners: queue.getRecentOpeners(),
       persona: speaker,
     });
-    const opts = { persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name } };
+    const opts = { persona: speaker, daypart, meta: { personaId: speaker?.id, personaName: speaker?.name } };
     if (atNextTrack) await queue.announceAtNextTrack(script, 'station-id', opts);
     else await queue.announce(script, 'station-id', opts);
     return script;

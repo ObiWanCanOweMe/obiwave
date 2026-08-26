@@ -12,6 +12,7 @@ writeFileSync(join(state, 'liquidsoap_stream_buffer_seconds.txt'), '22');
 writeFileSync(join(state, 'liquidsoap_stream_bitrate.txt'), '192');
 writeFileSync(join(state, 'liquidsoap_opus_bitrate.txt'), '96');
 writeFileSync(join(state, 'liquidsoap_aac_bitrate.txt'), '128');
+writeFileSync(join(state, 'liquidsoap_icecast_max_clients.txt'), '321');
 writeFileSync(join(state, 'icecast_listener_auth.txt'), 'true');
 
 const run = spawnSync(resolve(root, 'docker/icecast-render.sh'), [], {
@@ -31,6 +32,8 @@ const run = spawnSync(resolve(root, 'docker/icecast-render.sh'), [], {
 assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
 
 const xml = readFileSync(rendered, 'utf8');
+assert.match(xml, /<clients>321<\/clients>/);
+assert.match(run.stderr, /max listeners 321 \(from settings\)/);
 assert.match(xml, /<x-forwarded-for>127\.0\.0\.1<\/x-forwarded-for>/);
 assert.match(xml, /<x-forwarded-for>::1<\/x-forwarded-for>/);
 assert.doesNotMatch(xml, /@TRUSTED_PROXIES@/);

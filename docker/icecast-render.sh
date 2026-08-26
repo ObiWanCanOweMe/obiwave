@@ -17,8 +17,31 @@ read_state_num() {
     esac
 }
 
-ICECAST_MAX_CLIENTS="${ICECAST_MAX_CLIENTS:-100}"
-case "$ICECAST_MAX_CLIENTS" in *[!0-9]*|'') ICECAST_MAX_CLIENTS=100 ;; esac
+# Concurrent-listener ceiling. The legacy env var wins when present; otherwise
+# use the controller handoff so AIO/Unraid operators can set the ceiling. The
+# shared renderer owns this once for both launch shapes.
+resolve_max_clients() {
+    local source=ICECAST_MAX_CLIENTS
+    local value="${ICECAST_MAX_CLIENTS:-}"
+    if [ -z "$value" ]; then
+        source=settings
+        value=$(read_state_num liquidsoap_icecast_max_clients.txt 100)
+    fi
+    case "$value" in
+        *[!0-9]*|''|0) echo "100 fallback:${value}@${source}" ;;
+        *) echo "$value $source" ;;
+    esac
+}
+
+# Library mode lets the max-listener owner test drive the exact production
+# resolver without rendering or touching /etc.
+if [ "${SUBWAVE_ICECAST_RENDER_LIB:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+MAX_CLIENTS_LINE=$(resolve_max_clients)
+ICECAST_MAX_CLIENTS="${MAX_CLIENTS_LINE%% *}"
+echo "icecast-render: max listeners $ICECAST_MAX_CLIENTS (from ${MAX_CLIENTS_LINE#* })" >&2
 
 BUFFER_SECONDS="${ICECAST_BUFFER_SECONDS:-$(read_state_num liquidsoap_stream_buffer_seconds.txt 22)}"
 MP3_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"

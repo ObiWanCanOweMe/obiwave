@@ -45,6 +45,10 @@ export interface StationFeed {
   session: SessionPayload;
   elapsed: number;
   progress: number;
+  /** Epoch ms when the on-display track became audible to this listener. The
+   *  Live Activity uses this absolute stamp so its native clock stays correct
+   *  while the JS elapsed ticker is suspended in the background. */
+  trackStartedAt: number | null;
   /** Station IANA timezone, or null before first poll. Render on-air
    *  timestamps in this zone so they match what the DJ speaks (issue #418). */
   timezone: string | null;
@@ -81,6 +85,7 @@ export function useStationFeed(
   const [locale, setLocale] = useState<StationLocale>(DEFAULT_STATION_LOCALE);
   const [elapsed, setElapsed] = useState(0);
   const trackStartRef = useRef<number | null>(null);
+  const [trackStartedAt, setTrackStartedAt] = useState<number | null>(null);
   const offlinePollsRef = useRef(0);
   const appActive = useAppActive();
   // Identity of the track currently ON DISPLAY. Distinct from "latest track the
@@ -112,6 +117,7 @@ export function useStationFeed(
     prevApiRef.current = api;
     sigRef.current = {};
     trackStartRef.current = null;
+    setTrackStartedAt(null);
     offlinePollsRef.current = 0;
     // Drop any held track switch from the station we just left, or it would
     // land on the new station and stamp its clock with a foreign start time.
@@ -173,6 +179,7 @@ export function useStationFeed(
           promoteTimerRef.current = null;
           lastTrackKeyRef.current = trackKey;
           trackStartRef.current = audibleAt;
+          setTrackStartedAt(audibleAt);
           setIfChanged('nowPlaying', np, setNowPlaying);
         };
         const wait = audibleAt - Date.now();
@@ -188,7 +195,10 @@ export function useStationFeed(
         // repair a background-poll estimate) without churn inside ±2.5s.
         if (Number.isFinite(serverStart)) {
           const prev = trackStartRef.current;
-          if (prev == null || Math.abs(audibleAt - prev) > 2500) trackStartRef.current = audibleAt;
+          if (prev == null || Math.abs(audibleAt - prev) > 2500) {
+            trackStartRef.current = audibleAt;
+            setTrackStartedAt(audibleAt);
+          }
         }
         // Metadata enrichment (genres, bpm, cover) lands on later polls.
         setIfChanged('nowPlaying', np, setNowPlaying);
@@ -288,6 +298,7 @@ export function useStationFeed(
     session,
     elapsed,
     progress,
+    trackStartedAt,
     timezone,
     locale,
   };

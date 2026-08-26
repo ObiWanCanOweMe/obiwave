@@ -7,7 +7,9 @@ the matching section here before changing any of them.
 The recurring trap has two parts. **`docker/icecast-render.sh` is the only
 Icecast mount renderer**: both `docker/broadcast-entrypoint.sh` and the AIO
 supervisor invoke it, so per-mount burst/queue sizing, listener-auth blocks and
-trusted proxies stay identical. The two launchers still own parallel
+trusted proxies stay identical. It also resolves `stream.maxListeners`, with
+the legacy env override taking precedence and the winning source logged. The
+two launchers still own parallel
 `bootstrap_state_dirs` implementations; those must remain non-fatal and in
 lockstep.
 
@@ -31,6 +33,17 @@ delay. Both launchers invoke the shared Icecast renderer against the
 controller-written handoff file; the renderer accepts no environment override,
 because the controller would keep advertising the stored value and every
 listener-facing timestamp would drift.
+
+`settings.stream.maxListeners` deliberately has the opposite precedence.
+`docker/icecast-render.sh` prefers `ICECAST_MAX_CLIENTS` and otherwise reads
+`liquidsoap_icecast_max_clients.txt` (default 100). Nothing the controller
+publishes depends on this ceiling, while the env var predates the setting and
+rides all compose shapes; demoting it would silently change existing stations.
+The setting closes the AIO/Unraid gap, where there is no root `.env` surface.
+Invalid or zero values fall back to 100 rather than rendering invalid XML or a
+station nobody can connect to, and the renderer logs whether env, settings, or
+a named fallback won. `scripts/max-listeners.test.ts` drives that one shared
+resolver directly.
 
 **Default-on `analyzer` service** — the acoustic-analysis sidecar (`subwave-analyzer` image, `docker/Dockerfile.analyzer` + `docker/analyzer/server.py`). **Starts by default** in all three composes (no profile gate — like controller/web); only `tts-heavy` (voices) stays opt-in. It's the librosa (+ optional CLAP + Demucs) analyzer **split out of tts-heavy**: bpm/key/intro/loudness always, plus **outro analysis** on every tier (last ~20s of each *complete* file → `tracks.outro_json`: fade-vs-cold ending, tail LUFS/tempo/bars; a byte-capped download skips it — the completeness flag rides the analyze request). The outro is what makes transitions ending-aware: `queue.applyMixTransition` stamps each DJ-mode track's OWN exit canvas from its measured ending via `mix.endingCrossSecondsFor` (a fade rides out 8–12s, a cold end cuts ~4s; washout/loop overwrite it) — the per-track answer to #749, which blocks the pair-sized `crossSecondsFor` from ever being applied — and a measured fade vetoes the `chop` effect (`effectAllowedFor`). **Vocal-aware transitions** (heavy tier, vocal detection on): the outro window gets its own Demucs pass → `outro.vocalRanges` (absolute ms, `[]` = instrumental tail; backfill widened via the `tail_vocal` capability flag so stale analyzer images never churn; lyric-decided tracks skip the tail Demucs pass like the head one — their tail ranges are clipped from the synced-lyric timing instead, `lyric-vocal.clipRangesToTail`) — a sung fade pulls its exit canvas to the 8s floor (`Analysis.vocalTail`), a sung ending vetoes `chop`, and a *measured* first-vocal entry under 2.5s drops the DJ link outright (`enforceIntroBudget` — see `docs/stem-transitions-research.md`); "sounds-like" embeddings (multi-window CLAP — start/mid/late windows averaged, so quiet intros don't misrepresent the track), vocal ranges, and the CLAP **text tower** (`POST /embed-text`, capability-flagged in `/health`) are the heavy tier. Text and audio vectors share one 512-d space, which powers the picker's `searchBySound` tool (describe a sound in words → audio KNN) and zero-shot audio moods (`music/audio-moods.ts`: mood-vocab prompts scored against stored audio vectors at the end of every analysis pass → `tracks.audio_moods`, blended into `songsByMood`/`trackMoods`; vocab/prompt changes re-score via `mood_vocab_hash`). **Two published flavours**: `subwave-analyzer` — **LEAN, multi-arch** (~1.1GB — librosa + ffmpeg, no torch — the default everyone pulls), `WITH_CLAP=0 WITH_DEMUCS=0`; and `subwave-analyzer-heavy` — CLAP+Demucs baked (~1.9GB, amd64-only), `WITH_CLAP=1 WITH_DEMUCS=1`. **Opt-in switch is `ANALYZER_HEAVY=1` in `.env`** — the compose `analyzer` service resolves `image: …/subwave-analyzer${ANALYZER_HEAVY:+-heavy}:…` and its `build.args` key off the same var (so pull and local build agree). No `platform` pin (lean is native arm64; heavy on arm64 needs `DOCKER_DEFAULT_PLATFORM=linux/amd64`). Uses the **same `analyze_worker.py`** as the offline CLI (single source of truth). The controller resolves its analysis backend from `config.analyzer.urls` — **`ANALYZE_URL`** (`music/analyzer.ts` probes `/health`), then a local venv (`ANALYZE_PYTHON`). tts-heavy is TTS-only now and is **not** an analysis backend (no `TTS_HEAVY_URL` fallback). **AIO (`Dockerfile.aio`) bundles the analyzer in-process** (local venv, `ANALYZE_PYTHON` + `HF_HOME` under the state dir) rather than a service; `subwave-aio` is lean, `subwave-aio-heavy` bakes CLAP+Demucs. The analyze worker lives in the analyzer image(s) and the AIO.
 **Remote path fallback (#1331)**: the controller still prefers its one-ahead shared-path handoff, but a sidecar's typed `path_unavailable` response earns exactly one retry by URL; `complete` and `stems_dir` are removed because they describe controller-local files. Never retry generic DSP/decode failures. Shared state remains required for remote stem output and recommended for prefetch throughput.

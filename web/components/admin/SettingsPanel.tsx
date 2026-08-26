@@ -1,7 +1,7 @@
 'use client';
 
-import type { ChangeEvent } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { notify, errorMessage } from '../../lib/notify';
 import { normalizeStationLocale } from '../../lib/format';
@@ -27,15 +27,17 @@ import {
   SETTINGS_MP3_BITRATES,
   SETTINGS_OPUS_BITRATES,
 } from '@/lib/schemas.generated';
+import { AlertTriangle } from 'lucide-react';
 import {
-  Radio, Palette, Cpu, Mic, Library, Search,
-  Activity, Archive, Save, AlertTriangle, Heart, Music2,
-} from 'lucide-react';
-import {
-  SectionHeader, SettingsFieldError, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
+  SectionHeader, SaveBar, SettingsFieldError, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
   type LoudnessSource, type LlmForm, type LlmFallbackForm,
 } from './settings/shared';
+import {
+  SECTIONS, SECTION_GROUPS, RESTART_PATHS, sectionById, type SectionId,
+} from './settings/registry';
+import { Advanced, SectionChromeProvider } from './settings/section-chrome';
+import { SettingsSearch, type SettingsJump } from './settings/SettingsSearch';
 import { TtsSection } from './settings/TtsSection';
 import { LlmSection } from './settings/LlmSection';
 import { SearchSection } from './settings/SearchSection';
@@ -51,22 +53,59 @@ import {
   useSettingsQuery,
 } from './settings/queries';
 
-const SECTIONS = [
-  { id: 'station',  label: 'Station', hint: 'name · location · locale', icon: Radio },
-  { id: 'music',    label: 'Music source', hint: 'navidrome · subsonic', icon: Music2 },
-  { id: 'theme',    label: 'Skin & Themes', hint: 'player skin · palette', icon: Palette },
-  { id: 'llm',      label: 'LLM provider', hint: 'model routing', icon: Cpu },
-  { id: 'tts',      label: 'TTS voice', hint: 'default engine', icon: Mic },
-  { id: 'library',  label: 'Library tagger', hint: 'embedding · propagation', icon: Library },
-  { id: 'search',   label: 'Web search', hint: 'live-facts backend', icon: Search },
-  { id: 'scrobble', label: 'Scrobbling', hint: 'last.fm · listenbrainz', icon: Activity },
-  { id: 'likes',    label: 'Likes', hint: 'heart button · navidrome stars', icon: Heart },
-  { id: 'archives', label: 'Archives', hint: 'hourly recordings', icon: Archive },
-  { id: 'backup',   label: 'Backup', hint: 'export · restore', icon: Save },
-  { id: 'danger',   label: 'Danger zone', hint: 'broadcast control', icon: AlertTriangle },
-] as const;
+/**
+ * Read one dotted path out of the form. Returns undefined for a missing branch
+ * rather than throwing, so a path that names a key a given settings.json has
+ * never carried compares equal on both sides and reads as clean.
+ */
+function atPath(form: FormState | null, path: string): unknown {
+  let node: unknown = form;
+  for (const key of path.split('.')) {
+    if (!node || typeof node !== 'object') return undefined;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node;
+}
 
-type SectionId = (typeof SECTIONS)[number]['id'];
+const samePath = (a: FormState | null, b: FormState | null, path: string) =>
+  JSON.stringify(atPath(a, path) ?? null) === JSON.stringify(atPath(b, path) ?? null);
+
+/**
+ * How many individual controls differ between two form branches.
+ *
+ * Counting LEAVES, not top-level keys: `requests` is one key holding seven
+ * fields, and "1 unsaved change" under a card where the operator just edited
+ * three of them reads as a bug in the counter.
+ */
+function countLeafDiffs(a: unknown, b: unknown): number {
+  if (JSON.stringify(a ?? null) === JSON.stringify(b ?? null)) return 0;
+  const plain = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === 'object' && !Array.isArray(v);
+  // An array is one control (the TTS corrections list, the compat params
+  // table), not one control per row.
+  if (!plain(a) || !plain(b)) return 1;
+  let n = 0;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    n += countLeafDiffs(a[key], b[key]);
+  }
+  return n;
+}
+
+/**
+ * The paths a section owns that differ from the last saved baseline.
+ *
+ * Diffing against the BASELINE rather than the server's current values is what
+ * makes the count survive the 3s refetch: the baseline only moves when a save
+ * succeeds, so an operator mid-edit keeps seeing their own change count.
+ */
+function dirtyPaths(
+  form: FormState | null,
+  baseline: FormState | null,
+  paths: readonly string[],
+): string[] {
+  if (!form || !baseline) return [];
+  return paths.filter(path => !samePath(form, baseline, path));
+}
 
 // The three encoder vocabularies, from the mirror rather than re-typed. radio.liq
 // has a literal `%mp3(bitrate=…)` branch per value, so each set is genuinely
@@ -76,6 +115,25 @@ type SectionId = (typeof SECTIONS)[number]['id'];
 const MP3_BITRATES = SETTINGS_MP3_BITRATES;
 const OPUS_BITRATES = SETTINGS_OPUS_BITRATES;
 const AAC_BITRATES = SETTINGS_AAC_BITRATES;
+
+/**
+ * Settings keys a save posts under a name the FormState does NOT use.
+ *
+ * `rebaselineSavedPatch` already re-homes the VALUES (audio.stemCache* is edited
+ * as `transitions.*`); anything that scopes by FormState key has to follow the
+ * same map or it misses the alias. Discard is the case that bites: rolling back
+ * `transitions` while leaving the `audio.stemCacheGb` message on screen parks an
+ * error under a value that no longer produced it.
+ */
+const FORM_KEY_ALIASES: Record<string, readonly string[]> = {
+  transitions: ['audio'],
+};
+
+/** Does `path` belong to any of these FormState keys, alias included? */
+function ownsErrorPath(formKeys: readonly string[], path: string): boolean {
+  const under = (key: string) => path === key || path.startsWith(`${key}.`);
+  return formKeys.some(key => under(key) || (FORM_KEY_ALIASES[key] ?? []).some(under));
+}
 
 /**
  * Replace exactly the errors belonging to the keys this patch carried.
@@ -100,6 +158,97 @@ function mergePatchErrors(
   }
   for (const [path, message] of Object.entries(next || {})) out[path] = message;
   return out;
+}
+
+/**
+ * How long a search jump waits for its target card to mount, in animation
+ * frames (~1s at 60Hz). Generous on purpose: the cost of waiting is invisible
+ * — the scroll simply happens on the frame the card appears — while the cost of
+ * giving up early is a jump that silently does nothing.
+ */
+const JUMP_MAX_FRAMES = 60;
+
+// These four sections own write-only credential inputs in component state.
+// Defer each expensive section until its first visit, then keep it mounted for
+// the life of SettingsPanel so navigation and search cannot destroy a draft.
+// Nothing here is persisted to TanStack Query or browser storage.
+const RETAINED_DRAFT_SECTIONS = new Set<SectionId>(['music', 'llm', 'tts', 'library']);
+
+interface RetainedDraftSectionProps {
+  section: SectionId;
+  active: boolean;
+  saveSlot: HTMLElement | null;
+  reportDirty: (id: string, dirty: boolean) => void;
+  advOpen: boolean;
+  setAdvOpen: (section: SectionId, open: boolean) => void;
+  children: ReactNode;
+}
+
+/** Keep a visited credential editor alive without letting its hidden SaveBar
+ * or Advanced state leak into whichever section is currently visible. */
+function RetainedDraftSection({
+  section,
+  active,
+  saveSlot,
+  reportDirty,
+  advOpen,
+  setAdvOpen,
+  children,
+}: RetainedDraftSectionProps) {
+  const reportSectionDirty = useCallback(
+    (id: string, dirty: boolean) => reportDirty(`${section}:${id}`, dirty),
+    [reportDirty, section],
+  );
+  const setSectionAdvOpen = useCallback(
+    (open: boolean) => setAdvOpen(section, open),
+    [section, setAdvOpen],
+  );
+  const chrome = useMemo(() => ({
+    saveSlot: active ? saveSlot : null,
+    reportDirty: reportSectionDirty,
+    advOpen,
+    setAdvOpen: setSectionAdvOpen,
+  }), [active, saveSlot, reportSectionDirty, advOpen, setSectionAdvOpen]);
+
+  return (
+    <SectionChromeProvider value={chrome}>
+      <div hidden={!active} data-settings-section={section}>
+        {children}
+      </div>
+    </SectionChromeProvider>
+  );
+}
+
+/**
+ * Collector for the number boxes in a whole-block save.
+ *
+ * Archives and the danger zone post EVERY field on every click, so a box the
+ * operator cleared and has not refilled rides along with whatever they actually
+ * edited — and neither JS coercion fails safely there. `Number('')` is 0, which
+ * is a VALID listener buffer and a valid retention window, so saving an AAC
+ * toggle would quietly set the buffer to 0s and flag a mixer restart.
+ * `parseInt('')` is NaN, which JSON.stringify posts as `null` and fails the
+ * whole block with a message pointing at a field nobody touched.
+ *
+ * So a blank box refuses the save and names itself instead. An explicitly typed
+ * `0` still parses, which is what keeps "0 = no limit" on max track length.
+ */
+function numberFields() {
+  const bad: Record<string, string> = {};
+  const read = (path: string, raw: string, parse: (s: string) => number) => {
+    const text = String(raw).trim();
+    // Blank is checked before the parser, not by it: Number('') is a finite 0.
+    const n = text ? parse(text) : NaN;
+    if (Number.isFinite(n)) return n;
+    bad[path] = 'enter a number';
+    return 0;
+  };
+  return {
+    bad,
+    int: (path: string, raw: string) => read(path, raw, t => parseInt(t, 10)),
+    float: (path: string, raw: string) => read(path, raw, t => parseFloat(t)),
+    num: (path: string, raw: string) => read(path, raw, Number),
+  };
 }
 
 const sameForm = (a: FormState, b: FormState) => JSON.stringify(a) === JSON.stringify(b);
@@ -173,8 +322,32 @@ export default function SettingsPanel() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('station');
+  const [retainedSections, setRetainedSections] = useState<Partial<Record<SectionId, true>>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Portal target for the one sticky save bar. Null while nothing is unsaved,
+  // which is what makes every section's SaveBar render nothing when clean.
+  const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null);
+  // Dirtiness reported by a section whose state does not ride FormState.
+  const [localDirty, setLocalDirty] = useState<Record<string, boolean>>({});
+  // Advanced disclosure, per section — remembered while the panel is open so
+  // flipping away to check another section and back does not re-collapse it.
+  const [advOpen, setAdvOpen] = useState<Record<string, boolean>>({});
   const router = useRouter();
+
+  const reportDirty = useCallback((id: string, dirty: boolean) => {
+    setLocalDirty(prev => (!!prev[id] === dirty ? prev : { ...prev, [id]: dirty }));
+  }, []);
+
+  const setSectionAdvOpen = useCallback((section: SectionId, open: boolean) => {
+    setAdvOpen(prev => ({ ...prev, [section]: open }));
+  }, []);
+
+  const activateSection = useCallback((section: SectionId) => {
+    setActiveSection(section);
+    if (RETAINED_DRAFT_SECTIONS.has(section)) {
+      setRetainedSections(prev => prev[section] ? prev : { ...prev, [section]: true });
+    }
+  }, []);
 
   const refresh = async () => { await settingsQuery.refetch(); };
 
@@ -193,8 +366,8 @@ export default function SettingsPanel() {
       router.replace(`/admin/imaging?tab=${s}`);
       return;
     }
-    if (s && SECTIONS.some(x => x.id === s)) setActiveSection(s as SectionId);
-  }, [router, searchParams]);
+    if (s && SECTIONS.some(x => x.id === s)) activateSection(s as SectionId);
+  }, [activateSection, router, searchParams]);
 
   useEffect(() => {
     if (!data?.values) return;
@@ -228,6 +401,7 @@ export default function SettingsPanel() {
         oggIcyMetadata: v.stream?.oggIcyMetadata ?? true,
         idleWhenEmpty: v.stream?.idleWhenEmpty ?? false,
         idleAfterMinutes: String(v.stream?.idleAfterMinutes ?? 10),
+        maxListeners: String(v.stream?.maxListeners ?? 100),
       },
       loudness: {
         targetLufs: String(v.loudness?.targetLufs ?? -14),
@@ -529,37 +703,210 @@ export default function SettingsPanel() {
     } finally { setBusy(false); }
   };
 
+  /**
+   * Post a whole-block patch — unless a number box in it was left blank, in
+   * which case name the box and save nothing. See `numberFields`.
+   */
+  const saveBlock = (n: ReturnType<typeof numberFields>, patch: Record<string, unknown>) => {
+    const blanks = Object.keys(n.bad);
+    if (blanks.length > 0) {
+      setFieldErrors(prev => mergePatchErrors(prev, patch, n.bad));
+      notify.err(blanks.length === 1
+        ? 'a number field is empty — fill it in before saving'
+        : `${blanks.length} number fields are empty — fill them in before saving`);
+      return;
+    }
+    saveSettings(patch);
+  };
+
+  /**
+   * Archives and the danger zone used to carry a Save button per card — one for
+   * the bitrate, one for the retention window, one for each stream mount. Each
+   * now folds into the section's one save.
+   *
+   * Posting the whole block is safe rather than noisy: `settings.update()`
+   * change-gates every field in these two blocks against the CURRENT value
+   * before deciding it changed, so an untouched field posted alongside an
+   * edited one neither writes nor flags a restart. What it is NOT safe against
+   * is a blank number box, which is why both go through `saveBlock`.
+   */
+  const saveArchives = () => {
+    if (!form) return;
+    const n = numberFields();
+    saveBlock(n, {
+      archive: {
+        enabled: form.archive.enabled,
+        bitrate: n.int('archive.bitrate', form.archive.bitrate),
+        retentionDays: n.int('archive.retentionDays', form.archive.retentionDays),
+      },
+    });
+  };
+
+  const saveDanger = () => {
+    if (!form) return;
+    const n = numberFields();
+    saveBlock(n, {
+      crossfadeDuration: n.float('crossfadeDuration', form.crossfadeDuration),
+      maxTrackSeconds: n.int('maxTrackSeconds', form.maxTrackSeconds),
+      silenceTrim: {
+        enabled: form.silenceTrim.enabled,
+        minGapMs: n.int('silenceTrim.minGapMs', form.silenceTrim.minGapMs),
+      },
+      transitions: {
+        pairDrain: form.transitions.pairDrain,
+        stemBlends: form.transitions.stemBlends,
+      },
+      audio: {
+        stemCache: form.transitions.stemCache,
+        stemCacheGb: n.num('audio.stemCacheGb', form.transitions.stemCacheGb),
+      },
+      loudness: {
+        targetLufs: n.float('loudness.targetLufs', form.loudness.targetLufs),
+        maxBoostDb: n.float('loudness.maxBoostDb', form.loudness.maxBoostDb),
+        source: form.loudness.source,
+      },
+      stream: {
+        idleWhenEmpty: form.stream.idleWhenEmpty,
+        idleAfterMinutes: n.int('stream.idleAfterMinutes', form.stream.idleAfterMinutes),
+        opusEnabled: form.stream.opusEnabled,
+        opusBitrate: n.int('stream.opusBitrate', form.stream.opusBitrate),
+        flacEnabled: form.stream.flacEnabled,
+        oggIcyMetadata: form.stream.oggIcyMetadata,
+        aacEnabled: form.stream.aacEnabled,
+        aacBitrate: n.int('stream.aacBitrate', form.stream.aacBitrate),
+        bitrate: n.int('stream.bitrate', form.stream.bitrate),
+        bufferSeconds: n.num('stream.bufferSeconds', form.stream.bufferSeconds),
+        maxListeners: n.int('stream.maxListeners', form.stream.maxListeners),
+      },
+    });
+  };
+
+  const activeSpec = sectionById(activeSection);
+  const baseline = formBaselineRef.current;
+  const changedPaths = dirtyPaths(form, baseline, activeSpec?.formKeys ?? []);
+  const changedCount = changedPaths.reduce(
+    (n, path) => n + countLeafDiffs(atPath(form, path), atPath(baseline, path)),
+    0,
+  );
+  // A section can be dirty in either currency: form paths the panel diffs, or a
+  // section-local edit it cannot see (Navidrome creds, which live in
+  // setup-config.json rather than settings.json).
+  const hasLocalDirtyFor = (section: SectionId) => Object.entries(localDirty)
+    .some(([id, dirty]) => dirty && id.startsWith(`${section}:`));
+  const hasLocalDirty = hasLocalDirtyFor(activeSection);
+  const sectionDirty = changedCount > 0 || hasLocalDirty;
+  // Warn BEFORE the save, from the mirrored path list. The controller stays the
+  // authority afterwards — its `requiresRestart` is what raises the persistent
+  // banner above.
+  const restartWarn = RESTART_PATHS.some(path =>
+    (activeSpec?.formKeys ?? []).some(key => path === key || path.startsWith(`${key}.`))
+    && !samePath(form, baseline, path));
+
+  const dirtyLabel = changedCount > 0
+    ? `${changedCount} unsaved change${changedCount === 1 ? '' : 's'} in ${activeSpec?.label.toLowerCase() ?? 'this section'}`
+    : `unsaved changes in ${activeSpec?.label.toLowerCase() ?? 'this section'}`;
+
+  /** Roll this section's fields back to the last saved baseline, nothing else. */
+  const discardSection = () => {
+    if (!form || !baseline || !activeSpec) return;
+    const next = JSON.parse(JSON.stringify(form)) as Record<string, unknown>;
+    const from = baseline as unknown as Record<string, unknown>;
+    for (const key of activeSpec.formKeys) {
+      if (key in from) next[key] = JSON.parse(JSON.stringify(from[key] ?? null));
+    }
+    setForm(next as unknown as FormState);
+    // The errors belonged to values that no longer exist — same ownership rule
+    // the save path uses, so an unrelated section's message survives.
+    setFieldErrors(prev => {
+      const out: Record<string, string> = {};
+      for (const [path, message] of Object.entries(prev)) {
+        if (!ownsErrorPath(activeSpec.formKeys, path)) out[path] = message;
+      }
+      return out;
+    });
+  };
+
+  /** Search result → switch section, open Advanced if needed, scroll and flash. */
+  const jumpTo = useCallback(({ section, anchor, advanced }: SettingsJump) => {
+    activateSection(section);
+    if (advanced) setAdvOpen(prev => ({ ...prev, [section]: true }));
+    // The section swap and the disclosure both have to commit before the target
+    // card exists to scroll to. A fixed delay is a bet against render time that
+    // a 1200-control section can lose, and a lost jump looks exactly like a
+    // broken search result — no scroll, no flash, no error. So watch for the
+    // card across frames instead, and give up only after JUMP_MAX_FRAMES.
+    let frames = 0;
+    const settle = () => {
+      const el = document.querySelector(
+        `[data-settings-section="${section}"] [data-card="${anchor}"]`,
+      ) ?? document.querySelector(`[data-card="${anchor}"]`);
+      if (!(el instanceof HTMLElement)) {
+        if (frames++ < JUMP_MAX_FRAMES) window.requestAnimationFrame(settle);
+        return;
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.setAttribute('data-flash', '');
+      window.setTimeout(() => el.removeAttribute('data-flash'), 2600);
+    };
+    window.requestAnimationFrame(settle);
+  }, [activateSection]);
+
+  const chrome = useMemo(() => ({
+    saveSlot,
+    reportDirty,
+    advOpen: !!advOpen[activeSection],
+    setAdvOpen: (open: boolean) =>
+      setAdvOpen(prev => ({ ...prev, [activeSection]: open })),
+  }), [saveSlot, reportDirty, advOpen, activeSection]);
+
   return (
     <div className="stack-mobile grid grid-cols-[240px_1fr] items-start gap-6">
-      <aside className="grid gap-1 sm:sticky sm:top-6">
-        <span className="caption pb-2">settings</span>
-        {SECTIONS.map(s => {
-          const isActive = activeSection === s.id;
-          const Icon = s.icon;
-          return (
-            <button
-              key={s.id}
-              onClick={() => setActiveSection(s.id)}
-              className={cn(
-                'flex cursor-pointer items-center gap-2.5 border border-ink px-3 py-2.5 text-left font-[inherit] transition-colors',
-                isActive ? 'bg-ink text-bg' : 'bg-[var(--ink-soft)] text-ink hover:bg-ink/10',
-              )}
-            >
-              <Icon className="size-4 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
-              <span className="grid min-w-0 gap-1">
-                <span className="text-[11px] font-bold tracking-[0.2em] uppercase">
-                  {s.label}
-                </span>
-                <span className="text-[9px] tracking-[0.18em] uppercase opacity-70">
-                  {s.hint}
-                </span>
-              </span>
-            </button>
-          );
-        })}
+      <aside className="grid gap-3.5 sm:sticky sm:top-6">
+        {SECTION_GROUPS.map(group => (
+          <div key={group} className="grid gap-1">
+            <span className="caption pb-1">{group}</span>
+            {SECTIONS.filter(s => s.group === group).map(s => {
+              const isActive = activeSection === s.id;
+              const Icon = s.icon;
+              // Form drafts live in the panel; credential drafts live in the
+              // retained section component after its first visit. Both keep a
+              // section-owned marker while another section is visible.
+              const dirty = dirtyPaths(form, baseline, s.formKeys).length > 0
+                || hasLocalDirtyFor(s.id);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => activateSection(s.id)}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2.5 border border-ink px-3 py-2.5 text-left font-[inherit] transition-colors',
+                    isActive ? 'bg-ink text-bg' : 'bg-[var(--ink-soft)] text-ink hover:bg-ink/10',
+                  )}
+                >
+                  <Icon className="size-4 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
+                  <span className="grid min-w-0 flex-1 gap-1">
+                    <span className="text-[11px] font-bold tracking-[0.2em] uppercase">
+                      {s.label}
+                    </span>
+                    <span className="text-[9px] tracking-[0.18em] uppercase opacity-70">
+                      {s.hint}
+                    </span>
+                  </span>
+                  {dirty && (
+                    <span
+                      className="size-1.5 shrink-0 bg-vermilion"
+                      title="unsaved changes"
+                      aria-label="unsaved changes"
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </aside>
 
       <div className="grid gap-4">
+        <SettingsSearch onJump={jumpTo} />
         {err && <ErrorState error={err} onRetry={refresh} />}
         {pendingRestart && (
           <div
@@ -585,22 +932,62 @@ export default function SettingsPanel() {
         )}
         {!data && !err && <SkeletonForm fields={5} />}
 
+        {/* One save bar per section, sticky, and only while something is
+            unsaved. Each section's own SaveBar portals its note + button into
+            the slot below, so the wording, the patch and the error scoping
+            still belong to the section that knows them.
+
+            top-[3.25rem] clears AdminShell's own sticky header (top-0, ~49px
+            tall) rather than tucking under it like the section rail does — this
+            is the one strip that has to stay readable while the operator
+            scrolls a long section looking for what they changed. */}
+        {sectionDirty && (
+          <div className="sticky top-[3.25rem] z-30 grid gap-2.5 border border-vermilion bg-bg p-3 shadow-drawer">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="size-2 shrink-0 bg-vermilion" aria-hidden />
+              <span className="text-[11px] font-bold tracking-[0.2em] uppercase">
+                {dirtyLabel}
+              </span>
+              {restartWarn && (
+                <Pill tone="accent" dot>needs a mixer restart</Pill>
+              )}
+              {changedCount > 0 && (
+                <Btn sm className="ml-auto" onClick={discardSection} disabled={busy}>
+                  Discard
+                </Btn>
+              )}
+            </div>
+            <div ref={setSaveSlot} className="grid gap-2.5" />
+          </div>
+        )}
+
+        <SectionChromeProvider value={chrome}>
         {data && form && (() => {
           const updateForm: FormUpdater = (updater) =>
             setForm(prev => (prev ? updater(prev) : prev));
           return (
           <>
-            {activeSection === 'tts' && data.tts && (
-              <TtsSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.tts && data.tts && (
+              <RetainedDraftSection
+                section="tts" active={activeSection === 'tts'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.tts} setAdvOpen={setSectionAdvOpen}
+              >
+                <TtsSection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
-            {activeSection === 'llm' && data.llm && (
-              <LlmSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.llm && data.llm && (
+              <RetainedDraftSection
+                section="llm" active={activeSection === 'llm'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.llm} setAdvOpen={setSectionAdvOpen}
+              >
+                <LlmSection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
             {activeSection === 'search' && (
               <SearchSection
@@ -608,11 +995,16 @@ export default function SettingsPanel() {
                 saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch}
               />
             )}
-            {activeSection === 'library' && (
-              <LibrarySection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
+            {retainedSections.library && (
+              <RetainedDraftSection
+                section="library" active={activeSection === 'library'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.library} setAdvOpen={setSectionAdvOpen}
+              >
+                <LibrarySection
+                  data={data} form={form} setForm={updateForm} busy={busy}
+                  saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
+                />
+              </RetainedDraftSection>
             )}
             {activeSection === 'station' && (
               <StationSection
@@ -620,8 +1012,13 @@ export default function SettingsPanel() {
                 saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
             )}
-            {activeSection === 'music' && (
-              <NavidromeSection data={data} adminFetch={adminFetch} refresh={refresh} />
+            {retainedSections.music && (
+              <RetainedDraftSection
+                section="music" active={activeSection === 'music'} saveSlot={saveSlot}
+                reportDirty={reportDirty} advOpen={!!advOpen.music} setAdvOpen={setSectionAdvOpen}
+              >
+                <NavidromeSection data={data} adminFetch={adminFetch} refresh={refresh} />
+              </RetainedDraftSection>
             )}
             {activeSection === 'theme' && (
               <ThemeSection
@@ -670,15 +1067,6 @@ export default function SettingsPanel() {
                           )
                         }
                       />
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({ archive: { enabled: form.archive.enabled } })
-                        }
-                        disabled={busy}
-                      >
-                        Save
-                      </Btn>
                     </div>
                     <SettingsFieldError path="archive.enabled" errors={fieldErrors} />
                     <div className="field-hint">
@@ -711,17 +1099,6 @@ export default function SettingsPanel() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            archive: { bitrate: parseInt(form.archive.bitrate, 10) },
-                          })
-                        }
-                        disabled={busy || !form.archive.enabled}
-                      >
-                        Save bitrate
-                      </Btn>
                     </div>
                     <div className="field-hint">
                       Lower bitrate = smaller archives, less encoder CPU
@@ -750,17 +1127,6 @@ export default function SettingsPanel() {
                         }
                       />
                       <span className="text-[12px] text-muted">days</span>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            archive: { retentionDays: parseInt(form.archive.retentionDays, 10) },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save retention
-                      </Btn>
                     </div>
                     <div className="field-hint">
                       Defaults to 30 days; 0 = keep forever. With a window set, the hourly
@@ -774,6 +1140,14 @@ export default function SettingsPanel() {
                 </div>
               </Card>
             )}
+            <SaveBar
+              note="Turning the archive on or off, and changing its bitrate, need a mixer restart. The retention window applies live."
+              busy={busy}
+              onSave={saveArchives}
+              saveLabel="Save archives"
+              errors={fieldErrors}
+              ownedKeys={['archive']}
+            />
           </>
         )}
         {activeSection === 'backup' && <BackupPanel />}
@@ -847,20 +1221,6 @@ export default function SettingsPanel() {
                       }
                     />
                     <span className="text-[12px] text-muted">min</span>
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({
-                          stream: {
-                            idleWhenEmpty: form.stream.idleWhenEmpty,
-                            idleAfterMinutes: parseInt(form.stream.idleAfterMinutes, 10),
-                          },
-                        })
-                      }
-                      disabled={busy}
-                    >
-                      Save
-                    </Btn>
                   </div>
                   <div className="field-hint">
                     After this long with zero listeners the programme pauses mid-track and the DJ
@@ -873,6 +1233,7 @@ export default function SettingsPanel() {
               </Card>
             )}
 
+            <Advanced note="crossfade, transitions, loudness and the extra stream mounts">
             {form && (
               <Card title="Crossfade" sub="track transition overlap">
                 <div className="field">
@@ -893,15 +1254,6 @@ export default function SettingsPanel() {
                       }
                     />
                     <span className="text-[12px] text-muted">sec</span>
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({ crossfadeDuration: parseFloat(form.crossfadeDuration) })
-                      }
-                      disabled={busy}
-                    >
-                      Save crossfade
-                    </Btn>
                   </div>
                   <SettingsFieldError path="crossfadeDuration" errors={fieldErrors} />
                   <div className="field-hint">
@@ -995,19 +1347,6 @@ export default function SettingsPanel() {
                         ).toLocaleString('en-GB')}{' '}
                         tracks
                       </span>
-                      {/* Its own save button: without one, an edit here misses the
-                          card-level "Save transitions" and silently reverts. */}
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            audio: { stemCacheGb: Number(form.transitions.stemCacheGb) },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save budget
-                      </Btn>
                     </div>
                     <div className="field-hint">
                       How much disk the stem cache may use before the oldest entries are evicted
@@ -1033,24 +1372,6 @@ export default function SettingsPanel() {
                           )
                         }
                       />
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            transitions: {
-                              pairDrain: form.transitions.pairDrain,
-                              stemBlends: form.transitions.stemBlends,
-                            },
-                            audio: {
-                              stemCache: form.transitions.stemCache,
-                              stemCacheGb: Number(form.transitions.stemCacheGb),
-                            },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save transitions
-                      </Btn>
                     </div>
                     <div className="field-hint">
                       When two tempo-compatible tracks meet and both have cached stems, the seam
@@ -1084,15 +1405,6 @@ export default function SettingsPanel() {
                     <span className="text-[12px] text-muted">
                       sec · 0 = no limit · min {data?.values?.minTrackSeconds ?? 30}s
                     </span>
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({ maxTrackSeconds: parseInt(form.maxTrackSeconds, 10) || 0 })
-                      }
-                      disabled={busy}
-                    >
-                      Save limit
-                    </Btn>
                   </div>
                   <SettingsFieldError path="maxTrackSeconds" errors={fieldErrors} />
                   <div className="field-hint">
@@ -1151,20 +1463,6 @@ export default function SettingsPanel() {
                         }
                       />
                       <span className="text-[12px] text-muted">ms</span>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            silenceTrim: {
-                              enabled: form.silenceTrim.enabled,
-                              minGapMs: parseInt(form.silenceTrim.minGapMs, 10) || 1500,
-                            },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save trim
-                      </Btn>
                     </div>
                     <SettingsFieldError path="silenceTrim.minGapMs" errors={fieldErrors} />
                     <div className="field-hint">
@@ -1259,21 +1557,6 @@ export default function SettingsPanel() {
                         }
                       />
                       <span className="text-[12px] text-muted">dB · 0 to 12</span>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            loudness: {
-                              targetLufs: parseFloat(form.loudness.targetLufs),
-                              maxBoostDb: parseFloat(form.loudness.maxBoostDb),
-                              source: form.loudness.source,
-                            },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save loudness
-                      </Btn>
                     </div>
                     <div className="field-hint">
                       Cap on how far a quiet track is turned up (0 = level down only). Boost is
@@ -1309,15 +1592,6 @@ export default function SettingsPanel() {
                           )
                         }
                       />
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({ stream: { opusEnabled: form.stream.opusEnabled } })
-                        }
-                        disabled={busy}
-                      >
-                        Save
-                      </Btn>
                     </div>
                     <SettingsFieldError path="stream.opusEnabled" errors={fieldErrors} />
                     <div className="field-hint">
@@ -1352,17 +1626,6 @@ export default function SettingsPanel() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            stream: { opusBitrate: parseInt(form.stream.opusBitrate, 10) },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save bitrate
-                      </Btn>
                     </div>
                     <SettingsFieldError path="stream.opusBitrate" errors={fieldErrors} />
                     <div className="field-hint">
@@ -1396,15 +1659,6 @@ export default function SettingsPanel() {
                         )
                       }
                     />
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({ stream: { flacEnabled: form.stream.flacEnabled } })
-                      }
-                      disabled={busy}
-                    >
-                      Save
-                    </Btn>
                   </div>
                   <SettingsFieldError path="stream.flacEnabled" errors={fieldErrors} />
                   {form.stream.flacEnabled && (
@@ -1450,15 +1704,6 @@ export default function SettingsPanel() {
                         )
                       }
                     />
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({ stream: { oggIcyMetadata: form.stream.oggIcyMetadata } })
-                      }
-                      disabled={busy}
-                    >
-                      Save
-                    </Btn>
                   </div>
                   <SettingsFieldError path="stream.oggIcyMetadata" errors={fieldErrors} />
                   <div className="field-hint">
@@ -1495,15 +1740,6 @@ export default function SettingsPanel() {
                           )
                         }
                       />
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({ stream: { aacEnabled: form.stream.aacEnabled } })
-                        }
-                        disabled={busy}
-                      >
-                        Save
-                      </Btn>
                     </div>
                     <SettingsFieldError path="stream.aacEnabled" errors={fieldErrors} />
                     {form.stream.aacEnabled && (
@@ -1545,17 +1781,6 @@ export default function SettingsPanel() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <Btn
-                        sm
-                        onClick={() =>
-                          saveSettings({
-                            stream: { aacBitrate: parseInt(form.stream.aacBitrate, 10) },
-                          })
-                        }
-                        disabled={busy}
-                      >
-                        Save bitrate
-                      </Btn>
                     </div>
                     <SettingsFieldError path="stream.aacBitrate" errors={fieldErrors} />
                     <div className="field-hint">
@@ -1592,17 +1817,6 @@ export default function SettingsPanel() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({
-                          stream: { bitrate: parseInt(form.stream.bitrate, 10) },
-                        })
-                      }
-                      disabled={busy}
-                    >
-                      Save bitrate
-                    </Btn>
                   </div>
                   <SettingsFieldError path="stream.bitrate" errors={fieldErrors} />
                   <div className="field-hint">
@@ -1639,17 +1853,6 @@ export default function SettingsPanel() {
                       }
                     />
                     <span className="text-[12px] text-muted">seconds</span>
-                    <Btn
-                      sm
-                      onClick={() =>
-                        saveSettings({
-                          stream: { bufferSeconds: Number(form.stream.bufferSeconds) },
-                        })
-                      }
-                      disabled={busy}
-                    >
-                      Save listener buffer
-                    </Btn>
                   </div>
                   <SettingsFieldError path="stream.bufferSeconds" errors={fieldErrors} />
                   <div className="field-hint">
@@ -1662,6 +1865,56 @@ export default function SettingsPanel() {
                 </div>
               </Card>
             )}
+
+            {form && (
+              <Card title="Max listeners" sub="Icecast concurrent-connection ceiling">
+                <div className="field">
+                  <div className="flex items-center gap-2">
+                    <Label>Max listeners</Label>
+                    <Pill tone="ink">restart required</Pill>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      className="mono-num w-28"
+                      aria-label="Max concurrent listeners"
+                      type="number"
+                      min={1}
+                      max={10000}
+                      step={1}
+                      value={form.stream.maxListeners}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setForm(f =>
+                          f
+                            ? { ...f, stream: { ...f.stream, maxListeners: e.target.value } }
+                            : f,
+                        )
+                      }
+                    />
+                    <span className="text-[12px] text-muted">connections</span>
+                  </div>
+                  <SettingsFieldError path="stream.maxListeners" errors={fieldErrors} />
+                  <div className="field-hint">
+                    How many people can be tuned in at once, across all mounts. Icecast
+                    refuses connections past this; each one costs bandwidth at the mount&apos;s
+                    bitrate, so size it against your upstream. Some countries calculate
+                    licensing fees on simultaneous listener capacity, which is the usual
+                    reason to set it deliberately rather than leave it at 100. Applies on the
+                    next broadcast restart. Current:{' '}
+                    {data?.values?.stream?.maxListeners ?? '—'}.
+                  </div>
+                  <div className="field-hint">
+                    <strong>ICECAST_MAX_CLIENTS</strong>{' '}in the environment overrides this —
+                    it predates the setting and stays authoritative where it&apos;s set. The
+                    broadcast log names the source it used on every boot
+                    (<code>max listeners N (from …)</code>), so check there if this field
+                    saves but nothing changes.
+                  </div>
+                </div>
+              </Card>
+            )}
+
+
+            </Advanced>
 
             <Card title="Mixer" sub="apply pending Liquidsoap-level settings">
               <div className="grid gap-2">
@@ -1678,8 +1931,18 @@ export default function SettingsPanel() {
                 </div>
               </div>
             </Card>
+
+            <SaveBar
+              note="Crossfade, the encoder settings and the listener buffer only reach the stream after a mixer restart. Idle pause, loudness, dead-air trim and the track-length cap apply live."
+              busy={busy}
+              onSave={saveDanger}
+              saveLabel="Save danger zone"
+              errors={fieldErrors}
+              ownedKeys={['crossfadeDuration', 'maxTrackSeconds', 'silenceTrim', 'transitions', 'audio', 'loudness', 'stream']}
+            />
           </>
         )}
+        </SectionChromeProvider>
       </div>
 
       <V3AlertDialog

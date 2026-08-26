@@ -16,13 +16,14 @@ import { createApi, type StationApi } from '@/lib/api';
 import {
   clearActiveStation,
   featuredStation,
-  loadStationAuthorization,
+  loadStationCredentials,
   loadStations,
   removeRecent,
   setActiveStation,
   type StationRef,
   type StationStore,
 } from '@/lib/station';
+import type { StationCredentials } from '@/lib/station-credentials';
 
 interface StationContextValue {
   /** True until the persisted store has loaded. */
@@ -36,7 +37,11 @@ interface StationContextValue {
   recents: StationRef[];
   featured: StationRef;
   /** Switch to a station (also pushes it to the front of recents). */
-  selectStation: (ref: StationRef) => Promise<void>;
+  selectStation: (
+    ref: StationRef,
+    credentials?: StationCredentials | null,
+  ) => Promise<void>;
+  credentialsFor: (url: string) => Promise<StationCredentials | null>;
   forgetStation: (url: string) => Promise<void>;
   /** Clear the active station — sends the app back to onboarding. */
   signOut: () => Promise<void>;
@@ -45,57 +50,76 @@ interface StationContextValue {
 const Ctx = createContext<StationContextValue | null>(null);
 
 export function StationProvider({ children }: { children: React.ReactNode }) {
-  const [runtime, setRuntime] = useState<{
-    store: StationStore;
-    authorization: string | null;
-  }>({
-    store: { activeStation: null, recents: [] },
-    authorization: null,
-  });
+  const [store, setStore] = useState<StationStore>({ activeStation: null, recents: [] });
+  const [credentials, setCredentials] = useState<StationCredentials | null>(null);
   const [ready, setReady] = useState(false);
   const featured = useMemo(() => featuredStation(), []);
-  const store = runtime.store;
-
   useEffect(() => {
     let alive = true;
     loadStations().then(async (s) => {
-      const authorization = await loadStationAuthorization(s.activeStation);
+      let activeCredentials: StationCredentials | null = null;
+      try {
+        activeCredentials = s.activeStation
+          ? await loadStationCredentials(s.activeStation)
+          : null;
+      } catch {
+        // A locked/corrupt keychain must not strand the app behind the native
+        // splash. Start without the login; later station actions surface the
+        // read failure and never overwrite the vault.
+      }
       if (alive) {
-        setRuntime({ store: s, authorization });
+        setStore(s);
+        setCredentials(activeCredentials);
         setReady(true);
       }
+    }).catch(() => {
+      if (alive) setReady(true);
     });
     return () => {
       alive = false;
     };
   }, []);
 
-  const selectStation = useCallback(async (ref: StationRef) => {
-    // Single choke point for re-pointing the app: stop the current station's
-    // audio BEFORE the base changes, so every caller (stations screen,
-    // onboarding add-station) gets the teardown for free.
+  const selectStation = useCallback(async (
+    ref: StationRef,
+    suppliedCredentials?: StationCredentials | null,
+  ) => {
+    const nextCredentials = suppliedCredentials === undefined
+      ? await loadStationCredentials(ref.url)
+      : suppliedCredentials;
+    // A saved-station switch has already loaded its credential, so do not
+    // rewrite the same vault entry. New/edited onboarding credentials are
+    // persisted before current playback is interrupted.
+    const next = await setActiveStation(
+      ref,
+      suppliedCredentials === undefined ? undefined : nextCredentials,
+    );
+    // Single choke point for re-pointing the runtime app: stop the current
+    // station before changing the context base every screen consumes.
     await teardown();
-    const next = await setActiveStation(ref);
-    const authorization = await loadStationAuthorization(next.activeStation);
-    setRuntime({ store: next, authorization });
+    setCredentials(nextCredentials);
+    setStore(next);
   }, []);
+
+  const credentialsFor = useCallback(
+    (url: string) => loadStationCredentials(url),
+    [],
+  );
 
   const forgetStation = useCallback(async (url: string) => {
     const next = await removeRecent(url);
-    setRuntime((current) => ({ ...current, store: next }));
+    setStore(next);
   }, []);
 
   const signOut = useCallback(async () => {
     await teardown();
     const next = await clearActiveStation();
-    setRuntime({ store: next, authorization: null });
+    setCredentials(null);
+    setStore(next);
   }, []);
 
   const base = store.activeStation;
-  const api = useMemo(
-    () => (base ? createApi(base, runtime.authorization) : null),
-    [base, runtime.authorization],
-  );
+  const api = useMemo(() => (base ? createApi(base, credentials) : null), [base, credentials]);
   const name = useMemo(() => {
     if (!base) return null;
     return store.recents.find((r) => r.url === base)?.name ?? null;
@@ -110,10 +134,22 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
       recents: store.recents,
       featured,
       selectStation,
+      credentialsFor,
       forgetStation,
       signOut,
     }),
-    [ready, base, api, name, store.recents, featured, selectStation, forgetStation, signOut],
+    [
+      ready,
+      base,
+      api,
+      name,
+      store.recents,
+      featured,
+      selectStation,
+      credentialsFor,
+      forgetStation,
+      signOut,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

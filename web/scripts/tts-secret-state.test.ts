@@ -1,9 +1,25 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, useState, type ChangeEvent } from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { TtsSection } from '../components/admin/settings/TtsSection.tsx';
 import type { FormState, SettingsData } from '../components/admin/settings/shared.tsx';
+
+// SettingsPanel owns the real DOM slot that SaveBar portals into. This focused
+// component test has no DOM renderer, so keep the section's save control in its
+// react-test-renderer tree while preserving the production portal unchanged.
+const require = createRequire(import.meta.url);
+const reactDom = require('react-dom') as typeof import('react-dom');
+const realCreatePortal = reactDom.createPortal;
+let TtsSection: typeof import('../components/admin/settings/TtsSection.tsx').TtsSection;
+let SectionChromeProvider: typeof import('../components/admin/settings/section-chrome.tsx').SectionChromeProvider;
+
+const TEST_CHROME = {
+  saveSlot: {} as HTMLElement,
+  reportDirty: () => {},
+  advOpen: true,
+  setAdvOpen: () => {},
+};
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,16 +96,20 @@ async function renderTtsSection(
   function Harness() {
     const [form, setForm] = useState(FORM);
     updateForm = updater => setForm(current => updater(current));
-    return createElement(TtsSection, {
-      data: DATA,
-      form,
-      setForm: updater => setForm(current => updater(current)),
-      busy: false,
-      saveSettings,
-      fieldErrors: {},
-      adminFetch: async () => new Response(JSON.stringify({ ok: true, models: [], voices: [] })),
-      refresh: async () => {},
-    });
+    return createElement(
+      SectionChromeProvider,
+      { value: TEST_CHROME },
+      createElement(TtsSection, {
+        data: DATA,
+        form,
+        setForm: updater => setForm(current => updater(current)),
+        busy: false,
+        saveSettings,
+        fieldErrors: {},
+        adminFetch: async () => new Response(JSON.stringify({ ok: true, models: [], voices: [] })),
+        refresh: async () => {},
+      }),
+    );
   }
 
   const queryClient = new QueryClient({
@@ -133,6 +153,10 @@ async function typeSecret(view: Awaited<ReturnType<typeof renderTtsSection>>): P
 }
 
 async function main() {
+  reactDom.createPortal = ((children) => children) as typeof reactDom.createPortal;
+  ({ SectionChromeProvider } = await import('../components/admin/settings/section-chrome.tsx'));
+  ({ TtsSection } = await import('../components/admin/settings/TtsSection.tsx'));
+
   const fallbackEdits: { name: string; patch: Partial<FormState['tts']['fallback']> }[] = [
     { name: 'enabled', patch: { enabled: true } },
     { name: 'engine', patch: { engine: 'kokoro' } },
@@ -173,7 +197,11 @@ async function main() {
   console.log('tts-secret-state.test.ts: compatibility input follows real TTS save outcomes');
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main()
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    reactDom.createPortal = realCreatePortal;
+  });

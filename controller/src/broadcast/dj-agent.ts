@@ -34,7 +34,8 @@ import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
-import { recencyWindowsForLibrary, effectiveNoRepeatWindow } from '../music/recency.js';
+import { recencyWindowsForLibrary } from '../music/recency.js';
+import { effectiveShowNoRepeatWindow } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, runArtistGuard } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
@@ -178,13 +179,6 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // "recently played", just in-flight, and shouldn't tighten the hard guard.
   for (const id of queue.queuedIds()) recentIds.add(id);
 
-  // Count-based HARD no-repeat guard: the last N distinct plays can't re-air,
-  // and (unlike recentIds/recentKeys above) this survives the tool-level
-  // starvation cascade. Clamped to library size so a small catalogue never
-  // fully blocks; 0 = off, leaving the relaxable window in sole charge.
-  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, librarySize);
-  const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
-
   // Show playlist anchor: resolve the union here (async Navidrome fetch) and
   // thread it into the agent's tools. Strict → a hard lock set so every tool's
   // results are intersected with the playlist (the agent can only pick in-set);
@@ -242,6 +236,23 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const vocalLock = strict && activeShow?.vocals && library.vocalAnalyzedCount() > 0
     ? (activeShow.vocals as VocalMode)
     : null;
+
+  // Count-based HARD no-repeat guard: the last N distinct plays can't re-air,
+  // and (unlike recentIds/recentKeys above) this survives the tool-level
+  // starvation cascade. A resolved strict playlist is its own catalogue, so
+  // clamp to its real identity count using the same resolved genre lock as the
+  // tools; 0 leaves the relaxable window in charge.
+  const effN = effectiveShowNoRepeatWindow(
+    settings.get().llm?.noRepeatWindow ?? 0,
+    librarySize,
+    {
+      show: activeShow,
+      playlistTracks,
+      excludedIds,
+      resolvedGenres: genreLock ?? [],
+    },
+  );
+  const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
   // A pinned anchor that resolves to nothing (deleted/recreated playlist →
   // stale id, or a Navidrome error — resolveShowPlaylistPool swallows both)
   // silently un-anchors the show: no lock, no showPlaylistTracks tool. Say so,
@@ -1032,7 +1043,18 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
 // Never throws (callers still need to run the pick after it) and is idempotent:
 // it marks the handoff aired up front, so a concurrent second call — or a
 // mid-way failure — can't double-air or retry into the middle of the new show.
-export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
+// The two model calls are injectable for the same reason artist-guard's are:
+// the thing worth pinning here is the WIRING — which memory each side of the
+// mic-pass is handed — and that is only observable at the generator boundary.
+// Production passes nothing and gets the real ones.
+export interface HandoffDeps {
+  generateSignoff?: typeof dj.generateSignoff;
+  generateHandoffGreeting?: typeof dj.generateHandoffGreeting;
+}
+
+export async function runPersonaHandoff(queue: any, ctx: any, deps: HandoffDeps = {}): Promise<void> {
+  const generateSignoff = deps.generateSignoff ?? dj.generateSignoff;
+  const generateHandoffGreeting = deps.generateHandoffGreeting ?? dj.generateHandoffGreeting;
   const pending = session.pendingHandoff();
   if (!pending) return;
 
@@ -1076,19 +1098,27 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
   session.markHandoffAired();
 
   await withTrace({ kind: 'handoff', from: personaOut.name, to: personaIn.name }, async () => {
+    // The sign-off closes the show that just ENDED, but maybeRoll has already
+    // hard-rolled by the time this runs — the live session holds nothing but its
+    // own scenario turn, so reading it would strip the outgoing DJ of the hour
+    // it is signing off from. Its memory is the ARCHIVED session's
+    // (session.priorPromptMemory). The greeting keeps the fresh session's empty
+    // memory on purpose: not inheriting the outgoing topic is the point of #1479.
+    const outgoingRecap = queue.getDjRecap({ prior: true });
+    const outgoingOpeners = queue.getRecentOpeners(6, { prior: true });
     const recentOpeners = queue.getRecentOpeners();
     let aired = false;
 
     // 1. Sign-off, in the OUTGOING persona's voice. Tag the session turn with
-    //    the outgoing persona's id + name — session.windowMessages() uses the id
-    //    to spot a turn spoken by someone other than the session's own persona
-    //    and names the real speaker, so the incoming DJ never reads the
-    //    sign-off as its own words.
+    //    the outgoing persona's id + name — that id is what keeps the line out
+    //    of the new session's prompt memory (broadcast/prompt-memory.ts) and
+    //    what makes session.windowMessages() name the real speaker, so the
+    //    incoming DJ never reads the sign-off as its own words.
     let signoffText: string | null = null;
     try {
-      signoffText = await dj.generateSignoff({
+      signoffText = await generateSignoff({
         personaOut, personaIn, showIn,
-        context: ctx, recap: queue.getDjRecap(), recentOpeners,
+        context: ctx, recap: outgoingRecap, recentOpeners: outgoingOpeners,
       });
       await queue.announce(signoffText, 'handoff', {
         persona: personaOut, meta: { personaId: personaOut.id, personaName: personaOut.name },
@@ -1099,14 +1129,16 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
       signoffText = null;
     }
 
-    // 2. Greeting, in the INCOMING persona's voice — fed the sign-off text so
-    //    it can genuinely respond. Stands alone if the sign-off didn't air.
+    // 2. Greeting, in the INCOMING persona's voice. It acknowledges the
+    //    outgoing presenter by name but does not ingest their raw sign-off:
+    //    that line is an unbounded topic bridge across the session boundary.
+    //    Stands alone if the sign-off didn't air.
     //    On a programme show the greeting doubles as the episode's intro, so
     //    the producer's angle (planned before this runs — see the call sites)
     //    rides along; the standalone intro is then skipped (programme.ts).
     try {
-      const greeting = await dj.generateHandoffGreeting({
-        personaIn, personaOut, signoffText, showIn,
+      const greeting = await generateHandoffGreeting({
+        personaIn, personaOut, showIn,
         episodeAngle: session.getProgramme()?.plan?.angle || null,
         context: ctx, recap: queue.getDjRecap(), recentOpeners,
       });

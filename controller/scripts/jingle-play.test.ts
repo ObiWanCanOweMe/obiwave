@@ -19,10 +19,13 @@ const { config } = await import('../src/config.js');
 const { jingleUri } = await import('../src/broadcast/jingles.js');
 const { bedUri } = await import('../src/broadcast/beds.js');
 const { queue } = await import('../src/broadcast/queue.js');
+const session = await import('../src/broadcast/session.js');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RADIO_LIQ = join(here, '..', '..', 'liquidsoap', 'radio.liq');
 const QUEUE_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'queue.ts')).href;
+const SESSION_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'session.ts')).href;
+const ATOMIC_FILE_URL = pathToFileURL(join(here, '..', 'src', 'util', 'atomic-file.js')).href;
 
 function makeJingleState(names: string[]) {
   const state = mkdtempSync(join(tmpdir(), 'subwave-jingle-restart-'));
@@ -45,6 +48,55 @@ function runFreshController(state: string, sourceBody: string) {
   const child = spawnSync(
     process.execPath,
     ['--import', 'tsx', '--input-type=module', '-e', source],
+    {
+      cwd: join(here, '..'),
+      encoding: 'utf8',
+      env: { ...process.env, STATE_DIR: state },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const line = child.stdout.split('\n').find(value => value.startsWith('__RESULT__='));
+  assert.ok(line, child.stdout);
+  return JSON.parse(line.slice('__RESULT__='.length));
+}
+
+// Runs one controller process with a real atomic-file implementation whose
+// first pre-jingle session snapshot is deliberately held after serialisation.
+// Module mocking is limited to that timing seam: queue/session still operate
+// against actual files, and the nested process mimics a controller crash.
+function runWithHeldPreJingleSessionWrite(state: string, sourceBody: string) {
+  const source = `
+    import { mock } from 'node:test';
+    import { rmSync, writeFileSync } from 'node:fs';
+    import { rename, writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    let oldSerialized;
+    const oldSerializedReady = new Promise(resolve => { oldSerialized = resolve; });
+    let oldFinished;
+    const oldFinishedReady = new Promise(resolve => { oldFinished = resolve; });
+    await mock.module(${JSON.stringify(ATOMIC_FILE_URL)}, {
+      namedExports: {
+        writeFileAtomic: async (path, contents, { mode } = {}) => {
+          const staleSessionSnapshot = path.endsWith('/session.json')
+            && !String(contents).includes('manualJingleId');
+          if (staleSessionSnapshot) {
+            oldSerialized();
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          const tmp = path + '.held-test.tmp';
+          await writeFile(tmp, contents, mode == null ? {} : { mode });
+          await rename(tmp, path);
+          if (staleSessionSnapshot) oldFinished();
+        },
+      },
+    });
+    const { queue } = await import(${JSON.stringify(QUEUE_URL)});
+    const session = await import(${JSON.stringify(SESSION_URL)});
+    ${sourceBody}
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--experimental-test-module-mocks', '--import', 'tsx', '--input-type=module', '-e', source],
     {
       cwd: join(here, '..'),
       encoding: 'utf8',
@@ -93,6 +145,55 @@ async function markAired(name: string) {
   }));
   await new Promise(resolve => setTimeout(resolve, 150));
 }
+
+function sessionContext() {
+  return {
+    at: new Date().toISOString(),
+    time: { period: 'morning', vibe: 'morning', mood: 'calm' },
+    weather: null,
+    festival: null,
+    dominantMood: 'calm',
+    date: {},
+    clock: {},
+    listeners: 1,
+    activeShow: null,
+  } as any;
+}
+
+function manualJingleTurns() {
+  return (session.getSession()?.messages || [])
+    .filter(turn => turn.role === 'segment' && turn.kind === 'jingle');
+}
+
+test('manual jingle prompt memory is authenticated by the manual air marker exactly once', async () => {
+  session.start(sessionContext());
+  await queue.playJingle(filename);
+  assert.deepEqual(manualJingleTurns(), [], 'a queued handoff is not an aired editorial turn');
+  rmSync(join(STATE, 'jingle-now.txt'), { force: true });
+
+  // The shared marker has no authority without the manual origin stamp. A
+  // legacy marker and the automatic rotate must not invent a manual turn.
+  for (const origin of [undefined, 'automatic']) {
+    writeFileSync(join(STATE, 'jingle-playing.json'), JSON.stringify({
+      filename: join(jingleDir, filename),
+      durationSec: 4,
+      ...(origin ? { origin } : {}),
+      startedAt: Date.now() / 1000,
+    }));
+    await queue.retirePendingJingles();
+    assert.deepEqual(manualJingleTurns(), [], `${origin || 'legacy'} marker is not a manual air event`);
+  }
+
+  writeFileSync(join(STATE, 'jingle-playing.json'), JSON.stringify({
+    filename: join(jingleDir, filename),
+    durationSec: 4,
+    origin: 'manual',
+    startedAt: Date.now() / 1000,
+  }));
+  await queue.retirePendingJingles();
+  await queue.retirePendingJingles();
+  assert.deepEqual(manualJingleTurns().map(turn => turn.text), ['Event announcement']);
+});
 
 test('manual jingle uses a priority handoff without touching the FIFO track handoff', async () => {
   writeFileSync(config.liquidsoap.queueFile, 'existing-track');
@@ -183,6 +284,188 @@ test('a pending manual jingle survives a controller-only restart', () => {
       const result = await queue.playJingle(${JSON.stringify(filename)});
       console.log('__RESULT__=' + JSON.stringify(result));
     `), { ok: false, reason: 'already-queued' });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('the watcher records a lone manual jingle marker without another button press', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      queue.startWatcher();
+      await new Promise(resolve => setTimeout(resolve, 1700));
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+      process.exit(0);
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('an observed manual marker survives a later automatic marker overwrite', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      queue.startWatcher();
+      await new Promise(resolve => setTimeout(resolve, 1700));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'automatic',
+        startedAt: Date.now() / 1000,
+      }));
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+      process.exit(0);
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('an immediate exit after marker retirement cannot lose or duplicate the jingle turn', () => {
+  const state = makeJingleState([filename, other]);
+  const context = sessionContext();
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      session.start(${JSON.stringify(context)});
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      // This retires the first reservation and writes the next ledger snapshot.
+      // Exit immediately: the old implementation let that snapshot land before
+      // session's debounced write, dropping the already-aired announcement.
+      await queue.playJingle(${JSON.stringify(other)});
+      console.log('__RESULT__=' + JSON.stringify(true));
+      process.exit(0);
+    `), true);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      await session.recover(${JSON.stringify(context)});
+      queue.recover();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a stale debounced session write cannot land after manual-jingle retirement', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.equal(runWithHeldPreJingleSessionWrite(state, `
+      session.start(${JSON.stringify(context)});
+      await oldSerializedReady;
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      await queue.reconcilePendingJingles();
+      await oldFinishedReady;
+      console.log('__RESULT__=' + JSON.stringify(true));
+      process.exit(0);
+    `), true);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      await session.recover(${JSON.stringify(context)});
+      queue.recover();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      const pending = JSON.parse(readFileSync(join(process.env.STATE_DIR, 'pending-jingles.json'), 'utf8')).pending;
+      console.log('__RESULT__=' + JSON.stringify({ turns, pending }));
+    `), { turns: [filename], pending: [] });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a manual marker is remembered once across controller restart recovery', () => {
+  const state = makeJingleState([filename, other]);
+  const context = {
+    at: new Date().toISOString(),
+    time: { period: 'morning', vibe: 'morning', mood: 'calm' },
+    weather: null,
+    festival: null,
+    dominantMood: 'calm',
+    date: {},
+    clock: {},
+    listeners: 1,
+    activeShow: null,
+  };
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      const context = ${JSON.stringify(context)};
+      session.start(context);
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      // The next FIFO press reconciles the prior marker and durably removes
+      // that reservation before returning.
+      await queue.playJingle(${JSON.stringify(other)});
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      const context = ${JSON.stringify(context)};
+      await session.recover(context);
+      queue.recover();
+      // Re-reading the same marker after recovery cannot add another turn.
+      await queue.retirePendingJingles();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
   } finally {
     rmSync(state, { recursive: true, force: true });
   }

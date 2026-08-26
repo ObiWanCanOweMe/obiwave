@@ -3,7 +3,7 @@
 // node:assert-via-tsx style, matching scripts/recent-plays.test.ts.
 
 import assert from 'node:assert/strict';
-import { mergePlaylistTracks } from '../src/music/show-playlist.js';
+import { filterExcludedPlaylistTracks, mergePlaylistTracks } from '../src/music/show-playlist.js';
 
 // Empty / falsy inputs → empty pool.
 assert.deepEqual(mergePlaylistTracks([]), [], 'no lists → empty');
@@ -39,6 +39,39 @@ assert.deepEqual(
   mergePlaylistTracks([[{ id: 'a' }, { id: 'a' }, { id: 'a' }]]).map(t => t.id),
   ['a'],
   'intra-list duplicates collapse',
+);
+
+// Duplicate rips have different Subsonic ids but are the same audible song.
+// Keep the first copy so a strict show cannot offer both to the picker or play
+// them consecutively after the scoped hard window relaxes.
+assert.deepEqual(
+  mergePlaylistTracks([[
+    { id: 'rip-a', title: ' Jolene ', artist: 'Dolly Parton' },
+    { id: 'rip-b', title: 'jolene', artist: ' dolly parton ' },
+    { id: 'other', title: '9 to 5', artist: 'Dolly Parton' },
+  ]]).map(t => t.id),
+  ['rip-a', 'other'],
+  'duplicate title/artist rips collapse onto the first playlist entry',
+);
+
+// Scheduler refresh is the last route before the LLM-free coast writes URIs
+// into auto.m3u. Exclusions are absolute there too: an empty allowed set must
+// create an empty playlist (Liquidsoap's emergency fallback), never quietly
+// restore the original blocked pool to avoid starvation.
+const fallback = [
+  { id: 'blocked-a', uri: 'subsonic://blocked-a' },
+  { id: 'blocked-b', uri: 'subsonic://blocked-b' },
+];
+assert.deepEqual(
+  filterExcludedPlaylistTracks(fallback, new Set(['blocked-a', 'blocked-b'])),
+  [],
+  'all-excluded fallback writes no blocked URI',
+);
+assert.deepEqual(
+  filterExcludedPlaylistTracks([...fallback, { id: 'allowed', uri: 'subsonic://allowed' }], new Set(['blocked-a', 'blocked-b']))
+    .map(track => track.uri),
+  ['subsonic://allowed'],
+  'mixed fallback keeps only allowed URIs',
 );
 
 console.log('show-playlist merge checks passed');
