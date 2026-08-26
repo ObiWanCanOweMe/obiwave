@@ -24,8 +24,8 @@ export interface LiveActivityState {
   artist: string;
   /** Show name, e.g. "Night Shift". Omit outside a scheduled show. */
   show?: string | null;
-  /** Stable cache key for the artwork — the subsonic id, or the persona's
-   *  avatar path while the DJ is talking. */
+  /** Station-scoped cache key for the artwork. Contains the credential-free
+   *  station origin plus the complete track/avatar identity. */
   artworkKey?: string | null;
   /** Absolute artwork URL. The widget gets no network turn, so the app
    *  downloads this into the shared App Group container and passes the widget

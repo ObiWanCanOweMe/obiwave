@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UIKit
 
@@ -30,13 +31,13 @@ enum LiveActivityArtwork {
     return dir
   }
 
-  /// A subsonic id is opaque and may contain path separators on some servers,
-  /// so it is reduced to a filesystem-safe name rather than trusted.
+  /// The key contains the credential-free station origin and the complete
+  /// logical artwork identity. Hash the whole value rather than sanitizing or
+  /// truncating it: lossy filenames let distinct private artwork collide, and
+  /// raw station/id details do not belong on disk.
   private static func filename(for key: String) -> String {
-    let safe = key.unicodeScalars.map { scalar -> String in
-      CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : "-"
-    }.joined()
-    return String(safe.prefix(64)) + ".img"
+    let digest = SHA256.hash(data: Data(key.utf8))
+    return digest.map { String(format: "%02x", $0) }.joined() + ".img"
   }
 
   /// The filename for `key` if it is already on disk, else nil. Called on the

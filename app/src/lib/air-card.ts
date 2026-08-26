@@ -9,6 +9,7 @@
 // about to look up.
 
 import type { StationApi } from './api';
+import { normalizeStationOrigin } from './stationSecurity';
 import type { ActiveShow, NowPlayingTrack } from './types';
 
 export interface AirCard {
@@ -19,13 +20,28 @@ export interface AirCard {
   artworkUrl: string | undefined;
   /** Station-scoped headers for that exact URL. External artwork has none. */
   artworkHeaders: Record<string, string> | undefined;
-  /** Stable cache key for that artwork — the subsonic id, or the avatar path.
-   *  Only surfaces that cache artwork to disk (the Live Activity) need it. */
+  /** Station-scoped cache key for that artwork. Only surfaces that cache
+   *  artwork to disk (the Live Activity) need it. */
   artworkKey: string | null;
   /** Scheduled show name, when one is on. */
   show: string | null;
   /** The artwork above is the persona's, not the track's. */
   showingPersona: boolean;
+}
+
+/**
+ * The logical artwork id alone is not globally unique: two private stations
+ * can both call a track `123`, and persona avatar paths are likewise local to
+ * a station. Keep the complete logical id and bind it to the credential-free
+ * station origin before it crosses into the native cache. The native side
+ * hashes this structured value before using it as a filename, so neither ids
+ * nor station details are exposed on disk.
+ */
+function stationArtworkKey(stationBase: string, artworkIdentity: string | null): string | null {
+  if (!artworkIdentity) return null;
+  const stationOrigin = normalizeStationOrigin(stationBase);
+  if (!stationOrigin) return null;
+  return JSON.stringify([stationOrigin, artworkIdentity]);
 }
 
 export function resolveAirCard(params: {
@@ -42,6 +58,7 @@ export function resolveAirCard(params: {
   const avatar = personaAvatar ? api.avatar(personaAvatar) : undefined;
   const showingPersona = talking && !!avatar?.uri;
   const artwork = showingPersona ? avatar : cover;
+  const artworkIdentity = showingPersona ? personaAvatar : nowPlaying?.subsonic_id ?? null;
 
   return {
     title: nowPlaying?.title || 'SUB/WAVE',
@@ -51,7 +68,7 @@ export function resolveAirCard(params: {
     album: nowPlaying?.album || 'SUB/WAVE',
     artworkUrl: artwork?.uri,
     artworkHeaders: artwork?.headers,
-    artworkKey: showingPersona ? personaAvatar : nowPlaying?.subsonic_id ?? null,
+    artworkKey: artwork?.uri ? stationArtworkKey(api.base, artworkIdentity) : null,
     show: activeShow?.name ?? null,
     showingPersona,
   };

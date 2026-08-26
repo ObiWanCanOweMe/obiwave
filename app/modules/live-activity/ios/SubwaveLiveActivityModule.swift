@@ -31,7 +31,8 @@ struct LiveActivityState: Record {
   @Field var title: String = ""
   @Field var artist: String = ""
   @Field var show: String? = nil
-  /// Stable cache key for the cover — the track's subsonic id.
+  /// Station-scoped cache key for the cover. It contains no station
+  /// credentials or headers and is hashed before it is used as a filename.
   @Field var artworkKey: String? = nil
   /// Absolute cover URL, downloaded into the App Group on a background task.
   @Field var artworkUrl: String? = nil
@@ -200,7 +201,9 @@ public class SubwaveLiveActivityModule: Module {
       [weak self] name in
       guard let self else { return }
       Task { @MainActor in
-        self.inFlightArtworkKey = nil
+        if self.inFlightArtworkKey == key {
+          self.inFlightArtworkKey = nil
+        }
         guard let name, self.lastArtworkKey == key, var content = self.lastState else { return }
         guard content.artwork != name else { return }
         content.artwork = name
