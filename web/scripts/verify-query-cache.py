@@ -337,8 +337,11 @@ def row_mutations_patch_all_cache_shapes(_page):
         }
         client.clear();
     """)
+    # tsx's CLI `--eval` path starts its watch IPC server on Node 22 and can
+    # collide with its own socket.  Node's supported `--import tsx` hook
+    # transpiles the exact same TypeScript contract without starting a watcher.
     result = subprocess.run(
-        [str(web_root.parent / "controller/node_modules/.bin/tsx"), "--eval", program],
+        ["node", "--import", "tsx", "--input-type=module", "--eval", program],
         cwd=web_root,
         text=True,
         capture_output=True,

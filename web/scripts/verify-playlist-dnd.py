@@ -27,8 +27,9 @@ TWO MEASUREMENT TRAPS, both learned the hard way and both guarded below.
     of any control in the deck, which is pre-existing (measured identically on
     the old "Move down" button) and is taken as a warm-up before measuring.
 """
-import base64, json, os, sys, tempfile
+import base64, json, os, sys, tempfile, urllib.request
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
 WEB = "http://localhost:7793"
 AUTH = base64.b64encode(b"test:test").decode()
@@ -65,6 +66,22 @@ def titles(page):
 
 
 API = "http://localhost:7791"
+
+
+def assert_throwaway_stack():
+    """Fail closed before any browser-local mutation or route interception."""
+    request = urllib.request.Request(
+        f"{API}/health", headers={"Authorization": f"Basic {AUTH}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            health = json.loads(response.read())
+    except Exception as error:  # noqa: BLE001 — no browser action without attestation
+        sys.exit(f"refusing to run: verify stack not reachable at {API}: {error}")
+    assert_dummy_backend_provenance(health)
+
+
+assert_throwaway_stack()
 
 
 def stub(page):

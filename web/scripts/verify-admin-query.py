@@ -4419,8 +4419,10 @@ def connect_cache_reuse(page):
     )
     page.goto(f"{WEB}/admin/connect", wait_until="domcontentloaded")
     page.get_by_text("Everything wired to Task 6 Station.", exact=True).wait_for(state="visible")
-    page.get_by_role("tab", name="Integrations").click()
-    page.get_by_text("Stream URLs", exact=True).wait_for(state="visible")
+    # The operator-facing label changed to make the stream destination obvious;
+    # the stable URL tab id remains `integrations`.
+    page.get_by_role("tab", name="Stream URLs").click()
+    page.get_by_text("Point any player, speaker, or hub at these.", exact=False).wait_for(state="visible")
     page.get_by_role("tab", name="MCP").click()
     page.get_by_label("MCP endpoint URL").wait_for(state="visible")
     click_admin_link(page, "Skills", "/admin/skills")

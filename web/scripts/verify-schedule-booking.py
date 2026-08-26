@@ -28,8 +28,9 @@ TWO TRAPS, both hit while writing this:
     locator, or the check reads a neighbour's aria-pressed and fails a passing
     app.
 """
-import base64, json, os, re, sys
+import base64, json, os, re, sys, urllib.request
 from playwright.sync_api import sync_playwright
+from verify_stack import assert_dummy_backend_provenance
 
 WEB = os.environ.get("SUBWAVE_VERIFY_WEB", "http://localhost:7793")
 API = os.environ.get("SUBWAVE_VERIFY_API", "http://localhost:7791")
@@ -48,6 +49,24 @@ def check(name, ok, detail=""):
 
 def toasts(pg):
     return " | ".join(pg.locator("[data-sonner-toast]").all_inner_texts()).strip()
+
+
+def assert_throwaway_stack():
+    """Prove the controller and local Subsonic stub share this run's marker."""
+    if API != "http://localhost:7791" or WEB != "http://localhost:7793":
+        sys.exit("refusing to run: API/WEB are not the isolated verify stack")
+    request = urllib.request.Request(
+        f"{API}/health", headers={"Authorization": f"Basic {AUTH}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            health = json.loads(response.read())
+    except Exception as error:  # noqa: BLE001 — fail closed before a browser opens
+        sys.exit(f"refusing to run: verify stack not reachable at {API}: {error}")
+    assert_dummy_backend_provenance(health)
+
+
+assert_throwaway_stack()
 
 
 with sync_playwright() as p:

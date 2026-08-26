@@ -50,6 +50,7 @@ fieldAria's groupProps carries no id, see lib/form.ts).
 import base64
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -322,7 +323,13 @@ def stream_buffer(page):
     original = json.loads(api("/settings"))["values"]["stream"]["bufferSeconds"]
 
     try:
-        page.goto(f"{WEB}/admin/settings?section=danger")
+        page.goto(f"{WEB}/admin/settings")
+        # Stream controls live behind Danger zone's per-section Advanced
+        # disclosure. Select that rail entry like an operator, then open the
+        # one visible disclosure; its accessible name includes its note/count.
+        page.get_by_role("button", name=re.compile(r"^Danger zone")).click()
+        page.get_by_role("button", name="Stop stream").wait_for()
+        page.locator("button[aria-expanded]:visible").filter(has_text="Advanced").click()
         page.wait_for_selector("text=Stream MP3 bitrate")
 
         seconds = page.get_by_label("Listener buffer (seconds)")
@@ -336,7 +343,7 @@ def stream_buffer(page):
         with page.expect_response(
             lambda r: r.url.endswith("/settings") and r.request.method == "POST"
         ) as refused_info:
-            page.get_by_role("button", name="Save listener buffer").click()
+            page.get_by_role("button", name="Save danger zone").click()
         assert refused_info.value.status == 400, (
             f"out-of-range save returned HTTP {refused_info.value.status}, want 400"
         )
@@ -353,7 +360,7 @@ def stream_buffer(page):
         with page.expect_response(
             lambda r: r.url.endswith("/settings") and r.request.method == "POST"
         ) as saved_info:
-            page.get_by_role("button", name="Save listener buffer").click()
+            page.get_by_role("button", name="Save danger zone").click()
         saved = saved_info.value
         assert saved.status == 200, f"valid save returned HTTP {saved.status}, want 200"
         assert saved.json().get("requiresRestart") is True, "save did not request a restart"
@@ -1085,8 +1092,10 @@ def imaging(page):
 # cannot run against :7791/:7793 the way the rest of the file does, and must
 # not touch that shared stack (six other checks, and everything Task 13
 # drives, depend on it staying up and configured).
-ONBOARD_CONTROLLER_PORT = 7792
-ONBOARD_WEB_PORT = 7794
+# 7792 is deliberately kept vacant by Task 5. The wizard's independently
+# owned controller/web pair uses spare task-only loopback ports instead.
+ONBOARD_CONTROLLER_PORT = 7795
+ONBOARD_WEB_PORT = 7796
 ONBOARD_API = f"http://localhost:{ONBOARD_CONTROLLER_PORT}"
 ONBOARD_WEB = f"http://localhost:{ONBOARD_WEB_PORT}"
 
@@ -1122,10 +1131,10 @@ def onboarding(page):
     NavidromeStep/LlmStep/TtsStep/DjStep each own a useZodForm and their own
     gated "Next" submit; ReviewStep is unchanged (no fields of its own).
 
-    Boots its OWN throwaway controller (port 7792, a fresh temp STATE_DIR, a
+    Boots its OWN throwaway controller (port 7795, a fresh temp STATE_DIR, a
     loopback dummy NAVIDROME_URL, and critically no Navidrome credentials —
     their absence is what makes needsSetup true) and its OWN second Next dev
-    server (port 7794). Both are
+    server (port 7796). Both are
     started and stopped by THIS check, in a `finally`, so this file stays
     runnable as a whole against a freshly booted stack (Task 13's job) with no
     manual step for anyone to forget — that was Task 5's bar.
@@ -1138,7 +1147,7 @@ def onboarding(page):
        reading app/onboarding/page.tsx's `process.env.NEXT_PUBLIC_API_URL`
        and next.config.js (no rewrite proxies `/api` dynamically). So the
        EXISTING :7793 server this file's other checks use cannot be
-       retargeted per request; a second `next dev` process, pointed at 7792
+       retargeted per request; a second `next dev` process, pointed at 7795
        from the start, is the only way.
     2. A second `next dev` in the SAME source tree collides with the first:
        Next's dev server refuses to start a second instance sharing one
@@ -1210,8 +1219,12 @@ def onboarding(page):
     for k in ("NAVIDROME_USER", "NAVIDROME_PASS"):
         controller_env.pop(k, None)
 
+    # Node 22's tsx CLI creates a shared IPC watcher socket under TMPDIR; the
+    # primary isolated controller already owns it, so a second CLI process can
+    # fail before it binds its own task-only port. Node's supported tsx import
+    # performs the same TypeScript transform without that watcher IPC server.
     controller_proc = subprocess.Popen(
-        ["npx", "tsx", "src/server.ts"],
+        ["node", "--import", "tsx", "src/server.ts"],
         cwd=str(CONTROLLER_DIR),
         env=controller_env,
         stdout=subprocess.DEVNULL,
