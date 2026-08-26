@@ -143,6 +143,14 @@ const PENDING_JINGLE_MAX = 3;
 // it never retires a press that is merely waiting for its boundary.
 const PENDING_JINGLE_TTL_MS = 30 * 60 * 1000;
 
+type PendingJingle = {
+  reservedAt: number;
+  // The announcement's editorial text is captured with the reservation. The
+  // marker only identifies a filename, and its JSON may outlive a jingle list
+  // edit or a controller restart.
+  label: string;
+};
+
 // transitions far more often — a working DJ talks across most of them.
 class Queue {
   upcoming: QueueItem[] = [];  // request items pushed by listeners, not yet playing
@@ -170,7 +178,7 @@ class Queue {
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
   _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; daypart: string | null; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
   _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
-  _pendingJingles = new Map<string, number>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
+  _pendingJingles = new Map<string, PendingJingle>(); // manual jingle presses reserved or handed over but not yet heard — see playJingle
   _pendingJingleStateChain: Promise<void> = Promise.resolve(); // serialises the durable manual-jingle ledger
 
   // Snapshot upcoming/current/history to disk. The queue is otherwise purely
@@ -1878,6 +1886,11 @@ class Queue {
     if (!filename) throw new Error('Jingle filename is required');
     const path = await jingles.getPath(filename);
     if (!path) throw new Error(`Unknown jingle: ${filename}`);
+    // Capture the prose with the durable FIFO reservation, but do not put it
+    // in prompt memory yet: the handoff can wait behind a safe boundary or be
+    // lost on a mixer restart. Only Liquidsoap's manual-origin air marker
+    // authenticates the editorial event (retirePendingJingles below).
+    const label = (await jingles.list()).find(j => j.filename === filename)?.text || filename;
     const reservation = await this.withPendingJingleState(async () => {
       const retired = this.retirePendingJingles();
       if (this._pendingJingles.has(filename)) {
@@ -1889,14 +1902,14 @@ class Queue {
         return { ok: false as const, reason: 'queue-full' as const };
       }
       const reservedAt = Date.now();
-      this._pendingJingles.set(filename, reservedAt);
+      this._pendingJingles.set(filename, { reservedAt, label });
       try {
         // Commit the reservation before exposing the handoff. A crash can
         // therefore produce a temporary false block, never a duplicate FIFO
         // entry; the TTL is the bounded recovery for that narrow window.
         await this.persistPendingJingles();
       } catch (err) {
-        if (this._pendingJingles.get(filename) === reservedAt) this._pendingJingles.delete(filename);
+        if (this._pendingJingles.get(filename)?.reservedAt === reservedAt) this._pendingJingles.delete(filename);
         throw err;
       }
       return { ok: true as const, reservedAt };
@@ -1907,19 +1920,13 @@ class Queue {
       await writeHandoff(config.liquidsoap.jingleFile, jingles.jingleUri(path), { maxWaitMs: 5000 });
     } catch (err) {
       await this.withPendingJingleState(async () => {
-        if (this._pendingJingles.get(filename) !== reservedAt) return;
+        if (this._pendingJingles.get(filename)?.reservedAt !== reservedAt) return;
         this._pendingJingles.delete(filename);
         await this.persistPendingJingles();
       });
       throw err;
     }
-    // The sidecar's own script, not the hashed filename: every other segment
-    // turn in the booth log and the DJ's chat history carries prose, and
-    // `jingle_a1b2c3d4.wav` reads as noise next to them (playSfx logs its
-    // effect NAME for the same reason).
-    const label = (await jingles.list()).find(j => j.filename === filename)?.text || filename;
     this.log('jingle', `"${label}" queued — airs at the next safe boundary`);
-    session.appendTurn({ role: 'segment', kind: 'jingle', text: label });
     return { ok: true as const };
   }
 
@@ -1930,8 +1937,8 @@ class Queue {
   retirePendingJingles(): boolean {
     const now = Date.now();
     let changed = false;
-    for (const [name, at] of this._pendingJingles) {
-      if (now - at > PENDING_JINGLE_TTL_MS) {
+    for (const [name, pending] of this._pendingJingles) {
+      if (now - pending.reservedAt > PENDING_JINGLE_TTL_MS) {
         this._pendingJingles.delete(name);
         changed = true;
       }
@@ -1939,11 +1946,29 @@ class Queue {
     const marker = latestJingleMarker();
     if (marker) {
       const entries = [...this._pendingJingles];
-      const airedIndex = entries.findIndex(([name, at]) => (
-        name === marker.filename && marker.startedAtMs >= at
+      const airedIndex = entries.findIndex(([name, pending]) => (
+        name === marker.filename && marker.startedAtMs >= pending.reservedAt
       ));
       if (airedIndex >= 0) {
-        for (const [name] of entries.slice(0, airedIndex + 1)) this._pendingJingles.delete(name);
+        for (const [name, pending] of entries.slice(0, airedIndex + 1)) {
+          this._pendingJingles.delete(name);
+          // A single marker may retire several FIFO entries if the controller
+          // missed earlier marker writes. Give every turn the durable
+          // reservation id, so a restart between the session and ledger writes
+          // cannot append it twice when recovery sees the same marker again.
+          const manualJingleId = `${name}:${pending.reservedAt}`;
+          const alreadyRecorded = session.getSession()?.messages?.some(
+            turn => turn?.meta?.manualJingleId === manualJingleId,
+          );
+          if (!alreadyRecorded) {
+            session.appendTurn({
+              role: 'segment',
+              kind: 'jingle',
+              text: pending.label,
+              meta: { manualJingleId },
+            });
+          }
+        }
         changed = true;
       }
     }
@@ -1960,7 +1985,7 @@ class Queue {
   }
 
   async persistPendingJingles() {
-    const pending = [...this._pendingJingles].map(([filename, reservedAt]) => ({ filename, reservedAt }));
+    const pending = [...this._pendingJingles].map(([filename, value]) => ({ filename, ...value }));
     await writeFileAtomic(config.queue.pendingJinglesFile, JSON.stringify({ pending }, null, 2));
   }
 
@@ -1975,7 +2000,12 @@ class Queue {
           && Number.isFinite(entry?.reservedAt)
           && Number(entry.reservedAt) > 0
         ))
-        .map((entry: { filename: string; reservedAt: number }) => [entry.filename, entry.reservedAt]));
+        .map((entry: { filename: string; reservedAt: number; label?: unknown }) => [entry.filename, {
+          reservedAt: entry.reservedAt,
+          // Pending ledgers written before this field existed remain valid;
+          // their air-time memory falls back to the readable filename.
+          label: typeof entry.label === 'string' && entry.label ? entry.label : entry.filename,
+        }]));
       if (this.retirePendingJingles()) {
         void this.withPendingJingleState(() => this.persistPendingJingles())
           .catch(err => console.error('[queue] pending-jingles persist failed:', (err as Error).message));

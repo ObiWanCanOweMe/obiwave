@@ -3,7 +3,7 @@
 // each file as its own subprocess.
 //
 //   npm test              # run the whole suite
-//   npm test -- picker    # run only files whose name matches "picker"
+//   npm test -- picker queue    # run the union of matching file names
 //
 // Adding a test is still just dropping a `*.test.ts` file in here — no
 // package.json edit — which is what let mix-fx.test.ts silently fall out of the
@@ -32,20 +32,25 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
-const filter = process.argv[2]; // optional substring filter
+const filters = process.argv.slice(2); // optional substring filters (OR union)
 
 const files = readdirSync(scriptsDir)
   .filter((f) => f.endsWith('.test.ts'))
   .filter((f) => f !== 'run-tests.test.ts') // guard against self-inclusion if ever added
-  .filter((f) => !filter || f.includes(filter))
+  .filter((f) => !filters.length || filters.some(filter => f.includes(filter)))
   .sort();
 
 if (files.length === 0) {
-  console.error(filter ? `No test files match "${filter}".` : 'No *.test.ts files found.');
+  console.error(filters.length
+    ? `No test files match ${filters.map(filter => `"${filter}"`).join(' or ')}.`
+    : 'No *.test.ts files found.');
   process.exit(1);
 }
 
-console.log(`Running ${files.length} test file(s)${filter ? ` matching "${filter}"` : ''}:\n`);
+const selectorLabel = filters.length
+  ? ` matching ${filters.map(filter => `"${filter}"`).join(' or ')}`
+  : '';
+console.log(`Running ${files.length} test file(s)${selectorLabel}:\n`);
 
 // `--import tsx` is what lets the runner load .ts directly; it is passed to the
 // runner AND inherited by each test subprocess. The spec reporter is forced so

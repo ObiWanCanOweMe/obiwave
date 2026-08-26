@@ -17,7 +17,7 @@ import * as settings from '../settings.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type VocalMode } from '../music/show-filter.js';
 import { freshnessBiasedOrder } from '../music/airing.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
-import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
+import { filterExcludedPlaylistTracks, resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
 import { createPoolBuilder } from './auto-pool.js';
@@ -422,12 +422,13 @@ async function refreshAutoPlaylistInner() {
   // Excluded playlists (blocklist): drop every track from a blocklisted
   // playlist. The pick paths (picker.ts / the picker/ tools) apply this as a HARD
   // filter — an empty pool there just skips the LLM pick and coasts on this
-  // auto.m3u. This IS that coast, the last dead-air guard, so it mirrors the
-  // strict-playlist block above: never-starve if the blocklist would empty the
-  // pool (a mis-set "exclude everything" plays an excluded track over silence).
+  // auto.m3u. This IS that coast too, so the blocklist remains absolute even
+  // when every candidate is excluded: write an empty playlist and let the
+  // emergency source handle continuity rather than airing a forbidden track.
   if (excludedIds) {
-    const allowed = pool.filter((t: any) => t?.id && !excludedIds.has(t.id));
-    if (allowed.length) { pool.length = 0; pool.push(...allowed); }
+    const allowed = filterExcludedPlaylistTracks(pool, excludedIds);
+    pool.length = 0;
+    pool.push(...allowed);
   }
 
   // Loudness normalisation: the queue drain stamps liq_amplify per track, but

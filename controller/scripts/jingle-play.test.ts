@@ -19,10 +19,12 @@ const { config } = await import('../src/config.js');
 const { jingleUri } = await import('../src/broadcast/jingles.js');
 const { bedUri } = await import('../src/broadcast/beds.js');
 const { queue } = await import('../src/broadcast/queue.js');
+const session = await import('../src/broadcast/session.js');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RADIO_LIQ = join(here, '..', '..', 'liquidsoap', 'radio.liq');
 const QUEUE_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'queue.ts')).href;
+const SESSION_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'session.ts')).href;
 
 function makeJingleState(names: string[]) {
   const state = mkdtempSync(join(tmpdir(), 'subwave-jingle-restart-'));
@@ -93,6 +95,55 @@ async function markAired(name: string) {
   }));
   await new Promise(resolve => setTimeout(resolve, 150));
 }
+
+function sessionContext() {
+  return {
+    at: new Date().toISOString(),
+    time: { period: 'morning', vibe: 'morning', mood: 'calm' },
+    weather: null,
+    festival: null,
+    dominantMood: 'calm',
+    date: {},
+    clock: {},
+    listeners: 1,
+    activeShow: null,
+  } as any;
+}
+
+function manualJingleTurns() {
+  return (session.getSession()?.messages || [])
+    .filter(turn => turn.role === 'segment' && turn.kind === 'jingle');
+}
+
+test('manual jingle prompt memory is authenticated by the manual air marker exactly once', async () => {
+  session.start(sessionContext());
+  await queue.playJingle(filename);
+  assert.deepEqual(manualJingleTurns(), [], 'a queued handoff is not an aired editorial turn');
+  rmSync(join(STATE, 'jingle-now.txt'), { force: true });
+
+  // The shared marker has no authority without the manual origin stamp. A
+  // legacy marker and the automatic rotate must not invent a manual turn.
+  for (const origin of [undefined, 'automatic']) {
+    writeFileSync(join(STATE, 'jingle-playing.json'), JSON.stringify({
+      filename: join(jingleDir, filename),
+      durationSec: 4,
+      ...(origin ? { origin } : {}),
+      startedAt: Date.now() / 1000,
+    }));
+    queue.retirePendingJingles();
+    assert.deepEqual(manualJingleTurns(), [], `${origin || 'legacy'} marker is not a manual air event`);
+  }
+
+  writeFileSync(join(STATE, 'jingle-playing.json'), JSON.stringify({
+    filename: join(jingleDir, filename),
+    durationSec: 4,
+    origin: 'manual',
+    startedAt: Date.now() / 1000,
+  }));
+  queue.retirePendingJingles();
+  queue.retirePendingJingles();
+  assert.deepEqual(manualJingleTurns().map(turn => turn.text), ['Event announcement']);
+});
 
 test('manual jingle uses a priority handoff without touching the FIFO track handoff', async () => {
   writeFileSync(config.liquidsoap.queueFile, 'existing-track');
@@ -183,6 +234,58 @@ test('a pending manual jingle survives a controller-only restart', () => {
       const result = await queue.playJingle(${JSON.stringify(filename)});
       console.log('__RESULT__=' + JSON.stringify(result));
     `), { ok: false, reason: 'already-queued' });
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a manual marker is remembered once across controller restart recovery', () => {
+  const state = makeJingleState([filename, other]);
+  const context = {
+    at: new Date().toISOString(),
+    time: { period: 'morning', vibe: 'morning', mood: 'calm' },
+    weather: null,
+    festival: null,
+    dominantMood: 'calm',
+    date: {},
+    clock: {},
+    listeners: 1,
+    activeShow: null,
+  };
+  try {
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      const context = ${JSON.stringify(context)};
+      session.start(context);
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      // The next FIFO press reconciles the prior marker and durably removes
+      // that reservation. Wait for session's intentionally debounced write.
+      await queue.playJingle(${JSON.stringify(other)});
+      await new Promise(resolve => setTimeout(resolve, 1100));
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      const context = ${JSON.stringify(context)};
+      await session.recover(context);
+      queue.recover();
+      // Re-reading the same marker after recovery cannot add another turn.
+      queue.retirePendingJingles();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      console.log('__RESULT__=' + JSON.stringify(turns));
+    `), [filename]);
   } finally {
     rmSync(state, { recursive: true, force: true });
   }

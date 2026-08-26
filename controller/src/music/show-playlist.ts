@@ -44,6 +44,15 @@ export function mergePlaylistTracks(lists: any[][]): any[] {
   return out;
 }
 
+// The show blocklist is absolute at every consumer, including the scheduler's
+// LLM-free auto.m3u coast. Returning an empty array is intentional: callers
+// must hand Liquidsoap an empty scoped playlist and let its emergency source
+// handle continuity rather than reintroducing a forbidden URI as filler.
+export function filterExcludedPlaylistTracks<T extends { id?: string }>(tracks: T[], excludedIds: Set<string> | null): T[] {
+  if (!excludedIds) return tracks;
+  return tracks.filter(t => t?.id && !excludedIds.has(t.id));
+}
+
 // TTL cache so a pick / refresh doesn't re-walk every playlist. Same 30-min
 // horizon the pool picker uses for its other Subsonic sources; a playlist edited
 // in Navidrome shows up within a refresh cycle.

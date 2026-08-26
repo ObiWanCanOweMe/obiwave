@@ -29,7 +29,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,17 @@ process.env.STATE_DIR = stateRoot;
 const { setCache } = await import('../src/settings/store.js');
 const settings = await import('../src/settings.js');
 const { DEFAULTS } = await import('../src/settings/defaults.js');
-const { LIQ_ICECAST_MAX_CLIENTS_PATH } = await import('../src/settings/liquidsoap.js');
+const {
+  ICECAST_LISTENER_AUTH_PATH,
+  LIQ_ARCHIVE_BITRATE_PATH,
+  LIQ_ARCHIVE_ENABLED_PATH,
+  LIQ_CROSSFADE_PATH,
+  LIQ_ICECAST_MAX_CLIENTS_PATH,
+  LIQ_JINGLE_RATIO_PATH,
+  LIQ_OPUS_ENABLED_PATH,
+  LIQ_STREAM_BITRATE_PATH,
+  LIQ_STREAM_BUFFER_SECONDS_PATH,
+} = await import('../src/settings/liquidsoap.js');
 const { STREAM_MAX_LISTENERS_BOUNDS, streamPatchSchema } = await import('../src/schemas/settings.js');
 
 const SETTINGS_PATH = path.join(stateRoot, 'settings.json');
@@ -107,6 +117,31 @@ test('a save writes the handoff file the supervisors read', async () => {
   await settings.update({ stream: { maxListeners: 250 } });
   assert.ok(existsSync(LIQ_ICECAST_MAX_CLIENTS_PATH), 'handoff file not written');
   assert.equal(readFileSync(LIQ_ICECAST_MAX_CLIENTS_PATH, 'utf8'), '250');
+});
+
+test('cold bootstrap repairs a missing max-listener handoff when every older sentinel exists', async () => {
+  await coldLoad({ maxListeners: 400 });
+  // Simulate an upgrade where every old startup sentinel is present, so only
+  // the max-client file can decide whether ensureLiquidsoapSettingsFile()
+  // rewrites the handoffs. The renderer's separate test below keeps the
+  // existing env-wins rule pinned after this file is created.
+  const existing = [
+    LIQ_JINGLE_RATIO_PATH,
+    LIQ_CROSSFADE_PATH,
+    LIQ_ARCHIVE_ENABLED_PATH,
+    LIQ_ARCHIVE_BITRATE_PATH,
+    LIQ_OPUS_ENABLED_PATH,
+    LIQ_STREAM_BITRATE_PATH,
+    LIQ_STREAM_BUFFER_SECONDS_PATH,
+    ICECAST_LISTENER_AUTH_PATH,
+  ];
+  for (const handoff of existing) writeFileSync(handoff, 'already-present');
+  rmSync(LIQ_ICECAST_MAX_CLIENTS_PATH, { force: true });
+
+  await settings.ensureLiquidsoapSettingsFile();
+
+  assert.ok(existsSync(LIQ_ICECAST_MAX_CLIENTS_PATH), 'missing max-listener handoff was not bootstrapped');
+  assert.equal(readFileSync(LIQ_ICECAST_MAX_CLIENTS_PATH, 'utf8'), '400');
 });
 
 test('changing the ceiling asks for a mixer restart', async () => {

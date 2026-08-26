@@ -121,6 +121,7 @@ import {
   LIQ_ARCHIVE_BITRATE_PATH,
   LIQ_ARCHIVE_ENABLED_PATH,
   LIQ_CROSSFADE_PATH,
+  LIQ_ICECAST_MAX_CLIENTS_PATH,
   LIQ_JINGLE_RATIO_PATH,
   LIQ_OPUS_ENABLED_PATH,
   LIQ_STREAM_BITRATE_PATH,
@@ -2228,6 +2229,7 @@ export async function ensureLiquidsoapSettingsFile() {
     !existsSync(LIQ_OPUS_ENABLED_PATH) ||
     !existsSync(LIQ_STREAM_BITRATE_PATH) ||
     !existsSync(LIQ_STREAM_BUFFER_SECONDS_PATH) ||
+    !existsSync(LIQ_ICECAST_MAX_CLIENTS_PATH) ||
     !existsSync(ICECAST_LISTENER_AUTH_PATH)
   ) {
     await writeLiquidsoapSettings(s);
