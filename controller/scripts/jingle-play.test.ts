@@ -25,6 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const RADIO_LIQ = join(here, '..', '..', 'liquidsoap', 'radio.liq');
 const QUEUE_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'queue.ts')).href;
 const SESSION_URL = pathToFileURL(join(here, '..', 'src', 'broadcast', 'session.ts')).href;
+const ATOMIC_FILE_URL = pathToFileURL(join(here, '..', 'src', 'util', 'atomic-file.js')).href;
 
 function makeJingleState(names: string[]) {
   const state = mkdtempSync(join(tmpdir(), 'subwave-jingle-restart-'));
@@ -47,6 +48,55 @@ function runFreshController(state: string, sourceBody: string) {
   const child = spawnSync(
     process.execPath,
     ['--import', 'tsx', '--input-type=module', '-e', source],
+    {
+      cwd: join(here, '..'),
+      encoding: 'utf8',
+      env: { ...process.env, STATE_DIR: state },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const line = child.stdout.split('\n').find(value => value.startsWith('__RESULT__='));
+  assert.ok(line, child.stdout);
+  return JSON.parse(line.slice('__RESULT__='.length));
+}
+
+// Runs one controller process with a real atomic-file implementation whose
+// first pre-jingle session snapshot is deliberately held after serialisation.
+// Module mocking is limited to that timing seam: queue/session still operate
+// against actual files, and the nested process mimics a controller crash.
+function runWithHeldPreJingleSessionWrite(state: string, sourceBody: string) {
+  const source = `
+    import { mock } from 'node:test';
+    import { rmSync, writeFileSync } from 'node:fs';
+    import { rename, writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    let oldSerialized;
+    const oldSerializedReady = new Promise(resolve => { oldSerialized = resolve; });
+    let oldFinished;
+    const oldFinishedReady = new Promise(resolve => { oldFinished = resolve; });
+    await mock.module(${JSON.stringify(ATOMIC_FILE_URL)}, {
+      namedExports: {
+        writeFileAtomic: async (path, contents, { mode } = {}) => {
+          const staleSessionSnapshot = path.endsWith('/session.json')
+            && !String(contents).includes('manualJingleId');
+          if (staleSessionSnapshot) {
+            oldSerialized();
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          const tmp = path + '.held-test.tmp';
+          await writeFile(tmp, contents, mode == null ? {} : { mode });
+          await rename(tmp, path);
+          if (staleSessionSnapshot) oldFinished();
+        },
+      },
+    });
+    const { queue } = await import(${JSON.stringify(QUEUE_URL)});
+    const session = await import(${JSON.stringify(SESSION_URL)});
+    ${sourceBody}
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--experimental-test-module-mocks', '--import', 'tsx', '--input-type=module', '-e', source],
     {
       cwd: join(here, '..'),
       encoding: 'utf8',
@@ -330,6 +380,41 @@ test('an immediate exit after marker retirement cannot lose or duplicate the jin
         .map(turn => turn.text);
       console.log('__RESULT__=' + JSON.stringify(turns));
     `), [filename]);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('a stale debounced session write cannot land after manual-jingle retirement', () => {
+  const state = makeJingleState([filename]);
+  const context = sessionContext();
+  try {
+    assert.equal(runWithHeldPreJingleSessionWrite(state, `
+      session.start(${JSON.stringify(context)});
+      await oldSerializedReady;
+      await queue.playJingle(${JSON.stringify(filename)});
+      rmSync(join(process.env.STATE_DIR, 'jingle-now.txt'));
+      writeFileSync(join(process.env.STATE_DIR, 'jingle-playing.json'), JSON.stringify({
+        filename: join(process.env.STATE_DIR, 'jingles', ${JSON.stringify(filename)}),
+        origin: 'manual',
+        startedAt: Date.now() / 1000,
+      }));
+      await queue.reconcilePendingJingles();
+      await oldFinishedReady;
+      console.log('__RESULT__=' + JSON.stringify(true));
+      process.exit(0);
+    `), true);
+
+    assert.deepEqual(runFreshController(state, `
+      const session = await import(${JSON.stringify(SESSION_URL)});
+      await session.recover(${JSON.stringify(context)});
+      queue.recover();
+      const turns = session.getSession().messages
+        .filter(turn => turn.role === 'segment' && turn.kind === 'jingle')
+        .map(turn => turn.text);
+      const pending = JSON.parse(readFileSync(join(process.env.STATE_DIR, 'pending-jingles.json'), 'utf8')).pending;
+      console.log('__RESULT__=' + JSON.stringify({ turns, pending }));
+    `), { turns: [filename], pending: [] });
   } finally {
     rmSync(state, { recursive: true, force: true });
   }

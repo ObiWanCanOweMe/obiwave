@@ -124,6 +124,10 @@ const PERSIST_DEBOUNCE_MS = 1000;
 
 let _session: Session | null = null;
 let _writeTimer: NodeJS.Timeout | null = null;
+// Every session snapshot shares this chain. Atomic replacement prevents a
+// torn file, but not an older asynchronous replacement landing after a newer
+// flush; serialising the writes gives their snapshots one durable order.
+let _persistChain: Promise<void> = Promise.resolve();
 
 function mintId() {
   return 'sess_' + randomBytes(4).toString('hex');
@@ -223,14 +227,20 @@ function buildHandoff(prev: Session | null): string | null {
 
 async function persist(): Promise<boolean> {
   if (!_session) return true;
-  try {
-    // Atomic replace — /debug and boot recovery read this file, and a crash
-    // mid-write should leave the previous snapshot, not a truncated one.
-    await writeFileAtomic(config.session.currentFile, JSON.stringify(_session, null, 2));
-    return true;
-  } catch {
-    return false;
-  }
+  const snapshot = JSON.stringify(_session, null, 2);
+  const write = async () => {
+    try {
+      // Atomic replace — /debug and boot recovery read this file, and a crash
+      // mid-write should leave the previous snapshot, not a truncated one.
+      await writeFileAtomic(config.session.currentFile, snapshot);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const result = _persistChain.then(write, write);
+  _persistChain = result.then(() => {}, () => {});
+  return result;
 }
 
 function schedulePersist() {
