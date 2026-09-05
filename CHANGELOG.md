@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.12.0](https://github.com/perminder-klair/subwave/compare/v1.11.0...v1.12.0) (2026-09-05)
+
+
+### Features
+
+* **analyzer:** add configurable concurrency ([#1544](https://github.com/perminder-klair/subwave/issues/1544)) ([12eb45f](https://github.com/perminder-klair/subwave/commit/12eb45f2da8337e55d40d23b87834c356c4eb7ea))
+* **compose:** support relocating the stem cache ([#1523](https://github.com/perminder-klair/subwave/issues/1523)) ([cb646f5](https://github.com/perminder-klair/subwave/commit/cb646f5ab438d32296d5036a9539f8e6c294e8c2))
+* **controller:** one arbitrated talk-slot scheduler for every spoken segment ([#1505](https://github.com/perminder-klair/subwave/issues/1505)) ([e2d49d4](https://github.com/perminder-klair/subwave/commit/e2d49d4a2003c046849e7817fb08ee4b06010311)), closes [#1500](https://github.com/perminder-klair/subwave/issues/1500)
+* **dj:** announce-only link style — "This is &lt;artist&gt;" / "Next up, &lt;artist&gt;" ([#1497](https://github.com/perminder-klair/subwave/issues/1497)) ([324adf9](https://github.com/perminder-klair/subwave/commit/324adf9e7813041b36f0053301dd243b00e28f63))
+
+
+### Bug Fixes
+
+* **analyzer:** read ANALYZE_MAX_BYTES through envInt on both sides ([#1552](https://github.com/perminder-klair/subwave/issues/1552)) ([7b318a4](https://github.com/perminder-klair/subwave/commit/7b318a480a3c2a6acae21f24fd7fd46e83f43cdc)), closes [#1549](https://github.com/perminder-klair/subwave/issues/1549)
+* **analyzer:** remove the staging file when a capped download fails ([#1547](https://github.com/perminder-klair/subwave/issues/1547)) ([9d04488](https://github.com/perminder-klair/subwave/commit/9d0448827ec9cfff0042fcb8728222d4bbed38f1))
+* **beds:** give the bed a real tail before the next song ([#1485](https://github.com/perminder-klair/subwave/issues/1485)) ([#1499](https://github.com/perminder-klair/subwave/issues/1499)) ([452e459](https://github.com/perminder-klair/subwave/commit/452e45934d94e722e9f8fd4971c85a24009b76f5))
+* **controller:** bound pending talk slot holds ([#1546](https://github.com/perminder-klair/subwave/issues/1546)) ([55024db](https://github.com/perminder-klair/subwave/commit/55024dbd649d07faf709975fca92851cfaa71cc8))
+* **docker:** build the web image on Node 24 to clear the TransformStream race ([#1554](https://github.com/perminder-klair/subwave/issues/1554)) ([0a7e2c4](https://github.com/perminder-klair/subwave/commit/0a7e2c4df950e0a1652329a1a764f623fb825d9c)), closes [#1535](https://github.com/perminder-klair/subwave/issues/1535)
+* **mix:** make tempo-derived timing octave-safe ([#1417](https://github.com/perminder-klair/subwave/issues/1417)) ([#1434](https://github.com/perminder-klair/subwave/issues/1434)) ([2f420b0](https://github.com/perminder-klair/subwave/commit/2f420b0f454795be2de7acf12684ba6677d2e3f4))
+* **shows:** don't cap artist share of the pool for a strict single-artist playlist ([#1533](https://github.com/perminder-klair/subwave/issues/1533)) ([6799cba](https://github.com/perminder-klair/subwave/commit/6799cba160839d6c915d25e555cf1a2a07359e85))
+
+
+### Documentation
+
+* document squash merge message cleanup ([#1545](https://github.com/perminder-klair/subwave/issues/1545)) ([1a5988a](https://github.com/perminder-klair/subwave/commit/1a5988a3a3c23fd75677f069ce0f759d34512624))
+* **skills:** add a Todoist to-do nudge example skill ([#1504](https://github.com/perminder-klair/subwave/issues/1504)) ([174c347](https://github.com/perminder-klair/subwave/commit/174c347fc2a61aa4aed287b491ce73ade93134f9))
+* **skills:** clarify custom feed tool contract ([#1550](https://github.com/perminder-klair/subwave/issues/1550)) ([b527408](https://github.com/perminder-klair/subwave/commit/b52740801532014a9a44cc57cb42e75b5f2a7b7d))
+
+
+### Refactors
+
+* **tagger:** key prompt_hash off a contract version, not the prompt text ([#1553](https://github.com/perminder-klair/subwave/issues/1553)) ([dd26904](https://github.com/perminder-klair/subwave/commit/dd2690440dba440198603cf8afcb9ca81bea6390)), closes [#1548](https://github.com/perminder-klair/subwave/issues/1548)
+
 ## [1.11.0](https://github.com/perminder-klair/subwave/compare/v1.10.0...v1.11.0) (2026-08-26)
 
 
