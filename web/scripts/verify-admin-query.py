@@ -2558,7 +2558,7 @@ def takeover_expiry_survives_failed_poll(page):
         settle_clock(page, 30_000)
     settle_clock(page)
 
-    page.get_by_role("button", name="Pin to air →").wait_for(state="visible")
+    page.get_by_role("button", name="Take over →").wait_for(state="visible")
     assert schedule_hits == initial_hits + 2, schedule_hits
 
 
