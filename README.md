@@ -186,6 +186,8 @@ GPU-specific analyzer packaging remains upstream-owned and is outside
 ObiWave's image-only Ark release pipeline. The checked-in upstream-compatible
 overlay remains available to operators who intentionally manage that image and
 host passthrough themselves:
+Hosts with an NVIDIA GPU can run the heavy stack on CUDA instead. For a one-off
+run, layer the `docker-compose.analyzer-gpu.yml` overlay:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
@@ -194,6 +196,12 @@ docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 The Ark deployment uses its local analyzer service at
 `http://analyzer:8080` inside the split-stack network and does not depend on a
 remote GPU host.
+To keep the overlay across normal rebuilds and restarts, set `COMPOSE_FILE` in
+`.env` to `docker-compose.yml:docker-compose.analyzer-gpu.yml`.
+
+All-in-one installs have no `analyzer` service to swap, so they take the GPU on
+the image instead: pull `subwave-aio-cuda` and hand the container the card
+(`--gpus all`, or the Unraid steps in [`docs/unraid.md`](docs/unraid.md)).
 
 ### Local dev (contributors)
 

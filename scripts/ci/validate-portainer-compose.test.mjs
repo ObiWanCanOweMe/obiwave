@@ -824,3 +824,31 @@ test('generic Caddyfile expands optional trusted proxies and parses them strictl
   assert.match(caddyfile, /trusted_proxies static[\s\S]*\{\$TRUSTED_PROXY_RANGES\}/);
   assert.match(caddyfile, /^\s*trusted_proxies_strict\s*$/m);
 });
+
+test('Ark forwards analyzer limits and shares an optional relocated stem cache', () => {
+  const defaults = renderCompose(portainerManifest, { STEMS_DIR: '', ANALYZE_CONCURRENCY: '', ANALYZE_MAX_BYTES: '' });
+  const configured = renderCompose(portainerManifest, {
+    STEMS_DIR: '/mnt/large/subwave-stems', ANALYZE_CONCURRENCY: '3', ANALYZE_MAX_BYTES: '24000000',
+  });
+  assert.equal(configured.services.analyzer.environment.ANALYZE_CONCURRENCY, '3');
+  assert.equal(configured.services.analyzer.environment.ANALYZE_MAX_BYTES, '24000000');
+  for (const name of ['broadcast', 'controller', 'analyzer']) {
+    const mount = configured.services[name].volumes.find(v => v.target === '/var/sub-wave/stems');
+    assert.equal(mount?.source, '/mnt/large/subwave-stems', name);
+    const defaultMount = defaults.services[name].volumes.find(v => v.target === '/var/sub-wave/stems');
+    assert.equal(defaultMount?.source, '/mnt/NVMe/container-data/subwave/state/stems', name);
+  }
+  for (const name of ['broadcast', 'controller']) {
+    assert.equal(configured.services[name].environment.SUBWAVE_STEMS_DIR, '/var/sub-wave/stems');
+    assert.equal(defaults.services[name].environment.SUBWAVE_STEMS_DIR, '');
+  }
+});
+
+
+test('all Compose analyzer services receive the same custom download cap as the controller', () => {
+  for (const file of ['docker-compose.yml', 'docker-compose.byo.yml', 'docker-compose.dev.yml']) {
+    const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+    const model = renderCompose(source, { ANALYZE_MAX_BYTES: '24000000' });
+    assert.equal(model.services.analyzer.environment.ANALYZE_MAX_BYTES, '24000000', file);
+  }
+});

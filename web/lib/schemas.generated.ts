@@ -684,6 +684,16 @@ export const PERSONA_SCRIPT_LENGTHS = [
   'storyteller',
 ] as const;
 
+// 'natural' (default) writes the ordinary between-track link — set the track
+// up, name the artist or capture its feel, vary the opener. 'announce' is a
+// matter-of-fact station: the link is exactly "This is <artist>." or "Next
+// up, <artist>." — nothing else. Absent/invalid → 'natural', same posture as
+// djMode's absent → false, so an upgraded station keeps its old links.
+export const PERSONA_LINK_STYLES = [
+  'natural',
+  'announce',
+] as const;
+
 // Per-persona tone dials — 0-10 with 5 the neutral default.
 export const PERSONA_DIAL_MIN = 0;
 export const PERSONA_DIAL_MAX = 10;
@@ -992,6 +1002,7 @@ export interface PersonaParsed {
   frequency: string;
   scriptLength: string;
   djMode: boolean;
+  linkStyle: string;
   humour: number;
   localColour: number;
   warmth: number;
@@ -1093,6 +1104,15 @@ export const personaSchema = z
       personaNullToUndefined,
       z.boolean({ error: 'djMode must be a boolean' }).default(false),
     ),
+    // Absent → 'natural' (the historical link behaviour). See PERSONA_LINK_STYLES.
+    linkStyle: z.preprocess(
+      personaNullToUndefined,
+      z
+        .enum(PERSONA_LINK_STYLES, {
+          error: `linkStyle must be one of: ${PERSONA_LINK_STYLES.join(', ')}`,
+        })
+        .default('natural'),
+    ),
     // An absent dial reads as neutral, which is what clampPersonaDial returns
     // for undefined — see the note on personaCoercedText for the .optional().
     humour: z.unknown().optional().transform(clampPersonaDial),
@@ -1166,6 +1186,7 @@ export const personaSchema = z
       frequency: p.frequency,
       scriptLength: p.scriptLength,
       djMode: p.djMode,
+      linkStyle: p.linkStyle,
       humour: p.humour,
       localColour: p.localColour,
       warmth: p.warmth,
@@ -1225,6 +1246,9 @@ export function repairPersonaForLoad(
       ? raw.scriptLength
       : undefined,
     djMode: raw.djMode === true ? true : undefined,
+    linkStyle: (PERSONA_LINK_STYLES as readonly string[]).includes(raw.linkStyle as string)
+      ? raw.linkStyle
+      : undefined,
     avatar:
       typeof raw.avatar === 'string' && PERSONA_AVATAR_FILENAME_RE.test(raw.avatar.trim())
         ? raw.avatar.trim()
@@ -1884,15 +1908,45 @@ export function repairScheduleForLoad(raw: unknown, showIds: string[]): Schedule
 
 // ── Timed takeover (#930) ────────────────────────────────────────────────────
 
-/** Pin one show for a bounded window, then the weekly grid resumes. */
+/**
+ * A bounded takeover target. `showId: null` means Default programming; an
+ * outer `scheduleOverride: null` means there is no takeover at all.
+ */
 export interface ScheduleOverride {
-  showId: string;
+  showId: string | null;
   startedAt: number;
   expiresAt: number;
 }
 
+/**
+ * The takeover target, read in ONE place.
+ *
+ * A takeover's `showId` is three-way, not two-way — it names a show, it is
+ * explicitly `null` for Default programming (#1507), or it is neither — and the
+ * two obvious spellings of the question DISAGREE about that third case:
+ * `showId === null` calls a malformed target a show pin, `typeof showId ===
+ * 'string'` calls it Default programming. Both are wrong: before #1507 a target
+ * that named nothing real simply VOIDED the takeover (the roster lookup missed
+ * and the grid resumed), and that is the behaviour these two keep. The resolver,
+ * the roster sweep, the janitor, the programme span, the route and both admin
+ * screens all ask through them, so the answer cannot drift between call sites.
+ *
+ * Deliberately loose in their parameter: the route asks about a request body
+ * and the admin forms about their own submitted values, neither of which is a
+ * stored `ScheduleOverride` yet.
+ */
+export function takeoverShowId(ov: { showId?: unknown } | null | undefined): string | null {
+  const id = ov?.showId;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/** True while `ov` is an explicit Default programming takeover (#1507). */
+export function isDefaultTakeover(ov: { showId?: unknown } | null | undefined): boolean {
+  return !!ov && ov.showId === null;
+}
+
 export interface ScheduleOverrideContext {
-  /** Show ids the pin may name, or null when this caller cannot check. */
+  /** Show ids a string target may name, or null when this caller cannot check. */
   showIds: string[] | null;
   /**
    * Epoch-ms "now", or null to not judge expiry at all.
@@ -1909,7 +1963,10 @@ export function scheduleOverrideSchema(ctx: ScheduleOverrideContext) {
   return z
     .object(
       {
-        showId: z.string({ error: 'must be a show id' }).min(1, 'must be a show id'),
+        // `.nullable()` rather than a two-branch union: null is the Default
+        // programming target, and the string's own message is the one an
+        // operator can act on — a union answers with its own wording instead.
+        showId: z.string({ error: 'must be a show id' }).min(1, 'must be a show id').nullable(),
         startedAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
         expiresAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
       },
@@ -1920,8 +1977,9 @@ export function scheduleOverrideSchema(ctx: ScheduleOverrideContext) {
       { error: 'must be an object' },
     )
     .check((c) => {
-      const { showId, startedAt, expiresAt } = c.value;
-      if (ctx.showIds && !ctx.showIds.includes(showId)) {
+      const { startedAt, expiresAt } = c.value;
+      const showId = takeoverShowId(c.value);
+      if (showId && ctx.showIds && !ctx.showIds.includes(showId)) {
         c.issues.push({
           code: 'custom',
           input: showId,
@@ -1958,15 +2016,20 @@ export function scheduleOverrideSchema(ctx: ScheduleOverrideContext) {
 /**
  * POST /schedule/override's body.
  *
- * `minutes` is coerced because the hand-rolled route ran `Number(req.body
- * ?.minutes)` and therefore accepted the string "60". An EMPTY showId now 400s
+ * `showId: null` requests Default programming; an outer missing field is still
+ * malformed. `minutes` is coerced because the hand-rolled route ran
+ * `Number(req.body?.minutes)` and therefore accepted the string "60". An EMPTY
+ * showId now 400s
  * where it used to reach the roster lookup and 404 as `no such show: ` — a
  * missing field is a malformed request, not a missing show. A real id that
  * isn't in the roster still 404s from the handler, which is the answer that
  * needs server state.
  */
 export const scheduleOverrideRequestSchema = z.object({
-  showId: z.string({ error: 'pick a show to pin' }).min(1, 'pick a show to pin'),
+  showId: z
+    .string({ error: 'pick a show or Default programming' })
+    .min(1, 'pick a show or Default programming')
+    .nullable(),
   minutes: z.coerce
     .number({ error: `must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}` })
     .int(`must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`)
@@ -2036,6 +2099,7 @@ export const BEDS_THRESHOLD_SEC_BOUNDS: SettingsNumericBound = { min: 0, max: 60
 // The bed's ramp into the next song. bed-policy clamps this against the bed's
 // own length too, so a long ramp on a short link can't invert the arithmetic.
 export const BEDS_CROSS_SEC_BOUNDS: SettingsNumericBound = { min: 0, max: 15 };
+export const BEDS_TAIL_SEC_BOUNDS: SettingsNumericBound = { min: 0, max: 15 };
 
 // Dead-air trim: the smallest edge gap worth cutting. The FLOOR is what keeps
 // the feature from eating deliberate silence — a segued album leaves a beat
@@ -2355,6 +2419,10 @@ export const bedsPatchSchema = settingsBlockOf({
   crossSec: settingsFloatLike(
     BEDS_CROSS_SEC_BOUNDS,
     `beds.crossSec must be number in [${BEDS_CROSS_SEC_BOUNDS.min}, ${BEDS_CROSS_SEC_BOUNDS.max}]`,
+  ),
+  tailSec: settingsFloatLike(
+    BEDS_TAIL_SEC_BOUNDS,
+    `beds.tailSec must be number in [${BEDS_TAIL_SEC_BOUNDS.min}, ${BEDS_TAIL_SEC_BOUNDS.max}]`,
   ),
 });
 
@@ -4012,12 +4080,21 @@ const skillCronOnlySchema = z.preprocess(
   z.boolean({ error: 'cronOnly must be a boolean' }).default(false),
 );
 
+// Opt-in multi-persona discussion. Absent/null stays false for compatibility;
+// a present form value must be a literal boolean so a typo cannot silently turn
+// a normal skill into a multi-voice exchange.
+const skillCohostsSchema = z.preprocess(
+  skillNullToUndefined,
+  z.boolean({ error: 'cohosts must be a boolean' }).default(false),
+);
+
 // The fields every skill's SKILL.md carries, built-in or custom.
 export const builtinSkillFileSchema = z.object({
   label: skillLabelSchema,
   cooldown: skillCooldownSchema,
   cron: skillCronSchema,
   cronOnly: skillCronOnlySchema,
+  cohosts: skillCohostsSchema,
   context: skillContextSchema,
   tags: skillTagsSchema,
   brief: skillBriefSchema,
@@ -4060,6 +4137,7 @@ export function skillFieldsFrom(kind: string, parsed: SkillFileParsed) {
     cooldown: parsed.cooldown,
     cron: parsed.cron,
     cronOnly: parsed.cronOnly,
+    cohosts: parsed.cohosts,
     contextFields: parsed.context,
     window: parsed.window,
     requiresKey: parsed.requiresKey,

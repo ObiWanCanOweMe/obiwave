@@ -92,10 +92,11 @@ import {
 import {
   DEDUPE_KINDS,
   KIND_LABEL,
-  PENDING_VOICE_MAX_AGE_MS,
   TRACK_TIED_KINDS,
   VOICE_KINDS,
+  pendingVoiceStale,
 } from './queue/kinds.js';
+import type { PendingTalk } from './queue/kinds.js';
 import {
   BED_MARKER_FRESH_MS,
   VOICE_LEADIN_MS,
@@ -414,6 +415,21 @@ class Queue {
       if (out.length >= n) break;
     }
     return out;
+  }
+
+  // The text of the most recent between-track link that actually AIRED, or
+  // null. djLog entries for voice kinds are written by onSpoken — after the
+  // clip reached the stream — which is what makes this the right anchor for
+  // announce-mode's alternation (broadcast/announce-line.ts): a link that was
+  // composed and then dropped (silence ordered, intro budget, refused pick)
+  // never lands here, so the next one can't repeat the form the listener just
+  // heard. 'link' is the kind both link paths log under — enqueuePick's
+  // introKind and announce()'s own kind.
+  getLastLinkText(): string | null {
+    for (const entry of this.djLog) {
+      if (entry.kind === 'link') return entry.message || null;
+    }
+    return null;
   }
 
   // Timestamp (ms) of the most recent on-air spoken segment, or 0. Defaults to
@@ -748,7 +764,12 @@ class Queue {
         : budgetMs == null ? `no vocal onset, over ${cfg.thresholdSec}s`
           : budgetMs === Infinity ? 'instrumental'
             : `vocals at ${Math.round(budgetMs / 1000)}s`;
-      this.log('beds', `bed "${pick.name}" ${bedSec}s (${entryCrossSec}s entry cross) → ${crossSec}s ramp into "${item.track?.title}" (${Math.round(voiceMs / 1000)}s link, ${why})`);
+      // The tail is reported because it is the part an operator HEARS as a
+      // decision (a beat of bare bed) rather than as a fade, and it is the term
+      // that makes bedSec outgrow a short bed file — so when the line above
+      // says "no bed long enough", this line on the previous bed shows why.
+      const tailSec = Number.isFinite(cfg.tailSec) ? cfg.tailSec : bedPolicy.BED_TAIL_SEC;
+      this.log('beds', `bed "${pick.name}" ${bedSec}s (${entryCrossSec}s entry cross) → ${tailSec}s tail → ${crossSec}s ramp into "${item.track?.title}" (${Math.round(voiceMs / 1000)}s link, ${why})`);
     } catch (err) {
       // A bed is a garnish — never let it cost the station a track.
       this.log('error', `Bed push failed: ${(err as Error).message}`);
@@ -1593,6 +1614,16 @@ class Queue {
     }
   }
 
+  // The minimal description of a segment already rendered and waiting for the
+  // next track boundary, or null. Talk that has NOT aired yet is invisible to
+  // getLastTalkBreakAt(), while the enqueue time lets the talk scheduler respect
+  // both that in-flight talk and the queue's finite validity window (#1419,
+  // #1500, #1539). Queue remains the owner of eventual stale dropping.
+  pendingVoiceTalk(): PendingTalk | null {
+    const p = this._pendingVoice;
+    return p ? { kind: p.kind, queuedAt: p.t } : null;
+  }
+
   // Discard a scheduled-but-unaired deferred segment. A mic-pass supersedes an
   // ident: sign-off + greeting name the station, the outgoing show and the
   // incoming one, so an ident in front of it is three spoken segments in a row
@@ -1651,7 +1682,7 @@ class Queue {
     if (!p) return;
     // Staleness first: a clip too old to air is dropped outright rather than
     // held again below, so a busy stretch can't keep re-deferring a dead ident.
-    if (Date.now() - p.t > PENDING_VOICE_MAX_AGE_MS) {
+    if (pendingVoiceStale(p.t, Date.now())) {
       this.dropPendingVoice('waited too long for a track boundary');
       return;
     }

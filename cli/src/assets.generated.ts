@@ -14,6 +14,12 @@ export const COMPOSE_YML = `# SUB/WAVE — production orchestration. Only Caddy 
 # keep it clear of \`git clean -dffx\`.
 
 x-state: &state-mount \${STATE_DIR:-./state}:/var/sub-wave
+# Optional host relocation for the stem cache (STEMS_DIR in .env). The
+# container path is fixed because compose cannot know which station is active;
+# SUBWAVE_STEMS_DIR hands that path to the controller and the broadcast
+# entrypoint, which re-append the per-station segment under it. Unset leaves
+# the cache under the state dir, exactly as before.
+x-stems: &stems-mount \${STEMS_DIR:-\${STATE_DIR:-./state}/stems}:/var/sub-wave/stems
 
 # Cap container log growth (10m × 3 ≈ 30MB/service) — the default json-file
 # driver is unbounded and eventually fills the host disk.
@@ -81,12 +87,18 @@ services:
       - ICECAST_TRUSTED_PROXY_HOSTS=\${ICECAST_TRUSTED_PROXY_HOSTS:-}
       # Keeps the hourly archive paths (%Y-%m-%d/%H-00.mp3) on local wall time.
       - TZ=\${TZ:-Europe/London}
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
     extra_hosts:
       # Liquidsoap fetching Subsonic URLs that point at host services
       # (e.g. NAVIDROME_URL=http://host.docker.internal:4533).
       - "host.docker.internal:host-gateway"
     volumes:
       - *state-mount
+      - *stems-mount
       - \${STATE_DIR:-./state}/logs:/var/log/liquidsoap
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7702/status-json.xsl > /dev/null"]
@@ -125,6 +137,11 @@ services:
       - TZ=\${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
       # Optional Chatterbox/PocketTTS sidecar (--profile tts-heavy). When the
       # profile is off the URL is unreachable and TTS falls back to Piper.
       - TTS_HEAVY_URL=\${TTS_HEAVY_URL:-http://tts-heavy:8080}
@@ -142,6 +159,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - *state-mount
+      - *stems-mount
     # curl is in the controller image; /health is served at the router root.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7701/health > /dev/null"]
@@ -298,6 +316,8 @@ services:
       # Demucs model + analysis-window overrides (see .env.example).
       - DEMUCS_MODEL=\${DEMUCS_MODEL:-}
       - ANALYZE_SECONDS=\${ANALYZE_SECONDS:-}
+      - ANALYZE_CONCURRENCY=\${ANALYZE_CONCURRENCY:-}
+      - ANALYZE_MAX_BYTES=\${ANALYZE_MAX_BYTES:-}
       - ANALYZE_CLAP_WINDOWS=\${ANALYZE_CLAP_WINDOWS:-}
       - ANALYZE_OUTRO_SECONDS=\${ANALYZE_OUTRO_SECONDS:-}
       # CLAP isn't gated, but anonymous HF downloads are rate-limited. Same var
@@ -306,6 +326,7 @@ services:
     volumes:
       # Shared mount — reads tracks pre-fetched into /var/sub-wave/analyze-tmp.
       - *state-mount
+      - *stems-mount
       # Persist the CLAP/Demucs HF cache across recreates.
       - analyzer-cache:/opt/analyzer/hf-cache
     healthcheck:
@@ -352,6 +373,12 @@ export const COMPOSE_BYO_YML = `# SUB/WAVE — production without the bundled re
 # \`docker compose down -v\` won't touch it.
 
 x-state: &state-mount \${STATE_DIR:-./state}:/var/sub-wave
+# Optional host relocation for the stem cache (STEMS_DIR in .env). The
+# container path is fixed because compose cannot know which station is active;
+# SUBWAVE_STEMS_DIR hands that path to the controller and the broadcast
+# entrypoint, which re-append the per-station segment under it. Unset leaves
+# the cache under the state dir, exactly as before.
+x-stems: &stems-mount \${STEMS_DIR:-\${STATE_DIR:-./state}/stems}:/var/sub-wave/stems
 
 # Cap container log growth (10m × 3 ≈ 30MB/service).
 x-logging: &default-logging
@@ -384,12 +411,18 @@ services:
       - ICECAST_TRUSTED_PROXY_IPS=\${ICECAST_TRUSTED_PROXY_IPS:-}
       - ICECAST_TRUSTED_PROXY_HOSTS=\${ICECAST_TRUSTED_PROXY_HOSTS:-}
       - TZ=\${TZ:-Europe/London}
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
     ports:
       - "\${BIND_ADDRESS:-0.0.0.0}:\${ICECAST_PORT:-7702}:7702"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - *state-mount
+      - *stems-mount
       - \${STATE_DIR:-./state}/logs:/var/log/liquidsoap
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7702/status-json.xsl > /dev/null"]
@@ -424,6 +457,11 @@ services:
       - TZ=\${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
       # Optional Chatterbox/PocketTTS sidecar (--profile tts-heavy);
       # unreachable URL → fall back to Piper.
       - TTS_HEAVY_URL=\${TTS_HEAVY_URL:-http://tts-heavy:8080}
@@ -442,6 +480,7 @@ services:
       - "\${BIND_ADDRESS:-0.0.0.0}:\${CONTROLLER_PORT:-7701}:7701"
     volumes:
       - *state-mount
+      - *stems-mount
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7701/health > /dev/null"]
       interval: 10s
@@ -583,12 +622,15 @@ services:
       # Demucs model + analysis-window overrides (see .env.example).
       - DEMUCS_MODEL=\${DEMUCS_MODEL:-}
       - ANALYZE_SECONDS=\${ANALYZE_SECONDS:-}
+      - ANALYZE_CONCURRENCY=\${ANALYZE_CONCURRENCY:-}
+      - ANALYZE_MAX_BYTES=\${ANALYZE_MAX_BYTES:-}
       - ANALYZE_CLAP_WINDOWS=\${ANALYZE_CLAP_WINDOWS:-}
       - ANALYZE_OUTRO_SECONDS=\${ANALYZE_OUTRO_SECONDS:-}
       # Anonymous HF downloads are rate-limited; same var as tts-heavy.
       - HF_TOKEN=\${HF_TOKEN:-}
     volumes:
       - *state-mount
+      - *stems-mount
       - analyzer-cache:/opt/analyzer/hf-cache
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health | /opt/analyzer/venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get(\\"ok\\") is True and \\"analyze\\" in d.get(\\"engines\\", []) else 1)'"]
@@ -609,6 +651,12 @@ export const COMPOSE_DEV_YML = `# SUB/WAVE — dev compose (local smoke test): B
 # State + sounds + radio.liq are bind-mounted so dev cycles need no rebuilds.
 
 x-state: &state-mount \${STATE_DIR:-./state}:/var/sub-wave
+# Optional host relocation for the stem cache (STEMS_DIR in .env). The
+# container path is fixed because compose cannot know which station is active;
+# SUBWAVE_STEMS_DIR hands that path to the controller and the broadcast
+# entrypoint, which re-append the per-station segment under it. Unset leaves
+# the cache under the state dir, exactly as before.
+x-stems: &stems-mount \${STEMS_DIR:-\${STATE_DIR:-./state}/stems}:/var/sub-wave/stems
 
 # Cap container log growth (10m × 3 ≈ 30MB/service).
 x-logging: &default-logging
@@ -649,6 +697,11 @@ services:
       - ICECAST_TRUSTED_PROXY_IPS=\${ICECAST_TRUSTED_PROXY_IPS:-}
       - ICECAST_TRUSTED_PROXY_HOSTS=\${ICECAST_TRUSTED_PROXY_HOSTS:-}
       - TZ=\${TZ:-Europe/London}
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
     extra_hosts:
       # Liquidsoap fetching Subsonic URLs that point at host services.
       - "host.docker.internal:host-gateway"
@@ -658,6 +711,7 @@ services:
       - ./liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro
       - ./sounds:/sounds:ro
       - *state-mount
+      - *stems-mount
       - \${STATE_DIR:-./state}/logs:/var/log/liquidsoap
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7702/status-json.xsl > /dev/null"]
@@ -693,6 +747,11 @@ services:
       - TZ=\${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
+      # Container path of the STEMS_DIR bind mount above — empty when the
+      # operator did not relocate, which keeps the cache under the state dir
+      # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
+      # HOST path and reaches the controller through \`env_file: ./.env\`.
+      - SUBWAVE_STEMS_DIR=\${STEMS_DIR:+/var/sub-wave/stems}
       # Optional Chatterbox/PocketTTS sidecar (--profile tts-heavy);
       # unreachable URL → fall back to Piper.
       - TTS_HEAVY_URL=\${TTS_HEAVY_URL:-http://tts-heavy:8080}
@@ -714,6 +773,7 @@ services:
     command: ["node_modules/.bin/tsx", "watch", "src/server.ts"]
     volumes:
       - *state-mount
+      - *stems-mount
       - ./sounds:/sounds:ro
       # Mount src/ and scripts/ only — mounting the whole controller/ dir
       # would shadow /app/node_modules with the (possibly empty) host one.
@@ -818,12 +878,15 @@ services:
       # Demucs model + analysis-window overrides (see .env.example).
       - DEMUCS_MODEL=\${DEMUCS_MODEL:-}
       - ANALYZE_SECONDS=\${ANALYZE_SECONDS:-}
+      - ANALYZE_CONCURRENCY=\${ANALYZE_CONCURRENCY:-}
+      - ANALYZE_MAX_BYTES=\${ANALYZE_MAX_BYTES:-}
       - ANALYZE_CLAP_WINDOWS=\${ANALYZE_CLAP_WINDOWS:-}
       - ANALYZE_OUTRO_SECONDS=\${ANALYZE_OUTRO_SECONDS:-}
       # Anonymous HF downloads are rate-limited; same var as tts-heavy.
       - HF_TOKEN=\${HF_TOKEN:-}
     volumes:
       - *state-mount
+      - *stems-mount
       - analyzer-cache:/opt/analyzer/hf-cache
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health | /opt/analyzer/venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get(\\"ok\\") is True and \\"analyze\\" in d.get(\\"engines\\", []) else 1)'"]
@@ -958,6 +1021,13 @@ SITE_URL=
 
 # Storage + locale
 # STATE_DIR=./state
+# Optional: place the stem cache on another disk. This HOST path is mounted
+# into broadcast, controller and analyzer at a fixed container path, which the
+# three of them read back as SUBWAVE_STEMS_DIR. Multi-station installs keep a
+# per-station folder under it. Unset = the cache stays at <STATE_DIR>/stems.
+# Moving it does NOT migrate what is already cached — \`mv\` the old contents
+# across first, or the old copy just sits there unreferenced.
+# STEMS_DIR=/mnt/bigdisk/subwave-stems
 # TZ=Europe/London
 
 # Web
@@ -1115,12 +1185,30 @@ SITE_URL=
 # ghcr.io/perminder-klair/subwave-aio-cuda:<upstream-version> and pass the GPU
 # to the container. See docs/unraid.md.)
 #
+# Two heavier dimensions — CLAP "sounds-like" embeddings and Demucs vocal ranges
+# — need a CPU-torch stack that's NOT in the default image. Enable them by
+# pulling the heavy analyzer image (a one-liner, no rebuild):
+# ANALYZER_HEAVY=1   # switch the \`analyzer\` service to subwave-analyzer-heavy
+#
+# On NVIDIA hosts, persist the CUDA overlay for all Compose commands:
+# COMPOSE_FILE=docker-compose.yml:docker-compose.analyzer-gpu.yml
+# For a one-off run, use the two-file command in docs/tts-heavy.md.
+# Remove COMPOSE_FILE to return to the CPU analyzer. AIO one-click users should
+# use subwave-aio-cuda and pass the GPU to the container; see docs/unraid.md.
+#
+#
 # GPU in a DIFFERENT machine? Run the analyzer there and point the station at
 # it — no need to move the stack or copy state around. A same-path state mount
 # is optional but faster; it is required for remote
 # stem caching. Without one, analysis retries by URL after the path probe:
 #   docs/tts-heavy.md#running-the-analyzer-on-another-machine
 # ANALYZE_URL=http://192.168.1.101:8080   # overrides the in-compose analyzer
+# ANALYZE_CONCURRENCY=1  # max in-flight sidecar jobs / worker processes (1-8).
+#                        # Default 1 preserves existing behaviour. For a remote
+#                        # GPU analyzer, start with 2-4 and set the SAME value on
+#                        # both station and GPU hosts. Each worker can load its
+#                        # own models, increasing CPU/RAM/VRAM plus network and
+#                        # source-server demand; tune to the smaller host limit.
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
 # ANALYZE_IDLE_UNLOAD_S=  # seconds of no CLAP/Demucs use before the models are
@@ -1206,4 +1294,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.11.0`; // x-release-please-version
+export const CLI_VERSION = `1.12.0`; // x-release-please-version
