@@ -13,6 +13,8 @@
 //     (issue #623). Its provider-owned saved key also falls back to
 //     SEARCH_API_KEY; metered billing makes the 30-min memo matter here too.
 //   - searxng — self-hosted meta-search, keyless, needs settings.search.baseUrl.
+//     settings.search.searxngEngines optionally pins the engine set for these
+//     calls only (#1353), leaving the instance's browser traffic on its defaults.
 //   - kagi — paid privacy-oriented web search, with a dedicated saved key or
 //     KAGI_API_KEY fallback.
 //
@@ -143,10 +145,12 @@ export async function searxngSearch(
   const baseUrl = (settings.get().search?.baseUrl || '').trim();
   if (!baseUrl) throw new Error('SearXNG baseUrl not configured');
 
-  const url = new URL('/search', baseUrl);
-  url.searchParams.set('q', query);
-  url.searchParams.set('format', 'json');
-  if (recency) url.searchParams.set('time_range', recency);
+  const url = buildSearxngUrl({
+    baseUrl,
+    query,
+    recency,
+    engines: settings.get().search?.searxngEngines || '',
+  });
 
   const res = await fetchWithTimeout(url, {
     headers: {
@@ -157,6 +161,29 @@ export async function searxngSearch(
   if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
   const data = await res.json();
   return parseSearxngResponse(data);
+}
+
+// Pure URL builder for a SearXNG query. Exported alongside parseSearxngResponse
+// so the query shape can be pinned without mocking fetch.
+//
+// `engines` is the optional operator pin (settings.search.searxngEngines, #1353):
+// a comma-separated list of SearXNG `name:` fields, sent as SearXNG's per-request
+// `engines=` param so one instance can serve a narrow, deterministic engine set
+// to the controller while browser traffic keeps the instance-wide defaults.
+// Empty means the param is omitted entirely — the pre-#1353 behaviour.
+export function buildSearxngUrl(opts: {
+  baseUrl: string;
+  query: string;
+  recency?: 'day' | 'week' | 'month';
+  engines?: string;
+}): URL {
+  const url = new URL('/search', opts.baseUrl);
+  url.searchParams.set('q', opts.query);
+  url.searchParams.set('format', 'json');
+  if (opts.recency) url.searchParams.set('time_range', opts.recency);
+  const engines = (opts.engines || '').trim();
+  if (engines) url.searchParams.set('engines', engines);
+  return url;
 }
 
 // Pure parser for SearXNG's JSON response. Maps the SearXNG shape

@@ -398,7 +398,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
 
     const desktopClear = renderer.root.findByProps({ 'aria-label': 'clear all likes for Clamped Track' });
     await act(async () => { desktopClear.props.onClick({}); await flush(); });
-    let dialog = renderer.root.findByType(V3AlertDialog);
+    let dialog = renderer.root.findAllByType(V3AlertDialog).find(node => node.props.open)!;
     assert.equal(dialog.props.open, true, 'desktop clear opens the production confirmation dialog');
     await act(async () => { dialog.props.onConfirm(); await flush(); });
     assert.deepEqual(deleteRequests[0], {
@@ -414,7 +414,7 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
       .find(button => textContent(button).includes('Clear all likes (4)'));
     assert.ok(mobileClear, 'the mobile clear action remains available');
     await act(async () => { mobileClear.props.onClick({}); await flush(); });
-    dialog = renderer.root.findByType(V3AlertDialog);
+    dialog = renderer.root.findAllByType(V3AlertDialog).find(node => node.props.open)!;
     assert.equal(dialog.props.open, true, 'mobile clear opens the same production confirmation dialog');
     await act(async () => { dialog.props.onConfirm(); await flush(); });
     assert.deepEqual(deleteRequests[1], {

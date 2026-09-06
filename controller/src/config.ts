@@ -117,6 +117,15 @@ export const config = {
     // render queued behind a long bulk-analyze item on the single-flight
     // worker.
     renderTimeoutMs: envInt('ANALYZE_RENDER_TIMEOUT_MS', 60_000),
+    // How long a resolved "no backend at all" answer is cached before the
+    // probe runs again. Only the MISS is timed — a backend that answered is
+    // remembered for the process lifetime, exactly as before. A configured
+    // ANALYZE_URL whose host silently drops packets costs the probe's full 5s
+    // timeout, and an uncached miss paid that on every analyze call; this
+    // bounds it to once per interval while still finding a sidecar that comes
+    // up after the controller. Same shape and reasoning as
+    // ttsHeavy.probeIntervalMs below.
+    missProbeIntervalMs: envInt('ANALYZE_PROBE_MS', 60_000, { min: 0 }),
   },
   kokoro: {
     python: envStr('KOKORO_PYTHON', '/opt/kokoro/venv/bin/python'),
@@ -203,6 +212,14 @@ export const config = {
     // ICECAST_ADMIN_PASSWORD or state/icecast-secrets.env (see listeners.ts).
     adminUrl: envUrl('ICECAST_ADMIN_URL', 'http://broadcast:7702/admin/listclients'),
     adminUser: envStr('ICECAST_ADMIN_USER', 'admin'),
+  },
+  // Offline GeoIP database (MaxMind MMDB format) for the listener-country
+  // rollup. Empty = no lookup, which is the default: the DB is a licensed
+  // download nobody can ship, so the header chain stays the primary answer and
+  // this is the last, opt-in link in it. Env wins over settings.stream.geoipDbPath
+  // like every other config value here.
+  geoip: {
+    dbPath: envStr('GEOIP_DB_PATH', ''),
   },
   liquidsoap: {
     queueFile: `${STATE_DIR}/next.txt`,

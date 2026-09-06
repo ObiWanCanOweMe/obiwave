@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
+import * as sceneVocab from './scene-vocab.js';
 import { trackEraYear } from './show-filter.js';
 import { albumEraSuspect } from './era-suspect.js';
 
@@ -328,16 +329,21 @@ export async function getSongsByGenreSampled(genre, { count = 20 } = {}) {
 // The single normaliser for per-track genre ingest — everything downstream
 // (library-db genres column, picker/show filters, annotate) goes through it.
 export function songGenres(song: { genres?: unknown; genre?: unknown } | null | undefined): string[] {
-  const out: string[] = [];
-  const push = (v: unknown) => {
-    const s = String(v ?? '').trim();
-    if (s && !out.some((x) => x.toLowerCase() === s.toLowerCase())) out.push(s);
-  };
+  const raw: string[] = [];
   if (Array.isArray(song?.genres)) {
-    for (const g of song.genres) push(typeof g === 'string' ? g : (g as { name?: unknown })?.name);
+    for (const g of song.genres) {
+      raw.push(String((typeof g === 'string' ? g : (g as { name?: unknown })?.name) ?? ''));
+    }
   }
-  push(song?.genre);
-  return out;
+  raw.push(String(song?.genre ?? ''));
+  // The operator's scene-consolidation rules are applied HERE, at the one
+  // normaliser, so a merge survives the next Navidrome walk — which rewrites
+  // `tracks.genres` from the file tags and would otherwise undo it (#1577).
+  // The alias-then-dedupe rule itself lives in scene-vocab.ts and is shared
+  // with the in-place merge, so the two halves cannot drift on what a
+  // consolidated tag list looks like. Unaliased values pass through untouched,
+  // so a station with no rules normalises byte-identically to before.
+  return sceneVocab.applyAliases(raw, sceneVocab.activeMap());
 }
 
 let genresCache: { genres: any[]; at: number } | null = null;
@@ -530,6 +536,28 @@ export async function star(id) {
 
 export async function unstar(id) {
   await call('unstar', { id });
+}
+
+// Play reporting for Navidrome (#1298). Two calls, one endpoint:
+//   submission=false → "now playing" ping (Navidrome shows the track under
+//     Now Playing and does NOT touch playCount/lastPlayed)
+//   submission=true  → the real scrobble, which is what bumps playCount and
+//     lastPlayed so `.nsp` smart playlists filtering on lastPlayed rotate.
+// `time` is MILLISECONDS since epoch (Subsonic's own unit here — unlike
+// Last.fm/ListenBrainz, which take seconds), and names when the play STARTED.
+// Omitted when unknown so the server stamps its own clock.
+//
+// Throws like every other call() — broadcast/scrobble.ts is the only caller and
+// swallows it, because a Navidrome outage must never reach the broadcast.
+export async function scrobble(
+  id: string,
+  { submission = true, timeMs = null }: { submission?: boolean; timeMs?: number | null } = {},
+) {
+  await call('scrobble', {
+    id,
+    submission,
+    time: Number.isFinite(timeMs as number) ? Math.floor(timeMs as number) : null,
+  });
 }
 
 export async function getAlbumList(offset = 0, size = 500) {
@@ -975,6 +1003,12 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
   // like the washout's. radio.liq reads both off the OUTGOING track.
   if (song.loop) fields.push('liq_loop="true"');
   if (song.loopBar != null) fields.push(`liq_loop_bar="${escAnnotate(song.loopBar)}"`);
+  // Show-boundary fade (#1574): this track is cued out at a show change, so its
+  // ending is a cut and not its own. radio.liq reads liq_show_fade off the
+  // OUTGOING track and suppresses the exit gestures stamped for the ending that
+  // will not happen (washout, loop), leaving the plain fade that spans the full
+  // cross buffer. Absent → today's behaviour.
+  if (song.showFade) fields.push('liq_show_fade="true"');
   // DJ blend (spectral handover): validated same-lane picks trade the spectrum
   // with their predecessor across the cross — dj_transition reads liq_blend on
   // the INCOMING track, like the sweep.

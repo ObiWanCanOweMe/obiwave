@@ -206,6 +206,8 @@ services:
         /opt/chatterbox/venv/bin/python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &&
         exec uvicorn server:app --host 0.0.0.0 --port 8080
     environment:
+      # Ark readiness requires both engines resident with verified CUDA.
+      TTS_HEAVY_IDLE_UNLOAD_S: "0"
       TTS_HEAVY_DEVICE: cuda
       TTS_HEAVY_ENGINES: chatterbox,pocket-tts
       # Re-applied to every supervised Chatterbox worker start. If CUDA later

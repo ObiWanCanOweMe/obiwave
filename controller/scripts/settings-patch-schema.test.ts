@@ -387,6 +387,23 @@ test('search.apiKeys preserves provider ownership and validates each secret slot
   assert.equal(searchPatchSchema.safeParse({ apiKeys: { alien: 'x' } }).success, false);
 });
 
+// #1353. New field, so it takes the trimmed posture rather than search.apiKey's
+// raw one — nothing shipped depends on the old storage behaviour here.
+test('search.searxngEngines trims, caps and defaults to empty', () => {
+  assert.equal(searchPatchSchema.parse({ searxngEngines: '  google, wikipedia  ' }).searxngEngines,
+    'google, wikipedia');
+  assert.equal(searchPatchSchema.parse({ searxngEngines: '' }).searxngEngines, '');
+  // Absent stays absent — update() only writes the key when the patch names it,
+  // so an unset pin can never be clobbered by a save from another panel.
+  assert.equal('searxngEngines' in searchPatchSchema.parse({ provider: 'searxng' }), false);
+  assert.equal(searchPatchSchema.safeParse({ searxngEngines: 'x'.repeat(501) }).success, false);
+  assert.equal(
+    searchPatchSchema.safeParse({ searxngEngines: 'x'.repeat(501) }).error?.issues[0]?.message,
+    'search.searxngEngines must be 0-500 chars',
+  );
+
+});
+
 test('scrobble string fields clear on null (?? \'\')', () => {
   assert.equal(scrobblePatchSchema.parse({ lastfm: { username: null } }).lastfm?.username, '');
   assert.equal(scrobblePatchSchema.parse({ lastfm: { username: ' bob ' } }).lastfm?.username, 'bob');
@@ -612,10 +629,12 @@ test('the converted keys are exactly the ones with schemas', () => {
   // resists a stateless schema (clamps that fall back to the CURRENT value,
   // post-merge cross-field rules, write-throughs into another key).
   assert.deepEqual(Object.keys(SETTINGS_PATCH_SCHEMAS).sort(), [
-    'activeDjPromptId', 'archive', 'audio', 'beds', 'crossfadeDuration',
-    'djHouseRules', 'djPrompt', 'djPrompts', 'djSpeakClock', 'festivals',
-    'jingleRatio', 'likes',
+    'activeDjPromptId', 'archive', 'audio', 'backups', 'beds', 'crossfadeDuration',
+    'djHouseRules', 'djPrompt', 'djPrompts', 'djSpeakClock',
+    'djTalkOnlyBetweenTracks', 'ducking', 'fadeAtShowEnd', 'festivals',
+    'handover', 'jingleRatio', 'likes',
     'locale', 'loudness', 'maxTrackSeconds', 'moodSchedule', 'moods', 'personas',
+    'picker',
     'privacy', 'requests', 'schedule', 'scheduleOverride', 'scrobble', 'search',
     'sfx', 'shows', 'silenceTrim', 'station', 'stationDescription', 'stream',
     'theme', 'timezone', 'transitions', 'ui', 'weather', 'weatherMoods',

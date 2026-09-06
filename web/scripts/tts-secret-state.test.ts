@@ -26,6 +26,8 @@ const TEST_CHROME = {
 const ENGINE_IDS = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'];
 
 const FORM = {
+  handoverOffsetMinutes: '5',
+  djTalkOnlyBetweenTracks: false,
   kokoroLang: 'en-us',
   tts: {
     enabled: true,

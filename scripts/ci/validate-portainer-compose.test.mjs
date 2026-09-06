@@ -852,3 +852,9 @@ test('all Compose analyzer services receive the same custom download cap as the 
     assert.equal(model.services.analyzer.environment.ANALYZE_MAX_BYTES, '24000000', file);
   }
 });
+
+
+test('Ark keeps TTS models resident for its strict CUDA readiness contract', () => {
+  const manifest = readFileSync(new URL('../../deploy/portainer/docker-compose.yml', import.meta.url), 'utf8');
+  assert.match(manifest, /TTS_HEAVY_IDLE_UNLOAD_S: "0"/);
+});

@@ -106,10 +106,25 @@ const allowed = new Map([
   ])],
   ['BackupPanel.tsx', new Map([
     ['backup-export', { callee: 'adminResponse', method: 'GET', path: /^\/backup\/export$/ }],
+    // The stored file, byte for byte — export above builds a NEW archive, which
+    // is not the snapshot the operator clicked on. Same shape as
+    // archive-download next door.
+    ['backup-download-file', {
+      callee: 'adminResponse',
+      method: 'GET',
+      path: /^\/backup\/file\/\$\{\}$/,
+    }],
   ])],
   ['DoctorPanel.tsx', new Map([
     ['diagnosis-command', { callee: 'adminResponse', method: 'GET', path: /^\/doctor$/ }],
     ['diagnosis-stream', { callee: 'adminResponse', method: 'GET', path: /^\/doctor\/stream$/ }],
+  ])],
+  ['debug/LlmCalls.tsx', new Map([
+    ['llm-call-export', {
+      callee: 'adminResponse',
+      method: 'GET',
+      path: /^\/debug\/llm-calls\/export\?format=\$\{\}$/,
+    }],
   ])],
   ['connect/ConnectPanel.tsx', new Map([
     ['openapi-download', { callee: 'adminResponse', method: 'GET', path: /^catalog\.openapiPath$/ }],

@@ -123,6 +123,7 @@ const useState = (initial: unknown) => {
   ];
 };
 const dependencyMocks = new Map<string, unknown>([
+  ['@/lib/schemas.generated', { SETTINGS_SEARXNG_ENGINES_MAX: 500 }],
   ['react', { useState }],
   ['../../../lib/notify', { errorMessage: (error: unknown) => String(error) }],
   ['../../../lib/admin-query', {

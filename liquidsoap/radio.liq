@@ -108,6 +108,11 @@ jingle_now_on_air = ref(false)
 
 jingle_ratio = ref(30)
 crossfade_duration = ref(10.0)
+# smooth_add's `p` on the two ducking layers (see the DUCKING block below).
+# These are the depths that shipped as literals; a missing/garbage file keeps
+# them, so an upgrade with no settings.json change is byte-identical.
+duck_voice = ref(0.22)
+duck_intro = ref(0.30)
 archive_enabled = ref(false)
 archive_bitrate = ref(128)
 opus_enabled = ref(false)
@@ -149,6 +154,25 @@ if file.exists("#{state_dir}/liquidsoap_crossfade.txt") then
   raw = string.trim(file.contents("#{state_dir}/liquidsoap_crossfade.txt"))
   v = float_of_string(default=10.0, raw)
   if v >= 0.0 then crossfade_duration := v end
+end
+
+# Duck depths. `p` is the fraction of the music LEFT UP under a voice channel,
+# so the range is [0, 1] and smaller is deeper: 1.0 is no duck at all, 0.0 is a
+# full mute under the voice (still not the music-paused interlude — the music
+# keeps rolling underneath). Out-of-range is refused rather than clamped: the
+# controller already bounds the value on both its save and load paths, so a bad
+# file here is a hand-edit, and keeping the shipped depth beats guessing which
+# end the operator meant.
+if file.exists("#{state_dir}/liquidsoap_duck_voice.txt") then
+  raw = string.trim(file.contents("#{state_dir}/liquidsoap_duck_voice.txt"))
+  v = float_of_string(default=0.22, raw)
+  if v >= 0.0 and v <= 1.0 then duck_voice := v end
+end
+
+if file.exists("#{state_dir}/liquidsoap_duck_intro.txt") then
+  raw = string.trim(file.contents("#{state_dir}/liquidsoap_duck_intro.txt"))
+  v = float_of_string(default=0.30, raw)
+  if v >= 0.0 and v <= 1.0 then duck_intro := v end
 end
 
 if file.exists("#{state_dir}/liquidsoap_archive_enabled.txt") then
@@ -215,7 +239,7 @@ if file.exists("#{state_dir}/liquidsoap_station_name.txt") then
   if raw != "" then station_name := raw end
 end
 
-log("settings loaded: jingle_ratio=#{jingle_ratio()} crossfade_duration=#{crossfade_duration()} archive_enabled=#{archive_enabled()} archive_bitrate=#{archive_bitrate()} stream_bitrate=#{stream_bitrate()} opus_enabled=#{opus_enabled()} opus_bitrate=#{opus_bitrate()} flac_enabled=#{flac_enabled()} aac_enabled=#{aac_enabled()} aac_bitrate=#{aac_bitrate()} ogg_icy_metadata=#{ogg_icy_metadata()} station_name=#{station_name()}")
+log("settings loaded: jingle_ratio=#{jingle_ratio()} crossfade_duration=#{crossfade_duration()} duck_voice=#{duck_voice()} duck_intro=#{duck_intro()} archive_enabled=#{archive_enabled()} archive_bitrate=#{archive_bitrate()} stream_bitrate=#{stream_bitrate()} opus_enabled=#{opus_enabled()} opus_bitrate=#{opus_bitrate()} flac_enabled=#{flac_enabled()} aac_enabled=#{aac_enabled()} aac_bitrate=#{aac_bitrate()} ogg_icy_metadata=#{ogg_icy_metadata()} station_name=#{station_name()}")
 
 # ---------------------------------------------------------------------------
 # subhttp:<full-url> — whole-file download via curl. The built-in
@@ -465,11 +489,34 @@ def dj_transition(a, b) =
   # Precedence: a loop beats everything (the loop IS the transition; garnishing
   # it chokes the gesture), then the washout, which may carry the length-cap
   # auto-arm. The queue strips the losers upstream; enforced here too.
-  washing = a.metadata["liq_washout"] == "true"
-  looping = a.metadata["liq_loop"] == "true" and not washing
-  sweeping = b.metadata["liq_sweep"] == "true" and not looping
-  dissolving = b.metadata["liq_dissolve"] == "true" and not washing and not looping
-  chopping = b.metadata["liq_chop"] == "true" and not washing and not looping
+  # SHOW-BOUNDARY FADE (#1574) — the controller stamped liq_cue_out at a show
+  # change, so this track is being CUT, not ending, and EVERY gesture stands
+  # down: the seam is the plain `fade.out(duration=d)` below, spanning the whole
+  # cross buffer (the crossfade invariant, unchanged).
+  #
+  # The two on `a` are the obvious ones — the washout's echo tail is a dissolve
+  # out of an outro and the loop captures the last bar of the record, neither of
+  # which is happening. The loop is the one that bites: its branch applies NO
+  # fader to the outgoing (it rides its own gain after the comb cascade), so a
+  # boundary cut under an armed loop is exactly the hard stop this feature
+  # exists to avoid.
+  #
+  # The four on `b` stand down too, and that is NOT because they garnish the
+  # incoming — every one of them reshapes `a_source`: sweep chokes it through a
+  # filter cascade, blend high-passes it, and sweep/chop swap the outgoing onto
+  # the LOG fade that deliberately holds it hot so the effect does the removing.
+  # Over a mid-record cut there is no ending for any of that to describe, and a
+  # held-hot outgoing that then stops is the same failure as the loop in a
+  # gentler key. They are also armed from the PAIR (mix.effectAllowedFor), and
+  # what the pair is here is an accident of where the boundary fell. Note this
+  # is why they cannot simply be left alone: with washing/looping forced false
+  # they would ARM on seams where the outgoing gesture used to suppress them.
+  boundary_fading = a.metadata["liq_show_fade"] == "true"
+  washing = a.metadata["liq_washout"] == "true" and not boundary_fading
+  looping = a.metadata["liq_loop"] == "true" and not washing and not boundary_fading
+  sweeping = b.metadata["liq_sweep"] == "true" and not looping and not boundary_fading
+  dissolving = b.metadata["liq_dissolve"] == "true" and not washing and not looping and not boundary_fading
+  chopping = b.metadata["liq_chop"] == "true" and not washing and not looping and not boundary_fading
   # FADE SHAPE per effect. The exp fade drops the dry EARLY so the washout's
   # tail reads as a dissolve — that sums below unity mid-cross, a dip, which is
   # the effect (the +6 dB hazard is only for fades that hold full level early).
@@ -563,7 +610,7 @@ def dj_transition(a, b) =
   # full-spectrum piece of music whose ingredients are swapping — club "EQ
   # mixing". Armed only between COMPATIBLE tracks (mix.effectAllowedFor). At
   # e=0 the HPF sits at 30 Hz ≈ transparent, so the engage is seamless.
-  blending = b.metadata["liq_blend"] == "true" and not looping
+  blending = b.metadata["liq_blend"] == "true" and not looping and not boundary_fading
   a_source =
     if blending then
       log("DJ blend: spectral handover into the next track (d=#{d}s)")
@@ -680,8 +727,8 @@ def dj_transition(a, b) =
   #      metallic edge an exposed Schroeder cluster has.
   #   2. The damping lowpass closes deeper (7 kHz → 1.2 kHz) — the wash reads as
   #      the track receding into a large dark space, not echoing in place.
-  # Each comb's tail is isolated from its dry pass-through (pure_tail below) so
-  # the wash can run hot without multiplying the dry path.
+  # Each comb's tail is isolated from its dry pass-through (the -4x subtraction
+  # below) so the wash can run hot without multiplying the dry path.
   a_source =
     if dissolving then
       log("DJ dissolve: reverb wash under the next track (d=#{d}s)")
@@ -750,16 +797,38 @@ def dj_transition(a, b) =
       # PURE-TAIL isolation: comb passes its input through, so summing four
       # combs directly forces a 0.25 weight to keep the dry at unity — which
       # buries the tails 12 dB down before they start (first render: a −44 dB
-      # mid-cross crater, wash inaudible). Subtracting the input from each comb
-      # leaves ONLY the feedback tail, so the dry rides the faded path once and
-      # the tails run hot.
-      def pure_tail(tap) =
-        add(normalize=false,
-          [comb(delay=tap, feedback=diss_fb, a_source), amplify(-1., a_source)])
-      end
+      # mid-cross crater, wash inaudible). Subtracting the dry leaves ONLY the
+      # feedback tails, so the dry rides the faded path once and the tails run
+      # hot.
+      #
+      # ONE subtraction for all four taps, not one per tap (#1565). The old
+      # shape wrapped each comb in its own `add([comb, amplify(-1., a_source)])`
+      # and then its own `amplify(0.7, …)` — twelve extra full-frame operators
+      # for a sum that is algebraically 0.7 * ((c1+c2+c3+c4) - 4a). This is the
+      # same expression, and it is the same AUDIO: rendered against the old form
+      # over 60 s, 100.0000% of samples are equal, max difference 0 LSB.
+      #
+      # It is a clock fix, not a tuning change. Offline render throughput on
+      # liquidsoap 2.4.5 went from ~345 to ~645 audio-seconds per 10 s of CPU
+      # (1.87x), because the wash runs on the single streaming thread and a
+      # 12-core host with 43% idle cannot help it — the whole reason the old
+      # form stalled the clock on about one dissolve in five and Liquidsoap
+      # logged `Latency is too high: we must catchup 0.20–0.46 seconds`.
+      #
+      # Two things measured on the way that are NOT worth doing, so nobody
+      # re-derives them: the second darkening lowpass stage costs nothing
+      # (754 vs 762 with it removed — inside run-to-run noise), and dropping to
+      # two combs buys only ~15% on top of this fold. Both trade the wash's
+      # character for a rounding error. If a station still cannot afford the
+      # dissolve after this, the answer is the operator switch
+      # (`transitions.effects.dissolve`), not a thinner wash.
       washed = add(normalize=false,
-        [amplify(0.7, pure_tail(0.089)), amplify(0.7, pure_tail(0.113)),
-         amplify(0.7, pure_tail(0.151)), amplify(0.7, pure_tail(0.181))])
+        [comb(delay=0.089, feedback=diss_fb, a_source),
+         comb(delay=0.113, feedback=diss_fb, a_source),
+         comb(delay=0.151, feedback=diss_fb, a_source),
+         comb(delay=0.181, feedback=diss_fb, a_source),
+         amplify(-4., a_source)])
+      washed = amplify(0.7, washed)
       washed = filter.rc(frequency=diss_cut, mode="low", wetness=diss_wet,
                  filter.rc(frequency=diss_cut, mode="low", wetness=diss_wet, washed))
       # Dry (faded) + wash: the track walks out through its own ambience.
@@ -1446,9 +1515,14 @@ music_bus =
 # layers because each gets a silent lead-in clip pushed ahead of the speech (see
 # poll_voice / poll_intro), so the dip completes BEFORE the DJ's first word.
 
+# Both depths are operator settings (liquidsoap_duck_*.txt, read once above);
+# the shipped 0.22 / 0.30 are the defaults. `p` is a getter, so the ref reads
+# fine here — but the file is read at STARTUP, so a change needs a restart like
+# every other liquidsoap_*.txt value.
 ducked = smooth_add(
   duration=0.8,
-  p={0.22},         # heavy duck: music drops to ~-13 dB under solo voice
+  # heavy duck: 0.22 (the default) drops the music to ~-13 dB under solo voice
+  p={duck_voice()},
   normal=music_bus,
   special=voice
 )
@@ -1456,7 +1530,7 @@ ducked = smooth_add(
 # Light duck on top for talk-over links — leaves the song audible underneath.
 radio = smooth_add(
   duration=0.8,
-  p={0.30},         # ~-10 dB
+  p={duck_intro()},   # 0.30 default, ~-10 dB
   normal=ducked,
   special=intro
 )
