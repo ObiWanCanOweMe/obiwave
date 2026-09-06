@@ -16,8 +16,9 @@ for (const module of ['store', 'normalize', 'validate', 'liquidsoap']) {
 assert.ok(
   // The fork's provider-owned credentials, search providers, and private-station
   // settings extend the upstream entry point while preserving its split modules.
-  settings.split('\n').length <= 2400,
-  'settings entry must not exceed 2,400 lines',
+  // v1.13 adds scheduled backups, ducking, handover, and picker policies.
+  settings.split('\n').length <= 2600,
+  'settings entry must not exceed 2,600 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {

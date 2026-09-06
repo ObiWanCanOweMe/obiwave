@@ -101,10 +101,14 @@ export class PortainerClient {
     readTimeoutMs = DEFAULT_READ_TIMEOUT_MS,
     updateTimeoutMs = DEFAULT_UPDATE_TIMEOUT_MS,
     signalFactory = AbortSignal.timeout,
+    pollDelayMs = DEFAULT_RETRY_DELAY_MS,
+    sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
     now = () => performance.now(),
   }) {
     Object.assign(this, { apiKey, stackId, endpointId, fetch: fetchImpl });
     Object.assign(this, { readTimeoutMs, updateTimeoutMs, signalFactory, now });
+    Object.assign(this, { pollDelayMs, sleep });
+    this.pendingUpdate = false;
     this.baseUrl = baseUrl.replace(/\/$/, '');
   }
 
@@ -152,14 +156,51 @@ export class PortainerClient {
     return { Env: stack.Env ?? [], StackFileContent: file.StackFileContent };
   }
 
-  updateStack(snapshot, { deadlineMs } = {}) {
-    return this.request(`/stacks/${this.stackId}?endpointId=${this.endpointId}`, {
+  // Portainer 2.45 returns Status=3 before Compose finishes. Never inspect the
+  // new containers or send rollback while that deployment is still running.
+  // Status enum: portainer/portainer api/portainer.go (2.45.0), 1/2/3/4.
+  async waitForStackUpdate({ deadlineMs }) {
+    while (true) {
+      const stack = await this.request(`/stacks/${this.stackId}`, {
+        deadlineMs, operation: 'stack deployment status',
+      });
+      if ([1, 2, 4].includes(stack?.Status)) {
+        this.pendingUpdate = false;
+        return stack;
+      }
+      if (stack?.Status !== 3) {
+        throw new DeploymentVerificationError('Portainer stack deployment status is unknown');
+      }
+      await sleepBeforeDeadline({
+        milliseconds: this.pollDelayMs, deadlineMs, now: this.now, sleep: this.sleep,
+      });
+    }
+  }
+
+  async updateStack(snapshot, { deadlineMs } = {}) {
+    const updateDeadline = Math.min(deadlineMs ?? Infinity, this.now() + this.updateTimeoutMs);
+    // An earlier timeout/read failure leaves an uncertain operation. Prove it
+    // terminal before attempting another PUT, including rollback.
+    if (this.pendingUpdate) await this.waitForStackUpdate({ deadlineMs: updateDeadline });
+    const stack = await this.request(`/stacks/${this.stackId}?endpointId=${this.endpointId}`, {
       method: 'PUT',
       body: JSON.stringify({ ...snapshot, Prune: true, PullImage: true }),
       timeoutMs: this.updateTimeoutMs,
-      deadlineMs,
+      deadlineMs: updateDeadline,
       operation: 'stack update',
     });
+    if (stack?.Status === 3) {
+      this.pendingUpdate = true;
+      const result = await this.waitForStackUpdate({ deadlineMs: updateDeadline });
+      if (result.Status !== 1) {
+        throw new DeploymentVerificationError('Portainer stack deployment failed');
+      }
+      return result;
+    }
+    if (stack?.Status === 4 || stack?.Status === 2) {
+      throw new DeploymentVerificationError('Portainer stack deployment failed');
+    }
+    return stack;
   }
 
   inspectContainer(containerId, operation = 'container inspection', { deadlineMs } = {}) {
@@ -504,9 +545,9 @@ export async function deployWithRollback({
       deadlineMs: targetDeadlineMs,
     });
   } catch (deploymentError) {
-    // Portainer's update endpoint is synchronous, but after a client timeout the
-    // server may briefly continue work. A bounded grace period reduces overlap;
-    // the API provides no operation handle with which to prove completion.
+    // Older synchronous servers may continue work after a response timeout.
+    // Retain their bounded grace; async deployments are additionally settled
+    // by updateStack before any rollback PUT.
     if (deploymentError instanceof PortainerRequestTimeoutError
       && deploymentError.operation === 'stack update'
       && rollbackGraceMs > 0) {

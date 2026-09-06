@@ -622,6 +622,14 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     const hadStoredInlineKey = data.values?.tts?.cloud?.apiKey === 'set';
     const hasStoredCompatKey = data.values?.tts?.cloud?.compatApiKey === 'set';
     const settingsSaved = await saveSettings({
+      // Flat, like djSpeakClock — the DJ's talk PLACEMENT is not part of the
+      // engine config, it just lives on the same card as the voice switch
+      // because that is where an operator looks for "when does the DJ talk".
+      djTalkOnlyBetweenTracks: form.djTalkOnlyBetweenTracks,
+      // Same reasoning one step further out: "when does the DJ hand over" is
+      // the same question at a show boundary. A block, because the controller
+      // key is one (the ORDERING half of the handover has no dial).
+      handover: { offsetMinutes: Number(form.handoverOffsetMinutes) },
       tts: {
         enabled: form.tts.enabled,
         defaultEngine: form.tts.defaultEngine,
@@ -755,6 +763,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     // Absent reads as ON, matching the controller's coercion — so an untouched
     // pre-upgrade settings.json never shows up as dirty.
     form.tts.enabled !== (savedTts.enabled !== false)
+    // Absent reads as OFF, for the same reason in the other direction.
+    || form.djTalkOnlyBetweenTracks !== (data.values?.djTalkOnlyBetweenTracks === true)
+    // Absent reads as the default, which is what the controller stores for it.
+    || form.handoverOffsetMinutes !== String(data.values?.handover?.offsetMinutes ?? 5)
     || form.tts.defaultEngine !== savedEngine
     || (form.tts.kokoro?.voice || '') !== savedKokoroVoice
     || (form.kokoroLang || '') !== savedKokoroLang
@@ -855,6 +867,63 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 Station (needs a mixer restart).
               </>
             )}
+          </p>
+        </div>
+
+        <div className="field mt-6">
+          <Label>Talk placement</Label>
+          <Seg
+            value={form.djTalkOnlyBetweenTracks ? 'between' : 'any'}
+            options={[
+              { id: 'any', label: 'Any time', title: 'Scheduled segments air on the minute they are written' },
+              { id: 'between', label: 'Between tracks', title: 'Scheduled segments wait for the next track boundary' },
+            ]}
+            onChange={v => setForm(f => ({ ...f, djTalkOnlyBetweenTracks: v === 'between' }))}
+          />
+          <p className="mt-2 text-[13px] leading-[1.55] text-muted">
+            {form.djTalkOnlyBetweenTracks ? (
+              <>
+                Every <strong>scheduled</strong> segment — station IDs, the hourly time
+                check, banter, programme beats and between-track segments — is written
+                ahead of time and held for the <strong>next track boundary</strong>, so the
+                DJ never ducks a song mid-play. Two trades worth knowing: a segment can air
+                a track later than the minute it was written for, so an hourly check may
+                read the clock a little late (it is dropped outright if the part of the day
+                has moved on), and only <strong>one</strong> segment waits at a time — a
+                second one is postponed rather than queued, and skipped if its slot runs
+                out. Manual triggers on the DJ page still fire immediately.
+              </>
+            ) : (
+              <>
+                Scheduled segments air on the minute they are written, ducking the current
+                song. <strong>Station IDs are the exception</strong> and always wait for the
+                next track boundary — they have no reason to interrupt. Turn this on to
+                give every other segment the same treatment.
+              </>
+            )}
+          </p>
+        </div>
+
+        <div className="field mt-6">
+          <Label>Show handover</Label>
+          <Seg
+            value={form.handoverOffsetMinutes}
+            options={[
+              { id: '5', label: '5 min', title: 'The outgoing host signs off at :55' },
+              { id: '10', label: '10 min', title: 'The outgoing host signs off at :50' },
+              { id: '15', label: '15 min', title: 'The outgoing host signs off at :45' },
+              { id: '20', label: '20 min', title: 'The outgoing host signs off at :40' },
+            ]}
+            onChange={v => setForm(f => ({ ...f, handoverOffsetMinutes: v }))}
+          />
+          <p className="mt-2 text-[13px] leading-[1.55] text-muted">
+            How long before a show ends the outgoing host <strong>signs off</strong> — the
+            programme outro, at :{60 - Number(form.handoverOffsetMinutes)} of the show&apos;s
+            final hour. Whatever you pick, the incoming host waits for{' '}
+            <strong>one closing track</strong> before opening, so the changeover is never two
+            voices back to back. Only whole 5-minute steps: the sign-off is placed on the
+            station&apos;s clock and checked every five minutes, so anything in between
+            would be a slot that never comes round.
           </p>
         </div>
       </Card>

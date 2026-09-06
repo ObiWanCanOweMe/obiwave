@@ -14,6 +14,8 @@ import { Btn, Eyebrow, Metric } from '../ui';
 import { useSectionChrome, useReportDirty } from './section-chrome';
 import { Button } from '../../ui/button';
 import { FieldError } from '../../ui/field';
+import type { TransitionEffect } from '../../../lib/schemas.generated';
+export type { TransitionEffect } from '../../../lib/schemas.generated';
 
 export const KEY_HINTS: Record<string, string> = {
   ANTHROPIC_API_KEY: 'sk-ant-...',
@@ -150,6 +152,8 @@ export interface SearchForm {
   provider: string;
   apiKeys: Record<string, string | null>;
   baseUrl: string;
+  /** Optional comma-separated SearXNG engine pin (#1353); '' = instance default. */
+  searxngEngines: string;
 }
 
 export interface EmbeddingEnrichmentForm {
@@ -188,12 +192,30 @@ export interface ScrobbleListenbrainzForm {
   baseUrl: string;
 }
 
+/** Navidrome play reporting (#1298). No credentials of its own — the station's
+ *  existing Navidrome connection is what it scrobbles through. */
+export interface ScrobbleNavidromeForm {
+  enabled: boolean;
+}
+
 export interface ScrobbleForm {
   lastfm: ScrobbleLastfmForm;
   listenbrainz: ScrobbleListenbrainzForm;
+  navidrome: ScrobbleNavidromeForm;
 }
 
 /** Listener likes (#991) — heart button + Navidrome star + DJ influence. */
+// Track-selection windows read by BOTH pick paths. A separate top-level
+// settings key from `llm` because the album cooldown is not LLM config — the
+// stateless pool picker enforces it too.
+export interface PickerForm {
+  // Hours, as typed. 0/'' = off.
+  albumHours: string;
+  // Seconds, as typed. 0/'' = off (the shipped default). A show's own
+  // minTrackLengthSeconds overrides this; listener requests are exempt.
+  minTrackLengthSeconds: string;
+}
+
 export interface LikesForm {
   enabled: boolean;
   starInNavidrome: boolean;
@@ -220,6 +242,8 @@ export interface StreamForm {
   idleWhenEmpty: boolean;
   idleAfterMinutes: string;
   maxListeners: string;
+  countryHeader: string;
+  geoipDbPath: string;
 }
 
 export type LoudnessSource = 'replaygain-then-measured' | 'replaygain' | 'measured';
@@ -235,6 +259,9 @@ export interface TransitionsForm {
   stemBlends: boolean;  // pre-rendered stem-blend seams (needs pairDrain + stem cache)
   stemCache: boolean;   // settings.audio.stemCache — persist Demucs stems during analysis
   stemCacheGb: string;  // settings.audio.stemCacheGb — byte budget the LRU sweep enforces
+  /** settings.transitions.effects — which gestures the DJ may reach for. Always
+   *  fully populated in the form; an absent stored field loads as `true`. */
+  effects: Record<TransitionEffect, boolean>;
 }
 
 export interface PrivacyForm {
@@ -266,9 +293,21 @@ export interface SilenceTrimForm {
   minGapMs: string;
 }
 
+// settings.ducking — the two smooth_add depths radio.liq reads at mixer
+// startup. Strings like every other number box: a blank input must reach
+// saveBlock as a field error, not as 0 (which is a full mute under the DJ).
+export interface DuckingForm {
+  voice: string;
+  intro: string;
+}
+
 export interface FormState {
   crossfadeDuration: string;
+  ducking: DuckingForm;
   maxTrackSeconds: string;
+  /** Station default for the show-boundary fade (#1574). A show's own
+   *  tri-state overrides it; this level is only ever on or off. */
+  fadeAtShowEnd: boolean;
   silenceTrim: SilenceTrimForm;
   transitions: TransitionsForm;
   archive: ArchiveForm;
@@ -279,9 +318,19 @@ export interface FormState {
   timezone: string;
   locale: StationLocale;
   kokoroLang: string;
+  /** Talk placement switch — every scheduled segment waits for the next track
+   *  boundary. Flat, like djSpeakClock, and owned by the TTS section. */
+  djTalkOnlyBetweenTracks: boolean;
+  /** settings.handover.offsetMinutes — how many minutes before a show boundary
+   *  the outgoing host signs off. A string like every other number control, but
+   *  the values are a fixed set (multiples of the talk table's sampling stride),
+   *  so it renders as a segmented control and can never carry a free-text
+   *  error. Owned by the TTS section, beside talk placement. */
+  handoverOffsetMinutes: string;
   weather: WeatherCfg;
   tts: TtsForm;
   llm: LlmForm;
+  picker: PickerForm;
   search: SearchForm;
   embedding: EmbeddingForm;
   scrobble: ScrobbleForm;
@@ -303,10 +352,19 @@ export interface SettingsData {
   values?: {
     jingleRatio?: number;
     crossfadeDuration?: number;
+    ducking?: { voice?: number; intro?: number };
     maxTrackSeconds?: number;
     minTrackSeconds?: number;
     archive?: { enabled?: boolean; bitrate?: number; retentionDays?: number };
-    transitions?: { pairDrain?: boolean; stemBlends?: boolean };
+    /** Scheduled backups (#1570). No FormState entry and no settings section —
+     *  the schedule is edited from the Backup panel, beside Export/Restore, and
+     *  posts `{ backups }` through the same POST /settings chokepoint. */
+    backups?: { cadence?: string; keep?: number };
+    transitions?: {
+      pairDrain?: boolean;
+      stemBlends?: boolean;
+      effects?: Partial<Record<TransitionEffect, boolean>>;
+    };
     audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean; stemCacheGb?: number };
     stream?: {
       opusEnabled?: boolean;
@@ -320,13 +378,27 @@ export interface SettingsData {
       idleWhenEmpty?: boolean;
       idleAfterMinutes?: number;
       maxListeners?: number;
+      countryHeader?: string;
+      geoipDbPath?: string;
     };
     loudness?: { targetLufs?: number; maxBoostDb?: number; source?: LoudnessSource };
     silenceTrim?: { enabled?: boolean; minGapMs?: number };
+    /** Absent on a settings.json predating the key — false, like the
+     *  controller's own coercion. */
+    fadeAtShowEnd?: boolean;
+    /** Shortest playable track a boundary cut can arm on (seconds), served by
+     *  the controller so the hint cannot drift from the drain's own floors. */
+    boundaryFadeMinTrackSeconds?: number;
     station?: string;
     stationDescription?: string;
     timezone?: string;
     locale?: StationLocale;
+    /** Absent on a settings.json predating the key — read it as false, which is
+     *  what the controller's own coercion does. */
+    djTalkOnlyBetweenTracks?: boolean;
+    /** Absent on a settings.json predating the key — the controller's own
+     *  coercion reads it as the 5-minute default. */
+    handover?: { offsetMinutes?: number };
     theme?: { active?: string };
     weather?: {
       lat?: number;
@@ -388,6 +460,11 @@ export interface SettingsData {
     scrobble?: {
       lastfm?: Partial<ScrobbleLastfmForm>;
       listenbrainz?: Partial<ScrobbleListenbrainzForm>;
+      navidrome?: Partial<ScrobbleNavidromeForm>;
+    };
+    picker?: {
+      albumHours?: number;
+      minTrackLengthSeconds?: number;
     };
     likes?: {
       enabled?: boolean;

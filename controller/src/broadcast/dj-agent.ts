@@ -38,7 +38,10 @@ import { recencyWindowsForLibrary } from '../music/recency.js';
 import { effectiveShowNoRepeatWindow } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, runArtistGuard } from './dj-agent/artist-guard.js';
+import { runAlbumGuard } from './dj-agent/album-guard.js';
+import { albumKeyFor } from '../music/album-facts.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
+import type { TransitionEffect } from '../settings/vocab.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { speakClockAllowed } from './clock-policy.js';
@@ -281,6 +284,13 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     moodLock,
     energyLock,
     vocalLock,
+    // Minimum track length (#1573) — the show's own floor when it sets one,
+    // else the station default. NOT gated on `strict`, unlike the five locks
+    // above: this is the twin of the max-track-length cap, which every show
+    // gets whether or not it opted into strict filters. The pool picker
+    // resolves the identical figure from the identical show object, so the two
+    // paths cannot disagree about how short is too short.
+    minTrackSec: settings.effectiveMinTrackSec(activeShow),
     playlistLock,
     playlistTracks,
     excludedIds,
@@ -389,11 +399,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // escalated differently on purpose (see below): back-to-back is a fault worth
   // a pool rescue, spacing is a preference that yields to the run.
   const varietyWindow = settings.get().llm?.artistVarietyWindow ?? ARTIST_VARIETY_WINDOW;
+  // Read once: the album guard below steps around the same neighbours, and two
+  // reads of a live queue across two awaits could disagree.
+  const neighbourRoots = queue.neighbourArtistRoots(varietyWindow);
   const guarded = await runArtistGuard<any>({
     song, object, current,
     seen: extras.seen,
     // Every queue read stays here; the policy module is handed values only.
-    recentRoots: queue.neighbourArtistRoots(varietyWindow),
+    recentRoots: neighbourRoots,
     window: varietyWindow,
     repick: (alt, reason) => repickFromSeen({
       seen: alt, badId: null, wantLink, showAt,
@@ -413,6 +426,45 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   if (guarded.kind === 'repicked') {
     object = guarded.object;
     song = guarded.song;
+  }
+
+  // Album cooldown (#1485 FR 3), at the same point of choice and for the same
+  // reason: the discovery tools carry no album filter (#618), and around an
+  // album track `tracksLikeThis` frequently answers with that album.
+  //
+  // AFTER the artist guard, on whatever pick it left standing — an album
+  // re-pick that ran first could be reverted by the artist guard straight back
+  // onto a recent album, since the artist guard knows nothing about records.
+  // Nothing to do on a 'rescued' slot: that pick came from the pool, which
+  // applies this same cooldown itself.
+  //
+  // Zero cost when off (the default): albumHours 0 makes recentAlbumKeys empty
+  // and the guard is skipped outright, so no queue walk and no branch taken.
+  const albumHours = Number(settings.get().picker?.albumHours) || 0;
+  if (albumHours > 0) {
+    const albumGuarded = await runAlbumGuard<any>({
+      song, object,
+      seen: extras.seen,
+      recentAlbums: queue.recentAlbumKeys(albumHours),
+      avoidArtistRoots: neighbourRoots,
+      // The run's `seen` values are the MODEL's projection and carry no
+      // compilation flags (adding them would put them in a re-pick prompt), so
+      // the key is resolved against the library — the same resolver the pool
+      // path's filter uses, which is what makes the two paths agree.
+      albumKeyOf: albumKeyFor,
+      hours: albumHours,
+      repick: (alt, reason) => repickFromSeen({
+        seen: alt, badId: null, wantLink, showAt,
+        playlistResolved: !!playlistTracks?.length,
+        reason,
+      }),
+      log: (line) => queue.log('picker', line),
+      logEvent,
+    });
+    if (albumGuarded.kind === 'repicked') {
+      object = albumGuarded.object;
+      song = albumGuarded.song;
+    }
   }
 
   let rawSay = typeof object.say === 'string' ? object.say.trim() : '';
@@ -452,12 +504,24 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   if (!fxActive && object.transition && object.transition !== 'normal') {
     queue.log('mix', `transition "${object.transition}" ignored (persona not in DJ mode)`);
   }
-  const sweep = fxActive && object.transition === 'sweep';
-  const washout = fxActive && object.transition === 'washout';
-  const blend = fxActive && object.transition === 'blend';
-  const dissolve = fxActive && object.transition === 'dissolve';
-  const chop = fxActive && object.transition === 'chop';
-  const loop = fxActive && object.transition === 'loop';
+  // Per-effect operator switch (#1565). The agent's PICK_SCHEMA keeps the full
+  // enum whatever the switches say — it is session-anchored, so narrowing it
+  // mid-conversation would contradict the history already in it — and the
+  // prompt guidance names what is off. A model that reaches for a switched-off
+  // gesture anyway is logged for the same reason as the DJ-mode case above,
+  // rather than being dropped in silence.
+  if (fxActive && object.transition && object.transition !== 'normal'
+    && !settings.effectEnabled(object.transition as TransitionEffect)) {
+    queue.log('mix', `transition "${object.transition}" ignored (switched off in settings)`);
+  }
+  const wants = (kind: TransitionEffect) =>
+    fxActive && object.transition === kind && settings.effectEnabled(kind);
+  const sweep = wants('sweep');
+  const washout = wants('washout');
+  const blend = wants('blend');
+  const dissolve = wants('dissolve');
+  const chop = wants('chop');
+  const loop = wants('loop');
   // Attach the link to the pick so it airs as the pick starts (back-announcing
   // the track on-air now), instead of immediately over that on-air track (#189).
   // Stamp `current` as the link's back-announce target so the queue can drop the
@@ -560,14 +624,20 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // time like the agent path does — the queue would strip a stale flag anyway
   // (applyMixTransition's dj-mode-off strip), but not stamping it keeps the
   // pick log honest.
+  // The per-effect switches (#1565) are re-checked here for the same reason as
+  // effectsActive: pickNextTrack already narrowed the enum it offered, but the
+  // pick and the enqueue are separated by a model call, so a switch flipped in
+  // between must not reach the annotation.
   const fxActive = settings.effectsActive();
+  const wants = (kind: TransitionEffect) =>
+    fxActive && result.transition === kind && settings.effectEnabled(kind);
   const fx = {
-    sweep: fxActive && result.transition === 'sweep',
-    washout: fxActive && result.transition === 'washout',
-    blend: fxActive && result.transition === 'blend',
-    dissolve: fxActive && result.transition === 'dissolve',
-    chop: fxActive && result.transition === 'chop',
-    loop: fxActive && result.transition === 'loop',
+    sweep: wants('sweep'),
+    washout: wants('washout'),
+    blend: wants('blend'),
+    dissolve: wants('dissolve'),
+    chop: wants('chop'),
+    loop: wants('loop'),
   };
   // `current` is the link's back-announce target (passed to generateLink as
   // `previous`); stamp it so the queue drops the link if a request jumps ahead.

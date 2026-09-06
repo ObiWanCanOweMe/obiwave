@@ -682,7 +682,7 @@ test('Portainer uses separate short read and realistic update timeouts', async (
     if (options.method === 'PUT') return jsonResponse({});
     if (parsed.pathname.endsWith('/file')) return jsonResponse({ StackFileContent: oldFile });
     return jsonResponse({ Env: oldEnv });
-  }, { readTimeoutMs: 7_000, updateTimeoutMs: 240_000, signalFactory });
+  }, { readTimeoutMs: 7_000, updateTimeoutMs: 240_000, signalFactory, now: () => 0 });
 
   await client.snapshotStack();
   await client.updateStack({ Env: oldEnv, StackFileContent: newFile });

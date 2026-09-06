@@ -22,6 +22,7 @@ const SUITES = [
   'vocal_gate_test.py', // vocal-stem gate thresholds (#1125)
   'test_chatterbox_chunk.py', // chatterbox chunk_text (#1130)
   'test_tts_heavy_strict_device.py', // Ark CUDA worker startup + supervised restart
+  'tts_heavy_idle_test.py', // tts-heavy idle unload + cold-engine health (#1579)
   'analyzer_noise_test.py', // decode-noise filter + capability loss (#1300)
   'analyzer_silence_test.py', // edge dead-air measurement (silence trim)
 ];

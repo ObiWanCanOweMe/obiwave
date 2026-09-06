@@ -9,6 +9,7 @@ import { Label } from '../../ui/label';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup,
 } from '../../ui/select';
+import { SETTINGS_SEARXNG_ENGINES_MAX } from '@/lib/schemas.generated';
 import { Card, Btn, Pill } from '../ui';
 import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult,
@@ -51,12 +52,13 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
   const searchPatch = {
     provider,
     ...(apiKeyPatch !== undefined ? { apiKeys: { [provider]: apiKeyPatch } } : {}),
-    ...(provider === 'searxng' ? { baseUrl: form.search.baseUrl ?? '' } : {}),
+    ...(provider === 'searxng' ? { baseUrl: form.search.baseUrl ?? '', searxngEngines: form.search.searxngEngines ?? '' } : {}),
   };
   const searchDirty = provider !== savedSearch.provider
     || (!!keyed && searchKeyDirty(draft, savedKey))
     || (provider === 'searxng'
-        && (form.search.baseUrl ?? '') !== (savedSearch.baseUrl || ''));
+        && ((form.search.baseUrl ?? '') !== (savedSearch.baseUrl || '')
+            || (form.search.searxngEngines ?? '') !== (savedSearch.searxngEngines || '')));
 
   const invalidateKeyTest = () => {
     keyTestOwnership.invalidate();
@@ -269,6 +271,29 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                 <div className="field-hint">
                   Self-hosted SearXNG instance. No API key required. Ensure JSON format is
                   enabled in your SearXNG <code>settings.yml</code>.
+                </div>
+              </div>
+
+              <div className="field">
+                <Label>Engines (optional)</Label>
+                <Input
+                  type="text"
+                  placeholder="google, duckduckgo web, wikipedia"
+                  maxLength={SETTINGS_SEARXNG_ENGINES_MAX}
+                  value={form.search.searxngEngines ?? ''}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    setForm(f => ({ ...f, search: { ...f.search, searxngEngines: e.target.value } }))
+                  }
+                  className="max-w-[360px]"
+                />
+                <div className="field-hint">
+                  Comma-separated list restricting which engines SearXNG queries for
+                  SUB/WAVE&apos;s calls only — your browser traffic keeps the instance
+                  defaults. Leave blank to use the full default engine set. Names must
+                  match the <code>name:</code> field in SearXNG&apos;s{' '}
+                  <code>settings.yml</code> exactly (e.g. <code>duckduckgo web</code>,
+                  not the internal <code>engine:</code> module id): SearXNG silently
+                  ignores a name it doesn&apos;t recognise rather than erroring.
                 </div>
               </div>
             </>
