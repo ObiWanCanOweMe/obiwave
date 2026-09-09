@@ -205,7 +205,7 @@ export function customHeaders(cfg: any): Record<string, string> | undefined {
 export function headersSig(cfg: any): string {
   const h = customHeaders(cfg);
   if (!h) return '';
-  return Object.keys(h).sort().map((k) => `${k}=${h[k]}`).join(',');
+  return JSON.stringify(Object.keys(h).sort().map((k) => [k, h[k]]));
 }
 
 // Ollama falls back to the env-configured model; cloud providers must name a

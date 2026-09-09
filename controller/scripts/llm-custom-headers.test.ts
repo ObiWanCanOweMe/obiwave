@@ -241,3 +241,47 @@ test('the configured header is what lands on the wire', async () => {
   });
   assert.equal(locca['x-gateway-session'], 'via-locca');
 });
+
+for (const leg of ['primary', 'fallback'] as const) {
+  for (const connectionPatch of [
+    { provider: 'locca' },
+    { baseUrl: 'https://changed.example/v1' },
+    { providerBaseUrls: { 'openai-compatible': 'https://changed.example/v1' } },
+  ]) {
+    for (const headerPatch of [{}, { headers: { 'x-secret': 'set' } }, { headers: { 'x-secret': 'fresh' } }]) {
+      test(`${leg} headers respect connection change ${JSON.stringify(connectionPatch)} ${JSON.stringify(headerPatch)}`, async () => {
+        const saved = { ...BASE_LLM, headers: { 'x-secret': 'stored' } };
+        await coldLoad({ ...saved, fallback: { ...saved, enabled: true, headers: { 'x-secret': 'backup' } } });
+        const patch = { ...connectionPatch, ...headerPatch };
+        await settings.update({ llm: leg === 'primary' ? patch : { fallback: patch } } as never);
+        const state = settings.get().llm;
+        const changed = leg === 'primary' ? state : state.fallback;
+        const expected = 'headers' in headerPatch && headerPatch.headers?.['x-secret'] === 'fresh'
+          ? { 'x-secret': 'fresh' } : {};
+        assert.deepEqual(changed.headers, expected);
+        assert.deepEqual((leg === 'primary' ? state.fallback : state).headers,
+          { 'x-secret': leg === 'primary' ? 'backup' : 'stored' });
+        setCache(null);
+        await settings.load();
+        assert.deepEqual((leg === 'primary' ? settings.get().llm : settings.get().llm.fallback).headers, expected);
+      });
+    }
+  }
+  test(`${leg} same connection retains omitted headers through normalized URL and model edits`, async () => {
+    const saved = { ...BASE_LLM, headers: { 'x-secret': 'stored' } };
+    await coldLoad({ ...saved, fallback: { ...saved, enabled: true } });
+    const patch = { model: 'another', baseUrl: `${BASE_LLM.baseUrl}/` };
+    await settings.update({ llm: leg === 'primary' ? patch : { fallback: patch } } as never);
+    assert.deepEqual((leg === 'primary' ? settings.get().llm : settings.get().llm.fallback).headers, { 'x-secret': 'stored' });
+  });
+}
+
+test('delimiter-bearing header values select distinct clients and wire maps', async () => {
+  const one = { ...BASE_LLM, headers: { A: 'x,B=y' } };
+  const two = { ...BASE_LLM, headers: { A: 'x', B: 'y' } };
+  assert.notEqual(languageModel(one), languageModel(two));
+  assert.equal((await headersOnTheWire(one)).a, 'x,B=y');
+  const sent = await headersOnTheWire(two);
+  assert.equal(sent.a, 'x');
+  assert.equal(sent.b, 'y');
+});

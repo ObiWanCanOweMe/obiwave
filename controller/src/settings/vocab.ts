@@ -348,6 +348,8 @@ export function clampArtistVarietyWindow(raw: unknown, def: number): number {
 // enabled), as are the primary-only station toggles.
 export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown, label: string): void {
   const l = (patch ?? {}) as Record<string, unknown>;
+  const previousProvider = target.provider;
+  const previousBaseUrl = String(target.baseUrl ?? '').trim().replace(/\/+$/, '');
   if (l.provider !== undefined) {
     if (!LLM_PROVIDERS.includes(l.provider as string)) {
       throw new Error(`${label}.provider must be one of: ${LLM_PROVIDERS.join(', ')}`);
@@ -405,12 +407,16 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
       target.providerBaseUrls = urls;
     }
   }
-  // Extra request headers for the openai-compatible transport (#1618).
-  // Whole-map REPLACE, like tts.corrections and festivals: the editor always
-  // sends the full set, so a merge would make a deleted row un-deletable.
-  // `'set'` is the getRedacted() sentinel, resolved against the PRE-patch value.
-  // Deliberately NOT keyed by provider the way baseUrl is: headers belong to one
-  // server, so they follow the leg's inline API key instead.
+  // Resolve the connection before reading its credentials. Inherited values
+  // belong to this provider AND endpoint; only explicitly typed replacements
+  // may configure a changed connection.
+  const urls = (target.providerBaseUrls as Record<string, string> | undefined) ?? {};
+  const prov = target.provider as string | undefined;
+  target.baseUrl = (prov && urls[prov]) ? urls[prov] : '';
+  const sameConnection = previousProvider === target.provider && previousBaseUrl === target.baseUrl;
+  if (!sameConnection) target.headers = {};
+  // Whole-map replacement makes removed editor rows deletions. Resolve the
+  // redacted sentinel only from the same connection's previous header map.
   if (l.headers !== undefined) {
     if (!l.headers || typeof l.headers !== 'object' || Array.isArray(l.headers)) {
       throw new Error(`${label}.headers must be an object map of header name -> value`);
@@ -466,12 +472,6 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
     }
     target.toolChoice = v;
   }
-  // Single writer of the flat legacy `baseUrl`: always re-derived from the map
-  // so a provider-only patch can't leave a stale URL (#1082). Runtime consumers
-  // still read the flat field.
-  const urls = (target.providerBaseUrls as Record<string, string> | undefined) ?? {};
-  const prov = target.provider as string | undefined;
-  target.baseUrl = (prov && urls[prov]) ? urls[prov] : '';
 }
 
 // Route an inline API key into `llmHost.keys[provider]` (#657) using the leg's

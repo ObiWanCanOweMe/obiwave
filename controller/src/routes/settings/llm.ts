@@ -28,9 +28,15 @@ import { probeFishKey } from '../../llm/speech.js';
 export const router = express.Router();
 
 // Distill a raw provider/SDK error into a one-line actionable message.
-function briefLlmError(err: unknown): string {
+function briefLlmError(err: unknown, secrets: string[] = []): string {
   const e = err as { message?: string; toString(): string } | null | undefined;
-  const msg: string = (e?.message || e?.toString() || '').toLowerCase();
+  // Redact before truncating or splitting sentences: either can otherwise
+  // leave a recognizable prefix of an echoed credential in the response.
+  let raw = e?.message || e?.toString() || '';
+  for (const secret of [...new Set(secrets)].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    raw = raw.split(secret).join('[redacted]');
+  }
+  const msg = raw.toLowerCase();
   if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('invalid') && msg.includes('key') || msg.includes('incorrect api key')) {
     return 'Key rejected — check it\'s correct and hasn\'t expired';
   }
@@ -46,7 +52,6 @@ function briefLlmError(err: unknown): string {
   if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('aborted')) {
     return 'Timed out — provider may be slow or unreachable';
   }
-  const raw: string = (e?.message || '').trim();
   const sentence = raw.split(/[.\n]/)[0].trim();
   return sentence.slice(0, 80) || 'Request failed';
 }
@@ -470,6 +475,7 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, message: 'model is required', latencyMs: 0 });
   }
   const t0 = Date.now();
+  const probeSecrets: string[] = [];
   try {
     let resolvedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : '';
     let resolvedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
@@ -524,6 +530,7 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
       headers: resolveProbeHeaders(headers, storedHeaders),
     });
 
+    probeSecrets.push(resolvedApiKey, ...Object.values(probeHeaders ?? {}));
     const m = createOpenAI({
       apiKey: resolvedApiKey || 'no-key',
       baseURL: resolvedBaseUrl,
@@ -537,7 +544,7 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
     });
     res.json({ ok: true, message: '✓ Bearer token accepted · model responded', latencyMs: Date.now() - t0 });
   } catch (err: unknown) {
-    res.json({ ok: false, message: briefLlmError(err), latencyMs: Date.now() - t0 });
+    res.json({ ok: false, message: briefLlmError(err, probeSecrets), latencyMs: Date.now() - t0 });
   }
 });
 

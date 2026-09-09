@@ -194,7 +194,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
     const pin = inheriting && !!meta?.model;
     setForm(f => {
       if (!f) return f;
-      const next = { ...f, llm: { ...f.llm, provider: v } };
+      const next = { ...f, llm: { ...f.llm, provider: v, headers: [] } };
       if (pin && meta) {
         // Stored as "provider:model"; split on the FIRST colon so ollama tags with
         // their own colon (bge-m3:latest) keep the tag intact.
@@ -206,6 +206,22 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
       return next;
     });
     if (pin && meta) setEmbedPinNotice({ model: meta.model, dim: meta.dim, newProvider: v });
+  };
+
+  const changeLlmBaseUrl = (leg: 'primary' | 'fallback', provider: string, value: string) => {
+    setForm(f => {
+      const current = leg === 'primary' ? f.llm : f.llm.fallback;
+      const normalize = (url: string) => url.trim().replace(/\/+$/, '');
+      const sameEndpoint = normalize(current.providerBaseUrls[provider] ?? '') === normalize(value);
+      const next = {
+        ...current,
+        providerBaseUrls: { ...current.providerBaseUrls, [provider]: value },
+        headers: sameEndpoint ? current.headers : [],
+      };
+      return leg === 'primary'
+        ? { ...f, llm: { ...f.llm, ...next } }
+        : { ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, ...next } } };
+    });
   };
 
   const primaryKeyVar = LLM_ENV_VARS[primaryProvider];
@@ -523,7 +539,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               <Input
                 value={form.llm.providerBaseUrls[primaryProvider] ?? ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  setForm(f => ({ ...f, llm: { ...f.llm, providerBaseUrls: { ...f.llm.providerBaseUrls, [primaryProvider]: e.target.value } } }))
+                  changeLlmBaseUrl('primary', primaryProvider, e.target.value)
                 }
                 placeholder={primaryProvider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                 className="max-w-[360px]"
@@ -548,7 +564,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               <Input
                 value={form.llm.providerBaseUrls['locca'] ?? ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  setForm(f => ({ ...f, llm: { ...f.llm, providerBaseUrls: { ...f.llm.providerBaseUrls, locca: e.target.value } } }))
+                  changeLlmBaseUrl('primary', 'locca', e.target.value)
                 }
                 placeholder="http://host.docker.internal:8080/v1"
                 className="max-w-[360px]"
@@ -630,7 +646,8 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 plain llama.cpp / vLLM / LM Studio server. Values are hidden once
                 saved; a row showing <code>•••••• (on file)</code> keeps its
                 stored value unless you retype it, and clearing a row&apos;s
-                value or removing the row drops the header.
+                value or removing the row drops the header. Changing the provider
+                or server URL clears these rows; enter headers for the new connection afterward.
               </div>
             </div>
           )}
@@ -833,7 +850,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   value={form.llm.fallback.provider}
                   onValueChange={v => {
                     fallbackManagedKeyGeneration.current.invalidate();
-                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v } } }));
+                    setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, provider: v, headers: v === f.llm.fallback.provider ? f.llm.fallback.headers : [] } } }));
                   }}
                 >
                   <SelectTrigger className="max-w-[360px]" aria-label="Backup provider"><SelectValue /></SelectTrigger>
@@ -897,7 +914,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   <Input
                     value={form.llm.fallback.providerBaseUrls[fallbackProvider] ?? ''}
                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, providerBaseUrls: { ...f.llm.fallback.providerBaseUrls, [fallbackProvider]: e.target.value } } } }))
+                      changeLlmBaseUrl('fallback', fallbackProvider, e.target.value)
                     }
                     placeholder={fallbackProvider === 'litellm' ? 'https://gateway.example/v1' : 'http://192.168.1.101:8080/v1'}
                     className="max-w-[360px]"
@@ -920,7 +937,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                   <Input
                     value={form.llm.fallback.providerBaseUrls['locca'] ?? ''}
                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, providerBaseUrls: { ...f.llm.fallback.providerBaseUrls, locca: e.target.value } } } }))
+                      changeLlmBaseUrl('fallback', 'locca', e.target.value)
                     }
                     placeholder="http://host.docker.internal:8080/v1"
                     className="max-w-[360px]"

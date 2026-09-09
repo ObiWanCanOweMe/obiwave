@@ -29,6 +29,11 @@ async function recordingGateway() {
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       const parsed = JSON.parse(body || '{}');
+      if (parsed.model === 'echo-secrets') {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: `Routing rejected: ${req.headers['x-probe-secret']} ${req.headers.authorization}` } }));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
         id: 'chatcmpl-route-test',
@@ -403,6 +408,22 @@ try {
     assert.equal((await response.json()).ok, true);
     assert.equal(target.requests.at(-1)?.probeHeader, expected,
       `${leg} header must remain bound to its saved endpoint; explicit values may probe a new URL`);
+  }
+
+  for (const [leg, target, secret] of [
+    ['primary', primary, 'primary-header'], ['fallback', fallback, 'fallback-header'],
+  ] as const) {
+    const response = await post('/settings/llm/probe-compat', {
+      provider: 'openai-compatible', leg, model: 'echo-secrets',
+      baseUrl: target.baseUrl, headers: { 'x-probe-secret': 'set' },
+    });
+    const body = await response.json();
+    assert.equal(body.ok, false);
+    assert.ok(!JSON.stringify(body).includes(secret), 'gateway errors must not echo stored header secrets');
+    const key = target.requests.at(-1)!.authorization.replace(/^Bearer /, '');
+    assert.notEqual(key, 'no-key', 'exercise a resolved stored API key');
+    assert.ok(!JSON.stringify(body).includes(key), 'gateway errors must not echo stored API keys');
+    assert.match(body.message, /Routing rejected/);
   }
 
   await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
