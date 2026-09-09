@@ -94,7 +94,9 @@ export function llmForSubmission(llm: WizardData['llm']): Record<string, string>
     return { ...shared, ollamaUrl: llm.ollamaUrl };
   }
   if (llm.provider === 'openai-compatible' || llm.provider === 'litellm') {
-    return { ...shared, apiKey: llm.apiKey, baseUrl: llm.baseUrl };
+    // A blank wizard field means keep the saved credential. Clearing belongs
+    // to the explicit credential controls in Settings.
+    return { ...shared, ...(llm.apiKey.trim() ? { apiKey: llm.apiKey } : {}), baseUrl: llm.baseUrl };
   }
   if (llm.provider === 'locca') {
     return { ...shared, baseUrl: llm.baseUrl };

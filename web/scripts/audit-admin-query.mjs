@@ -158,6 +158,9 @@ const allowed = new Map([
     ['generation-sync-fallback', { callee: 'rawFetcher', method: 'POST', path: /^\/playlists\/generate$/ }],
     ['generation-job-poll', { callee: 'rawFetcher', method: 'GET', path: /^\/playlists\/generate\/jobs\/\$\{\}$/ }],
   ])],
+  ['settings/BrainSection.tsx', new Map([
+    ['brain-connection-probe', { callee: 'adminResponse', method: 'POST', path: /^\/settings\/llm\/probe-compat$/ }],
+  ])],
   ['settings/LibrarySection.tsx', new Map([
     ['locca-discovery-probe', {
       callee: 'adminResponse',

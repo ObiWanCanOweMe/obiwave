@@ -29,7 +29,7 @@ jobs:
           - package: controller
             command: npm run lint && npm test
           - package: web
-            command: npm run lint && npm run test:audio-format && npm run test:stream-auth-format && npm run test:llm-provider && npm run test:mounted-state && npm run test:async-generation && npm run test:model-discovery-request && npm run test:llm-section-provider-url-contract && npm run build
+            command: npm run lint && npm test && npm run build
           - package: mcp-subwave
             command: npm run lint
           - package: cli
@@ -106,7 +106,7 @@ jobs:
           node-version: '22'
 
       - name: Run deployment contract tests
-        run: node --test scripts/release/fork-tag.test.mjs scripts/release/mirror-cuda-analyzer.test.mjs scripts/ci/validate-portainer-compose.test.mjs scripts/ci/assert-image-tag-absent.test.mjs scripts/ci/pinned-download.test.mjs scripts/ci/workflow-contract.test.mjs scripts/deploy/portainer-client.test.mjs scripts/security/trivy-policy.test.mjs
+        run: node --test scripts/ci/*.test.mjs scripts/release/*.test.mjs scripts/security/*.test.mjs scripts/deploy/*.test.mjs
 
       - name: Validate Portainer manifest policy
         run: |

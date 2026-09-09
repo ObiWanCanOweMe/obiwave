@@ -182,6 +182,9 @@ export class PortainerClient {
     // An earlier timeout/read failure leaves an uncertain operation. Prove it
     // terminal before attempting another PUT, including rollback.
     if (this.pendingUpdate) await this.waitForStackUpdate({ deadlineMs: updateDeadline });
+    // A rejected fetch or truncated response does not prove the PUT failed to
+    // reach Portainer. Keep it pending until a response proves completion.
+    this.pendingUpdate = true;
     const stack = await this.request(`/stacks/${this.stackId}?endpointId=${this.endpointId}`, {
       method: 'PUT',
       body: JSON.stringify({ ...snapshot, Prune: true, PullImage: true }),
@@ -190,13 +193,14 @@ export class PortainerClient {
       operation: 'stack update',
     });
     if (stack?.Status === 3) {
-      this.pendingUpdate = true;
       const result = await this.waitForStackUpdate({ deadlineMs: updateDeadline });
       if (result.Status !== 1) {
         throw new DeploymentVerificationError('Portainer stack deployment failed');
       }
       return result;
     }
+    // Older synchronous versions omit Status from a successful response.
+    this.pendingUpdate = false;
     if (stack?.Status === 4 || stack?.Status === 2) {
       throw new DeploymentVerificationError('Portainer stack deployment failed');
     }

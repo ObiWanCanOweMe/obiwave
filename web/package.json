@@ -26,7 +26,10 @@
     "test:admin-navigation-schedule": "node --experimental-strip-types scripts/admin-navigation-schedule-contract.test.ts",
     "test:llm-section-provider-url-contract": "node --experimental-strip-types scripts/llm-section-provider-url-contract.test.ts",
     "test:search-provider": "node --experimental-strip-types scripts/search-provider-state.test.ts",
-    "test:manual-clients-auth": "node --experimental-strip-types scripts/manual-clients-auth.test.ts"
+    "test:manual-clients-auth": "node --experimental-strip-types scripts/manual-clients-auth.test.ts",
+    "test": "node scripts/run-tests.mjs",
+    "test:onboarding-credentials": "node --experimental-strip-types --test scripts/onboarding-credential-preservation.test.ts",
+    "test:admin-query": "node scripts/audit-admin-query.mjs && node --test scripts/audit-admin-query.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -76,7 +76,7 @@ The sidecar half is **N independent single-flight worker processes**, not one wo
 
 **Ark TTS residency.** The Portainer manifest pins `TTS_HEAVY_IDLE_UNLOAD_S=0`: its readiness contract requires both engines loaded and Chatterbox attested on CUDA. Upstream idle unloading remains available in the standalone compose deployments; a cold engine is not a ready Ark engine.
 
-**Portainer asynchronous updates.** Portainer 2.45 returns stack status `3` while Compose is still deploying. The release client polls until terminal status before verifying containers. If polling fails or times out, it retains the pending operation and must establish completion before sending rollback. Status reads, sleeps, and the update request share a bounded deadline; server error bodies are never printed.
+**Portainer asynchronous updates.** Portainer 2.45 returns stack status `3` while Compose is still deploying. The release client polls until terminal status before verifying containers. A lost update response is also potentially accepted work: the pending flag is set before sending the PUT. If that request or later polling fails or times out, the client retains the pending operation and must establish completion before sending rollback. Status reads, sleeps, and the update request share a bounded deadline; server error bodies are never printed.
 
 ### Trusted proxy diagnostics
 

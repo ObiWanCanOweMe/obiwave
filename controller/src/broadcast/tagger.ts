@@ -76,6 +76,9 @@ function lastErrorText(): string | null {
 
 // Live handle for stopTagger() — cleared on the exit handler.
 let activeChild: ChildProcess | null = null;
+// A process may exit before its stdio drains. Keep its capture until close,
+// unless a successor takes over the operator's log first.
+let captureChild: ChildProcess | null = null;
 
 // Caller must reject when `tagger.running` is already true.
 // re-* flags map to music/tag-library.ts: reseed (rebuild track_vectors + re-embed),
@@ -176,32 +179,42 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   // MANAGED_ENV tells the CLI it was spawned by us so it won't fight over the
   // pidfile we write below (the file names the CLI's own ancestor).
   const startedAt = new Date().toISOString();
+  const clearRunPidfile = () => {
+    const info = readPidfile();
+    if (info?.pid === child.pid && info?.startedAt === startedAt) clearPidfile();
+  };
+  const onError = (error: Error) => {
+    if (activeChild !== child) return;
+    // A PID means spawn succeeded. Kill/send failures do not imply exit; retain
+    // single-flight and the lock until this worker's exit event arrives.
+    if (child.pid) {
+      tagger.lastLog.push(`[error] ${error.message}`);
+      queue.log('error', `${label} process error: ${error.message}`);
+      return;
+    }
+    tagger.running = false;
+    tagger.pid = null;
+    activeChild = null;
+    clearRunPidfile();
+    const message = `${label} could not start: ${error.message}`;
+    tagger.lastLog.push(`[error] ${message}`);
+    tagger.lastRun = {
+      mode, outcome: 'failed', exitCode: null, signal: null, error: message,
+      startedAt, finishedAt: new Date().toISOString(),
+    };
+    queue.log('error', `${label} spawn failed: ${error.message}`);
+  };
   const child = spawnControllerTsx(
     args,
-    {
-      detached: true,
-      env: { ...process.env, [MANAGED_ENV]: '1' },
-    },
-    (error) => {
-      tagger.running = false;
-      tagger.pid = null;
-      if (activeChild === child) activeChild = null;
-      clearPidfile();
-      const message = `${label} could not start: ${error.message}`;
-      tagger.lastLog.push(`[error] ${message}`);
-      tagger.lastRun = {
-        mode,
-        outcome: 'failed',
-        exitCode: null,
-        signal: null,
-        error: message,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-      };
-      queue.log('error', `${label} spawn failed: ${error.message}`);
-    },
+    { detached: true, env: { ...process.env, [MANAGED_ENV]: '1' } },
+    onError,
   );
+  // The shared helper installs a one-shot handler. This long-lived worker must
+  // also handle subsequent process errors, through that same owner-aware path.
+  child.removeListener('error', onError);
+  child.on('error', onError);
   activeChild = child;
+  captureChild = child;
   tagger.running = true;
   tagger.startedAt = startedAt;
   tagger.pid = child.pid ?? null;
@@ -222,6 +235,7 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   const makeCapture = () => {
     let remainder = '';
     return (chunk: Buffer) => {
+      if (captureChild !== child) return;
       remainder += chunk.toString();
       const lines = remainder.split('\n');
       remainder = lines.pop() ?? '';
@@ -252,30 +266,15 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   };
   child.stdout.on('data', makeCapture());
   child.stderr.on('data', makeCapture());
-  // An unhandled ChildProcess 'error' is thrown and would take the controller down,
-  // so a failed spawn is reported like a non-zero exit instead. 'error' can also fire
-  // after a successful spawn, where 'exit' owns the bookkeeping — hence the guard.
-  child.on('error', (err) => {
-    if (activeChild !== child) return;
-    tagger.running = false;
-    activeChild = null;
-    clearPidfile();
-    tagger.lastLog.push(`[error] ${err.message}`);
-    tagger.lastRun = {
-      mode,
-      outcome: 'failed',
-      exitCode: null,
-      signal: null,
-      error: err.message,
-      startedAt,
-      finishedAt: new Date().toISOString(),
-    };
-    queue.log('error', `${label} could not start: ${err.message}`);
+  child.once('close', () => {
+    if (captureChild === child) captureChild = null;
   });
   child.on('exit', (code, signal) => {
+    if (activeChild !== child) return;
     tagger.running = false;
-    if (activeChild === child) activeChild = null;
-    clearPidfile();
+    tagger.pid = null;
+    activeChild = null;
+    clearRunPidfile();
     tagger.lastLog.push(`[exit ${signal || code}]`);
     // Signal (incl. Stop / restart-kill) → 'stopped'; exit 0 → 'ok'; else 'failed'.
     const outcome: TaggerLastRun['outcome'] = signal ? 'stopped' : code === 0 ? 'ok' : 'failed';
@@ -339,23 +338,24 @@ function label(mode: TaggerMode): string {
 // Signals the child; the exit handler above clears `tagger.running`.
 export function stopTagger(): { stopped: boolean } {
   if (!activeChild || !tagger.running) return { stopped: false };
-  const pid = activeChild.pid;
+  const child = activeChild;
+  const pid = child.pid;
   try {
     if (pid) {
       // Negative PID → signal the whole process GROUP (the child is its leader,
       // detached:true above), so the actual node/tsx worker tree dies. Fall back
       // to the lone process if the group send fails.
       try { process.kill(-pid, 'SIGTERM'); }
-      catch { activeChild.kill('SIGTERM'); }
+      catch { child.kill('SIGTERM'); }
       // Escalate to SIGKILL on the group if it's still alive after 5s — the
       // The tsx loader doesn't always forward SIGTERM.
       setTimeout(() => {
-        if (tagger.running) {
+        if (activeChild === child && tagger.running) {
           try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
         }
       }, 5000);
     } else {
-      activeChild.kill('SIGTERM');
+      child.kill('SIGTERM');
     }
     queue.log('scheduler', 'tagger stop requested (SIGTERM → process group)');
     return { stopped: true };
