@@ -30,6 +30,10 @@ const validImperativeFixtures = {
   // admin-query-imperative: diagnosis-stream
   return adminResponse(adminFetch, '/doctor/stream', { headers: { Accept: 'text/event-stream' } });
 }\n`,
+  'PersonasPanel.tsx': `export async function run(adminFetch, id) {
+  // admin-query-imperative: persona-bundle-export
+  return adminResponse(adminFetch, \`/personas/\${id}/export\`);
+}\n`,
   'debug/LlmCalls.tsx': `export async function run(adminFetch, format) {
   // admin-query-imperative: llm-call-export
   return adminResponse(adminFetch, \`/debug/llm-calls/export?format=\${format}\`);
@@ -54,6 +58,10 @@ const validImperativeFixtures = {
   await fetcher('/playlists/generate', init);
   // admin-query-imperative: generation-job-poll
   return fetcher(\`/playlists/generate/jobs/\${id}\`);
+}\n`,
+  'settings/BrainSection.tsx': `export async function run(adminFetch) {
+  // admin-query-imperative: brain-connection-probe
+  return adminResponse(adminFetch, '/settings/llm/probe-compat', { method: 'POST' });
 }\n`,
   'settings/LibrarySection.tsx': `export async function run(adminFetch, url) {
   // admin-query-imperative: locca-discovery-probe

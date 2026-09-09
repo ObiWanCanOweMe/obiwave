@@ -1,10 +1,6 @@
-// Now-playing cover with the web player's flourishes: an accent scanline that
-// sweeps the art and concentric ripple rings animate while on air (`live`); on a
-// `burst` — a ~3s window opened by a track change or a new DJ turn — the art
-// glitches (chromatic-split ghosts + colour tears, the native analog of the web
-// `.v3-cover-live` CSS) and the corner registration ticks fade in. At rest the
-// ticks/glitch are hidden, matching the web player. expo-image handles the
-// cross-fade on track change.
+// Now-playing cover. While `live`, an accent scanline sweeps the art and
+// ripple rings animate; during a `burst` the art glitches and the corner
+// registration ticks fade in. expo-image handles the cross-fade.
 
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,8 +19,7 @@ export interface CoverArtProps {
   onPress?: () => void;
 }
 
-// Discrete glitch frames — stepped (not eased) for the authentic digital
-// stutter the web gets from `animation: … steps(1)`. dx* = chromatic ghost
+// Discrete glitch frames, stepped rather than eased. dx* are chromatic ghost
 // offsets; the tear is a thin colour slice that jumps around the frame.
 const GLITCH_FRAMES = [
   { dx1: -3, dx2: 3, tearY: 0.10, tearX: -5, tearH: 0.06 },
@@ -86,13 +81,11 @@ export default function CoverArt({ source, live, burst = false, size = 160, onPr
   const appActive = useAppActive();
   const scan = useRef(new Animated.Value(0)).current;
   const ripples = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
-  // Corner ticks fade in on burst (track change / DJ thinking), mirroring the
-  // web `.v3-cover-tick` opacity transition.
   const tick = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Loops pause while backgrounded — native-driver or not, they keep the
-    // bridge scheduling work the listener can't see.
+    // Loops pause while backgrounded: native driver or not, they keep
+    // scheduling work the listener can't see.
     if (!live || !appActive) return;
     const s = Animated.loop(Animated.timing(scan, { toValue: 1, duration: 5500, easing: Easing.linear, useNativeDriver: true }));
     s.start();

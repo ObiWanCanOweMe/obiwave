@@ -1025,7 +1025,10 @@ test('app quality matrix runs the native stream-buffer contract', () => {
 test('web quality runs the complete mounted state suite with its locked local runner', () => {
   const webCommand = ci.match(/- package: web\s*\n\s+command: ([^\n]+)/)?.[1];
   assert.ok(webCommand, 'missing web quality-matrix command');
-  assert.match(webCommand, /(?:^|&& )npm run test:mounted-state(?: &&|$)/);
+  assert.match(webCommand, /(?:^|&& )npm test(?: &&|$)/);
+  assert.equal(webPackage.scripts.test, 'node scripts/run-tests.mjs');
+  assert.equal(webPackage.scripts['test:admin-query'], 'node scripts/audit-admin-query.mjs && node --test scripts/audit-admin-query.test.mjs');
+  assert.equal(webPackage.scripts['test:onboarding-credentials'], 'node --experimental-strip-types --test scripts/onboarding-credential-preservation.test.ts');
 
   const aggregate = webPackage.scripts?.['test:mounted-state'];
   assert.equal(typeof aggregate, 'string', 'missing aggregate mounted-state package script');
@@ -1076,22 +1079,14 @@ test('vulnerability scanning is manual-only and absent from build and release wo
   }
 });
 
-test('reusable CI deployment gate runs the CUDA mirror and pinned download contracts exactly once', () => {
-  const deploymentCommand = ci.match(
-    /- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/,
-  )?.[1];
-  assert.ok(deploymentCommand, 'missing reusable deployment-contract test command');
-  assert.match(
-    deploymentCommand,
-    /(?:^| )scripts\/release\/mirror-cuda-analyzer\.test\.mjs(?: |$)/,
-  );
-  assert.equal(
-    deploymentCommand.split(/\s+/).filter(
-      (argument) => argument === 'scripts/ci/pinned-download.test.mjs',
-    ).length,
-    1,
-    'pinned-download contract must run exactly once in mandatory PR CI',
-  );
+test('reusable CI discovers every deployment, release, security and CI contract', async () => {
+  const command = ci.match(/- name: Run deployment contract tests\s*\n\s+run: ([^\n]+)/)?.[1];
+  assert.equal(command, 'node --test scripts/ci/*.test.mjs scripts/release/*.test.mjs scripts/security/*.test.mjs scripts/deploy/*.test.mjs');
+  // The glob gate covers both earlier required contracts and the async regression.
+  for (const path of ['ci/pinned-download.test.mjs', 'release/mirror-cuda-analyzer.test.mjs', 'deploy/portainer-async.test.mjs']) {
+    const [directory, filename] = path.split('/');
+    assert.ok((await readdir(new URL(`../${directory}/`, import.meta.url))).includes(filename));
+  }
 });
 
 test('CUDA mirror is preflighted and gates deployment without an automatic vulnerability scan', () => {

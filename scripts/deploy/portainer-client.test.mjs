@@ -975,7 +975,7 @@ test('a timed-out target update waits for a bounded grace period before rollback
       if (updates.length === 1) throw new DOMException('timed out', 'TimeoutError');
       return jsonResponse({});
     }
-    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv, Status: 1 });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
     const analyzerResponse = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
     if (analyzerResponse) return analyzerResponse;
@@ -1019,7 +1019,7 @@ test('an update timeout while reading the response body waits before rollback', 
       }
       return jsonResponse({});
     }
-    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv });
+    if (parsed.pathname === '/api/stacks/7') return jsonResponse({ Env: oldEnv, Status: 1 });
     if (parsed.pathname === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
     const analyzerResponse = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
     if (analyzerResponse) return analyzerResponse;
@@ -1240,4 +1240,44 @@ test('release validation reports all missing required configuration before deplo
     return true;
   });
   assert.equal(touchedDeployment, false);
+});
+
+test('transport loss after accepted deployment waits for terminal status before verified rollback', async () => {
+  const sequence = [];
+  let pending = false;
+  let updates = 0;
+  let statusReads = 0;
+  const client = clientFor(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (path === '/api/stacks/7' && options.method === 'PUT') {
+      sequence.push('PUT');
+      assert.equal(pending, false, 'Portainer would reject overlapping update with HTTP 409');
+      updates++;
+      if (updates === 1) {
+        pending = true;
+        throw new TypeError('response lost after request accepted');
+      }
+      assert.deepEqual(JSON.parse(options.body).Env, oldEnv);
+      return jsonResponse({ Status: 1 });
+    }
+    if (path === '/api/stacks/7') {
+      if (updates === 0) return jsonResponse({ Env: oldEnv, Status: 1 });
+      sequence.push('GET');
+      if (++statusReads === 1) return jsonResponse({ Status: 3 });
+      pending = false;
+      return jsonResponse({ Status: 1 });
+    }
+    if (path === '/api/stacks/7/file') return jsonResponse({ StackFileContent: oldFile });
+    const analyzer = analyzerDockerResponse(url, 'v0.41.0-obiwave.3');
+    if (analyzer) return analyzer;
+    throw new Error('Unexpected request');
+  });
+  client.sleep = async () => {};
+  await assert.rejects(deployWithRollback({
+    client, manifest: releaseManifest, targetVersion: 'v0.42.0-obiwave.1',
+    healthUrl: 'https://radio.example/health', streamUrl: 'https://radio.example/stream.mp3',
+    fetchImpl: async url => url.endsWith('/health') ? jsonResponse({ status: 'on-air' }) : streamResponse(),
+    attempts: 1,
+  }), DeploymentRolledBackError);
+  assert.deepEqual(sequence, ['PUT', 'GET', 'GET', 'PUT']);
 });

@@ -1,13 +1,6 @@
-// Hourly archive index.
-//
-// Liquidsoap writes one MP3 per hour to `${STATE_DIR}/archive/%Y-%m-%d/%H-00.mp3`
-// (see liquidsoap/radio.liq's output.file block). This module exposes that
-// tree to the admin UI as a listable + downloadable index — purely read-only
-// over the existing on-disk layout.
-//
-// The pathing scheme is fixed and the operator never edits inside the
-// archive directory by hand, so we don't watch for changes; each /archives
-// GET re-scans. Two-level directory walk is cheap (one entry per hour).
+// Hourly archive index over the MP3s radio.liq writes to
+// `${STATE_DIR}/archive/%Y-%m-%d/%H-00.mp3`. Read-only; each GET re-scans (a
+// two-level walk, one entry per hour).
 
 import { readdir, stat, rm } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
@@ -69,8 +62,7 @@ export interface ArchiveEntry {
   mtime: string;  // ISO
 }
 
-// Scan the archive tree. Newest first. Bounded by `limit` to keep the response
-// small for accounts with months of archives — the UI paginates client-side.
+// Scan the archive tree, newest first. `limit` bounds the response size.
 export async function list({ limit = 500 }: { limit?: number } = {}): Promise<ArchiveEntry[]> {
   if (!existsSync(ARCHIVE_ROOT)) return [];
   let dayDirs: string[] = [];

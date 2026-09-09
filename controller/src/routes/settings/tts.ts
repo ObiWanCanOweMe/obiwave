@@ -1,5 +1,4 @@
 // Voice preview and the voice catalogue for the on-air engines.
-//
 // Part of the settings/ route split - see ../settings.ts.
 
 import express from 'express';
@@ -13,37 +12,20 @@ import { requireAdmin } from '../../middleware/auth.js';
 // Mounted onto the parent settings router in ../settings.ts.
 export const router = express.Router();
 
-// ---------------------------------------------------------------------------
-// POST /settings/tts/preview — synthesize a short sample in an EXPLICIT engine +
-// voice (not the on-air persona) so the admin "Play sample" button can audition
-// a voice/speed before saving. Body: { engine, voice?, cloudProvider?, cloudModel?, speed?,
-// lang?, language?, text?, corrections?, voiceSettings?, fishSettings? } — `language` is the persona's
-// free-text on-air language; when set (and no explicit text), the sample
-// sentence is rendered in that language. `corrections` is an UNSAVED
-// {from,to}[] override (admin "Test corrections" button, Speech tab) — when
-// present it replaces settings.tts.corrections for this call, sanitized
-// server-side by settings.normalizeTtsCorrections (the same helper the
-// persisted operator settings run through). voiceSettings carries UNSAVED ElevenLabs
-// slider values (issue #696) so the operator can tune the expressive knobs by
-// ear before saving; fishSettings does the same for temperature/top-p/latency.
-// synthesizeSample clamps them like settings.update() does.
-// On success returns the rendered audio (WAV locally, MP3 for managed cloud). On a synth
-// failure — e.g. the tts-heavy sidecar is down or no cloud key — returns 422
-// with { ok, message } instead of silently falling back to Piper, so the
-// operator sees why. The temp WAV is unlinked once sent.
-// ---------------------------------------------------------------------------
+// Auditions an EXPLICIT engine + voice, not the on-air persona. `corrections`,
+// `voiceSettings` and `fishSettings` are UNSAVED overrides for this call only
+// (#696); synthesizeSample sanitizes and clamps them like settings.update() does.
+// A synth failure returns 422 rather than falling back to Piper, so the operator
+// sees why. The temp file is unlinked once sent.
 router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
   const body = req.body || {};
   const engine = typeof body.engine === 'string' ? body.engine : '';
   if (!engine || !tts.ENGINES.includes(engine)) {
     return res.status(400).json({ ok: false, message: `Unknown engine: ${engine || '(none)'}` });
   }
-  // A closed picker/button aborts its browser request. Carry that cancellation
-  // through Express into the provider call so a discarded Fish preview does
-  // not continue as an invisible metered synthesis. `close` on the response
-  // fires for client disconnects (the deprecated `req 'aborted'` event is
-  // redundant with it) and also after a normal send, where writableEnded
-  // makes the abort a no-op.
+  // Carry a client disconnect into the provider call so a discarded preview does
+  // not continue as invisible metered synthesis. `close` also fires after a
+  // normal send, where writableEnded makes the abort a no-op.
   const previewAbort = new AbortController();
   const abortOnDisconnect = () => {
     if (!res.writableEnded) previewAbort.abort();
@@ -70,8 +52,7 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
       signal: previewAbort.signal,
     });
     const buf = await readFile(filePath);
-    // Local engines render WAV; cloud (ElevenLabs) renders MP3. Set the type
-    // from the actual extension so the browser <audio> gets the right MIME.
+    // Local engines render WAV, cloud renders MP3; take the MIME from the file.
     res.type(extname(filePath) || '.wav').send(buf);
   } catch (err: unknown) {
     if (!previewAbort.signal.aborted && !res.destroyed) {
@@ -126,9 +107,8 @@ router.post('/settings/tts/voices', requireAdmin, async (req, res) => {
       : speech.resolveCloudApiKey({ provider })
   );
 
-  // Backstop only — listVoices runs its own per-provider budget (10s managed,
-  // 8s across the compat probe). Sits above both so the inner deadline is what
-  // actually fires and the caller gets a real reason instead of a bare abort.
+  // Backstop only: listVoices' own 10s/8s budgets should fire first so the caller
+  // gets a real reason instead of a bare abort.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {

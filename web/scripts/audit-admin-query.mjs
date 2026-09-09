@@ -53,6 +53,11 @@ const defaultOwnershipRegistry = [
     consumers: [{ file: 'dash/TakeoverCard.tsx', owner: 'useAdminQuery', property: 'request', count: 1 }],
   },
   {
+    file: 'dash/queries.ts', function: 'fetchTakeoverWindow',
+    reads: [{ callee: 'adminJson', method: 'GET', path: '/schedule/next-change', signal: 'signal' }],
+    consumers: [{ file: 'dash/TakeoverCard.tsx', owner: 'useAdminQuery', property: 'request', count: 1 }],
+  },
+  {
     file: 'dash/queries.ts', function: 'fetchNavidromeStatus',
     reads: [{ callee: 'adminJson', method: 'GET', path: '/doctor/navidrome', signal: 'signal' }],
     consumers: [{ file: 'NavidromeBanner.tsx', owner: 'useAdminQuery', property: 'request', count: 1 }],
@@ -119,6 +124,15 @@ const allowed = new Map([
     ['diagnosis-command', { callee: 'adminResponse', method: 'GET', path: /^\/doctor$/ }],
     ['diagnosis-stream', { callee: 'adminResponse', method: 'GET', path: /^\/doctor\/stream$/ }],
   ])],
+  ['PersonasPanel.tsx', new Map([
+    // Persona bundle (#1620). A one-shot blob download, like backup-export and
+    // skill-export next door — the import half is an ordinary useAdminMutation.
+    ['persona-bundle-export', {
+      callee: 'adminResponse',
+      method: 'GET',
+      path: /^\/personas\/\$\{\}\/export$/,
+    }],
+  ])],
   ['debug/LlmCalls.tsx', new Map([
     ['llm-call-export', {
       callee: 'adminResponse',
@@ -143,6 +157,9 @@ const allowed = new Map([
     ['generation-job-start', { callee: 'rawFetcher', method: 'POST', path: /^\/playlists\/generate\/jobs$/ }],
     ['generation-sync-fallback', { callee: 'rawFetcher', method: 'POST', path: /^\/playlists\/generate$/ }],
     ['generation-job-poll', { callee: 'rawFetcher', method: 'GET', path: /^\/playlists\/generate\/jobs\/\$\{\}$/ }],
+  ])],
+  ['settings/BrainSection.tsx', new Map([
+    ['brain-connection-probe', { callee: 'adminResponse', method: 'POST', path: /^\/settings\/llm\/probe-compat$/ }],
   ])],
   ['settings/LibrarySection.tsx', new Map([
     ['locca-discovery-probe', {

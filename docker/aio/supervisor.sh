@@ -52,6 +52,7 @@ log() { echo "[subwave-aio] $*" >&2; }
 # container outright.
 # ---------------------------------------------------------------------------
 state_warn() { log "WARNING $*"; }
+state_log() { log "$*"; }
 
 # GNU stat uses `-c %a`; macOS/BSD stat uses `-f %Lp`. Contributor tests run
 # these library-mode helpers on both families, while production containers use

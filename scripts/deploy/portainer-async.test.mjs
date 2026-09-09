@@ -65,3 +65,19 @@ test('rollback settlement and PUT share one update timeout budget', async () => 
   assert.deepEqual(calls, ['GET', 'GET', 'PUT']);
   assert.deepEqual(timeouts, [100, 10, 10]);
 });
+
+for (const failure of [new TypeError('connection reset'), new DOMException('aborted', 'TimeoutError'), new SyntaxError('truncated JSON')]) {
+  test(`lost update response (${failure.name}) settles accepted work before rollback`, async () => {
+    const { client, calls } = fixture([failure, { Status: 3 }, { Status: 1 }, { Status: 1 }]);
+    await assert.rejects(client.updateStack(snapshot));
+    await client.updateStack(snapshot);
+    assert.deepEqual(calls, ['PUT', 'GET', 'GET', 'PUT']);
+  });
+}
+
+test('lost update response followed by unreadable status prevents rollback PUT', async () => {
+  const { client, calls } = fixture([new TypeError('connection reset'), new Error('offline')]);
+  await assert.rejects(client.updateStack(snapshot));
+  await assert.rejects(client.updateStack(snapshot), /offline/);
+  assert.deepEqual(calls, ['PUT', 'GET']);
+});

@@ -51,10 +51,8 @@ import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 60_000;
 
-// Idle cutoff (issue #343). A forgotten tab counts as a listener and holds the
-// DJ's pause-when-empty gate open, so tune out after this long with no pointer,
-// key or focus activity; the consumer offers resume via `idleStopped`. 8h clears
-// an untouched workday of listening while still catching an abandoned tab.
+// Idle cutoff (#343). A forgotten tab counts as a listener and holds the DJ's
+// pause-when-empty gate open, so tune out after this long with no pointer/key/focus activity.
 const IDLE_TUNE_OUT_MS = 8 * 60 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 60_000;
 
@@ -74,8 +72,7 @@ export interface Player {
   stop: () => void;
   toggleMute: () => void;
   muted: boolean;
-  // True when the idle cutoff (not the listener) tore playback down. Cleared on
-  // the next tune().
+  // True when the idle cutoff, not the listener, tore playback down. Cleared on the next tune().
   idleStopped: boolean;
   format: AudioFormat;
   availability: FormatAvailability;
@@ -131,39 +128,32 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   const [formatFailure, setFormatFailure] = useState<AudioFormat | null>(null);
   const [browserSupport, setBrowserSupport] = useState<BrowserSupport>(INITIAL_BROWSER_SUPPORT);
   const [tunedIn, setTunedIn] = useState(false);
-  // 'connecting' covers the gap between the tune-in gesture and the first
-  // audible frames, so the UI doesn't claim to be playing while silent.
+  // 'connecting' covers the gap between the tune-in gesture and the first audible frames.
   const [status, setStatus] = useState<PlayerStatus>('idle');
   const [volume, setVolume] = useState(initialVolume);
   const [idleStopped, setIdleStopped] = useState(false);
   const preMuteVolume = useRef(initialVolume || 1);
 
-  // play() resolves asynchronously and pausing before it settles rejects with
-  // AbortError. The latest promise plus a generation counter let rapid tune/stop
-  // toggles settle on the last action without a stale teardown clobbering a
-  // fresh play.
+  // play() resolves async and pausing before it settles rejects with AbortError. The latest
+  // promise plus a generation counter let rapid tune/stop toggles settle on the last action.
   const playPromise = useRef<Promise<void> | null>(null);
   const gen = useRef(0);
 
-  // Refs mirror the latest values of state the stall watchdog needs to read,
-  // so its event listeners can stay registered once and still see fresh data.
+  // Refs mirror the latest state the stall watchdog reads, so its listeners register once.
   const tunedInRef = useRef(tunedIn);
   const streamUrlRef = useRef(streamUrl);
   const streamsRef = useRef(streams);
   const activeFormatRef = useRef<AudioFormat>('mp3');
   const volumeRef = useRef(volume);
   const watchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Media clock at arm time — the baseline the fire compares against to decide
-  // whether audio kept flowing.
+  // Media clock at arm time — the baseline the fire compares against.
   const watchdogArmedAt = useRef(0);
   // Consecutive failed reconnects since the last 'playing'; drives the backoff.
   const retryCount = useRef(0);
-  // Last listener activity, read by the idle sweep. Seeded by the sweep effect
-  // at mount (not here — render must stay pure) so a fresh tab gets the full
-  // idle window.
+  // Last listener activity, read by the idle sweep. Seeded by the sweep effect at mount
+  // (render must stay pure) so a fresh tab gets the full idle window.
   const lastActivityAt = useRef(0);
-  // The idle sweep mounts once but must call the latest stop(), recreated per
-  // render — bridge with a ref.
+  // The idle sweep mounts once but must call the latest stop() — bridge with a ref.
   const stopRef = useRef<() => void>(() => {});
   const failedFormatsRef = useRef(new Set<AudioFormat>());
   const formatHydrationKeyRef = useRef<string | null>(null);
@@ -199,9 +189,8 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  // Restore the listener's last-used volume (issue #783). Effect-only, so SSR
-  // and first paint stay on the default with no hydration mismatch; `hydrated`
-  // keeps this restoring setVolume from racing the persist effect below.
+  // Restore the listener's last-used volume (#783). Effect-only, so SSR and first paint
+  // stay on the default; `hydrated` keeps it from racing the persist effect below.
   const hydratedRef = useRef(false);
   useEffect(() => {
     const stored = loadVolumePref();
@@ -212,9 +201,8 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     hydratedRef.current = true;
   }, []);
 
-  // Debounced so a knob drag collapses to one write. The cleanup also keeps the
-  // mount pass's default value from reaching localStorage before the restore
-  // effect's setVolume lands.
+  // Debounced so a knob drag collapses to one write. The cleanup also keeps the mount
+  // pass's default from reaching localStorage before the restore effect's setVolume lands.
   useEffect(() => {
     if (!hydratedRef.current) return;
     const id = setTimeout(() => saveVolumePref(volume), 300);
@@ -364,11 +352,8 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     });
   }, [apiUrl, clearWatchdog]);
 
-  // Idle cutoff (issue #343): a tab tuned in with no activity for
-  // IDLE_TUNE_OUT_MS is tuned out, so an abandoned browser doesn't sit on the
-  // mount as a phantom listener holding pause-when-empty's DJ gate open.
-  // Activity = pointer, key, or the tab becoming visible. Sweeps once a minute;
-  // an hour-scale cutoff needs no finer precision.
+  // Idle cutoff (#343): a tab with no activity for IDLE_TUNE_OUT_MS is tuned out
+  // so it doesn't sit on the mount as a phantom listener. Sweeps once a minute.
   useEffect(() => {
     const markActivity = () => { lastActivityAt.current = Date.now(); };
     markActivity(); // seed: mount counts as the start of the idle window
@@ -392,8 +377,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     };
   }, []);
 
-  // Tear down playback. Also called by PlayerApp when the station goes off air,
-  // so the <audio> element isn't left retrying a dead mount.
+  // Tear down playback. Also called by PlayerApp when the station goes off air.
   const stop = () => {
     if (!audioRef.current) return;
     const el = audioRef.current;
@@ -401,8 +385,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     clearWatchdog();
     setTunedIn(false);
     setStatus('idle');
-    // Let any in-flight play() settle before pausing, then bail if a later
-    // tune() has already superseded this teardown.
+    // Let any in-flight play() settle before pausing, then bail if a later tune() superseded this.
     Promise.resolve(playPromise.current)
       .catch(() => {})
       .then(() => {
@@ -421,8 +404,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     }
     const el = audioRef.current;
     const myGen = ++gen.current;
-    // A fresh tune-in is listener activity: restart the idle window, clear any
-    // pending idle prompt, reset the reconnect backoff.
+    // A fresh tune-in is listener activity: restart the idle window, clear the idle prompt, reset backoff.
     lastActivityAt.current = Date.now();
     setIdleStopped(false);
     retryCount.current = 0;
@@ -451,8 +433,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     });
   };
 
-  // Mute is volume 0; toggling restores the last non-zero level so the 'M'
-  // shortcut and the command palette round-trip.
+  // Mute is volume 0; toggling restores the last non-zero level.
   const toggleMute = () => {
     if (volume > 0) {
       preMuteVolume.current = volume;

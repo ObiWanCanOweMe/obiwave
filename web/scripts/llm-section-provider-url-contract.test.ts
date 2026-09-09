@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 
 const [
   source,
@@ -100,36 +102,98 @@ assert.match(
   'direct Locca discovery must keep its unsaved URL in a POST body',
 );
 assert.doesNotMatch(librarySource, /settings\/llm\/discover\?baseUrl=/);
-assert.match(
-  source,
-  /providerBaseUrls: \{ \.\.\.f\.llm\.providerBaseUrls, \[primaryProvider\]: e\.target\.value \}/,
-  'primary URL edits must write the selected provider slot',
-);
-assert.match(
-  source,
-  /providerBaseUrls: \{ \.\.\.f\.llm\.fallback\.providerBaseUrls, \[fallbackProvider\]: e\.target\.value \}/,
-  'fallback URL edits must write the selected provider slot',
-);
-const primaryLoccaUrlBlock = blockBetween(
-  source,
-  "{form.llm.provider === 'locca' && (",
-  '{INLINE_KEY_PROVIDERS.includes(form.llm.provider) && (',
-);
-assert.match(
-  primaryLoccaUrlBlock,
-  /providerBaseUrls: \{ \.\.\.f\.llm\.providerBaseUrls, locca: e\.target\.value \}/,
-  'primary Locca URL edits must write providerBaseUrls.locca',
-);
-const fallbackLoccaUrlBlock = blockBetween(
-  source,
-  "{form.llm.fallback.provider === 'locca' && (",
-  '{INLINE_KEY_PROVIDERS.includes(form.llm.fallback.provider) && (',
-);
-assert.match(
-  fallbackLoccaUrlBlock,
-  /providerBaseUrls: \{ \.\.\.f\.llm\.fallback\.providerBaseUrls, locca: e\.target\.value \}/,
-  'fallback Locca URL edits must write fallback.providerBaseUrls.locca',
-);
+// Execute the real URL callbacks and helper without mounting unrelated network
+// hooks. AST extraction keeps this contract independent of inline-vs-helper
+// formatting while proving each Input still reaches the correct credential leg.
+function assertUrlEditsPreserveOwnership(text: string) {
+  const tree = ts.createSourceFile('LlmSection.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let helper: ts.Expression | undefined;
+  const callbacks = new Map<string, ts.Expression>();
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'changeLlmBaseUrl') {
+      helper = node.initializer;
+    }
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(tree) === 'Input') {
+      const props = new Map<string, ts.Expression>();
+      for (const attribute of node.attributes.properties) {
+        if (ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer)
+          && attribute.initializer.expression) {
+          props.set(attribute.name.getText(tree), attribute.initializer.expression);
+        }
+      }
+      const value = props.get('value');
+      const onChange = props.get('onChange');
+      if (value && onChange && ts.isBinaryExpression(value) && ts.isElementAccessExpression(value.left)) {
+        const access = value.left;
+        if (ts.isPropertyAccessExpression(access.expression) && access.expression.name.text === 'providerBaseUrls') {
+          const owner = access.expression.expression.getText(tree);
+          const key = access.argumentExpression;
+          const slot = ts.isStringLiteral(key) ? key.text : key.getText(tree);
+          callbacks.set(`${owner}:${slot}`, onChange);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  assert.ok(helper, 'provider URL editor must have a shared connection update helper');
+
+  for (const [owner, slot, leg, provider] of [
+    ['form.llm', 'primaryProvider', 'primary', 'litellm'],
+    ['form.llm', 'locca', 'primary', 'locca'],
+    ['form.llm.fallback', 'fallbackProvider', 'fallback', 'openai-compatible'],
+    ['form.llm.fallback', 'locca', 'fallback', 'locca'],
+  ] as const) {
+    const callback = callbacks.get(`${owner}:${slot}`);
+    assert.ok(callback, `${owner}:${slot} must remain an editable URL field`);
+    for (const sameEndpoint of [false, true]) {
+      const savedUrl = 'https://saved.example/v1';
+      const nextUrl = sameEndpoint ? ` ${savedUrl}/ ` : 'https://changed.example/v1';
+      const makeLeg = (name: string) => ({
+        provider,
+        model: `${name}-model`,
+        providerBaseUrls: { [provider]: savedUrl, openai: 'https://other.example/v1' },
+        headers: [{ name: 'x-secret', value: 'set' }, { name: 'x-typed', value: `${name}-unsaved` }],
+      });
+      let form = { otherSetting: 'keep', llm: { ...makeLeg('primary'), fallback: makeLeg('fallback') } };
+      const original = form;
+      const selectedBefore = leg === 'primary' ? original.llm : original.llm.fallback;
+      const untouchedBefore = leg === 'primary' ? original.llm.fallback : original.llm;
+      const javascript = ts.transpileModule(
+        `const changeLlmBaseUrl = ${helper.getText(tree)}; const onChange = ${callback.getText(tree)}; onChange;`,
+        { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } },
+      ).outputText;
+      const onChange = runInNewContext(javascript, {
+        primaryProvider: provider,
+        fallbackProvider: provider,
+        setForm: (update: (previous: typeof form) => typeof form) => { form = update(form); },
+      }) as (event: { target: { value: string } }) => void;
+      onChange({ target: { value: nextUrl } });
+      const selected = leg === 'primary' ? form.llm : form.llm.fallback;
+      const untouched = leg === 'primary' ? form.llm.fallback : form.llm;
+      assert.equal(selected.providerBaseUrls[provider], nextUrl, `${owner}:${slot} writes its provider slot`);
+      assert.equal(selected.providerBaseUrls.openai, 'https://other.example/v1', 'other provider URL retained');
+      assert.equal(selected.model, selectedBefore.model, 'model retained');
+      assert.equal(form.otherSetting, 'keep');
+      assert.equal(selectedBefore.providerBaseUrls[provider], savedUrl, 'update does not mutate the prior form');
+      assert.equal(untouched.providerBaseUrls, untouchedBefore.providerBaseUrls, 'other leg URLs untouched');
+      assert.equal(untouched.headers, untouchedBefore.headers, 'other leg credentials untouched');
+      if (sameEndpoint) {
+        assert.equal(selected.headers, selectedBefore.headers, 'normalized same endpoint retains stored and typed headers');
+      } else {
+        assert.equal(selected.headers.length, 0, 'changed endpoint clears inherited and previously typed headers');
+      }
+    }
+  }
+}
+assertUrlEditsPreserveOwnership(source);
+const retainedHeaderMutation = source.replace('headers: sameEndpoint ? current.headers : []', 'headers: current.headers');
+assert.notEqual(retainedHeaderMutation, source);
+assert.throws(() => assertUrlEditsPreserveOwnership(retainedHeaderMutation), /changed endpoint clears/);
+const wrongLegMutation = source.replace("changeLlmBaseUrl('fallback', fallbackProvider", "changeLlmBaseUrl('primary', fallbackProvider");
+assert.notEqual(wrongLegMutation, source);
+assert.throws(() => assertUrlEditsPreserveOwnership(wrongLegMutation), /writes its provider slot/);
+
 assert.match(
   source,
   /owner: 'chat',[\s\S]*?leg: 'primary',[\s\S]*?apiKey: INLINE_KEY_PROVIDERS\.includes\(primaryProvider\)[\s\S]*?\? compatKeyInput[\s\S]*?: primaryKeyInput,[\s\S]*?baseUrl: primaryBaseUrl,/,

@@ -1,4 +1,6 @@
-// Native port of web/web/hooks/useMediaSession.ts (the metadata half).
+// Pushes track metadata to the OS lock screen / CarPlay via
+// TrackPlayer.updateNowPlayingMetadata; while the DJ is talking the persona
+// avatar and name are swapped in. Remote-control handlers live in service.ts.
 //
 // The talking decision and shared card strings live in useTalking and
 // lib/air-card so the OS media card and Live Activity cannot drift.
@@ -38,7 +40,7 @@ export function useNowPlayingInfo({
   useEffect(() => {
     if (!api || !tunedIn || !title) return;
     TrackPlayer.updateNowPlayingMetadata({ title, artist, album, artwork }).catch(() => {
-      /* no active track yet — ignored */
+      /* no active track yet */
     });
   }, [api, tunedIn, title, artist, album, artwork]);
 }

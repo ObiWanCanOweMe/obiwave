@@ -21,7 +21,6 @@ import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
 
 const STATE = mkdtempSync(join(tmpdir(), 'subwave-tagger-spawn-'));
 process.env.STATE_DIR = STATE;
@@ -43,40 +42,6 @@ test('an unlistened ChildProcess error event is fatal (why the guard exists)', a
   assert.equal(threw, true, 'spawning a missing binary must surface an error event');
 });
 
-test('startTagger attaches an error handler to the child', async () => {
-  const src = await readFile(
-    new URL('../src/broadcast/tagger.ts', import.meta.url), 'utf8',
-  );
-  const code = src.replace(/^\s*\/\/.*$/gm, '');
-  assert.match(
-    code, /child\.on\('error'/,
-    "a spawn that never starts must be handled — an unlistened 'error' event kills the controller",
-  );
-  // The handler must finalise the run, or the panel shows a run that is
-  // "running" forever and Start stays locked behind the single-flight slot.
-  const handler = code.slice(code.indexOf("child.on('error'"));
-  const body = handler.slice(0, handler.indexOf("child.on('exit'"));
-  assert.match(body, /tagger\.running = false/, 'a failed spawn must clear running');
-  assert.match(body, /clearPidfile\(\)/, 'a failed spawn must clear the cross-restart lock');
-  assert.match(body, /outcome: 'failed'/, 'a failed spawn must be reported as a failed run');
-});
-
-test('the error handler defers to exit when the child did start', async () => {
-  // 'error' can also fire on an already-running child (a kill that fails). The
-  // exit handler owns the bookkeeping in that case; two writers would race and
-  // could report 'failed' over a clean 'ok'.
-  const src = await readFile(
-    new URL('../src/broadcast/tagger.ts', import.meta.url), 'utf8',
-  );
-  const code = src.replace(/^\s*\/\/.*$/gm, '');
-  const handler = code.slice(code.indexOf("child.on('error'"));
-  const body = handler.slice(0, handler.indexOf("child.on('exit'"));
-  assert.match(
-    body, /activeChild\s*[!=]==\s*child/,
-    'the error handler must only finalise the run it still owns',
-  );
-});
-
 test('startTagger reports a failed spawn without throwing', async () => {
   const tagger = await import('../src/broadcast/tagger.js');
   // The fork launches the installed tsx binary directly, so an empty PATH
@@ -96,5 +61,54 @@ test('startTagger reports a failed spawn without throwing', async () => {
   } finally {
     childProcess.spawn = realSpawn;
     syncBuiltinESMExports();
+  }
+});
+
+test('a failed kill cannot release a live worker, and retired callbacks cannot affect its successor', async () => {
+  const { EventEmitter } = await import('node:events');
+  const runtime = await import('../src/broadcast/tagger.js');
+  const lock = await import('../src/music/tagger-lock.js');
+  const children: Array<InstanceType<typeof EventEmitter> & { pid: number; stdout: InstanceType<typeof EventEmitter>; stderr: InstanceType<typeof EventEmitter> }> = [];
+  const realSpawn = childProcess.spawn;
+  childProcess.spawn = (() => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 700_000 + children.length, stdout: new EventEmitter(), stderr: new EventEmitter(),
+    });
+    children.push(child);
+    return child;
+  }) as typeof spawn;
+  syncBuiltinESMExports();
+  try {
+    runtime.startAnalyzer();
+    const first = children[0];
+    first.emit('spawn');
+    first.emit('error', Object.assign(new Error('kill EPERM'), { code: 'EPERM' }));
+    assert.equal(runtime.tagger.running, true, 'failed kill leaves worker running');
+    assert.equal(runtime.tagger.pid, first.pid);
+    assert.equal(lock.readPidfile()?.pid, first.pid, 'live worker retains lock');
+    first.emit('exit', 0, null);
+    first.stderr.emit('data', Buffer.from('final buffered diagnostic\n'));
+    assert.ok(runtime.taggerView().lastLog.includes('final buffered diagnostic'), 'stdio may finish draining after exit');
+    runtime.startAnalyzer();
+    const second = children[1];
+    first.emit('close', 0, null);
+    second.stdout.emit('data', Buffer.from('successor output\n'));
+    assert.ok(runtime.taggerView().lastLog.includes('successor output'), 'retired close cannot stop successor capture');
+    const before = structuredClone(runtime.taggerView());
+    first.emit('error', new Error('late error'));
+    first.stdout.emit('data', Buffer.from('[progress] {"phase":"stale"}\nold output\n'));
+    first.emit('exit', 1, null);
+    assert.deepEqual(runtime.taggerView(), before, 'retired callbacks cannot mutate successor state');
+    assert.equal(lock.readPidfile()?.pid, second.pid, 'retired callbacks cannot remove successor lock');
+    second.emit('exit', 0, null);
+    second.emit('close', 0, null);
+    const closed = structuredClone(runtime.taggerView());
+    second.stderr.emit('data', Buffer.from('after close\n'));
+    assert.deepEqual(runtime.taggerView(), closed, 'close retires capture ownership');
+  } finally {
+    children.at(-1)?.emit('exit', 1, null);
+    childProcess.spawn = realSpawn;
+    syncBuiltinESMExports();
+    lock.clearPidfile();
   }
 });
