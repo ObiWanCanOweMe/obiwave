@@ -8,22 +8,19 @@
 
 set -eu
 
-# ---- Shared state bootstrap -------------------------------------------------
-# Mode 777 because the controller, analyzer and liquidsoap write here as OTHER
-# uids; without it an operator must chown every bind-mount source by hand.
+# Shared state bootstrap. Mode 777 because the controller, analyzer and
+# liquidsoap write here as OTHER uids; without it an operator must chown every
+# bind-mount source by hand.
 #
-# NOTHING in here is fatal (#1300 bug 10). Under `set -eu` the old bulk
-# `mkdir -p a b c` / `chmod 777 a b c` made every state path load-bearing: one
-# on a mount that refuses the change (read-only bind, NFS export, the
-# exFAT/NTFS disk people move the stem cache to) aborted this script BEFORE
-# icecast started, and compose reported only `dependency failed to start:
-# container sub-wave-broadcast is unhealthy` — naming neither path nor cause.
-# A station running on a degraded mount still serves and still airs the
+# NOTHING in here is fatal (#1300 bug 10): under `set -eu` a bulk mkdir/chmod
+# makes every state path load-bearing, and one unwritable mount aborts this
+# script before icecast starts. A degraded mount still serves and still airs the
 # emergency loop; an exited container airs nothing.
 #
 # docker/aio/supervisor.sh keeps the same functions, list and messages;
 # scripts/state-bootstrap.test.ts drives both through one table.
 state_warn() { echo "broadcast: WARNING $*" >&2; }
+state_log() { echo "broadcast: $*" >&2; }
 
 # GNU stat uses `-c %a`; macOS/BSD stat uses `-f %Lp`. Contributor tests run
 # these library-mode helpers on both families, while production containers use
@@ -75,26 +72,22 @@ bootstrap_state_dirs() {
     local sub
     state_prepare_dir "$root"
     state_prepare_dir "$dir"
-    # stems + transitions are the analyzer's (uid 10001), and the only two
-    # dirs worth relocating to a bigger disk. A fresh bind mount lands
-    # root-owned 755, which the analyzer cannot write without the same 777
-    # treatment as the rest.
+    # stems + transitions are the analyzer's (uid 10001); a fresh bind mount
+    # lands root-owned 755, which it cannot write without the same 777.
     for sub in voice voices archive jingles logs sessions sfx stems transitions; do
         state_prepare_dir "$dir/$sub"
     done
-    # A RELOCATED stem cache (STEMS_DIR in .env, handed down as the container
-    # path SUBWAVE_STEMS_DIR) sits outside $dir, so the loop above never
-    # reaches it and the bind mount would keep its root-owned 755 — the exact
-    # state the loop entry above exists to prevent. Per-station subdirs under
-    # it are created by the analyzer itself, which inherits this 777.
+    # A RELOCATED stem cache (STEMS_DIR in .env, container path
+    # SUBWAVE_STEMS_DIR) sits outside $dir, so the loop above never reaches it.
+    # Per-station subdirs under it are created by the analyzer, inheriting 777.
     if [ -n "${SUBWAVE_STEMS_DIR:-}" ]; then
         state_prepare_dir "$SUBWAVE_STEMS_DIR"
     fi
     # Liquidsoap's reload_mode="watch" playlists need the files to exist.
     state_prepare_file "$dir/auto.m3u" 666
     state_prepare_file "$dir/jingles.m3u" 666
-    # Keep a co-located Navidrome from scanning the hourly archive mixdowns in
-    # as junk "HH-00" tracks (issue #273). Harmless when paths don't overlap.
+    # Keeps a co-located Navidrome from scanning the hourly archive mixdowns in
+    # as junk "HH-00" tracks (#273).
     state_prepare_file "$dir/archive/.ndignore"
     return 0
 }
@@ -121,11 +114,10 @@ if [ "${SUBWAVE_BROADCAST_LIB:-}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
-# ---- Multi-station pointer resolution ---------------------------------------
-# state/stations/active.json ({"activeId":"<slug>"}) picks the station dir this
-# boot serves; install-level files (icecast secrets) stay at $STATE_ROOT. No jq
-# in this image — the sed matches the controller's canonical output and the
-# slug charset [a-z0-9-]; a hand-mangled file falls back to the root.
+# Multi-station pointer: state/stations/active.json ({"activeId":"<slug>"}) picks
+# the station dir this boot serves; install-level files (icecast secrets) stay at
+# $STATE_ROOT. No jq in this image — the sed matches the controller's canonical
+# output and the slug charset [a-z0-9-]; a hand-mangled file falls back to root.
 STATE_ROOT=/var/sub-wave
 STATE_DIR="$STATE_ROOT"
 ACTIVE_FILE="$STATE_ROOT/stations/active.json"
@@ -160,9 +152,9 @@ if [ -f "$RADIO_LOG" ] && [ "$(stat -c %s "$RADIO_LOG" 2>/dev/null || echo 0)" -
     echo "broadcast: rotated oversized radio.log to radio.log.old" >&2
 fi
 
-# ---- Resolve passwords ------------------------------------------------------
-# Precedence: env override > persisted secrets file > freshly generated.
-# Capture env values FIRST so sourcing the secrets file can't clobber them.
+# Password precedence: env override > persisted secrets file > freshly
+# generated. Capture env values FIRST so sourcing the secrets file can't clobber
+# them.
 
 ENV_SRC="${ICECAST_SOURCE_PASSWORD:-}"
 ENV_ADM="${ICECAST_ADMIN_PASSWORD:-}"
@@ -208,8 +200,7 @@ LISTENER_AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}" \
     /usr/local/bin/icecast-render
 chown icecast2 "$RENDERED" 2>/dev/null || true
 
-# ---- Launch the pair, then wait for either to die ---------------------------
-
+# Launch the pair, then wait for either to die.
 echo "broadcast: starting icecast2" >&2
 sudo -E -u icecast2 icecast2 -n -c "$RENDERED" &
 ICECAST_PID=$!
@@ -225,12 +216,10 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 echo "broadcast: starting liquidsoap" >&2
-# TEMPORARY (re-harden later): run liquidsoap as root instead of dropping to
-# the `liquidsoap` user. The savonet base bump 2.2.5 → 2.4.4 changed that
-# user's uid (10000 → 100), making state files persisted by the old image
-# unwritable — every on_meta write EACCES'd and the UI froze one song behind.
-# Restore the privilege drop once the state files are chowned to the new uid
-# (needs settings.init.allow_root reverted in radio.liq too).
+# TEMPORARY (re-harden later): run liquidsoap as root instead of dropping to the
+# `liquidsoap` user. The savonet bump 2.2.5 -> 2.4.4 changed that user's uid
+# (10000 -> 100), making persisted state files unwritable. Restore the privilege
+# drop once they are chowned (also revert settings.init.allow_root in radio.liq).
 liquidsoap /etc/liquidsoap/radio.liq &
 LIQ_PID=$!
 

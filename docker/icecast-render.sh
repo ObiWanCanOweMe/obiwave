@@ -33,6 +33,96 @@ resolve_max_clients() {
     esac
 }
 
+state_warn() { echo "icecast-render: WARNING $*" >&2; }
+state_log() { echo "icecast-render: $*" >&2; }
+
+trusted_proxy_token() {
+    printf '%s' "$1" | tr -cd '0-9A-Za-z.:/_-' | cut -c1-48
+}
+
+# True when $1 has the SHAPE of an address icecast can match. A bare character
+# class (`''|*[!0-9a-fA-F.:]*`) is NOT enough: it accepts every hex-only word,
+# so `cafe`, `beef`, `ff` and a bare `a` pass while `caddy` is dropped, and the
+# operator-facing count then claims proxies that can never match.
+#
+# Shape only, deliberately: whether the address is the RIGHT one is the
+# operator's to know, and this must keep dropping rather than repairing.
+trusted_proxy_valid() {
+    local addr=$1 rest octet n=0
+    # Anything with a colon is IPv6 (dots allowed for the ::ffff:1.2.3.4 form).
+    # Not a full parser; icecast's own exact match is the real arbiter.
+    case "$addr" in
+        *:*)
+            case "$addr" in *[!0-9a-fA-F:.]*) return 1 ;; esac
+            case "$addr" in *[0-9a-fA-F]*) return 0 ;; *) return 1 ;; esac
+            ;;
+    esac
+    # IPv4: exactly four dot-separated decimal octets, each 0-255.
+    rest=$addr
+    while [ "$n" -lt 4 ]; do
+        case "$rest" in
+            *.*) octet=${rest%%.*}; rest=${rest#*.} ;;
+            *)   octet=$rest; rest='' ;;
+        esac
+        n=$(( n + 1 ))
+        case "$octet" in ''|*[!0-9]*) return 1 ;; esac
+        # Length first: `[ 99999999999999999999 -le 255 ]` is an arithmetic
+        # error, not a false.
+        [ "${#octet}" -le 3 ] || return 1
+        [ "$octet" -le 255 ] || return 1
+        [ "$n" -eq 4 ] || [ -n "$rest" ] || return 1
+    done
+    [ -z "$rest" ] || return 1
+    return 0
+}
+
+write_trusted_proxy_marker() {
+    # $1 = count, $2 = source label, $3 = proxies JSON array, $4 = dropped array
+    local dir=${STATE_DIR:-}
+    [ -n "$dir" ] || return 0
+    local marker=$dir/trusted-proxies.json
+    local tmp=$marker.tmp
+    if printf '{"count":%s,"source":"%s","proxies":%s,"dropped":%s,"at":%s}\n' \
+            "$1" "$2" "$3" "$4" "$(date +%s)" > "$tmp" 2>/dev/null \
+        && mv -f "$tmp" "$marker" 2>/dev/null; then
+        chmod 644 "$marker" 2>/dev/null || true
+    else
+        rm -f "$tmp" 2>/dev/null || true
+        state_warn "could not write $marker — the station is unaffected, but the admin Listeners table cannot explain a missing trusted proxy"
+    fi
+    return 0
+}
+
+render_trusted_proxies() {
+    local xml=$1
+    local source=$2
+    shift 2
+    local ip names="" kept="" dropped="" count=0
+    : > "$xml" 2>/dev/null || true
+    # Candidates arrive already word-split, so prose is dropped word by word.
+    # Left alone: the list has always been space-separated (the DNS path returns
+    # several addresses for one name).
+    for ip in "$@"; do
+        if ! trusted_proxy_valid "$ip"; then
+            state_warn "ignoring malformed trusted proxy '$ip' — icecast matches an exact IP, so a CIDR, a hostname or anything else that is not an address never matches"
+            dropped="$dropped,\"$(trusted_proxy_token "$ip")\""
+            continue
+        fi
+        echo "        <x-forwarded-for>$ip</x-forwarded-for>" >> "$xml"
+        names="$names $ip"
+        kept="$kept,\"$ip\""
+        count=$(( count + 1 ))
+    done
+    if [ "$count" -gt 0 ]; then
+        state_log "trusting X-Forwarded-For from$names (from $source)"
+    else
+        state_log "no trusted proxy resolved from $source — listener IPs will show the connecting peer (docs/reverse-proxy.md)"
+    fi
+    write_trusted_proxy_marker "$count" "$source" "[${kept#,}]" "[${dropped#,}]"
+    return 0
+}
+
+
 # Library mode lets the max-listener owner test drive the exact production
 # resolver without rendering or touching /etc.
 if [ "${SUBWAVE_ICECAST_RENDER_LIB:-}" = "1" ]; then
@@ -78,20 +168,17 @@ AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}"
 : > "$MOUNTS_XML"
 : > "$TRUSTED_XML"
 TRUSTED_LIST=""
+TRUSTED_SOURCE=ICECAST_TRUSTED_PROXY_IPS
 if [ -n "${ICECAST_TRUSTED_PROXY_IPS:-}" ]; then
     TRUSTED_LIST=$(echo "$ICECAST_TRUSTED_PROXY_IPS" | tr ',' ' ')
 else
+    TRUSTED_SOURCE=ICECAST_TRUSTED_PROXY_HOSTS
     for host in $(echo "${ICECAST_TRUSTED_PROXY_HOSTS:-caddy}" | tr ',' ' '); do
         found=$(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u || true)
         [ -n "$found" ] && TRUSTED_LIST="$TRUSTED_LIST $found"
     done
 fi
-for ip in $TRUSTED_LIST; do
-    case "$ip" in
-        ''|*[!0-9a-fA-F.:]*) continue ;;
-    esac
-    echo "        <x-forwarded-for>$ip</x-forwarded-for>" >> "$TRUSTED_XML"
-done
+render_trusted_proxies "$TRUSTED_XML" "$TRUSTED_SOURCE" $TRUSTED_LIST
 render_mount() {
     local mount=$1 bitrate=$2 burst queue
     burst=$(( BUFFER_SECONDS * bitrate * 125 ))

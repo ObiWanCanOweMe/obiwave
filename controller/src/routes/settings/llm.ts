@@ -1,8 +1,5 @@
-// Provider probing and model discovery: does this key work, does this server
-// speak the OpenAI-compatible dialect we need, and what models can it offer.
-// All read-only against the provider - nothing here writes settings.
-//
-// Part of the settings/ route split - see ../settings.ts.
+// Provider probing and model discovery. All read-only against the provider:
+// nothing here writes settings. Part of the settings/ route split.
 
 import express from 'express';
 import * as settings from '../../settings.js';
@@ -30,11 +27,6 @@ import { probeFishKey } from '../../llm/speech.js';
 // Mounted onto the parent settings router in ../settings.ts.
 export const router = express.Router();
 
-// ---------------------------------------------------------------------------
-// probeKey — non-mutating live probe for a single secret key.
-// Builds a one-off provider client using the supplied value; never writes to
-// process.env or secrets.env. Always resolves (never rejects).
-// ---------------------------------------------------------------------------
 // Distill a raw provider/SDK error into a one-line actionable message.
 function briefLlmError(err: unknown): string {
   const e = err as { message?: string; toString(): string } | null | undefined;
@@ -54,7 +46,6 @@ function briefLlmError(err: unknown): string {
   if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('aborted')) {
     return 'Timed out — provider may be slow or unreachable';
   }
-  // Fallback: first sentence or first 80 chars of the original message
   const raw: string = (e?.message || '').trim();
   const sentence = raw.split(/[.\n]/)[0].trim();
   return sentence.slice(0, 80) || 'Request failed';
@@ -154,8 +145,8 @@ async function probeKey(
           signal: AbortSignal.timeout(10000),
         });
         if (!r.ok) {
-          // Brave signals a bad token as 422 SUBSCRIPTION_TOKEN_INVALID
-          // (verified live), not 401/403 — check the error code too.
+          // Brave signals a bad token as 422 SUBSCRIPTION_TOKEN_INVALID, not
+          // 401/403, so the error code has to be checked too.
           const j = await r.json().catch(() => ({})) as { error?: { code?: string } };
           const rejected = r.status === 401 || r.status === 403
             || j?.error?.code === 'SUBSCRIPTION_TOKEN_INVALID';
@@ -441,8 +432,27 @@ router.post('/settings/llm/models', requireAdmin, async (req, res) => {
 // Body: { apiKey: string, baseUrl: string, model: string }
 // Always 200s with { ok, message, latencyMs }. The key is NOT saved.
 // ---------------------------------------------------------------------------
+// 'set' is getRedacted()'s sentinel and means "the value already on file", read
+// here exactly as applyLlmLegPatch reads it on the save path. Never throws.
+function hasRedactedHeader(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  return Object.values(raw as Record<string, unknown>).some((v) => v === 'set');
+}
+
+function resolveProbeHeaders(raw: unknown, stored: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const onFile = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
+  for (const name of Object.keys(raw as Record<string, unknown>)) {
+    const v = (raw as Record<string, unknown>)[name];
+    const resolved = v === 'set' ? onFile[name.trim()] : v;
+    if (typeof resolved === 'string' && resolved.trim()) out[name.trim()] = resolved.trim();
+  }
+  return out;
+}
+
 router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
-  const { apiKey, baseUrl, model, provider } = req.body || {};
+  const { apiKey, baseUrl, model, provider, headers } = req.body || {};
   const submittedProvider = typeof provider === 'string' ? provider.trim() : '';
   const hasSubmittedLeg = Object.prototype.hasOwnProperty.call(req.body || {}, 'leg');
   const compatibleProviders = new Set(['openai-compatible', 'locca', 'litellm']);
@@ -495,9 +505,29 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
       }
     }
 
+    // Stored custom headers are credentials: resolve sentinels only for the
+    // selected saved leg at its exact endpoint, never an arbitrary probe URL.
+    let storedHeaders: unknown;
+    if (hasRedactedHeader(headers)) {
+      await settings.load();
+      const state = settings.get();
+      const identity = llmLegIdentity(req.body?.leg);
+      const candidates = hasSubmittedLeg
+        ? identity === 'onboarding' ? [] : [identity === 'fallback' ? state.llm?.fallback : state.llm]
+        : [state.llm, state.llm?.fallback];
+      storedHeaders = candidates.find(leg =>
+        (!submittedProvider || leg?.provider === submittedProvider)
+        && !!resolvedBaseUrl
+        && normalizedProviderEndpoint(leg?.baseUrl) === resolvedBaseUrl)?.headers;
+    }
+    const probeHeaders = llmProvider.customHeaders({
+      headers: resolveProbeHeaders(headers, storedHeaders),
+    });
+
     const m = createOpenAI({
       apiKey: resolvedApiKey || 'no-key',
       baseURL: resolvedBaseUrl,
+      ...(probeHeaders ? { headers: probeHeaders } : {}),
     }).chat(model.trim());
     await generateText({
       model: m,
@@ -521,18 +551,11 @@ router.get('/settings/llm/models', requireAdmin, (_req, res) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /settings/embedding/probe — test whether the configured (or supplied)
-// embedding endpoint can actually produce embeddings, surfacing the result
-// in the admin UI BEFORE a long tagging run instead of failing mid-job.
-// Optional body overrides (provider/model/baseUrl/ollamaUrl/apiKey) test the
-// unsaved form values; omitted fields fall back to saved settings.embedding →
-// llm. POST body rather than query params so the bearer token never rides a
-// URL that reverse-proxy access logs capture — same shape as
-// /settings/llm/probe-compat.
-// Always 200s with { ok, dim, code, message } — a chat-model / unreachable
-// server is a normal, actionable answer, not an error.
-// ---------------------------------------------------------------------------
+// Test whether the configured (or supplied) embedding endpoint can actually
+// embed, before a long tagging run. Body overrides test unsaved form values;
+// omitted fields fall back to settings.embedding then llm. POST rather than
+// query params so the bearer token never rides a URL access logs capture.
+// Always 200s with { ok, dim, code, message }.
 router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
   const overrides: Record<string, string> = {};
   for (const k of ['provider', 'model', 'baseUrl', 'ollamaUrl', 'apiKey']) {
@@ -542,10 +565,9 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
   try {
     const r = await probeEmbeddingConfig(overrides);
     let message = r.message;
-    // Test-only reassurance: a not-yet-pulled Ollama model isn't a real failure —
-    // the tagger auto-pulls it on the next run (ensureReady → tryOllamaPull). We
-    // add this only here, NOT in the shared actionableMessage, because the tagger
-    // reuses that same message only AFTER an auto-pull has already failed.
+    // Test-only: a not-yet-pulled Ollama model is auto-pulled on the next run.
+    // Kept out of the shared actionableMessage, which the tagger reuses only
+    // AFTER an auto-pull has already failed.
     if (r.code === 'not_found' && r.provider === 'ollama') {
       message += '\n  You can ignore this — the tagger pulls this model automatically when you start a run.';
     }

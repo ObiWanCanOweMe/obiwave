@@ -29,8 +29,7 @@ export interface WizardData {
   tts: {
     defaultEngine: 'piper' | 'kokoro' | 'cloud' | 'chatterbox' | 'pocket-tts' | 'remote';
     // Advisory only: the web wizard can't start the tts-heavy sidecar, so this
-    // captures intent (persisted to settings.tts.heavyEnabled) and shows the
-    // copy-paste docker commands. The CLI setup writes COMPOSE_PROFILES to .env.
+    // records intent (settings.tts.heavyEnabled) and shows the docker commands.
     heavyEnabled: boolean;
     cloud: { enabled: boolean; provider: string; apiKey: string; model: string; voice: string };
   };
@@ -94,9 +93,8 @@ export const STEP_LABELS: Record<StepId, string> = {
   review: 'Review',
 };
 
-// AbortSignal timeouts reject with a TimeoutError; everything else (connection
-// refused, DNS, CORS/TLS) is a bare "Failed to fetch" that means nothing to an
-// operator, so point them at the real culprit: reaching the controller.
+// AbortSignal timeouts reject with TimeoutError; everything else (refused, DNS,
+// CORS/TLS) is a bare "Failed to fetch", so name the controller instead.
 function fetchErrorMsg(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return 'timed out — the controller did not respond';
@@ -160,20 +158,13 @@ export function useWizard() {
     });
   }, []);
 
-  // Every wizard write goes through adminFetch for the admin shell's
-  // 401-handling. Both test helpers catch their own failures into the result
-  // pill: a rejected or timed-out fetch must surface as a red pill, never as an
-  // unhandled throw that wedges the button on "Testing…" (issue #682).
-  //
-  // Both now take the credentials/config as an explicit argument rather than
-  // reading `data.navidrome` / `data.llm` — each step owns its own
-  // react-hook-form instance and only writes back into `data` on Next, so the
-  // Test button (which must probe whatever is CURRENTLY typed, not the last
-  // committed value) hands over the step form's live values directly.
+  // Every wizard write goes through adminFetch for the shell's 401 handling.
+  // Both test helpers catch their own failures into the result pill rather than
+  // throwing, which would wedge the button on "Testing…" (#682). They take the
+  // config as an argument: each step's form only writes back into `data` on
+  // Next, so Test must probe the live values.
   const testNavidrome = useCallback(async (creds: WizardData['navidrome']) => {
-    // The browser→controller hop has no default timeout, so a request that
-    // never answers wedges the button. 15s clears the 5s server-side Subsonic
-    // probe with margin.
+    // 15s: clears the 5s server-side Subsonic probe; the hop has no default.
     try {
       const r = await auth.adminFetch('/onboarding/test-navidrome', {
         method: 'POST',
@@ -262,11 +253,8 @@ export function useWizard() {
         data.tts.cloud.provider === 'fish-audio' ? 'FISH_API_KEY' : '';
       if (k) apiKeys[k] = data.tts.cloud.apiKey;
     }
-    // The key may already come from the root environment, so fishAudioIssue
-    // only judges the fields the wizard itself must persist for a usable Fish
-    // request. Same helper the controller's save handler runs — the two
-    // hand-rolled copies this replaces had already drifted in the message
-    // ('1-100' vs '1–100') before they could in logic.
+    // The key may come from the root environment, so fishAudioIssue judges only
+    // the fields the wizard must persist. Same helper the controller's save runs.
     const fishIssue = fishAudioIssue(data.tts.cloud);
     if (fishIssue) return { ok: false, error: fishIssue };
 

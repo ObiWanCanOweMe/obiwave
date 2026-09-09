@@ -9,7 +9,7 @@ process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-litellm-routes-'));
 process.env.ADMIN_USER = 'route-admin';
 process.env.ADMIN_PASS = 'route-password';
 
-interface RecordedRequest { method: string; url: string; authorization: string }
+interface RecordedRequest { method: string; url: string; authorization: string; probeHeader?: string }
 
 async function recordingGateway() {
   const requests: RecordedRequest[] = [];
@@ -18,6 +18,7 @@ async function recordingGateway() {
       method: req.method || '',
       url: req.url || '',
       authorization: String(req.headers.authorization || ''),
+      ...(req.headers['x-probe-secret'] ? { probeHeader: String(req.headers['x-probe-secret']) } : {}),
     });
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -378,6 +379,31 @@ try {
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'an environment LiteLLM token must remain bound to a trusted endpoint');
+
+  // A routing header can carry a secret just like the bearer token. The
+  // upstream header editor must inherit the fork's exact endpoint/leg boundary.
+  await settings.update({ llm: {
+    provider: 'openai-compatible', model: 'vendor/model', baseUrl: primary.baseUrl,
+    headers: { 'x-probe-secret': 'primary-header' },
+    fallback: { enabled: true, provider: 'openai-compatible', model: 'vendor/model',
+      baseUrl: fallback.baseUrl, headers: { 'x-probe-secret': 'fallback-header' } },
+  } });
+  for (const [leg, target, value, expected] of [
+    ['primary', primary, 'set', 'primary-header'],
+    ['fallback', fallback, 'set', 'fallback-header'],
+    ['primary', changedOrigin, 'set', undefined],
+    ['primary', fallback, 'set', undefined],
+    ['onboarding', primary, 'set', undefined],
+    ['primary', changedOrigin, 'typed-header', 'typed-header'],
+  ] as const) {
+    const response = await post('/settings/llm/probe-compat', {
+      provider: 'openai-compatible', leg, model: 'vendor/model',
+      baseUrl: target.baseUrl, headers: { 'x-probe-secret': value },
+    });
+    assert.equal((await response.json()).ok, true);
+    assert.equal(target.requests.at(-1)?.probeHeader, expected,
+      `${leg} header must remain bound to its saved endpoint; explicit values may probe a new URL`);
+  }
 
   await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
   routeServer = undefined;
