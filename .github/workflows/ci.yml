@@ -104,6 +104,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The source contracts validate font imports against the installed Next catalog.
+      - name: Install web dependencies for source contracts
+        run: npm --prefix web ci --no-audit --no-fund
 
       - name: Run deployment contract tests
         run: node --test scripts/ci/*.test.mjs scripts/release/*.test.mjs scripts/security/*.test.mjs scripts/deploy/*.test.mjs

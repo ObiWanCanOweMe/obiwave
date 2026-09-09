@@ -22,7 +22,9 @@ const caddyfiles = ['docker/Caddyfile', 'docker/aio/Caddyfile'];
 async function listen(server) {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+    // Linux containers reach the host through its bridge address; Docker
+    // Desktop also proxies loopback, which otherwise hid this fixture bug.
+    server.listen(0, process.platform === 'linux' ? '0.0.0.0' : '127.0.0.1', resolve);
   });
   const address = server.address();
   assert.ok(address && typeof address === 'object');
@@ -101,7 +103,12 @@ for (const relativeCaddyfile of caddyfiles) {
     ]);
 
     const caddyPort = await hostPort(containerName);
-    await waitForCaddy(caddyPort);
+    try {
+      await waitForCaddy(caddyPort);
+    } catch (error) {
+      const logs = await execFile('docker', ['logs', containerName]);
+      throw new Error(`Test Caddy did not become ready: ${logs.stdout}${logs.stderr}`, { cause: error });
+    }
 
     for (const [pathname, expectedStatus] of listenerAuthCases) {
       const methods = expectedStatus === 404 ? ['GET', 'POST'] : ['GET'];

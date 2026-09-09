@@ -680,7 +680,11 @@ const v17ManifestPath = fileURLToPath(
 );
 const scannerPath = fileURLToPath(new URL('../../security/trivy-scanner.json', import.meta.url));
 
-function runImageCli(extra = [], env = process.env) {
+// CI defines GITHUB_OUTPUT globally; stdout tests must select their own mode.
+const cliEnv = { ...process.env };
+delete cliEnv.GITHUB_OUTPUT;
+
+function runImageCli(extra = [], env = cliEnv) {
   return spawnSync(process.execPath, [
     scriptPath,
     'image',
@@ -861,7 +865,7 @@ test('partial recovery preflight rejects a non-public GitHub release', () => {
 
 const partialManifestPath = fileURLToPath(new URL('../../security/releases/v1.6.0-obiwave.1.partial.json', import.meta.url));
 
-function runPartialCli(command, args = [], env = process.env) {
+function runPartialCli(command, args = [], env = cliEnv) {
   return spawnSync(process.execPath, [
     scriptPath,
     command,
@@ -895,7 +899,7 @@ test('materialize-sealed and sealed-image CLI strictly transport a sealed manife
       '--partial-manifest', partialManifestPath,
       '--scanner', scannerPath,
       '--image', 'subwave-web',
-    ], { encoding: 'utf8' });
+    ], { encoding: 'utf8', env: cliEnv });
     assert.equal(image.status, 0, image.stderr);
     assert.deepEqual(JSON.parse(image.stdout), {
       image: 'subwave-web',
