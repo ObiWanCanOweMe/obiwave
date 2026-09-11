@@ -242,7 +242,7 @@ test('the forecast counts unsent items ahead, which the drain clock does not', a
 // this forecast's callers are understated by the miss in the direction that
 // matters: the listener is told their request is closer than it is, and
 // runsPastShowChange under-reports the overrun.
-test('the forecast counts a bed queued ahead, which is not an upcoming entry', async () => {
+test('the forecast counts a bed queued ahead, which is not an upcoming entry', async (t) => {
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -252,6 +252,9 @@ test('the forecast counts a bed queued ahead, which is not an upcoming entry', a
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
 
+  // Compare the delay at one instant, independent of runner scheduling.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const bare = queue.airForecastSec(request)!;
   // The bed is decided at the item's own drain, so mark it sent and bedded the
   // way drainToLiquidsoap does.
@@ -261,7 +264,7 @@ test('the forecast counts a bed queued ahead, which is not an upcoming entry', a
 });
 
 // The item's own bed plays immediately ahead of it, so it delays this item too.
-test("the forecast counts the item's OWN bed", async () => {
+test("the forecast counts the item's OWN bed", async (t) => {
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -269,12 +272,15 @@ test("the forecast counts the item's OWN bed", async () => {
   } as any;
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[0];
+  // Compare the delay at one instant, independent of runner scheduling.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const bare = queue.airForecastSec(request)!;
   request.bedDelaySec = 18;
   assert.equal(queue.airForecastSec(request), bare + 18);
 });
 
-test('the forecast counts pause-and-talk silence hidden ahead of a request', async () => {
+test('the forecast counts pause-and-talk silence hidden ahead of a request', async (t) => {
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -283,13 +289,16 @@ test('the forecast counts pause-and-talk silence hidden ahead of a request', asy
   await queue.push({ track: { id: 'next', title: 'Next', duration: 200 }, requestedBy: null });
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
+  // Compare the delay at one instant, independent of runner scheduling.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const bare = queue.airForecastSec(request)!;
   queue.upcoming[0].sent = true;
   queue.upcoming[0].pauseDelaySec = 34.75;
   assert.equal(queue.airForecastSec(request), bare + 34.75);
 });
 
-test("the forecast counts the item's OWN pause-and-talk delay", async () => {
+test("the forecast counts the item's OWN pause-and-talk delay", async (t) => {
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -297,6 +306,9 @@ test("the forecast counts the item's OWN pause-and-talk delay", async () => {
   } as any;
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[0];
+  // Compare the delay at one instant, independent of runner scheduling.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const bare = queue.airForecastSec(request)!;
   request.pauseDelaySec = 19;
   assert.equal(queue.airForecastSec(request), bare + 19);
@@ -305,7 +317,7 @@ test("the forecast counts the item's OWN pause-and-talk delay", async () => {
 // An UNSENT item ahead has had no bed pushed — the decision happens at ITS
 // drain — so a zero contribution is correct rather than a miss. Pinned so the
 // next person to touch bedDelayBeforeItemAirs does not "fix" the sent gate.
-test('an unsent item ahead contributes no bed, because it has none yet', async () => {
+test('an unsent item ahead contributes no bed, because it has none yet', async (t) => {
   reset();
   queue.current = {
     track: { id: 'onair', title: 'On air', duration: 100 },
@@ -314,6 +326,9 @@ test('an unsent item ahead contributes no bed, because it has none yet', async (
   await queue.push({ track: { id: 'link', title: 'Linked', duration: 200 }, requestedBy: null, aiPicked: true });
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
+  // Compare the delay at one instant, independent of runner scheduling.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const bare = queue.airForecastSec(request)!;
   // Stamped but never drained: nothing is in next.txt for it.
   queue.upcoming[0].sent = false;
