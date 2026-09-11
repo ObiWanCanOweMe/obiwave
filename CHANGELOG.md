@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.15.0](https://github.com/perminder-klair/subwave/compare/v1.14.0...v1.15.0) (2026-09-10)
+
+
+### Features
+
+* **broadcast:** pause-and-talk breaks for long DJ segments ([#551](https://github.com/perminder-klair/subwave/issues/551)) ([0e9c3c6](https://github.com/perminder-klair/subwave/commit/0e9c3c6275556505eb74fe65458682a1d1c13981))
+* make DJ links safer and more natural ([65c8202](https://github.com/perminder-klair/subwave/commit/65c8202a4e2a914e9a16f344714fa8a971e2c67b))
+* **schedule:** drag and drop shows within day's schedule ([#1642](https://github.com/perminder-klair/subwave/issues/1642)) ([ddcb77f](https://github.com/perminder-klair/subwave/commit/ddcb77fa0e4ec33e0e583d781dcf69320a987367))
+
+
+### Bug Fixes
+
+* **analyzer:** default ANALYZE_URL to the compose sidecar ([#1636](https://github.com/perminder-klair/subwave/issues/1636)) ([b2d8cdb](https://github.com/perminder-klair/subwave/commit/b2d8cdb8b21cc76e3605717b01907737e1f1465a))
+* **analyzer:** degrade gracefully when beat tracking fails ([#1653](https://github.com/perminder-klair/subwave/issues/1653)) ([72e0133](https://github.com/perminder-klair/subwave/commit/72e013332936de93150adee46ef010d29592fd01))
+* **broadcast:** harden pause-talk delivery ([b8306d8](https://github.com/perminder-klair/subwave/commit/b8306d8502ffc02f2109bbcea05fb92eb0250298))
+* **broadcast:** make pause speech recovery idempotent ([de716e6](https://github.com/perminder-klair/subwave/commit/de716e6ebb24f29b1f4f5e5a6f57b57dccfeef71))
+* **controller:** clarify pair-drain transition ownership ([#1652](https://github.com/perminder-klair/subwave/issues/1652)) ([3a50d15](https://github.com/perminder-klair/subwave/commit/3a50d152d49e44b24df8c394a1e233dc3e573c7a))
+* **dj:** close link safety gaps ([#1656](https://github.com/perminder-klair/subwave/issues/1656)) ([7c9103b](https://github.com/perminder-klair/subwave/commit/7c9103b55ae6c480aa895af70c2e915af7f4cfc3))
+* **dj:** harden verified link pipeline ([4d6d363](https://github.com/perminder-klair/subwave/commit/4d6d3639a1d93041f4e07bffed6d604ea6a6d3d2))
+* **dj:** make boundary handoffs lifecycle-safe ([e71cbbb](https://github.com/perminder-klair/subwave/commit/e71cbbbe51aaa8ae2b75d992b16149c14e0cb389))
+* **library:** survive a stale Navidrome socket instead of failing the count ([#1640](https://github.com/perminder-klair/subwave/issues/1640)) ([7c74ce7](https://github.com/perminder-klair/subwave/commit/7c74ce733c7785236e9238e52914b1a76457e159))
+* **settings:** return saved talk placement ([7b42e75](https://github.com/perminder-klair/subwave/commit/7b42e75dacd6642da3f9646ab58d5c10e7e81461))
+* **settings:** return saved talk placement ([bf9a6ab](https://github.com/perminder-klair/subwave/commit/bf9a6abd7a21317501c70382e13f2edf61041ac8))
+* **settings:** return saved talk placement ([a7b79af](https://github.com/perminder-klair/subwave/commit/a7b79af61e8993c7944534b306366e7de4183021))
+* **settings:** return saved talk placement ([6e4b243](https://github.com/perminder-klair/subwave/commit/6e4b2438d09d5ae7a65f719d22b208c1c0f85fbe))
+
+
+### Documentation
+
+* **analyzer:** correct engine recovery guidance ([675c7d3](https://github.com/perminder-klair/subwave/commit/675c7d3f497a94726ea1e9c4e2b3678d8e13fd86))
+
 ## [1.14.0](https://github.com/perminder-klair/subwave/compare/v1.13.0...v1.14.0) (2026-09-09)
 
 
