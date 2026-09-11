@@ -589,14 +589,17 @@ output.file(%wav, fallible=true, "/work/xdur.wav", music)
 clock.assign_new(sync="none", [music])
 thread.run(delay=30., fun() -> shutdown())
 LIQ
-  liq xdur.liq | grep -E "XDUR|rror" || true
-  echo "output duration (78 = buffer followed a's stamp; 86 = it didn't):"
-  local duration
+  local log duration
+  log=$(liq xdur.liq)
+  echo "$log" | grep -E "XDUR|rror" || true
+  grep -q "XDUR: transition d=12.0" <<<"$log" \
+    || { echo "XDUR FAIL — the outgoing track's duration stamp did not reach its transition"; return 1; }
   duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/xdur.wav")
+  echo "output duration (78 = buffer followed a's stamp; 86 = it didn't):"
   echo "$duration"
   awk -v duration="$duration" 'BEGIN { exit !(duration >= 77.9 && duration <= 78.1) }' \
-    || { echo "XDUR FAIL — stamped duration did not size the outgoing buffer"; return 1; }
-  echo "XDUR PASS — stamped duration sizes the outgoing buffer"
+    || { echo "XDUR FAIL — output duration shows the stamped outgoing buffer was not retained"; return 1; }
+  echo "XDUR PASS — the outgoing track owns its stamped end-of-track buffer"
 }
 
 case "${1:-}" in
