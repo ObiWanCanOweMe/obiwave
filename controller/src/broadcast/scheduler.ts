@@ -471,13 +471,17 @@ async function refreshAutoPlaylistInner() {
 
 // Gate-free runner — also called directly by the /dj/segment command route as
 // an operator override. The cron wrapper below adds the frequency gate.
-export async function runHourlyCheck({ showWelcome = false }: { showWelcome?: boolean } = {}) {
+export async function runHourlyCheck({ showWelcome = false, automatic = false }: { showWelcome?: boolean; automatic?: boolean } = {}) {
   return withTrace({ kind: 'hourly' }, async () => {
     const ctx = await getFullContext();
     // Guest rotation: on a show with co-hosts the ordinary time check may come
     // from a guest. A show welcome belongs to the incoming host: it establishes
     // that show's voice, rather than making a guest appear to take it over.
-    const speaker = showWelcome ? session.onAirPersona() : settings.pickOnAirSpeaker();
+    let speaker = showWelcome ? session.onAirPersona() : settings.pickOnAirSpeaker();
+    const speechOwner = automatic
+      ? session.captureAutomaticHostSpeech(speaker)
+      : { persona: speaker, hostSpeech: null };
+    speaker = speechOwner.persona;
     const script = await dj.generateHourlyTime({
       recap: queue.getDjRecap(),
       context: ctx,
@@ -486,7 +490,7 @@ export async function runHourlyCheck({ showWelcome = false }: { showWelcome?: bo
       showWelcome,
     });
     await queue.announce(script, 'hourly-check', {
-      persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name },
+      persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name }, hostSpeech: speechOwner.hostSpeech,
     });
     return script;
   });
@@ -688,10 +692,14 @@ export async function runProgrammeOutro() {
 // Station ident. Gate-free runner — the /dj/segment route fires it immediately;
 // the scheduled path passes atNextTrack so it holds for the next track boundary
 // rather than ducking mid-vocal.
-export async function runStationId({ atNextTrack = false } = {}) {
+export async function runStationId({ atNextTrack = false, automatic = false } = {}) {
   return withTrace({ kind: 'station-id' }, async () => {
     const ctx = await getFullContext();
-    const speaker = settings.pickOnAirSpeaker();
+    let speaker = settings.pickOnAirSpeaker();
+    const speechOwner = automatic
+      ? session.captureAutomaticHostSpeech(speaker)
+      : { persona: speaker, hostSpeech: null };
+    speaker = speechOwner.persona;
     // A deferred ident can wait across several boundaries, so stamp the daypart
     // offered to the model and let the queue refuse the clip if it changed.
     const daypart = atNextTrack
@@ -703,7 +711,7 @@ export async function runStationId({ atNextTrack = false } = {}) {
       recentOpeners: queue.getRecentOpeners(),
       persona: speaker,
     });
-    const opts = { persona: speaker, daypart, meta: { personaId: speaker?.id, personaName: speaker?.name } };
+    const opts = { persona: speaker, daypart, hostSpeech: speechOwner.hostSpeech, meta: { personaId: speaker?.id, personaName: speaker?.name } };
     if (atNextTrack) await queue.announceAtNextTrack(script, 'station-id', opts);
     else await queue.announce(script, 'station-id', opts);
     return script;
@@ -824,12 +832,12 @@ async function runTalkSlotInner(plan: Extract<TalkPlan, { act: 'fire' }>, rolled
   try {
     switch (plan.kind) {
       case 'hourly':
-        await runHourlyCheck({ showWelcome: settings.get().djBehaviour.showWelcome && !!rolled?.showStarted });
+        await runHourlyCheck({ showWelcome: settings.get().djBehaviour.showWelcome && !!rolled?.showStarted, automatic: true });
         return;
       case 'station-id':
         // Read off the PLAN, not hardcoded, so the table stays the only place
         // placement is decided.
-        await runStationId({ atNextTrack: plan.air === 'next-track' });
+        await runStationId({ atNextTrack: plan.air === 'next-track', automatic: true });
         return;
       case 'banter':
         await runBanter();
@@ -1124,7 +1132,7 @@ export function syncSkillCrons() {
           const ctx = await getFullContext();
           // A timer is automatic speech even when it keeps immediate placement.
           // Preserve that provenance through rendering and a later pause hold.
-          await withTalkAir('immediate', () => runCapability(cap.kind, ctx));
+          await withTalkAir('immediate', () => runCapability(cap.kind, ctx, { automaticHostSpeech: true }));
         });
       } catch (err: any) {
         queue.log('error', `[skills] cron "${expr}" skill "${cap.kind}" failed: ${err.message}`);

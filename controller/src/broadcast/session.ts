@@ -6,15 +6,22 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
-import { writeFileAtomic } from '../util/atomic-file.js';
+import { writeFileAtomic, writeFileAtomicSync } from '../util/atomic-file.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
 import type { getFullContext } from '../context.js';
 import { promptMemoryEntries, type PromptMemoryEntry } from './prompt-memory.js';
 import { nextShowBoundaryMs } from './show-boundary.js';
+import type { Persona } from './queue/types.js';
 
 // Type-only import, erased at runtime, so no cycle with context.ts.
 export type SessionContext = Awaited<ReturnType<typeof getFullContext>>;
+
+export interface HostSpeechStamp {
+  readonly showKey: string;
+  readonly personaId: string | null;
+  readonly revision: number;
+}
 
 interface Scenario {
   period: string | null;
@@ -107,6 +114,7 @@ interface Session {
   handoffAired?: boolean;
   rolledFrom?: RolledFrom | null;
   boundaryHandoff?: BoundaryHandoff | null;
+  hostRevision?: number;
 }
 
 const MAX_SESSION_MS = 4 * 60 * 60 * 1000;  // safety cap — roll even if key is stable
@@ -120,14 +128,11 @@ const PERSIST_DEBOUNCE_MS = 1000;
 
 let _session: Session | null = null;
 let _writeTimer: NodeJS.Timeout | null = null;
-// Every session snapshot shares this chain. Atomic replacement prevents a
-// torn file, but not an older asynchronous replacement landing after a newer
-// flush; serialising the writes gives their snapshots one durable order.
-let _persistChain: Promise<void> = Promise.resolve();
-// A queued handoff survives a restart in session.json, while its WAVs do not.
-// This flag lets pendingHandoff() offer that durable record for one re-render
-// only after recovery; a live process already has the queue entry and must not
-// create a duplicate.
+// A queued handoff survives a restart in session.json. queue.json separately
+// snapshots the rendered WAV paths and their absolute deadline; this flag lets
+// pendingHandoff() offer the durable session record for one re-render after
+// recovery only when queue recovery cannot reclaim those clips. A live process
+// already has the queue entry and must not create a duplicate.
 let _resumedQueuedHandoff = false;
 
 function mintId() {
@@ -208,20 +213,15 @@ function buildHandoff(prev: Session | null): string | null {
 
 async function persist(): Promise<boolean> {
   if (!_session) return true;
-  const snapshot = JSON.stringify(_session, null, 2);
-  const write = async () => {
-    try {
-      // Atomic replace — /debug and boot recovery read this file, and a crash
-      // mid-write should leave the previous snapshot, not a truncated one.
-      await writeFileAtomic(config.session.currentFile, snapshot);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const result = _persistChain.then(write, write);
-  _persistChain = result.then(() => {}, () => {});
-  return result;
+  try {
+    // Host revisions are synchronous publication boundaries. Every writer of
+    // session.json uses the same synchronous atomic path, so an older snapshot
+    // cannot land after a newer epoch or a manual-jingle retirement flush.
+    writeFileAtomicSync(config.session.currentFile, JSON.stringify(_session, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function schedulePersist() {
@@ -249,13 +249,109 @@ async function archive(s: Session | null) {
   } catch {}
 }
 
+function normalizedHostRevision(value: unknown): number {
+  const revision = Number(value);
+  return Number.isFinite(revision) && revision >= 0 ? Math.floor(revision) : 0;
+}
+
+// Refresh the compact host identity without rolling the editorial session. Only
+// the same active scheduled show is eligible; a look-ahead session on the other
+// side of a real boundary remains authoritative until the clock catches up.
+export function refreshHost(at: Date = new Date()): boolean {
+  const s = _session;
+  if (!s || !s.key.startsWith('show:')) return false;
+  const show = settings.resolveActiveShow(at);
+  if (!show || `show:${show.id}` !== s.key) return false;
+  const persona = settings.getEffectivePersona(at);
+  const previousId = s.persona?.id ?? null;
+  const nextId = persona?.id ?? null;
+  s.hostRevision = normalizedHostRevision(s.hostRevision);
+  if (previousId === nextId) return false;
+  const previousName = s.persona?.name ?? null;
+  s.persona = persona ? { id: persona.id, name: persona.name } : null;
+  s.hostRevision += 1;
+  appendTurn({
+    role: 'event',
+    kind: 'scenario',
+    text: `Host changed from ${previousName || 'the default DJ'} to ${persona?.name || 'the default DJ'} while the show continues.`,
+  });
+  logEvent('session.host-refresh', {
+    sessionId: s.id, key: s.key, previousPersonaId: previousId, personaId: nextId,
+    hostRevision: s.hostRevision,
+  });
+  // queue.json lands on a shorter debounce. Make the new epoch durable before
+  // a freshly stamped queue item can outrun it, including A -> B -> A where
+  // persona equality cannot reveal the missed transitions after restart.
+  void persist();
+  return true;
+}
+
+export function captureHostSpeech(at: Date = new Date()): HostSpeechStamp | null {
+  refreshHost(at);
+  const s = _session;
+  if (!s || !s.key.startsWith('show:')) return null;
+  return {
+    showKey: s.key,
+    personaId: s.persona?.id ?? null,
+    revision: normalizedHostRevision(s.hostRevision),
+  };
+}
+
+export function isHostSpeechCurrent(stamp: HostSpeechStamp | null | undefined): boolean {
+  if (!stamp) return true;
+  refreshHost();
+  const s = _session;
+  return !!s
+    && s.key === stamp.showKey
+    && (s.persona?.id ?? null) === stamp.personaId
+    && normalizedHostRevision(s.hostRevision) === stamp.revision;
+}
+
 // The persona currently ON AIR. Prefer this over settings.getEffectivePersona()
 // for anything voicing a line: the session leads the weekly grid by up to
 // PICK_SHOW_LOOKAHEAD_SEC after a look-ahead roll, and inside that window the
 // session is right. Falls back to the grid.
 export function onAirPersona() {
+  refreshHost();
   const id = _session?.persona?.id;
   return (id && settings.resolvePersonaById(id)) || settings.getEffectivePersona();
+}
+
+export interface AutomaticHostSpeech {
+  persona: Persona | null;
+  hostSpeech: HostSpeechStamp | null;
+}
+
+// Resolve one automatic speaker and its ownership stamp before asynchronous
+// generation starts. Ordinary host speech belongs to the current same-show
+// host epoch. A rostered guest is independently owned and intentionally
+// unstamped; an unexpected speaker is repaired to the on-air host.
+export function captureAutomaticHostSpeech(
+  selected: Persona | null | undefined = undefined,
+  at: Date = new Date(),
+): AutomaticHostSpeech {
+  const hostSpeech = captureHostSpeech(at);
+  const hostPersona = (hostSpeech?.personaId && settings.resolvePersonaById(hostSpeech.personaId))
+    || settings.getEffectivePersona(at)
+    || null;
+  const persona = selected ?? hostPersona;
+  if (!hostSpeech || persona?.id === hostSpeech.personaId) return { persona, hostSpeech };
+  const guests = settings.getOnAirRoster(at).guests;
+  if (guests.some(guest => guest.id === persona?.id)) return { persona, hostSpeech: null };
+  return { persona: hostPersona, hostSpeech };
+}
+
+// Spend an asynchronously generated host-owned line only if the exact epoch
+// that commissioned it is still live. Persona and stamp are cleared with the
+// text so a caller cannot relabel old words as the new host.
+export function finalizeAutomaticHostSpeech(
+  text: string | null | undefined,
+  owner: AutomaticHostSpeech,
+): { text: string | null; persona: Persona | null; hostSpeech: HostSpeechStamp | null } {
+  const present = typeof text === 'string' && text.trim().length > 0;
+  const current = !owner.hostSpeech || isHostSpeechCurrent(owner.hostSpeech);
+  if (!present || !current) return { text: null, persona: null, hostSpeech: null };
+  return { text: text!, persona: owner.persona, hostSpeech: owner.hostSpeech };
 }
 
 export function getSession() {
@@ -316,6 +412,7 @@ export function start(ctx: SessionContext, handoff: string | null = null): Sessi
     // mid-episode can't re-plan or double-air a beat.
     programme: null,
     messages: [],
+    hostRevision: 0,
   };
   // Debounced persist only. An immediate unawaited write here could land after
   // maybeRoll's awaited post-stampRolledFrom persist() and leave a stale file.
@@ -342,7 +439,10 @@ export async function maybeRoll(ctx: SessionContext): Promise<Session> {
   if (!_session) return start(ctx);
   const nextKey = sessionKeyFor(ctx);
   const aged = Date.now() - new Date(_session.startedAt).getTime() > MAX_SESSION_MS;
-  if (_session.key === nextKey && !aged) return _session;
+  if (_session.key === nextKey) {
+    refreshHost(contextDate(ctx));
+    if (!aged) return _session;
+  }
 
   // A key change that only exists because the CALLER's clock is behind the
   // look-ahead roll is not a boundary. Rolling here would archive the
@@ -353,6 +453,7 @@ export async function maybeRoll(ctx: SessionContext): Promise<Session> {
   if (bothAuto && !aged) return softShift(ctx, nextKey);
 
   const prev = _session;
+  const sameKeyRevision = prev.key === nextKey ? normalizedHostRevision(prev.hostRevision) : 0;
   // An armed final-track handoff may already have voiced (or, in
   // between-tracks mode, rendered and queued) this exact changeover. Do not
   // create a second mic-pass when the station clock reaches the boundary.
@@ -371,6 +472,7 @@ export async function maybeRoll(ctx: SessionContext): Promise<Session> {
   _priorPromptMemory = promptMemoryEntries(prev.messages, prev.persona?.id ?? null);
   await end();
   const next = start(ctx, buildHandoff(prev));
+  if (prev.key === nextKey) next.hostRevision = sameKeyRevision;
   if (boundaryProgramme) next.programme = boundaryProgramme;
   stampRolledFrom(next, prev);
   if (handoffAlreadyCovered) next.handoffAired = true;
@@ -433,7 +535,8 @@ export function markHandoffAired() {
 }
 
 // The voice chain accepted a handoff pair, but its live-edge marker has not
-// fired. This is durable so a controller restart can regenerate the pair;
+// fired. This is durable so a controller restart can reclaim the rendered pair
+// from queue.json, or regenerate it if that manifest/audio is unavailable;
 // pendingHandoff() intentionally hides it during this process because queue.ts
 // still owns the original rendered clips.
 export function markHandoffQueued() {
@@ -659,16 +762,22 @@ export async function recover(ctx: SessionContext): Promise<Session> {
       if (stored?.id && !stored.endedAt && stored.key === sessionKeyFor(ctx)
           && Array.isArray(stored.messages)) {
         _session = stored as Session;
+        const normalizedRevision = normalizedHostRevision(_session.hostRevision);
+        const revisionRepaired = _session.hostRevision !== normalizedRevision;
+        _session.hostRevision = normalizedRevision;
         _resumedQueuedHandoff = _session.boundaryHandoff?.queued === true;
         appendTurn({ role: 'event', kind: 'scenario', text: 'Controller restarted — session resumed.' });
+        const repaired = refreshHost(contextDate(ctx));
+        if (repaired || revisionRepaired) await persist();
         return _session;
       }
       // The restart happened after the station clock crossed the boundary, so
       // the stored outgoing-session key no longer matches. Preserve the
-      // boundary record on the fresh incoming session: an armed/queued pair is
-      // regenerated because its WAVs lived only in memory, while an aired pair
-      // transfers its programme and covered-intro stamp without reopening the
-      // show.
+      // boundary record on the fresh incoming session: an armed pair remains
+      // eligible to render, while a queued pair is first offered to queue.json
+      // recovery and falls back to regeneration if its manifest/audio is gone.
+      // An aired pair transfers its programme and covered-intro stamp without
+      // reopening the show.
       if (stored?.boundaryHandoff
           && stored.boundaryHandoff.targetKey === sessionKeyFor(ctx)) {
         const next = start(ctx, buildHandoff(stored as Session));

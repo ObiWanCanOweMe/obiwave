@@ -16,6 +16,7 @@
 
 import { z } from 'zod';
 import { queue } from '../broadcast/queue.js';
+import * as session from '../broadcast/session.js';
 import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
@@ -290,7 +291,8 @@ export function buildSituation(ctx, { forced = false, contextFields, recentCurio
   // a long persona's segment is cut after its first sentence, hiding a repeated
   // topic from the anti-repeat instruction.
   const RECAP_CHARS: Record<string, number> = { extended: 360, storyteller: 520 };
-  const recap = queue.getDjRecap({ maxChars: RECAP_CHARS[lengthMode()] ?? 140 });
+  // undefined (concise) falls through to the station's saved recapChars setting.
+  const recap = queue.getDjRecap({ maxChars: RECAP_CHARS[lengthMode()] });
   if (recap) {
     lines.push(`\nWhat you have already said on air recently (do NOT repeat these topics or phrasing):\n${recap}`);
   }
@@ -443,7 +445,8 @@ export async function agenticTick(ctx) {
   // only the VOICE rotates. What is on offer and how often the station talks
   // never depends on who won the mic.
   const persona = settings.getEffectivePersona(now);
-  const speaker = settings.pickOnAirSpeaker(now);
+  const pickedSpeaker = settings.pickOnAirSpeaker(now);
+  const { persona: speaker, hostSpeech } = session.captureAutomaticHostSpeech(pickedSpeaker, now);
   const freq = settings.effectiveFrequency(persona);
 
   // Floor on the gap between any two spoken breaks. lastAnySegment sees only
@@ -552,6 +555,7 @@ export async function agenticTick(ctx) {
       meta: { personaId: speaker?.id, personaName: speaker?.name },
       pauseTalkEligible: true,
       sfx: selectedSfx,
+      hostSpeech,
     });
     if (!delivery.accepted) return;
 
@@ -666,12 +670,12 @@ export interface CapabilityRun {
   reason: string | null;
 }
 
-// Operator override: fire one capability on demand, bypassing cooldowns, the
-// frequency floor, persona ownership and the enable toggle. Backs POST /dj/skill,
-// the per-skill cron and the programme feature beat, which passes `brief` (the
-// episode plan's feature topic, appended so the segment is built around it) and
-// `persona` (the rotated speaker — voice, prompt seat and session attribution
-// move together).
+// Forced capability core shared by POST /dj/skill, per-skill crons and the
+// programme feature beat. All bypass cooldowns, the frequency floor, persona
+// ownership and the enable toggle; automatic callers opt into host-epoch
+// ownership while the operator route deliberately remains unstamped. Programme
+// beats also pass `brief` (the episode feature topic) and `persona` (the rotated
+// speaker, keeping voice, prompt seat and attribution together).
 //
 // Throws on an unknown/unready capability, or on empty output from a skill with
 // no grounds to stand down. Returns `{ aired: false, reason }` when a grounded
@@ -679,8 +683,8 @@ export interface CapabilityRun {
 export async function runCapability(
   which,
   ctx,
-  { brief = null, persona = null, pauseTalkEligible = true }:
-    { brief?: string | null; persona?: { id?: string; name?: string; skills?: string[]; tts?: unknown } | null; pauseTalkEligible?: boolean } = {},
+  { brief = null, persona = null, pauseTalkEligible = true, automaticHostSpeech = false }:
+    { brief?: string | null; persona?: { id?: string; name?: string; skills?: string[]; tts?: unknown } | null; pauseTalkEligible?: boolean; automaticHostSpeech?: boolean } = {},
 ): Promise<CapabilityRun> {
   const cap = allCapabilities().find(c => c.kind === which || c.skill === which);
   if (!cap) throw new Error(`unknown skill: ${which}`);
@@ -734,7 +738,11 @@ export async function runCapability(
     return { aired: true, queued: true, deferred: false, text, reason: result.reason };
   }
 
-  const speaker = persona || settings.getEffectivePersona(new Date());
+  let speaker = persona || settings.getEffectivePersona(new Date());
+  const speechOwner = automaticHostSpeech
+    ? session.captureAutomaticHostSpeech(speaker)
+    : { persona: speaker, hostSpeech: null };
+  speaker = speechOwner.persona;
   // Empty catalogue when SFX are disabled — the agent is never offered effects.
   const sfxCatalog = settings.get().sfx?.enabled === false ? [] : await sfx.catalog();
   const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
@@ -814,12 +822,13 @@ export async function runCapability(
 
   // A rotated speaker rides through announce so voice and session attribution
   // agree (windowMessages names foreign speakers by meta id).
-  const delivery = await queue.announce(text, cap.kind, persona
+  const delivery = await queue.announce(text, cap.kind, (persona || automaticHostSpeech)
     ? {
         persona: speaker,
         meta: { personaId: speaker?.id, personaName: speaker?.name },
         pauseTalkEligible,
         sfx: selectedSfx,
+        hostSpeech: speechOwner.hostSpeech,
       }
     : { pauseTalkEligible, sfx: selectedSfx });
   if (!delivery.accepted) {
