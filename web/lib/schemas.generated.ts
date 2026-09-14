@@ -825,6 +825,22 @@ export function clampTtsSpeed(v: unknown): number {
   return Math.round(c * 20) / 20;
 }
 
+/** Bounds-clamp an effective speech rate without snapping it back to the saved
+ *  controls' 0.05 grid. Products such as 0.90 engine x 1.15 persona are real
+ *  1.035x rates, as are the non-grid daypart/show factors applied on air. */
+export function clampEffectiveTtsSpeed(v: unknown): number {
+  if (v === null || v === undefined || v === '') return TTS_SPEED_DEFAULT;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return TTS_SPEED_DEFAULT;
+  return Math.max(TTS_SPEED_MIN, Math.min(TTS_SPEED_MAX, n));
+}
+
+/** Compose the two saved speed controls for a deterministic persona preview.
+ *  Live programme pacing is deliberately a separate, on-air-only factor. */
+export function composeTtsControlSpeeds(engineSpeed: unknown, personaSpeed: unknown): number {
+  return clampEffectiveTtsSpeed(clampTtsSpeed(engineSpeed) * clampTtsSpeed(personaSpeed));
+}
+
 export interface TtsVoiceSlot {
   engine: string;
   cloudProvider: string;
@@ -2907,6 +2923,13 @@ export const pauseTalkMinSecondsSchema = settingsIntLike(
   'pauseTalkMinSeconds must be a whole number of seconds between 5 and 90',
 );
 
+// The prompt-memory recap injected into every DJ script. The four-hour session
+// roll is the hard ceiling on useful history, and the line/character caps keep
+// an operator typo from consuming the model's whole context window.
+export const DJ_RECAP_LIMIT_BOUNDS: SettingsNumericBound = { min: 1, max: 50 };
+export const DJ_RECAP_MINUTES_BOUNDS: SettingsNumericBound = { min: 1, max: 240 };
+export const DJ_RECAP_CHARS_BOUNDS: SettingsNumericBound = { min: 40, max: 1000 };
+
 // DJ policy controls are grouped so future speaking/transition behaviour has
 // one stable home in Settings. A missing block remains the pre-existing off.
 export const djBehaviourPatchSchema = settingsBlockOf({
@@ -2916,6 +2939,18 @@ export const djBehaviourPatchSchema = settingsBlockOf({
   releaseYearMentions: z.enum(['regular', 'occasional', 'rare'], {
     error: 'djBehaviour.releaseYearMentions must be regular, occasional or rare',
   }),
+  recapLimit: settingsIntLike(
+    DJ_RECAP_LIMIT_BOUNDS,
+    'djBehaviour.recapLimit must be a whole number between 1 and 50',
+  ),
+  recapMinutes: settingsIntLike(
+    DJ_RECAP_MINUTES_BOUNDS,
+    'djBehaviour.recapMinutes must be a whole number of minutes between 1 and 240',
+  ),
+  recapChars: settingsIntLike(
+    DJ_RECAP_CHARS_BOUNDS,
+    'djBehaviour.recapChars must be a whole number between 40 and 1000',
+  ),
 });
 
 /**
@@ -3650,7 +3685,7 @@ export const SHOW_VOCALS = ['instrumental', 'vocal'] as const;
 export type EraWindow = { fromYear: number | null; toYear: number | null };
 
 /**
- * Everything a show can only be judged against from outside itself. Three fields
+ * Everything a show can only be judged against from outside itself. Four fields
  * are NULLABLE and null always means "this caller cannot check that rule", which
  * is how the lenient load path and the strict save path share one schema:
  *
@@ -3658,12 +3693,12 @@ export type EraWindow = { fromYear: number | null; toYear: number | null };
  *   - `themeIds: null` — load has no theme registry; a stale id is harmless.
  *   - `minTrackSeconds: null` — the crossfade-derived floor under BOTH
  *     maxTrackSeconds and minTrackLengthSeconds; load clamps to hard bounds.
- *
- * `personaIds` is NOT nullable: a show whose host does not exist has no owner on
- * either path (strict throws, lenient drops the row).
+ *   - `personaIds: null` — a shape-only caller cannot know the effective roster
+ *     when the same patch may replace it. The strict save path supplies the
+ *     resolved roster and remains the membership chokepoint.
  */
 export interface ShowSchemaContext {
-  personaIds: string[];
+  personaIds: string[] | null;
   moodNames: string[] | null;
   themeIds: string[] | null;
   minTrackSeconds: number | null;
@@ -3842,7 +3877,7 @@ function showObjectSchema(ctx: ShowSchemaContext) {
       ),
       personaId: z
         .string({ error: 'Pick a host persona' })
-        .refine((v) => ctx.personaIds.includes(v), 'must reference an existing persona'),
+        .refine((v) => ctx.personaIds == null || ctx.personaIds.includes(v), 'must reference an existing persona'),
       // Host exclusion and dedupe happen in the object transform below.
       guestPersonaIds: z.preprocess(
         nullToUndefined,
@@ -3850,7 +3885,10 @@ function showObjectSchema(ctx: ShowSchemaContext) {
           .array(
             z
               .string()
-              .refine((v) => ctx.personaIds.includes(v), 'must reference existing personas'),
+              .refine(
+                (v) => ctx.personaIds == null || ctx.personaIds.includes(v),
+                'must reference existing personas',
+              ),
           )
           .max(GUESTS_PER_SHOW, `must have at most ${GUESTS_PER_SHOW} entries`)
           .default([]),

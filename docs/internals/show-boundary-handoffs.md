@@ -55,7 +55,9 @@ or co-host exchange.
    the live session early.
 4. With normal talk placement, air that pair during the final track. With
    **Talk only between tracks**, render it during the final track but hold it
-   for the first real track seam at or after the scheduled boundary.
+   for the first real track seam at or after the scheduled boundary. If no
+   eligible seam arrives within two minutes, release that same rendered pair
+   through the light-duck intro channel rather than waiting without bound.
 5. After the handoff is claimed, suppress ordinary outgoing-presenter speech.
 6. At the real changeover, activate the incoming session and roster; its first
    track then starts under the new show's identity. There is no mandatory
@@ -83,9 +85,14 @@ the corresponding on-air moment.
   cross-persona handoff speech.
 - A top-of-hour check postponed by between-tracks placement must be generated
   under the incoming identity and current clock once the handoff has cleared.
-- A pair rendered for a future seam is **queued**, not aired. That state is
-  persisted with the session so a controller restart regenerates lost WAVs;
-  only the final line's stream-edge marker settles the complete pair as aired.
+- A pair rendered for a future seam is **queued**, not aired. `session.json`
+  persists that lifecycle and the regeneration fallback; `queue.json` persists
+  the rendered clip manifest and its absolute post-boundary deadline. After a
+  controller restart, valid WAVs are reclaimed without another model/TTS run
+  and the remaining wait is re-armed (or fires immediately when overdue). A
+  missing or invalid manifest/audio leaves the session record eligible for the
+  established regeneration path. Only the final line's stream-edge marker
+  settles the complete pair as aired.
 - If the wall-clock session roll wins the race with the final-track marker, the
   armed record transfers to the incoming session and generic roll/drain hooks
   still leave it for the confirmed-track runner.
@@ -118,6 +125,8 @@ Tests should cover at least:
 - no outgoing ordinary speech after the handoff;
 - a host/guest role reversal between adjacent shows;
 - no schedule-fact repetition outside an optional integration's cadence allowance;
+- a real seam before the two-minute bound, and light-duck fallback when no seam arrives;
+- a controller restart that preserves the rendered pair and its original deadline;
 
 ## Resolved live finding — 8 September 2026
 

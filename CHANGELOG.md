@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.16.0](https://github.com/perminder-klair/subwave/compare/v1.15.0...v1.16.0) (2026-09-14)
+
+
+### Features
+
+* **controller:** make the DJ anti-repeat recap configurable in settings ([#1667](https://github.com/perminder-klair/subwave/issues/1667)) ([d48be93](https://github.com/perminder-klair/subwave/commit/d48be931c8683819062e1189579010436fe65ce2))
+* **library:** preserve data across Navidrome 0.64 ID migration ([#1255](https://github.com/perminder-klair/subwave/issues/1255)) ([c7da09c](https://github.com/perminder-klair/subwave/commit/c7da09c13d9df26dd22b04e72a82524574c51a02))
+* **tts:** apply speech rate to remote audio ([#1677](https://github.com/perminder-klair/subwave/issues/1677)) ([a237645](https://github.com/perminder-klair/subwave/commit/a2376455c398b2e8da80e97675743e93ba83312a))
+
+
+### Bug Fixes
+
+* **analyzer:** recover audio from byte-capped FLAC ([#1674](https://github.com/perminder-klair/subwave/issues/1674)) ([4e73b0d](https://github.com/perminder-klair/subwave/commit/4e73b0d9bb8036fcd8a201caf53e94c83f01db6d))
+* **broadcast:** refresh active show host and discard stale speech ([#1675](https://github.com/perminder-klair/subwave/issues/1675)) ([040dbc0](https://github.com/perminder-klair/subwave/commit/040dbc0fdb11ecbb4617d51b2276994b39c9de61))
+* **controller:** hold API readiness until startup recovery completes ([#1679](https://github.com/perminder-klair/subwave/issues/1679)) ([1103567](https://github.com/perminder-klair/subwave/commit/110356733cf35d51e65fc391cdaa052455545964))
+* **library:** serialize state writes during ID migration ([#1682](https://github.com/perminder-klair/subwave/issues/1682)) ([4aba4b4](https://github.com/perminder-klair/subwave/commit/4aba4b468732c45254660c673f8b166976a20f97))
+* offer timely boundary handoffs ([#1665](https://github.com/perminder-klair/subwave/issues/1665)) ([d153473](https://github.com/perminder-klair/subwave/commit/d15347334c5a23ff41d50f8d3e5b6c2decd4d731))
+* **picker:** anchor pool fallback on the queued predecessor ([#1676](https://github.com/perminder-klair/subwave/issues/1676)) ([a402fc5](https://github.com/perminder-klair/subwave/commit/a402fc549d33b305eff7e6d1b86423c433f8315b))
+* **settings:** let shows ride in a settings patch ([#1661](https://github.com/perminder-klair/subwave/issues/1661)) ([51dc6de](https://github.com/perminder-klair/subwave/commit/51dc6ded259c268209ab25a666558e9b954f7a7c))
+
 ## [1.15.0](https://github.com/perminder-klair/subwave/compare/v1.14.0...v1.15.0) (2026-09-10)
 
 

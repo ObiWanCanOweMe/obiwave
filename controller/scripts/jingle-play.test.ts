@@ -62,7 +62,9 @@ function runFreshController(state: string, sourceBody: string) {
 }
 
 // Runs one controller process with a real atomic-file implementation whose
-// first pre-jingle session snapshot is deliberately held after serialisation.
+// first pre-jingle session snapshot is observed. An asynchronous write is held
+// after serialisation; the synchronous current-session writer completes before
+// yielding. Both must keep the later authenticated turn durable.
 // Module mocking is limited to that timing seam: queue/session still operate
 // against actual files, and the nested process mimics a controller crash.
 function runWithHeldPreJingleSessionWrite(state: string, sourceBody: string) {
@@ -75,8 +77,17 @@ function runWithHeldPreJingleSessionWrite(state: string, sourceBody: string) {
     const oldSerializedReady = new Promise(resolve => { oldSerialized = resolve; });
     let oldFinished;
     const oldFinishedReady = new Promise(resolve => { oldFinished = resolve; });
+    const atomic = await import(${JSON.stringify(ATOMIC_FILE_URL)});
     await mock.module(${JSON.stringify(ATOMIC_FILE_URL)}, {
       namedExports: {
+        ...atomic,
+        writeFileAtomicSync: (path, contents, options) => {
+          const staleSessionSnapshot = path.endsWith('/session.json')
+            && !String(contents).includes('manualJingleId');
+          if (staleSessionSnapshot) oldSerialized();
+          atomic.writeFileAtomicSync(path, contents, options);
+          if (staleSessionSnapshot) oldFinished();
+        },
         writeFileAtomic: async (path, contents, { mode } = {}) => {
           const staleSessionSnapshot = path.endsWith('/session.json')
             && !String(contents).includes('manualJingleId');
