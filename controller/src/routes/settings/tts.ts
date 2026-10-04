@@ -38,9 +38,13 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
       voice: typeof body.voice === 'string' ? body.voice : '',
       cloudProvider: typeof body.cloudProvider === 'string' ? body.cloudProvider : 'openai',
       cloudModel: typeof body.cloudModel === 'string' ? body.cloudModel : undefined,
+      // The UNSAVED Gemini model, so "Play sample" auditions the dropdown choice
+      // rather than the saved station model.
+      geminiModel: typeof body.geminiModel === 'string' ? body.geminiModel : undefined,
       speed: typeof body.speed === 'number' ? body.speed : undefined,
       lang: typeof body.lang === 'string' ? body.lang : undefined,
       language: typeof body.language === 'string' ? body.language : undefined,
+      voiceStyle: typeof body.voiceStyle === 'string' ? body.voiceStyle : undefined,
       text: typeof body.text === 'string' ? body.text : undefined,
       corrections: Array.isArray(body.corrections) ? body.corrections : undefined,
       voiceSettings: (body.voiceSettings && typeof body.voiceSettings === 'object')

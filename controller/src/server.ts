@@ -17,7 +17,7 @@ import * as chatterbox from './audio/chatterbox.js';
 import * as pocketTts from './audio/pocketTts.js';
 import { getFullContext } from './context.js';
 import { loadCuriosityLedger } from './skills/curiosity.js';
-import { startScheduler } from './broadcast/scheduler.js';
+import { startScheduler, flushPendingAutoPlaylist } from './broadcast/scheduler.js';
 import { startListenerMonitor } from './broadcast/listeners.js';
 import { startStreamIdleMonitor } from './broadcast/stream-idle.js';
 import { startAudienceMonitor } from './broadcast/audience.js';
@@ -26,6 +26,7 @@ import { cors } from './middleware/cors.js';
 import { createStartupGate } from './middleware/startup.js';
 import { assertAdminConfigured } from './middleware/auth.js';
 import { router as publicRoutes } from './routes/public.js';
+import { router as authRoutes } from './routes/auth.js';
 import { router as requestRoutes } from './routes/request.js';
 import { router as settingsRoutes } from './routes/settings.js';
 import { router as jingleRoutes } from './routes/jingles.js';
@@ -128,6 +129,7 @@ app.use(startup.middleware);
 
 // Routes. `requireAdmin` is applied per-route inside the admin modules.
 app.use(publicRoutes);
+app.use(authRoutes);
 app.use(requestRoutes);
 app.use(settingsRoutes);
 app.use(jingleRoutes);
@@ -310,7 +312,7 @@ app.listen(config.server.port, async () => {
   // every restart (#1256). Bounded internally, so never a boot hang.
   await startListenerMonitor();
   queue.startWatcher();
-  startStreamIdleMonitor();
+  await startStreamIdleMonitor(flushPendingAutoPlaylist);
   startAudienceMonitor().catch(err => console.error('[audience] init failed:', err.message));
   // Up front so the sync readers see data from the first pick.
   await likes.load().catch(err => console.error('[likes] init failed:', err.message));

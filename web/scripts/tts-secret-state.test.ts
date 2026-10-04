@@ -23,7 +23,10 @@ const TEST_CHROME = {
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const ENGINE_IDS = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'];
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout } });
+Object.defineProperty(globalThis, 'HTMLFormElement', { configurable: true, value: class HTMLFormElement {} });
+
+const ENGINE_IDS = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote', 'gemini'];
 
 const FORM = {
   handoverOffsetMinutes: '5',
@@ -39,6 +42,7 @@ const FORM = {
     kokoro: { voice: '' },
     chatterbox: { referenceVoice: '' },
     pocketTts: { voice: 'alba' },
+    gemini: { model: '', voice: 'Puck', pronunciation: '' },
     cloud: {
       enabled: true,
       provider: 'openai-compatible',
@@ -91,12 +95,16 @@ async function renderTtsSection(
   renderer: ReactTestRenderer;
   input: () => ReactTestInstance;
   isUnsaved: () => boolean;
+  getForm: () => FormState;
+  setGemini: (patch: Partial<FormState['tts']['gemini']>) => Promise<void>;
   setFallback: (patch: Partial<FormState['tts']['fallback']>) => Promise<void>;
   save: () => Promise<void>;
 }> {
+  let currentForm!: FormState;
   let updateForm!: (updater: (current: FormState) => FormState) => void;
   function Harness() {
     const [form, setForm] = useState(FORM);
+    currentForm = form;
     updateForm = updater => setForm(current => updater(current));
     return createElement(
       SectionChromeProvider,
@@ -132,6 +140,15 @@ async function renderTtsSection(
   return {
     renderer,
     input,
+    getForm: () => currentForm,
+    setGemini: async patch => {
+      await act(async () => {
+        updateForm(current => ({
+          ...current,
+          tts: { ...current.tts, gemini: { ...current.tts.gemini, ...patch } },
+        }));
+      });
+    },
     isUnsaved: () => textContent(renderer.root).includes('Your edits below aren’t live until you Save.'),
     setFallback: async patch => {
       await act(async () => {
@@ -158,6 +175,23 @@ async function main() {
   reactDom.createPortal = ((children) => children) as typeof reactDom.createPortal;
   ({ SectionChromeProvider } = await import('../components/admin/settings/section-chrome.tsx'));
   ({ TtsSection } = await import('../components/admin/settings/TtsSection.tsx'));
+
+  const { CloudProviderSelector } = await import('../components/admin/tts/CloudProviderSelector.tsx');
+  const geminiView = await renderTtsSection(async () => true);
+  await act(async () => {
+    geminiView.renderer.root.findByType(CloudProviderSelector).props.onChange('gemini');
+  });
+  assert.equal(geminiView.getForm().tts.defaultEngine, 'gemini', 'Gemini provider card selects its dedicated engine');
+  assert.equal(geminiView.getForm().tts.cloud.provider, 'openai-compatible', 'Gemini must preserve the compatible provider and credential ownership');
+  await act(async () => { geminiView.renderer.unmount(); });
+
+  for (const patch of [{ model: 'gemini-3.8-flash-tts' }, { voice: 'Kore' }, { pronunciation: 'Sook rhymes with look' }]) {
+    const dirtyView = await renderTtsSection(async () => true);
+    assert.equal(dirtyView.isUnsaved(), false, 'an absent saved Gemini block starts clean at upgrade defaults');
+    await dirtyView.setGemini(patch);
+    assert.equal(dirtyView.isUnsaved(), true, 'a Gemini edit is marked unsaved');
+    await act(async () => { dirtyView.renderer.unmount(); });
+  }
 
   const fallbackEdits: { name: string; patch: Partial<FormState['tts']['fallback']> }[] = [
     { name: 'enabled', patch: { enabled: true } },
