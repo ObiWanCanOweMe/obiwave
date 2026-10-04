@@ -705,6 +705,7 @@ export const PERSONA_LIMIT = 48;
 export const PERSONA_NAME_MAX = 40;
 export const PERSONA_TAGLINE_MAX = 80;
 export const PERSONA_LANGUAGE_MAX = 60;
+export const PERSONA_VOICE_STYLE_MAX = 300;
 // A soul rides in the system prompt on every call: a per-call token cost.
 export const PERSONA_SOUL_MAX = 2000;
 export const PERSONA_SKILLS_LIMIT = 64;
@@ -762,6 +763,7 @@ export const TTS_ENGINES = [
   'pocket-tts',
   'cloud',
   'remote',
+  'gemini',
 ] as const;
 
 /**
@@ -782,6 +784,38 @@ export const PERSONA_TTS_ENGINES = [PERSONA_TTS_INHERIT, ...TTS_ENGINES] as cons
  * chosen without knowing the engine fails the synth or 400s there.
  */
 export const TTS_INHERITABLE_VOICE_ENGINES = ['piper', 'kokoro'] as const;
+
+// ── Gemini TTS vocabularies ──────────────────────────────────────────────────
+//
+// MODELS — verified through the EXACT request gemini.ts builds (`/interactions`
+// with a `speech_metadata` annotation AND a `speech_config` voice), because a
+// model that synthesises audio through generateContent can still 400 on every
+// render through this engine. The engine always sends a speech annotation,
+// because per-persona voiceStyle is sent on every turn:
+//
+//   gemini-3.1-flash-tts-preview  -> "Speech metadata is not supported for this model."
+//   gemini-2.5-flash-preview-tts -> "Speech annotations are not supported for model"
+//   gemini-2.5-pro-preview-tts   -> "Speech annotations are not supported for model"
+//
+// They are deliberately ABSENT rather than offered-and-broken. Unlocking them
+// means the engine has to omit an empty annotation, which it cannot do while a
+// persona's voiceStyle may be set — a separate decision, not a dropdown entry.
+//
+// VOICES — the 30 prebuilt studio voices, verified by rendering through each.
+// `GET /v1beta/voices` is NOT the source: it is the Live/native-audio catalogue
+// (1000 rows, 198 unique), which omits Puck/Zephyr/Kore entirely.
+export const GEMINI_TTS_MODELS = [
+  'gemini-3.8-flash-lite-tts',
+  'gemini-3.8-flash-tts',
+] as const;
+
+export const GEMINI_TTS_VOICES = [
+  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
+  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
+  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
+  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat',
+] as const;
 
 export const TTS_CLOUD_PROVIDERS = [
   'openai',
@@ -924,10 +958,12 @@ export function ttsVoiceSlotSchema(where: string, opts?: { allowInherit?: boolea
       } else if (voice.length < 1 || voice.length > TTS_VOICE_MAX) {
         return fail(`${where}.voice must be 1-${TTS_VOICE_MAX} chars`);
       }
-    } else if (engine === 'remote' || engine === PERSONA_TTS_INHERIT) {
-      // remote: sidecar-interpreted ids. inherit: no engine is known yet, so no
-      // per-engine rule can apply (resolvePersonaVoiceSlot decides at speak
-      // time). Both leave only the length cap, and empty is valid.
+    } else if (engine === 'remote' || engine === 'gemini' || engine === PERSONA_TTS_INHERIT) {
+      // remote: sidecar-interpreted ids. gemini: a Google voice name, or a
+      // designed/replicated `voice_…`/`voicekey_…` handle, or empty for the
+      // station floor. inherit: no engine is known yet, so no per-engine rule
+      // can apply (resolvePersonaVoiceSlot decides at speak time). All three
+      // leave only the length cap, and empty is valid.
       if (voice.length > TTS_VOICE_MAX) {
         return fail(`${where}.voice must be 0-${TTS_VOICE_MAX} chars`);
       }
@@ -1004,6 +1040,9 @@ export function repairTtsVoiceSlot(raw: unknown, opts?: { allowInherit?: boolean
     engine !== 'chatterbox' &&
     engine !== 'piper' &&
     engine !== 'remote' &&
+    // gemini reads a Google voice id (or empty = the station floor), so a
+    // Kokoro id here would be spoken as gibberish rather than merely unused.
+    engine !== 'gemini' &&
     engine !== PERSONA_TTS_INHERIT
   ) {
     voice = 'bf_isabella';
@@ -1052,6 +1091,7 @@ export interface PersonaParsed {
   warmth: number;
   soul: string;
   language: string;
+  voiceStyle: string;
   avatar: string;
   tts: TtsVoiceSlot;
   skills: string[] | null;
@@ -1112,6 +1152,12 @@ export const personaSchema = z
         .string({ error: 'language must be a string' })
         .trim()
         .max(PERSONA_LANGUAGE_MAX, `language must be 0-${PERSONA_LANGUAGE_MAX} chars`)
+        .default(''),
+    ),
+    voiceStyle: z.preprocess(
+      personaNullToUndefined,
+      z.string({ error: 'voiceStyle must be a string' }).trim()
+        .max(PERSONA_VOICE_STYLE_MAX, `voiceStyle must be 0-${PERSONA_VOICE_STYLE_MAX} chars`)
         .default(''),
     ),
     frequency: z.enum(PERSONA_FREQUENCIES, {
@@ -1211,6 +1257,7 @@ export const personaSchema = z
       warmth: p.warmth,
       soul: p.soul,
       language: p.language,
+      voiceStyle: p.voiceStyle,
       avatar: p.avatar,
       tts: p.tts,
       skills: p.skills,
@@ -1248,6 +1295,9 @@ export function repairPersonaForLoad(
       typeof raw.language === 'string'
         ? raw.language.trim().slice(0, PERSONA_LANGUAGE_MAX)
         : undefined,
+    voiceStyle: typeof raw.voiceStyle === 'string'
+      ? raw.voiceStyle.trim().slice(0, PERSONA_VOICE_STYLE_MAX)
+      : undefined,
     frequency: (PERSONA_FREQUENCIES as readonly string[]).includes(raw.frequency as string)
       ? raw.frequency
       : 'moderate',
@@ -2382,6 +2432,23 @@ export const LLM_HEADER_VALUE_RE = /^[\x20-\x7E]+$/;
 /** At most this many custom headers per leg, and this long a value. */
 export const LLM_HEADERS_MAX = 10;
 export const LLM_HEADER_VALUE_MAX = 500;
+
+// Native Google safety flags are independent per LLM leg. Only a literal true
+// enables blocking; absent or malformed flags preserve the permissive default.
+const geminiSafetyFlagSchema = z.unknown().transform((raw) => raw === true).default(false);
+export const geminiSafetySchema = z.object({
+  harassment: geminiSafetyFlagSchema,
+  hateSpeech: geminiSafetyFlagSchema,
+  sexuallyExplicit: geminiSafetyFlagSchema,
+  dangerousContent: geminiSafetyFlagSchema,
+});
+export type GeminiSafety = z.output<typeof geminiSafetySchema>;
+
+export function normalizeGeminiSafety(raw: unknown): GeminiSafety {
+  return geminiSafetySchema.parse(
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {},
+  );
+}
 
 /** Path length cap for `stream.geoipDbPath` — a generous PATH_MAX. */
 export const STREAM_GEOIP_DB_PATH_MAX = 512;

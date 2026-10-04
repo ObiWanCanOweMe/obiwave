@@ -44,11 +44,15 @@ export interface VoicePickerPreviewParams {
   engine: string;
   cloudProvider?: string;
   cloudModel?: string;
+  // Gemini's own model id, so "Play sample" auditions the UNSAVED choice rather
+  // than the saved station model. Mirrors cloudModel above.
+  geminiModel?: string;
   speed?: number;
   lang?: string;
   // Persona's free-text on-air language — the server renders the sample
   // sentence in this language when it recognizes it.
   language?: string;
+  voiceStyle?: string;
   fishSettings?: {
     temperature: number;
     topP: number;
@@ -126,6 +130,8 @@ export function VoicePicker({
         speed: preview.speed,
         lang: preview.lang,
         language: preview.language,
+        voiceStyle: preview.voiceStyle,
+        geminiModel: preview.geminiModel,
         fishSettings: preview.fishSettings,
       }, ac.signal);
     } catch (e) {

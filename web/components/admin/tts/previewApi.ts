@@ -11,6 +11,9 @@ export interface PreviewParams {
   cloudProvider?: string;
   // Unsaved model id so the sample uses the exact provider/tier selection.
   cloudModel?: string;
+  // Gemini's own model id, so an unsaved dropdown choice is what gets
+  // auditioned rather than the saved station model.
+  geminiModel?: string;
   // Final rate multiplier to audition (server clamps to 0.5–2.0×).
   speed?: number;
   // Kokoro phonemizer language override (e.g. "en-gb", "ja").
@@ -18,6 +21,7 @@ export interface PreviewParams {
   // Free-text on-air language ("Turkish", "Türkçe"); the server renders the sample
   // sentence in it, falling back to English when it doesn't recognize it.
   language?: string;
+  voiceStyle?: string;
   // Explicit sample text, overriding both the default sentence and the
   // language-localized one. Truncated server-side at PREVIEW_TEXT_MAX (200).
   text?: string;
