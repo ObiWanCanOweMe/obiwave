@@ -1,6 +1,6 @@
 {
   "name": "sub-wave-web",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -74,8 +74,8 @@
     "motion": "^12.40.0",
     "nanoid": "^6.0.0",
     "next": "^16.3.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "react-hook-form": "^7.84.0",
     "shiki": "^4.3.1",
     "sonner": "^2.0.7",
@@ -101,7 +101,7 @@
     "eslint-plugin-better-tailwindcss": "^4.5.0",
     "eslint-plugin-react": "^7.37.5",
     "postcss": "^8.4.0",
-    "react-test-renderer": "^19.2.0",
+    "react-test-renderer": "19.2.8",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.19.2",
     "typescript": "5.8.2",

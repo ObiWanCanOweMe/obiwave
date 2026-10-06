@@ -219,3 +219,5 @@ export interface DebugData {
   mounts?: DebugMounts;
   error?: string;
 }
+
+export type { PlaybackFailureHistory } from '../../../lib/schemas.generated';

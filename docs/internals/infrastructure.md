@@ -77,6 +77,29 @@ The sidecar half is **N independent single-flight worker processes**, not one wo
 
 - **Multi-station profiles**: `state/stations/<id>/` + `stations/active.json` decide the ACTIVE station dir, resolved once per boot in four places — `config.ts` (`STATE_DIR` = resolved dir, `STATE_ROOT` = root), `radio.liq` (`SUBWAVE_STATE_DIR` env), `docker/broadcast-entrypoint.sh`, and the AIO supervisor (kept in lockstep). No `stations/` dir → single-station, everything at the root as before. Switching = pointer write + mixer restart + controller `process.exit` (docker restart policy reboots both against the new dir) — never hot-swap state paths in-process. Only `icecast-secrets.env`, `hf-cache`, `analyze-tmp` stay install-level at the root (`conversionAction` in `stations/pure.ts` is the classifier; new root-level state files must be classified there and in `duplicateAction`). State files holding **absolute paths** must be re-derived at boot rather than trusted — `jingles.m3u` is the one such file today (`ensureDefaultIdent` rewrites it every boot so conversion/duplicate can't leave it pointing at a moved dir).
 
+Navidrome connection precedence lives in `setup/navidrome-policy.ts`. The
+controller and both maintenance workers call `loadNavidromeConfig`; setup
+status and admin environment locks use the same policy. Once `stations/`
+exists, only the active profile's `setup-config.json` supplies its connection.
+Conversion saves the original station's effective connection before restarting.
+Before this policy applies, `stations/navidrome-migration.ts` runs synchronously
+from `config.ts`. Its first boot freezes all unmarked profile IDs and their
+legacy effective connections in a private, atomic, fsynced journal under
+`stations/navidrome-migration.json`. Truthy environment fields override saved
+fields independently, including complete saved connections. Replay uses the
+snapshot, not the current environment, and skips profiles marked
+`navidromePolicy: 'profile-v1'` in their card or setup config. Creates and
+conversions mark the card; multi-station connection saves mark the setup config.
+Only successful persistence of the whole cohort replaces the journal with a
+credential-free completion record. Persistence failures stop controller boot
+with a fixed error that cannot include JSON or credential text. A completed
+journal never expands its cohort. #1777 did not stamp its writes, so operators
+must explicitly mark profiles reconfigured during that interval before their
+first migration boot; see `docs/multi-station.md`. Do not infer policy from
+file timestamps or reintroduce an indefinite environment fallback.
+Duplication omits music credentials, the library database and playlist recipes,
+and clears show playlist IDs in both current and legacy settings storage.
+
 **Ark TTS residency.** The Portainer manifest pins `TTS_HEAVY_IDLE_UNLOAD_S=0`: its readiness contract requires both engines loaded and Chatterbox attested on CUDA. Upstream idle unloading remains available in the standalone compose deployments; a cold engine is not a ready Ark engine.
 
 **Portainer asynchronous updates.** Portainer 2.45 returns stack status `3` while Compose is still deploying. The release client polls until terminal status before verifying containers. A lost update response is also potentially accepted work: the pending flag is set before sending the PUT. If that request or later polling fails or times out, the client retains the pending operation and must establish completion before sending rollback. Status reads, sleeps, and the update request share a bounded deadline; server error bodies are never printed.
