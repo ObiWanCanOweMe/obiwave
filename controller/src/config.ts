@@ -1,8 +1,11 @@
 // Centralised config — reads from env, with sensible defaults
 
+import { existsSync } from 'node:fs';
+import { resolveNavidrome } from './setup/navidrome-policy.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { resolveActiveStationDir } from './stations/resolve.js';
+import { migrateNavidromeProfiles } from './stations/navidrome-migration.js';
 import { envEnum, envFloat, envInt, envStr, envUrl } from './util/env.js';
 import { resolveVerifierProvenance } from './util/verify-provenance.js';
 
@@ -11,10 +14,16 @@ import { resolveVerifierProvenance } from './util/verify-provenance.js';
 export const STATE_ROOT = process.env.STATE_DIR
   || resolve(dirname(fileURLToPath(import.meta.url)), '../../state');
 
+// A code/image replacement must preserve legacy connections before the new
+// profile-only policy takes effect, including profiles that are currently idle.
+migrateNavidromeProfiles(STATE_ROOT);
+
 // The ACTIVE station's state dir — every file-based IPC channel lives here.
 // Single-station installs resolve to the root. Resolved once per boot: switching
 // stations restarts this process.
 export const STATE_DIR = resolveActiveStationDir(STATE_ROOT);
+// Captured at boot, like STATE_DIR. Conversion takes effect after restart.
+export const NAVIDROME_ENV_ENABLED = !existsSync(resolve(STATE_ROOT, 'stations'));
 
 // Relocated stem-cache root, as a CONTAINER path (the operator's STEMS_DIR is a
 // HOST path and means nothing in here). Empty = no relocation; music/stem-cache.ts
@@ -44,9 +53,7 @@ export const config = {
   stemsDir: STEMS_DIR,
   soundsDir: SOUNDS_DIR,
   navidrome: {
-    url: envUrl('NAVIDROME_URL', 'http://navidrome:4533'),
-    user: envStr('NAVIDROME_USER', ''),
-    password: process.env.NAVIDROME_PASS || '',
+    ...resolveNavidrome({}, NAVIDROME_ENV_ENABLED),
     apiVersion: '1.16.1',
     clientName: 'sub-wave',
     // Per-request cap on Subsonic calls; without one a hung Navidrome stacks up

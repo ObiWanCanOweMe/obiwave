@@ -16,9 +16,10 @@ for (const module of ['store', 'normalize', 'validate', 'liquidsoap']) {
 assert.ok(
   // The fork's provider-owned credentials, search providers, and private-station
   // settings extend the upstream entry point while preserving its split modules.
-  // v1.17 adds Gemini TTS/safety and request timeouts; the split remains intact.
-  settings.split('\n').length <= 2700,
-  'settings entry must not exceed 2,700 lines',
+  // v1.18 adds nonpublishing settings preflight and Gemini library fields;
+  // the split remains intact.
+  settings.split('\n').length <= 2750,
+  'settings entry must not exceed 2,750 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {

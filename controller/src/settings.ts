@@ -106,6 +106,7 @@ import { validateCompatParams } from './settings/compat-params.js';
 // beside the engine that enforces it (web/lib/geminiLimits.ts mirrors it for the
 // admin field, pinned by scripts/gemini-tts-settings.test.ts).
 import { GEMINI_PRONUNCIATION_MAX } from './audio/gemini.js';
+import { isLibraryVoice, looksLikeLibraryId } from './audio/gemini-library.js';
 import { parseSettingsPatchKey } from './settings/patch-registry.js';
 import {
   DJ_RECAP_CHARS_BOUNDS,
@@ -118,6 +119,8 @@ import {
   STREAM_GEOIP_DB_PATH_MAX,
   STREAM_MAX_LISTENERS_BOUNDS,
   maxTrackSecondsValueSchema,
+  isGeminiLibraryLanguage,
+  normalizeGeminiLibraryLanguage,
   type ScheduledBackupSettings,
   type JingleRotateOwner,
 } from './schemas/settings.js';
@@ -260,6 +263,7 @@ export {
   effectiveFadeAtShowEnd,
   effectiveFrequency,
   effectiveMaxTrackSec,
+  effectiveTrackLengthLimits,
   effectiveMinTrackSec,
   effectsActive,
   getActivePersona,
@@ -457,6 +461,7 @@ export async function load() {
       voice: normalizeDuckDepth(stored.ducking?.voice, DEFAULTS.ducking.voice),
       intro: normalizeDuckDepth(stored.ducking?.intro, DEFAULTS.ducking.intro),
     },
+    maxTrackLengthMode: stored.maxTrackLengthMode === 'exclude' ? 'exclude' : 'cut',
     maxTrackSeconds: coerceMaxTrackSeconds(rawMaxTrackSec(stored), false) ?? DEFAULTS.maxTrackSeconds,
     // Station default for the show-boundary fade (#1574). Anything but an
     // explicit boolean reads as the shipped default (off), which is what makes
@@ -839,6 +844,12 @@ export async function load() {
           typeof stored.tts?.gemini?.pronunciation === 'string'
             ? stored.tts.gemini.pronunciation.trim().slice(0, GEMINI_PRONUNCIATION_MAX)
             : DEFAULTS.tts.gemini.pronunciation,
+        // Lenient load: a value that is not a language tag reads as "no filter"
+        // rather than throwing, so a hand-edited or truncated settings.json
+        // cannot wedge boot. Same posture as every other lenient branch here.
+        libraryLanguage: isGeminiLibraryLanguage(stored.tts?.gemini?.libraryLanguage)
+          ? normalizeGeminiLibraryLanguage(stored.tts?.gemini?.libraryLanguage)
+          : DEFAULTS.tts.gemini.libraryLanguage,
       },
       cloud: {
         // Explicit boolean wins; otherwise an install that already had a saved
@@ -1331,10 +1342,9 @@ export function searchKeyFor(
 // Lenient normalizer — used by load(). Drops invalid entries silently rather
 // than failing the whole boot.
 
-// Serialize from the initial cache read through validation and persistence.
-// Theme/avatar I/O can pause validation: ordering only the final writes would
-// let an older update later publish stale show pins after rotation acknowledged
-// its journal. Keep each caller's failure while allowing later updates to retry.
+// Serialize the entire update, including asynchronous preparation and avatar
+// cleanup, so a later caller cannot publish settings composed from stale state.
+// A failed caller must not poison the queue for subsequent settings saves.
 let pendingSettingsUpdate: Promise<unknown> = Promise.resolve();
 
 export function update(patch) {
@@ -1343,7 +1353,8 @@ export function update(patch) {
   return next;
 }
 
-async function applySettingsUpdate(patch) {
+/** Validate and compose a patch without persisting it or publishing its effective settings. */
+export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySet<string> } = {}) {
   const cur = await load();
   const next = JSON.parse(JSON.stringify(cur));
   const inheritedEmbeddingProvider = next.embedding.provider
@@ -1395,6 +1406,9 @@ async function applySettingsUpdate(patch) {
       next.ducking.intro = dk.intro;
       restart = true;
     }
+  }
+  if ('maxTrackLengthMode' in patch) {
+    next.maxTrackLengthMode = parseSettingsPatchKey('maxTrackLengthMode', patch.maxTrackLengthMode);
   }
   if ('maxTrackSeconds' in patch || 'maxTrackMinutes' in patch) {
     // The bound lives once, in the shared schema — this applies it to the
@@ -1572,7 +1586,8 @@ async function applySettingsUpdate(patch) {
       // and the serve-time fallback in GET /themes, and the same precedent as the
       // activeDjPromptId reset. Throwing here aborted the whole restore for any
       // install whose active theme id had since been retired (issue #917).
-      next.theme.active = (await isValidThemeId(v)) ? v : DEFAULT_THEME_ID;
+      const valid = themeIds ? themeIds.has(v) : await isValidThemeId(v);
+      next.theme.active = valid ? v : DEFAULT_THEME_ID;
       if (next.theme.active !== v) {
         console.warn(`[theme] active theme "${v}" is not a known theme id — falling back to "${DEFAULT_THEME_ID}"`);
       }
@@ -1711,7 +1726,7 @@ async function applySettingsUpdate(patch) {
     // Snapshot the theme registry once so the validator can stay sync.
     // listThemes() returns built-ins + cached user themes (30 s TTL) — same
     // source the picker reads.
-    const allowedThemeIds = new Set((await listThemes()).map(t => t.id));
+    const allowedThemeIds = themeIds ? new Set(themeIds) : new Set((await listThemes()).map(t => t.id));
     next.shows = validateShowsStrict(patch.shows, next.personas, allowedThemeIds, moodNames);
   }
   if ('schedule' in patch) {
@@ -1838,8 +1853,20 @@ async function applySettingsUpdate(patch) {
         // `voicekey_…`) is deliberately NOT in this list: it is an opaque
         // per-project handle this code cannot validate, and refusing it would
         // break custom voices outright.
-        if (v && !/^(voice|voicekey)_/i.test(v) && !(GEMINI_TTS_VOICES as readonly string[]).includes(v)) {
-          throw new Error(`tts.gemini.voice must be one of: ${GEMINI_TTS_VOICES.join(', ')} (or a voice_… / voicekey_… id)`);
+        //
+        // The Extended Voice Library adds a third accepted form, and this check
+        // is LOOSER than the runtime gate on purpose: the membership index can
+        // be cold (no key, or Google unreachable at boot), and refusing to save
+        // a real voice the operator just browsed to would be the worse failure.
+        // `looksLikeLibraryId` catches obvious garbage; anything that slips
+        // through degrades at speak time to the station voice, which is the
+        // graceful path that already exists.
+        if (v
+          && !/^(voice|voicekey)_/i.test(v)
+          && !(GEMINI_TTS_VOICES as readonly string[]).includes(v)
+          && !isLibraryVoice(v)
+          && !looksLikeLibraryId(v)) {
+          throw new Error(`tts.gemini.voice must be one of: ${GEMINI_TTS_VOICES.join(', ')}, a voice_… / voicekey_… id, or a voice from the Extended Voice Library`);
         }
         if (!v) throw new Error('tts.gemini.voice must not be blank');
         next.tts.gemini.voice = v;
@@ -1854,6 +1881,21 @@ async function applySettingsUpdate(patch) {
           throw new Error(`tts.gemini.pronunciation must be at most ${GEMINI_PRONUNCIATION_MAX} characters`);
         }
         next.tts.gemini.pronunciation = v;
+      }
+      if (gm.libraryLanguage !== undefined) {
+        // A BCP-47 tag or empty ("every language"). Validated SHAPE-only: the
+        // set of languages Google serves is a moving target and a static enum
+        // here would refuse a tag the operator can plainly see in AI Studio.
+        // Canonicalised so the admin dropdown cannot hold three spellings of one
+        // language. Saving this is never required to make a voice work — it only
+        // chooses which page of the catalogue the browser opens on.
+        const v = normalizeGeminiLibraryLanguage(gm.libraryLanguage);
+        if (!isGeminiLibraryLanguage(v)) {
+          throw new Error(
+            `tts.gemini.libraryLanguage must be a BCP-47 language tag such as en-AU, or blank for every language`,
+          );
+        }
+        next.tts.gemini.libraryLanguage = v;
       }
     }
     if (t.cloud !== undefined) {
@@ -2594,6 +2636,16 @@ async function applySettingsUpdate(patch) {
     }
     if (!personaIds.includes(next.activePersonaId)) next.activePersonaId = personaIds[0];
 
+  }
+
+  return { saved: next, requiresRestart: restart };
+}
+
+async function applySettingsUpdate(patch) {
+  const cur = await load();
+  const { saved: next, requiresRestart: restart } = await prepareUpdate(patch);
+  {
+    const personaIds = next.personas.map(p => p.id);
     // Garbage-collect avatar files for personas that no longer exist. Best
     // effort — a missing directory or a vanished file is fine, this just
     // keeps the on-disk state from accumulating dead images.

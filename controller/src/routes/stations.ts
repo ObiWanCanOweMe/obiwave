@@ -8,7 +8,7 @@ import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { stationCreateSchema, stationRenameSchema, type StationCreate } from '../schemas/station.js';
-import { STATE_ROOT } from '../config.js';
+import { config, STATE_ROOT } from '../config.js';
 import { envHasNavidrome } from '../setup/firstRun.js';
 import { MAX_STATIONS } from '../stations/pure.js';
 import * as settings from '../settings.js';
@@ -17,7 +17,6 @@ import {
   StationMutationConflictError,
   stationMutationGuard,
 } from '../stations/lifecycle.js';
-import * as libraryDb from '../music/library-db.js';
 import { restartLiquidsoap } from '../broadcast/liquidsoap-control.js';
 
 export const router = express.Router();
@@ -114,14 +113,10 @@ router.post('/stations', requireAdmin, validateBody(stationCreateSchema), async 
         name,
         mode,
         currentName: currentName(),
-        // Fresh installs may never have opened library.db — a duplicate without
-        // the analysis cache is still a valid station, so tolerate failure.
-        backupLibraryDb: async (dest) => {
-          try {
-            await libraryDb.backup(dest);
-          } catch (err) {
-            console.warn('[stations] library.db copy skipped:', (err as Error).message);
-          }
+        currentNavidrome: {
+          url: config.navidrome.url,
+          user: config.navidrome.user,
+          pass: config.navidrome.password,
         },
       }),
       {
