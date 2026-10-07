@@ -7,6 +7,7 @@ export interface ModelDiscoveryRequestInput {
   apiKey?: string;
   baseUrl?: string;
   ollamaUrl?: string;
+  headers?: Record<string, string>;
 }
 
 export interface ModelDiscoveryRequest {
@@ -23,7 +24,7 @@ export interface ModelDiscoveryRequest {
 export function buildModelDiscoveryRequest(
   input: ModelDiscoveryRequestInput,
 ): ModelDiscoveryRequest {
-  const body: Record<string, string> = {
+  const body: Record<string, string | Record<string, string>> = {
     owner: input.owner,
     provider: input.provider,
   };
@@ -31,6 +32,7 @@ export function buildModelDiscoveryRequest(
     const value = input[key];
     if (value) body[key] = value;
   }
+  if (input.headers) body.headers = input.headers;
   return {
     url: '/settings/llm/models',
     init: {

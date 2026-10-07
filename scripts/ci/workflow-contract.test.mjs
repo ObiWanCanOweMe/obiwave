@@ -1016,9 +1016,10 @@ test('controller image smoke executes the production child command inside the bu
   );
 });
 
-test('app quality matrix runs the native stream-buffer contract', () => {
+test('app quality matrix runs native tests and the stream-buffer contract', () => {
   const appCommand = ci.match(/- package: app\s*\n\s+command: ([^\n]+)/)?.[1];
   assert.ok(appCommand, 'missing app quality-matrix command');
+  assert.match(appCommand, /(?:^|&& )npm test(?: &&|$)/, 'native polling timeout regressions must run in CI');
   assert.match(appCommand, /(?:^|&& )npm run test:stream-buffer-format(?: &&|$)/);
 });
 

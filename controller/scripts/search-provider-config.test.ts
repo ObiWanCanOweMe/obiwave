@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
+// The CLI delegates persistence to /onboarding/save; its former unused
+// secrets writer was removed upstream. Check the live owner and boot surfaces.
 for (const path of [
   'controller/src/config.ts',
   'controller/src/setup/secrets.ts',
-  'cli/src/util.ts',
   '.env.example',
   'cli/src/assets.generated.ts',
 ]) {

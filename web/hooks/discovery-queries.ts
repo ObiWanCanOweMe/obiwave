@@ -22,6 +22,7 @@ export interface ModelDiscoveryInput {
   apiKey?: string;
   baseUrl?: string;
   ollamaUrl?: string;
+  headers?: Record<string, string>;
 }
 
 export interface VoiceDiscoveryInput { provider: string; baseUrl?: string; apiKey?: string; }
@@ -44,12 +45,11 @@ function credentialFingerprint(value: string): string {
   return `${value.length}:${hash.toString(16).padStart(16, '0')}`;
 }
 
-function discoveryCacheInput<T extends { apiKey?: string }>(input: T): Omit<T, 'apiKey'> & {
-  credential?: string;
+function discoveryCacheInput<T extends { apiKey?: string; headers?: Record<string, string> }>(input: T): Omit<T, 'apiKey' | 'headers'> & {
+  credential?: string; headerCredential?: string;
 } {
-  const { apiKey, ...publicInput } = input;
-  if (!apiKey) return publicInput;
-  return { ...publicInput, credential: credentialFingerprint(apiKey) };
+  const { apiKey, headers, ...publicInput } = input;
+  return { ...publicInput, ...(apiKey ? { credential: credentialFingerprint(apiKey) } : {}), ...(headers ? { headerCredential: credentialFingerprint(JSON.stringify(headers)) } : {}) };
 }
 
 export const discoveryKeys = {
@@ -75,6 +75,7 @@ export function normalizeModelDiscoveryInput(input: ModelDiscoveryInput): ModelD
     ...(apiKey ? { apiKey } : {}),
     ...(baseUrl ? { baseUrl } : {}),
     ...(ollamaUrl ? { ollamaUrl } : {}),
+    ...(input.headers ? { headers: Object.fromEntries(Object.entries(input.headers).sort(([a], [b]) => a.localeCompare(b))) } : {}),
   };
 }
 
@@ -124,10 +125,11 @@ function discoveryError(data: { ok: boolean; error?: string } | undefined, error
 }
 
 export function useModelDiscoveryQuery(rawInput: ModelDiscoveryInput, enabled: boolean, adminFetch: AdminFetch) {
-  const { owner, provider, leg, apiKey, baseUrl, ollamaUrl } = rawInput;
+  const { owner, provider, leg, apiKey, baseUrl, ollamaUrl, headers } = rawInput;
+  const headersJson = JSON.stringify(headers);
   const raw = useMemo(
-    () => normalizeModelDiscoveryInput({ owner, provider, leg, apiKey, baseUrl, ollamaUrl }),
-    [owner, provider, leg, apiKey, baseUrl, ollamaUrl],
+    () => normalizeModelDiscoveryInput({ owner, provider, leg, apiKey, baseUrl, ollamaUrl, headers: headersJson ? JSON.parse(headersJson) : undefined }),
+    [owner, provider, leg, apiKey, baseUrl, ollamaUrl, headersJson],
   );
   const { input, refreshInput, isRawTransition } = useDiscoveryInput(raw);
   const client = useQueryClient();

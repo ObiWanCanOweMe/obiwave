@@ -7,6 +7,8 @@ import * as llmProvider from '../../llm/provider.js';
 import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { SECRET_ENV_KEYS } from '../../setup/secrets.js';
+import { applyCustomHeadersPatch } from '../../settings/vocab.js';
+import type { EmbeddingCfg } from '../../llm/provider.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -420,6 +422,7 @@ router.post('/settings/llm/models', requireAdmin, async (req, res) => {
       baseUrl: typeof req.body?.baseUrl === 'string' ? req.body.baseUrl : '',
       ollamaUrl: typeof req.body?.ollamaUrl === 'string' ? req.body.ollamaUrl : '',
       apiKey: typeof req.body?.apiKey === 'string' ? req.body.apiKey : '',
+      headers: req.body?.headers,
     });
     res.json({ ok: true, ...result });
   } catch (err: unknown) {
@@ -542,7 +545,7 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
       maxOutputTokens: 32,
       abortSignal: AbortSignal.timeout(15000),
     });
-    res.json({ ok: true, message: '✓ Bearer token accepted · model responded', latencyMs: Date.now() - t0 });
+    res.json({ ok: true, message: '✓ Model responded', latencyMs: Date.now() - t0 });
   } catch (err: unknown) {
     res.json({ ok: false, message: briefLlmError(err, probeSecrets), latencyMs: Date.now() - t0 });
   }
@@ -564,10 +567,19 @@ router.get('/settings/llm/models', requireAdmin, (_req, res) => {
 // query params so the bearer token never rides a URL access logs capture.
 // Always 200s with { ok, dim, code, message }.
 router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
-  const overrides: Record<string, string> = {};
-  for (const k of ['provider', 'model', 'baseUrl', 'ollamaUrl', 'apiKey']) {
+  const overrides: Partial<EmbeddingCfg> = {};
+  for (const k of ['provider', 'model', 'baseUrl', 'ollamaUrl', 'apiKey'] as const) {
     const v = (req.body || {})[k];
     if (typeof v === 'string' && v.trim()) overrides[k] = v.trim();
+  }
+  if ((req.body || {}).headers !== undefined) {
+    try {
+      const saved = llmProvider.resolveEmbeddingCfg(overrides).headers || {};
+      // Sentinels may resolve only against the effective provider and endpoint.
+      overrides.headers = applyCustomHeadersPatch(saved, req.body.headers, 'embedding');
+    } catch (err: unknown) {
+      return res.json({ ok: false, dim: null, code: 'invalid', message: (err as Error).message });
+    }
   }
   try {
     const r = await probeEmbeddingConfig(overrides);

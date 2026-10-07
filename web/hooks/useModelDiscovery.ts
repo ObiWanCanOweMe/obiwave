@@ -8,6 +8,7 @@ interface UseModelDiscoveryOpts {
   apiKey?: string;
   baseUrl?: string;
   ollamaUrl?: string;
+  headers?: Record<string, string>;
   enabled: boolean;
   adminFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }

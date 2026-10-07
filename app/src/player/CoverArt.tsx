@@ -1,7 +1,3 @@
-// Now-playing cover. While `live`, an accent scanline sweeps the art and
-// ripple rings animate; during a `burst` the art glitches and the corner
-// registration ticks fade in. expo-image handles the cross-fade.
-
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
@@ -19,8 +15,7 @@ export interface CoverArtProps {
   onPress?: () => void;
 }
 
-// Discrete glitch frames, stepped rather than eased. dx* are chromatic ghost
-// offsets; the tear is a thin colour slice that jumps around the frame.
+// dx values offset the ghost copies; tear marks a jumping color slice.
 const GLITCH_FRAMES = [
   { dx1: -3, dx2: 3, tearY: 0.10, tearX: -5, tearH: 0.06 },
   { dx1: 2, dx2: -2, tearY: 0.46, tearX: 5, tearH: 0.05 },
@@ -84,8 +79,6 @@ export default function CoverArt({ source, live, burst = false, size = 160, onPr
   const tick = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Loops pause while backgrounded: native driver or not, they keep
-    // scheduling work the listener can't see.
     if (!live || !appActive) return;
     const s = Animated.loop(Animated.timing(scan, { toValue: 1, duration: 5500, easing: Easing.linear, useNativeDriver: true }));
     s.start();
@@ -116,7 +109,6 @@ export default function CoverArt({ source, live, burst = false, size = 160, onPr
 
   const body = (
     <View style={{ width: size, height: size }}>
-      {/* ripple rings (behind) */}
       {live
         ? ripples.map((r, i) => (
             <Animated.View
@@ -138,7 +130,6 @@ export default function CoverArt({ source, live, burst = false, size = 160, onPr
           ))
         : null}
 
-      {/* cover + glitch + scanline (clipped) */}
       <View style={{ width: size, height: size, borderWidth: 1, borderColor: colors.muted, backgroundColor: colors.field, overflow: 'hidden' }}>
         <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={280} />
         {burst ? <CoverGlitch source={source} size={size} accent={colors.accent} /> : null}
@@ -163,7 +154,6 @@ export default function CoverArt({ source, live, burst = false, size = 160, onPr
         ) : null}
       </View>
 
-      {/* corner ticks — fade in on burst */}
       <Tick corner="tl" color={colors.ink} opacity={tick} />
       <Tick corner="tr" color={colors.ink} opacity={tick} />
       <Tick corner="bl" color={colors.ink} opacity={tick} />

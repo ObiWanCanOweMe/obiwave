@@ -35,7 +35,7 @@ jobs:
           - package: cli
             command: npm run typecheck
           - package: app
-            command: npm run lint && npm run typecheck && npm run test:stream-buffer-format && npm run test:station-credentials
+            command: npm run lint && npm run typecheck && npm test && npm run test:stream-buffer-format && npm run test:station-credentials
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -83,6 +83,12 @@ jobs:
           python3 -m venv .venv-analyzer-tests
           .venv-analyzer-tests/bin/python -m pip install --disable-pip-version-check --no-cache-dir numpy==2.2.6
           echo "$PWD/.venv-analyzer-tests/bin" >> "$GITHUB_PATH"
+
+      # Controller test typechecking imports web helpers and their dependencies.
+      - name: Install web deps (controller test cross-package imports)
+        if: matrix.package == 'controller'
+        working-directory: web
+        run: npm ci --no-audit --no-fund
 
       # mcp-subwave imports shared MCP sources from controller/src/mcp/**.
       # Install their dependencies so TypeScript can resolve those imports.

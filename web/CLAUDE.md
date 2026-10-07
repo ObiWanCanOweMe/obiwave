@@ -54,3 +54,13 @@ changes, re-capture against a running station:
 `cd web && npm i --no-save playwright sharp && npx tsx scripts/capture-gallery.mjs`.
 
 **Codec selection (browsers → Icecast).** `usePlayer` intersects the station's MP3, Opus, AAC, and FLAC mounts with browser support, restores the listener's station-scoped preference, and defaults to MP3. Opus requires definitive browser support and excludes iOS and Firefox because chained-Ogg boundaries fail on those engines. A failed optional mount pins playback to MP3 for the session. Every tune, format switch, watchdog reconnect, and resume preserves stream query parameters and appends only that station's saved auth. `play`, `pause`, and `stop` are separate commands: pause closes the stream and supported iOS devices retain a silent local WAV without playing it; resume joins live on a fresh URL; stop and element removal unload and release the local clip. Skins toggle play/pause; Media Session commands never toggle. `npm test` retains the fork's focused commands with their original Node/tsx runners and auto-discovers the remaining tests across the documented roots.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

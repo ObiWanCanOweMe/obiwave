@@ -86,7 +86,11 @@ export function splitCredentials(rawBase: string): {
 
 const FETCH_TIMEOUT_MS = 8000;
 
-function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout<T>(
+  url: string,
+  init: RequestInit,
+  consume: (response: Response) => T | Promise<T>,
+): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   const outer = init?.signal;
@@ -95,10 +99,14 @@ function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
     if (outer.aborted) ctrl.abort();
     else outer.addEventListener('abort', onAbort);
   }
-  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => {
+  try {
+    // Keep the deadline and outer cancellation alive through body consumption.
+    // A headers-only timeout can wedge the serialized poll on stalled JSON.
+    return await consume(await fetch(url, { ...init, signal: ctrl.signal }));
+  } finally {
     clearTimeout(timer);
     outer?.removeEventListener('abort', onAbort);
-  });
+  }
 }
 
 export function createApi(
@@ -122,21 +130,21 @@ export function createApi(
       ? { headers: { ...authHeaders, ...(init.headers as Record<string, string> | undefined) } }
       : {}),
   });
-  const stationFetch = (url: string, init: RequestInit = {}) =>
-    fetchWithTimeout(url, withAuth(init));
-  const getJson = async <T>(url: string, signal?: AbortSignal): Promise<T> => {
-    const res = await stationFetch(url, { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as T;
-  };
+  const stationFetch = <T>(url: string, init: RequestInit, consume: (res: Response) => T | Promise<T>) =>
+    fetchWithTimeout(url, withAuth(init), consume);
+  const getJson = <T>(url: string, signal?: AbortSignal): Promise<T> =>
+    stationFetch(url, { signal }, async res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as T;
+    });
   const stationImage = (uri: string): StationImageSource => ({
     uri,
     ...(authHeaders ? { headers: { ...authHeaders } } : {}),
   });
   const probeHealth = async (signal?: AbortSignal): Promise<HealthResult> => {
     try {
-      const res = await stationFetch(api('/health'), { cache: 'no-store', signal });
-      return res.ok ? { ok: true } : { ok: false, kind: 'http', status: res.status };
+      return await stationFetch<HealthResult>(api('/health'), { cache: 'no-store', signal },
+        res => res.ok ? { ok: true } : { ok: false, kind: 'http', status: res.status });
     } catch (error) {
       const err = error as { name?: string; message?: string };
       const aborted = signal?.aborted || err?.name === 'AbortError';
@@ -168,39 +176,36 @@ export function createApi(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }).then((res) => res.json() as Promise<RequestResult>),
+      }, res => res.json() as Promise<RequestResult>),
     postBeacon: async (body) => {
       try {
         await stationFetch(api('/beacon'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
+        }, () => undefined);
       } catch {
         /* best-effort analytics */
       }
     },
-    pollRequest: async (id) => {
-      const res = await stationFetch(api(`/request/${encodeURIComponent(id)}`));
+    pollRequest: (id) => stationFetch<RequestResult>(api(`/request/${encodeURIComponent(id)}`), {}, async res => {
       if (res.status === 404) return { success: false, status: 'unknown' };
       return (await res.json()) as RequestResult;
-    },
+    }),
     likeCurrent: async (songId) => {
       try {
-        const res = await stationFetch(api('/like'), {
+        return await stationFetch(api('/like'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ songId }),
-        });
-        return (await res.json()) as LikeResult;
+        }, res => res.json() as Promise<LikeResult>);
       } catch {
         return null;
       }
     },
     likeStatus: async () => {
       try {
-        const res = await stationFetch(api('/like'));
-        return (await res.json()) as LikeStatus;
+        return await stationFetch(api('/like'), {}, res => res.json() as Promise<LikeStatus>);
       } catch {
         return null;
       }

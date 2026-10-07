@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { pollWhileVisible } from '@/lib/poll';
+import { pollAsyncWhileVisible } from '@/lib/poll';
 import { splitAudibleTurns } from '@/lib/sessionFeed';
 import { useStationClient } from '@/lib/stationClient';
 import { listenerLeadMsForFormat, type AudioFormat } from '@/lib/audioFormat';
@@ -103,13 +103,14 @@ export function useStationFeed({
         ? null
         : setTimeout(applySession, Math.max(0, nextChangeMs - Date.now()));
     };
-    const tick = async () => {
+    const tick = async (signal: AbortSignal) => {
       try {
         const [npRes, stRes, seRes] = await Promise.all([
-          client.nowPlaying(),
-          client.state(),
-          client.session(),
+          client.nowPlaying({ signal }),
+          client.state({ signal }),
+          client.session({ signal }),
         ]);
+        if (signal.aborted) return;
         const np = npRes.nowPlaying;
         // Clamped: a bad value here would either park the clock in the far
         // future or wind it back past the track start.
@@ -190,7 +191,7 @@ export function useStationFeed({
         }
       } catch {}
     };
-    const stopPolling = pollWhileVisible(() => { void tick(); }, 5000);
+    const stopPolling = pollAsyncWhileVisible(tick, 5000);
     return () => {
       stopPolling();
       // A held track switch (or a held spoken line) must not land after teardown.

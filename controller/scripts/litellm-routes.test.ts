@@ -9,6 +9,13 @@ process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-litellm-routes-'));
 process.env.ADMIN_USER = 'route-admin';
 process.env.ADMIN_PASS = 'route-password';
 
+async function responseBody(response: Pick<Response, 'json'>): Promise<{ ok: boolean; message?: unknown }> {
+  const body: unknown = await response.json();
+  assert.ok(body && typeof body === 'object' && 'ok' in body);
+  assert.equal(typeof body.ok, 'boolean');
+  return body as { ok: boolean; message?: unknown };
+}
+
 interface RecordedRequest { method: string; url: string; authorization: string; probeHeader?: string }
 
 async function recordingGateway() {
@@ -111,7 +118,7 @@ try {
   for (const leg of ['primary', 'fallback'] as const) {
     const response = await post('/settings/llm/models', { owner: 'chat', provider: 'litellm', leg });
     assert.equal(response.status, 200);
-    const body = await response.json();
+    const body = await responseBody(response);
     assert.equal(body.ok, true);
   }
   assert.deepEqual(primary.requests[0], {
@@ -125,7 +132,7 @@ try {
     provider: 'litellm', leg: 'fallback', model: 'vendor/model',
   });
   assert.equal(probe.status, 200);
-  assert.equal((await probe.json()).ok, true);
+  assert.equal((await responseBody(probe)).ok, true);
   assert.deepEqual(fallback.requests[1], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-leg-token',
   });
@@ -134,7 +141,7 @@ try {
     baseUrl: changedOrigin.baseUrl,
     model: 'vendor/model',
   });
-  assert.equal((await changedLegacyProbe.json()).ok, true);
+  assert.equal((await responseBody(changedLegacyProbe)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'regression: an unmatched legacy probe URL must not receive the primary stored bearer');
@@ -145,7 +152,7 @@ try {
     baseUrl: changedOrigin.baseUrl,
     model: 'vendor/model',
   });
-  assert.equal((await changedLiteProbe.json()).ok, true);
+  assert.equal((await responseBody(changedLiteProbe)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'regression: a changed LiteLLM URL must not receive the stored LiteLLM bearer');
@@ -157,7 +164,7 @@ try {
     apiKey: 'explicit-changed-token',
     model: 'vendor/model',
   });
-  assert.equal((await explicitChangedLiteProbe.json()).ok, true);
+  assert.equal((await responseBody(explicitChangedLiteProbe)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-changed-token',
   });
@@ -169,7 +176,7 @@ try {
     baseUrl: onboarding.baseUrl,
     apiKey: 'unsaved-onboarding-token',
   });
-  assert.equal((await onboardingResponse.json()).ok, true);
+  assert.equal((await responseBody(onboardingResponse)).ok, true);
   assert.deepEqual(onboarding.requests[0], {
     method: 'GET', url: '/v1/models', authorization: 'Bearer unsaved-onboarding-token',
   });
@@ -181,7 +188,7 @@ try {
     apiKey: 'unsaved-onboarding-token',
   });
   assert.equal(onboardingTestResponse.status, 200);
-  assert.equal((await onboardingTestResponse.json()).ok, true);
+  assert.equal((await responseBody(onboardingTestResponse)).ok, true);
   assert.deepEqual(onboarding.requests[1], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer unsaved-onboarding-token',
   });
@@ -194,7 +201,7 @@ try {
     model: 'vendor/model',
     baseUrl: changedOrigin.baseUrl,
   });
-  assert.equal((await changedOnboarding.json()).ok, true);
+  assert.equal((await responseBody(changedOnboarding)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer unused',
   }, 'regression: a changed onboarding URL must not receive the environment LiteLLM bearer');
@@ -205,7 +212,7 @@ try {
     baseUrl: changedOrigin.baseUrl,
     apiKey: 'explicit-onboarding-token',
   });
-  assert.equal((await explicitChangedOnboarding.json()).ok, true);
+  assert.equal((await responseBody(explicitChangedOnboarding)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-onboarding-token',
   });
@@ -214,7 +221,7 @@ try {
     provider: 'litellm',
     model: 'vendor/model',
   });
-  assert.equal((await environmentOnboarding.json()).ok, true);
+  assert.equal((await responseBody(environmentOnboarding)).ok, true);
   assert.deepEqual(environment.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer environment-only-token',
   });
@@ -240,7 +247,7 @@ try {
     model: 'vendor/model',
   });
   assert.equal(switchBackProbe.status, 200);
-  assert.equal((await switchBackProbe.json()).ok, true);
+  assert.equal((await responseBody(switchBackProbe)).ok, true);
   assert.deepEqual(primary.requests[1], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-leg-token',
   }, 'switching an unsaved form back to LiteLLM uses only the stored LiteLLM key');
@@ -251,7 +258,7 @@ try {
     model: 'vendor/model',
   });
   assert.equal(legacyProbe.status, 200);
-  assert.equal((await legacyProbe.json()).ok, true);
+  assert.equal((await responseBody(legacyProbe)).ok, true);
   assert.deepEqual(compatFallback.requests[0], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-compat-fallback-token',
   });
@@ -262,7 +269,7 @@ try {
     baseUrl: changedOrigin.baseUrl,
     model: 'vendor/model',
   });
-  assert.equal((await changedCompatProbe.json()).ok, true);
+  assert.equal((await responseBody(changedCompatProbe)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'regression: a changed compatibility URL must not receive the stored provider bearer');
@@ -274,7 +281,7 @@ try {
     apiKey: 'explicit-compat-token',
     model: 'vendor/model',
   });
-  assert.equal((await explicitChangedCompatProbe.json()).ok, true);
+  assert.equal((await responseBody(explicitChangedCompatProbe)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer explicit-compat-token',
   });
@@ -286,7 +293,7 @@ try {
     model: 'vendor/model',
   });
   assert.equal(mismatchedProbe.status, 200);
-  assert.equal((await mismatchedProbe.json()).ok, true);
+  assert.equal((await responseBody(mismatchedProbe)).ok, true);
   assert.deepEqual(unsavedLocca.requests[0], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'an unsaved Locca endpoint receives only the SDK placeholder, never the saved fallback provider token');
@@ -319,7 +326,7 @@ try {
     model: 'vendor/model',
   });
   assert.equal(providerOwnedProbe.status, 200);
-  assert.equal((await providerOwnedProbe.json()).ok, true);
+  assert.equal((await responseBody(providerOwnedProbe)).ok, true);
   assert.deepEqual(unsavedLocca.requests[1], {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer saved-locca-token',
   }, 'the submitted provider must resolve only its own stored token');
@@ -338,7 +345,7 @@ try {
   const environmentResponse = await post('/settings/llm/models', {
     owner: 'chat', provider: 'litellm', leg: 'primary',
   });
-  assert.equal((await environmentResponse.json()).ok, true);
+  assert.equal((await responseBody(environmentResponse)).ok, true);
   assert.deepEqual(environment.requests.at(-1), {
     method: 'GET', url: '/v1/models', authorization: 'Bearer environment-only-token',
   });
@@ -361,7 +368,7 @@ try {
   const savedUrlEnvironmentKey = await post('/settings/llm/models', {
     owner: 'chat', provider: 'litellm', leg: 'primary',
   });
-  assert.equal((await savedUrlEnvironmentKey.json()).ok, true);
+  assert.equal((await responseBody(savedUrlEnvironmentKey)).ok, true);
   assert.deepEqual(savedEnvironment.requests.at(-1), {
     method: 'GET', url: '/v1/models', authorization: 'Bearer openai-environment-token',
   }, 'a saved LiteLLM URL uses the same environment-token fallback as live inference');
@@ -369,7 +376,7 @@ try {
   const savedUrlEnvironmentProbe = await post('/settings/llm/probe-compat', {
     provider: 'litellm', leg: 'primary', model: 'vendor/model',
   });
-  assert.equal((await savedUrlEnvironmentProbe.json()).ok, true);
+  assert.equal((await responseBody(savedUrlEnvironmentProbe)).ok, true);
   assert.deepEqual(savedEnvironment.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer openai-environment-token',
   }, 'a saved LiteLLM probe uses the same environment-token fallback as live inference');
@@ -380,7 +387,7 @@ try {
     baseUrl: changedOrigin.baseUrl,
     model: 'vendor/model',
   });
-  assert.equal((await environmentKeyChangedUrl.json()).ok, true);
+  assert.equal((await responseBody(environmentKeyChangedUrl)).ok, true);
   assert.deepEqual(changedOrigin.requests.at(-1), {
     method: 'POST', url: '/v1/chat/completions', authorization: 'Bearer no-key',
   }, 'an environment LiteLLM token must remain bound to a trusted endpoint');
@@ -405,7 +412,7 @@ try {
       provider: 'openai-compatible', leg, model: 'vendor/model',
       baseUrl: target.baseUrl, headers: { 'x-probe-secret': value },
     });
-    assert.equal((await response.json()).ok, true);
+    assert.equal((await responseBody(response)).ok, true);
     assert.equal(target.requests.at(-1)?.probeHeader, expected,
       `${leg} header must remain bound to its saved endpoint; explicit values may probe a new URL`);
   }
@@ -417,13 +424,14 @@ try {
       provider: 'openai-compatible', leg, model: 'echo-secrets',
       baseUrl: target.baseUrl, headers: { 'x-probe-secret': 'set' },
     });
-    const body = await response.json();
+    const body = await responseBody(response);
     assert.equal(body.ok, false);
     assert.ok(!JSON.stringify(body).includes(secret), 'gateway errors must not echo stored header secrets');
     const key = target.requests.at(-1)!.authorization.replace(/^Bearer /, '');
     assert.notEqual(key, 'no-key', 'exercise a resolved stored API key');
     assert.ok(!JSON.stringify(body).includes(key), 'gateway errors must not echo stored API keys');
-    assert.match(body.message, /Routing rejected/);
+    assert.equal(typeof body.message, 'string');
+    assert.match(body.message as string, /Routing rejected/);
   }
 
   await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));

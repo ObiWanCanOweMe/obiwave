@@ -81,12 +81,8 @@ export function withStreamAuth(apiBase: string, url: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
 }
 
-// Deliberately hits /station-auth, NOT the /listener-auth endpoint Icecast
-// calls. They share the password but not the failure mode: /listener-auth fails
-// OPEN when stream auth is off, covering the window where icecast.xml still
-// carries the auth blocks but the setting is already off. Asking it here would
-// mean a private player with stream auth off accepts any password.
-// /station-auth fails closed.
+// Use fail-closed /station-auth. /listener-auth fails open when stream auth is disabled and would
+// let a private player accept any password.
 export async function checkStationAuth(apiBase: string, password: string): Promise<boolean> {
   try {
     const res = await fetch(`${apiBase}/station-auth`, {

@@ -71,7 +71,10 @@ try {
   });
   assert.equal(metadataResponse.status, 200);
   const metadataBody = await metadataResponse.json();
-  assert.equal(metadataBody.env.KAGI_API_KEY, true);
+  assert.ok(metadataBody && typeof metadataBody === 'object' && 'env' in metadataBody);
+  const env = metadataBody.env;
+  assert.ok(env && typeof env === 'object' && 'KAGI_API_KEY' in env);
+  assert.equal(env.KAGI_API_KEY, true);
   assert.equal(JSON.stringify(metadataBody).includes(environmentToken), false);
   delete process.env.KAGI_API_KEY;
   console.log('settings route security: POST response is public-only and token-free');

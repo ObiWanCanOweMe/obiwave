@@ -243,9 +243,9 @@ await test('dispatches Kagi and keeps all keyed providers credential-isolated', 
     apiKeys: { brave: null, tavily: 'saved-tavily-key' },
   } });
   let tavilyAuthorization = '';
-  let tavilySignal: AbortSignal | null = null;
+  const tavilyCapture: { signal: AbortSignal | null } = { signal: null };
   globalThis.fetch = async (_input, init) => {
-    tavilySignal = init?.signal instanceof AbortSignal ? init.signal : null;
+    tavilyCapture.signal = init?.signal instanceof AbortSignal ? init.signal : null;
     tavilyAuthorization = new Headers(init?.headers).get('Authorization') || '';
     return new Response(JSON.stringify({ answer: '', results: [] }), {
       headers: { 'Content-Type': 'application/json' },
@@ -258,7 +258,7 @@ await test('dispatches Kagi and keeps all keyed providers credential-isolated', 
     globalThis.fetch = original;
   }
   assert.equal(tavilyAuthorization, 'Bearer saved-tavily-key');
-  assert.ok(tavilySignal instanceof AbortSignal, 'Tavily fetch must be abortable');
+  assert.ok(tavilyCapture.signal instanceof AbortSignal, 'Tavily fetch must be abortable');
 
   await settings.update({ search: {
     provider: 'brave',
@@ -268,10 +268,10 @@ await test('dispatches Kagi and keeps all keyed providers credential-isolated', 
 });
 
 test('DuckDuckGo requests are abortable', async () => {
-  let duckduckgoSignal: AbortSignal | null = null;
+  const duckduckgoCapture: { signal: AbortSignal | null } = { signal: null };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
-    duckduckgoSignal = init?.signal instanceof AbortSignal ? init.signal : null;
+    duckduckgoCapture.signal = init?.signal instanceof AbortSignal ? init.signal : null;
     return new Response(JSON.stringify({
       AbstractText: '',
       Abstract: '',
@@ -288,7 +288,7 @@ test('DuckDuckGo requests are abortable', async () => {
     globalThis.fetch = originalFetch;
   }
   assert.ok(
-    duckduckgoSignal instanceof AbortSignal,
+    duckduckgoCapture.signal instanceof AbortSignal,
     'DuckDuckGo fetch must be abortable',
   );
 });
