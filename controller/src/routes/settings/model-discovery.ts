@@ -1,3 +1,4 @@
+import { applyCustomHeadersPatch } from '../../settings/vocab.js';
 import { config } from '../../config.js';
 import * as settings from '../../settings.js';
 import * as llmProvider from '../../llm/provider.js';
@@ -19,6 +20,7 @@ export interface ModelDiscoveryInput {
   baseUrl?: string;
   ollamaUrl?: string;
   apiKey?: string;
+  headers?: unknown;
 }
 
 export interface ModelDiscoveryResult {
@@ -111,6 +113,7 @@ function resolveCustomConnection(input: ModelDiscoveryInput): {
   baseUrl: string;
   apiKey: string;
   ollamaUrl: string;
+  headers: Record<string, string>;
 } {
   const suppliedBase = endpoint(input.baseUrl);
   const suppliedOllama = endpoint(input.ollamaUrl);
@@ -119,11 +122,13 @@ function resolveCustomConnection(input: ModelDiscoveryInput): {
   let savedBase = '';
   let savedOllama = '';
   let savedKey = '';
+  let savedHeaders: Record<string, string> = {};
 
   if (input.owner === 'chat') {
     const leg = input.leg!;
     const saved = savedChatLeg(leg);
     savedBase = savedChatBase(leg, input.provider);
+    if (saved.provider === input.provider) savedHeaders = saved.headers || {};
     savedOllama = input.provider === 'ollama' ? endpoint(saved.ollamaUrl) : '';
     savedProvider = savedBase || savedOllama ? input.provider : '';
     const inlineKey = savedBase ? settings.llmKeyFor(input.provider) : '';
@@ -138,6 +143,7 @@ function resolveCustomConnection(input: ModelDiscoveryInput): {
     savedBase = endpoint(llmProvider.embeddingBaseUrl(cfg));
     savedOllama = endpoint(cfg.ollamaUrl);
     savedKey = cfg.apiKey;
+    savedHeaders = cfg.headers || {};
   } else {
     const cloud = settings.get().tts?.cloud || {};
     savedProvider = String(cloud.provider || '');
@@ -157,6 +163,9 @@ function resolveCustomConnection(input: ModelDiscoveryInput): {
     baseUrl: selectedBase,
     ollamaUrl: selectedOllama,
     apiKey: explicitKey || (storedCredentialIsBound ? savedKey : ''),
+    headers: input.headers === undefined
+      ? (storedCredentialIsBound ? savedHeaders : {})
+      : applyCustomHeadersPatch(storedCredentialIsBound ? savedHeaders : {}, input.headers, 'discovery'),
   };
 }
 
@@ -248,9 +257,10 @@ export async function discoverModels(input: ModelDiscoveryInput): Promise<ModelD
         : '');
     if (!baseUrl) throw new Error('baseUrl is required for openai-compatible');
     const payload = await getJson(`${baseUrl}/models`, {
-      headers: connection.apiKey
-        ? { Authorization: `Bearer ${connection.apiKey}` }
-        : {},
+      headers: {
+        ...(connection.apiKey ? { Authorization: `Bearer ${connection.apiKey}` } : {}),
+        ...connection.headers,
+      },
     });
     models = modelsFromOpenAiPayload(payload);
     return { models: filterForOwner(models, owner, provider), provider };

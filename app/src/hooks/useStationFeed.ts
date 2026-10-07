@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppActive } from '@/hooks/useAppActive';
 import type { StationApi } from '@/lib/api';
+import { pollAsync } from '@/lib/poll';
 import { DEFAULT_STATION_LOCALE, type StationLocale } from '@/lib/format';
 import { bufferSecondsForFormat } from '@/lib/streamBuffer';
 import type { StreamFormat } from '@/lib/streamFormat';
@@ -146,7 +147,6 @@ export function useStationFeed(
     if (!api) return;
     const background = !appActive;
     if (background && !backgroundPoll) return;
-    let cancelled = false;
 
     // `current` is /state's live-edge view, absent on the background poll (which
     // fetches /now-playing only) and on a failed /state leg.
@@ -222,12 +222,12 @@ export function useStationFeed(
       if (npRes.locale === 'en-US' || npRes.locale === 'en-GB') setLocale(npRes.locale);
     };
 
-    const tick = async () => {
+    const tick = async (signal: AbortSignal) => {
       if (background) {
         // Lock-screen metadata only — no point feeding UI nobody can see.
         try {
-          const npRes = await api.nowPlaying();
-          if (!cancelled) applyNowPlaying(npRes);
+          const npRes = await api.nowPlaying(signal);
+          if (!signal.aborted) applyNowPlaying(npRes);
         } catch {
           /* transient — next tick retries */
         }
@@ -236,11 +236,11 @@ export function useStationFeed(
       // allSettled: one slow/failed endpoint shouldn't stall the others;
       // failures are transient — the next tick retries.
       const [np, st, se] = await Promise.allSettled([
-        api.nowPlaying(),
-        api.state(),
-        api.session(),
+        api.nowPlaying(signal),
+        api.state(signal),
+        api.session(signal),
       ]);
-      if (cancelled) return;
+      if (signal.aborted) return;
       // /state before /now-playing: its `current` carries the live-edge stamp
       // applyNowPlaying needs to place the track in listener-time.
       if (np.status === 'fulfilled') {
@@ -251,11 +251,9 @@ export function useStationFeed(
         setIfChanged('session', se.value, setSession);
       }
     };
-    tick();
-    const id = setInterval(tick, background ? 30000 : 5000);
+    const stopPolling = pollAsync(tick, background ? 30000 : 5000);
     return () => {
-      cancelled = true;
-      clearInterval(id);
+      stopPolling();
       // A held switch must not land after teardown. Deliberately does NOT reset
       // lastTrackKeyRef: this effect re-runs on every foreground/background
       // flip, and forgetting the on-display track there would make the next

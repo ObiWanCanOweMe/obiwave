@@ -12,6 +12,32 @@
   independent. Operators who already reconfigured profiles under #1777 must
   mark those profiles before upgrading. See [upgrade and recovery steps](docs/multi-station.md#upgrading-existing-profiles).
 
+## [1.19.0](https://github.com/perminder-klair/subwave/compare/v1.18.0...v1.19.0) (2026-10-07)
+
+
+### Features
+
+* **llm:** support hosted OpenAI-compatible services ([#1795](https://github.com/perminder-klair/subwave/issues/1795)) ([1bbbc07](https://github.com/perminder-klair/subwave/commit/1bbbc07fae60f776b47a4881866304863949a2d3))
+* **personas:** Musical Leanings: explicit, auditable editorial control ([#1678](https://github.com/perminder-klair/subwave/issues/1678)) ([9190db2](https://github.com/perminder-klair/subwave/commit/9190db27f5105cbb723401bf227e03efc4e94997))
+* **shows:** prepare episodes with custom skills ([#1802](https://github.com/perminder-klair/subwave/issues/1802)) ([60ca1a3](https://github.com/perminder-klair/subwave/commit/60ca1a355600a30f0f2d7ae035150c400cb95b18))
+
+
+### Bug Fixes
+
+* **broadcast:** keep FLAC metadata in Ogg encoder ([#1686](https://github.com/perminder-klair/subwave/issues/1686)) ([45ef433](https://github.com/perminder-klair/subwave/commit/45ef433494dac633c217cc774a4647203dc27f0b))
+* **llm-bench:** read the event log in failure reasons, not an empty stdin ([#1794](https://github.com/perminder-klair/subwave/issues/1794)) ([48c6b38](https://github.com/perminder-klair/subwave/commit/48c6b38a2943296e2b0c9d7bd3d159853ffdc092))
+* **llm:** never force tools or disable thinking on Claude 5.5-era models ([#1805](https://github.com/perminder-klair/subwave/issues/1805)) ([7f8b875](https://github.com/perminder-klair/subwave/commit/7f8b875b08f22a68ff6db5ec823ae29882790fe6))
+* **picker:** bound show lookahead at handoffs ([#1684](https://github.com/perminder-klair/subwave/issues/1684)) ([e11da2b](https://github.com/perminder-klair/subwave/commit/e11da2b47ce5cc96d8454805bec8c16252081b87))
+* **session:** don't acknowledge a same-host show change at the 4h session cap ([#1800](https://github.com/perminder-klair/subwave/issues/1800)) ([cc6dca0](https://github.com/perminder-klair/subwave/commit/cc6dca015dbd64b0cb435b7fca1a23c0154e4a1f))
+* **session:** keep the programme episode across the 4h session cap ([#1801](https://github.com/perminder-klair/subwave/issues/1801)) ([f511f12](https://github.com/perminder-klair/subwave/commit/f511f1213e2604891b2d7b62d74c325167b70ff3))
+* **tts:** keep a station-default slot off the persona's dead cloud provider ([#1793](https://github.com/perminder-klair/subwave/issues/1793)) ([514a007](https://github.com/perminder-klair/subwave/commit/514a0074e0f656429b6319155d03e28816de8b5c))
+* **web:** fit mobile settings and keep model picker open ([#1796](https://github.com/perminder-klair/subwave/issues/1796)) ([741608f](https://github.com/perminder-klair/subwave/commit/741608f4203cd1462376ff27cc775791cf6717d8))
+
+
+### Refactors
+
+* clean up unused code, polling and library reads ([#1804](https://github.com/perminder-klair/subwave/issues/1804)) ([7848fb4](https://github.com/perminder-klair/subwave/commit/7848fb41da56cdb369456adee19d89da44109118))
+
 ## [1.18.0](https://github.com/perminder-klair/subwave/compare/v1.17.0...v1.18.0) (2026-10-05)
 
 

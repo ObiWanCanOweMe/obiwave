@@ -71,7 +71,7 @@ test('a failed kill cannot release a live worker, and retired callbacks cannot a
   const children: Array<InstanceType<typeof EventEmitter> & { pid: number; stdout: InstanceType<typeof EventEmitter>; stderr: InstanceType<typeof EventEmitter> }> = [];
   const realSpawn = childProcess.spawn;
   childProcess.spawn = (() => {
-    const child = Object.assign(new EventEmitter(), {
+    const child = Object.assign(new childProcess.ChildProcess(), {
       pid: 700_000 + children.length, stdout: new EventEmitter(), stderr: new EventEmitter(),
     });
     children.push(child);

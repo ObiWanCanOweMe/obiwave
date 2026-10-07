@@ -370,6 +370,12 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
     if (v.length > 100) throw new Error(`${label}.model must be 0-100 chars`);
     target.model = v;
   }
+  if (l.compatibleMode !== undefined) {
+    if (l.compatibleMode !== 'local' && l.compatibleMode !== 'hosted') {
+      throw new Error(`${label}.compatibleMode must be "local" or "hosted"`);
+    }
+    target.compatibleMode = l.compatibleMode;
+  }
   // The inline API key is NOT handled here: applyInlineKey() routes it into
   // settings.llm.keys at the call site, after the provider is resolved, so one
   // provider's key can't leak into another's slot (#657).
@@ -427,38 +433,7 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
   // Whole-map replacement makes removed editor rows deletions. Resolve the
   // redacted sentinel only from the same connection's previous header map.
   if (l.headers !== undefined) {
-    if (!l.headers || typeof l.headers !== 'object' || Array.isArray(l.headers)) {
-      throw new Error(`${label}.headers must be an object map of header name -> value`);
-    }
-    const incoming = l.headers as Record<string, unknown>;
-    const existing = (target.headers as Record<string, string> | undefined) ?? {};
-    const next: Record<string, string> = {};
-    for (const rawName of Object.keys(incoming)) {
-      const name = rawName.trim();
-      if (!LLM_HEADER_NAME_RE.test(name)) {
-        throw new Error(`${label}.headers has an invalid header name "${rawName}"`);
-      }
-      const raw = incoming[rawName];
-      if (raw === 'set') {
-        // Redacted on the way out: a row the operator did not retype must
-        // survive their save.
-        if (existing[name]) next[name] = existing[name];
-        continue;
-      }
-      const v = String(raw ?? '').trim();
-      if (!v) continue; // an emptied value drops the header, like providerBaseUrls
-      if (v.length > LLM_HEADER_VALUE_MAX) {
-        throw new Error(`${label}.headers.${name} must be 0-${LLM_HEADER_VALUE_MAX} chars`);
-      }
-      if (!LLM_HEADER_VALUE_RE.test(v)) {
-        throw new Error(`${label}.headers.${name} must be printable ASCII on a single line`);
-      }
-      next[name] = v;
-    }
-    if (Object.keys(next).length > LLM_HEADERS_MAX) {
-      throw new Error(`${label}.headers must have at most ${LLM_HEADERS_MAX} entries`);
-    }
-    target.headers = next;
+    target.headers = applyCustomHeadersPatch(target.headers, l.headers, label);
   }
   if (l.reasoning !== undefined) {
     target.reasoning = !!l.reasoning;
@@ -502,6 +477,41 @@ export function applyInlineKey(llmHost: { keys?: Record<string, string> }, provi
   if (!llmHost.keys || typeof llmHost.keys !== 'object') llmHost.keys = {};
   if (v) llmHost.keys[provider] = v;
   else delete llmHost.keys[provider];
+}
+
+// The chat and embedding editors use the same strict header rules and the same
+// redaction sentinel. A whole map replaces the previous one so Remove works.
+export function applyCustomHeadersPatch(existingRaw: unknown, incomingRaw: unknown, label: string): Record<string, string> {
+  if (!incomingRaw || typeof incomingRaw !== 'object' || Array.isArray(incomingRaw)) {
+    throw new Error(`${label}.headers must be an object map of header name -> value`);
+  }
+  const incoming = incomingRaw as Record<string, unknown>;
+  const existing = (existingRaw as Record<string, string> | undefined) ?? {};
+  const next: Record<string, string> = {};
+  for (const rawName of Object.keys(incoming)) {
+    const name = rawName.trim();
+    if (!LLM_HEADER_NAME_RE.test(name)) {
+      throw new Error(`${label}.headers has an invalid header name "${rawName}"`);
+    }
+    const raw = incoming[rawName];
+    if (raw === 'set') {
+      if (existing[name]) next[name] = existing[name];
+      continue;
+    }
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    if (value.length > LLM_HEADER_VALUE_MAX) {
+      throw new Error(`${label}.headers.${name} must be 0-${LLM_HEADER_VALUE_MAX} chars`);
+    }
+    if (!LLM_HEADER_VALUE_RE.test(value)) {
+      throw new Error(`${label}.headers.${name} must be printable ASCII on a single line`);
+    }
+    next[name] = value;
+  }
+  if (Object.keys(next).length > LLM_HEADERS_MAX) {
+    throw new Error(`${label}.headers must have at most ${LLM_HEADERS_MAX} entries`);
+  }
+  return next;
 }
 
 // Build the per-provider inline-key map from a stored settings.llm blob.
@@ -943,6 +953,7 @@ export interface NormalizedShow {
   pauseTalk: boolean;
   programme: boolean;
   segmentSkill: string;
+  preparationSkill: string;
   moods: string[];
   themeId: string;
   genres: string[];

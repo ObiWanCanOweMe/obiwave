@@ -154,7 +154,10 @@ export function getRedacted() {
       }
     }
   }
-  if (clone.embedding) clone.embedding.apiKey = s.embedding?.apiKey ? 'set' : '';
+  if (clone.embedding) {
+    clone.embedding.apiKey = s.embedding?.apiKey ? 'set' : '';
+    clone.embedding.headers = maskHeaderValues(s.embedding?.headers);
+  }
   if (Array.isArray(clone.webhooks)) {
     for (let i = 0; i < clone.webhooks.length; i++) {
       clone.webhooks[i].authHeader = s.webhooks?.[i]?.authHeader ? 'set' : '';

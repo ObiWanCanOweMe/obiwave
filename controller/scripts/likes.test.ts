@@ -133,7 +133,7 @@ try {
     id: string,
     likedAt: string,
     via?: 'operator',
-  ): import('../src/broadcast/likes.js').LikeRecord => ({
+  ): Parameters<typeof likes.trimLikeRecords>[0][number] => ({
     songId: id,
     track: track(id),
     airingKey: `${id}|${via || 'listener'}`,

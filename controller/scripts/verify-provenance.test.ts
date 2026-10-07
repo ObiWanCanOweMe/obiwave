@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {
   resolveVerifierProvenance,
   verifierHealthFields,
-} from '../src/util/verify-provenance.ts';
+} from '../src/util/verify-provenance.js';
 
 const marker = 'subwave-verify-8de7ba8b-17f5-4d89-9f34-e0f625529b11';
 const dummyUrl = 'http://127.0.0.1:9999';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { spawnControllerTsx } from '../src/util/tsx-child.js';
@@ -46,13 +46,14 @@ test('the production child command reports spawn errors without an unhandled err
   const directory = await mkdtemp(join(tmpdir(), 'subwave-production-command-error-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
 
-  let spawnError: NodeJS.ErrnoException | null = null;
+  const spawnErrors: NodeJS.ErrnoException[] = [];
   const child = spawnControllerTsx(
     ['--version'],
     { cwd: join(directory, 'missing-working-directory') },
-    (error) => { spawnError = error as NodeJS.ErrnoException; },
+    (error) => { spawnErrors.push(error as NodeJS.ErrnoException); },
   );
   await new Promise<void>((resolve) => child.once('close', () => resolve()));
 
-  assert.equal(spawnError?.code, 'ENOENT');
+  assert.equal(spawnErrors.length, 1);
+  assert.equal(spawnErrors[0].code, 'ENOENT');
 });

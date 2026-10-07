@@ -287,3 +287,17 @@ test('voice discovery hides an A error that resolves during the raw A-to-B debou
     client.clear();
   }
 });
+
+test('custom discovery headers change cache identity without retaining credentials', async () => {
+  const input = { owner: 'chat' as const, provider: 'openai-compatible', headers: { 'api-key': 'azure-secret-a' } };
+  const first = discoveryKeys.models(input);
+  const second = discoveryKeys.models({ ...input, headers: { 'api-key': 'azure-secret-b' } });
+  assert.notDeepEqual(first, second);
+  assert.doesNotMatch(JSON.stringify(first), /azure-secret|api-key/);
+  let posted: unknown;
+  await fetchModels(async (_url, init) => {
+    posted = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ ok: true, models: ['deployment'] }));
+  }, input, new AbortController().signal);
+  assert.deepEqual((posted as { headers: unknown }).headers, input.headers);
+});
