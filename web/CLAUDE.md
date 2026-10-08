@@ -4,7 +4,9 @@ Loaded when working under `web/`. Station-wide architecture lives in the root `C
 
 ### Web UI (`web/`)
 
-Next.js 15 App Router + Tailwind. Routes:
+Next.js App Router + Tailwind. Before upgrading dependencies, read
+[`DEPENDENCIES.md`](DEPENDENCIES.md) for peer compatibility limits and security overrides.
+Routes:
 
 - `/` — `PlayerApp` or `Landing`, chosen at request time by `SUBWAVE_HOMEPAGE` (`player` default).
 - `/listen` (always player), `/landing` (always broadsheet), `/setup` (docs), `/onboarding` (first-run wizard, the in-browser counterpart to `npm run setup`).
@@ -57,7 +59,7 @@ changes, re-capture against a running station:
 
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 

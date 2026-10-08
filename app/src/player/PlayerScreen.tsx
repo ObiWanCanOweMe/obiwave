@@ -194,7 +194,9 @@ export default function PlayerScreen() {
   const boothFeed = session.messages;
 
   const streamFormat = useStreamFormat(api?.base ?? null, streamInfo);
-  activeStreamFormatRef.current = streamFormat.format;
+  useEffect(() => {
+    activeStreamFormatRef.current = streamFormat.format;
+  }, [streamFormat.format]);
   const localPlayer = usePlayer(api, 1, isConnected, streamFormat.format);
   useEffect(() => {
     setBgPoll(localPlayer.tunedIn);
@@ -203,10 +205,7 @@ export default function PlayerScreen() {
   const stationName = typeof dj?.station === 'string' ? dj.station : undefined;
   const djName = typeof dj?.name === 'string' ? dj.name : undefined;
 
-  const coverSrc = useMemo(
-    () => (api && nowPlaying?.subsonic_id ? api.cover(nowPlaying.subsonic_id) : null),
-    [api, nowPlaying?.subsonic_id],
-  );
+  const coverSrc = api && nowPlaying?.subsonic_id ? api.cover(nowPlaying.subsonic_id) : null;
 
   const trackLike = useTrackLike(api, nowPlaying?.subsonic_id ?? null);
 
@@ -265,7 +264,7 @@ export default function PlayerScreen() {
   const [pagerW, setPagerW] = useState(0);
   const [active, setActive] = useState(HOME_INDEX);
   const activeRef = useRef(HOME_INDEX);
-  const scrollX = useRef(new Animated.Value(0)).current;
+  const [scrollX] = useState(() => new Animated.Value(0));
   const didInit = useRef(false);
 
   const onPagerLayout = (e: LayoutChangeEvent) => {
@@ -284,6 +283,8 @@ export default function PlayerScreen() {
 
   const onPagerScroll = useMemo(
     () =>
+      // Animated.event stores the listener; it reads refs only on scroll.
+      // eslint-disable-next-line react-hooks/refs
       Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
         useNativeDriver: true,
         listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {

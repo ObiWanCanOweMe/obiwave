@@ -363,7 +363,7 @@ async function resolveRequest(entry) {
   // cascade below so a request is never dropped.
   if (strictPlan.allowAgent) {
     try {
-      const agentRes = await djAgent.runRequest(queue, ctx, { requester, text });
+      const agentRes = await djAgent.runRequest(queue, { requester, text });
       if (agentRes) {
         // Agent path's echo guard (dj-agent.ts) already logged the ephemeral
         // djLog entry when it fired; thread the same verdict into the durable
@@ -399,7 +399,7 @@ async function resolveRequest(entry) {
         entry.pick = agentRes.track;
         entry.introScript = agentRes.introScript || null;
         return resolved({
-          ack: agentRes.ack,
+          ack: withWaitNotice(agentRes.ack, agentRes.track.id),
           track: agentRes.track,
           queuePosition: queue.upcoming.length,
         });
