@@ -65,7 +65,7 @@ test('runtime Node images do not retain the package manager toolchain', async ()
 test('controller production dependency locks meet the scanner fixed versions', async () => {
   const manifest = await json('controller/package.json');
   const lock = await json('controller/package-lock.json');
-  assert.equal(manifest.dependencies['adm-zip'], '^0.6.0');
+  assert.equal(manifest.dependencies['adm-zip'], '^0.6.1');
   assert.ok(lockVersions(lock, 'adm-zip').every((version) => atLeast(version, '0.6.0')));
   assert.ok(lockVersions(lock, 'fast-uri').every((version) => atLeast(version, '3.1.5')));
   assert.ok(lockVersions(lock, 'ip-address').every((version) => atLeast(version, '10.3.1')));
@@ -74,8 +74,8 @@ test('controller production dependency locks meet the scanner fixed versions', a
 test('web dependency locks pull the Next release with fixed Sharp', async () => {
   const manifest = await json('web/package.json');
   const lock = await json('web/package-lock.json');
-  assert.equal(manifest.dependencies.next, '^16.3.0');
-  assert.equal(manifest.dependencies['@next/third-parties'], '^16.3.0');
+  assert.equal(manifest.dependencies.next, '^16.4.0');
+  assert.equal(manifest.dependencies['@next/third-parties'], '^16.4.0');
   assert.ok(lockVersions(lock, 'sharp').every((version) => atLeast(version, '0.35.0')));
 });
 

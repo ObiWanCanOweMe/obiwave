@@ -127,7 +127,7 @@ for (const change of [
     name: 'theme change',
     next: { station: 'Alpha', accent: '#222222' },
   },
-] satisfies Array<{ name: string; next: LiveActivityConfig }>) {
+] satisfies { name: string; next: LiveActivityConfig }[]) {
   test(`${change.name} serializes after cleanup and tracks only the current card`, async () => {
     const fake = controlledBridge();
     const lifecycle = new LiveActivityLifecycle(fake.bridge);

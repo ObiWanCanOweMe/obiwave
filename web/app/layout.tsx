@@ -66,6 +66,7 @@ const sairaStencilOne = Saira_Stencil({
   subsets: ['latin'],
   weight: '400',
   display: 'swap',
+  adjustFontFallback: false,
   variable: '--font-saira-stencil-one',
 });
 
