@@ -181,6 +181,7 @@ export function formatTrackText(
 
 export interface EmbedTextOptions {
   maxRetries?: number;
+  abortSignal?: AbortSignal;
 }
 
 export async function embedTexts(
@@ -192,6 +193,7 @@ export async function embedTexts(
   const { embeddings } = await embedMany({
     model,
     values: texts,
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     ...(options.maxRetries != null ? { maxRetries: options.maxRetries } : {}),
   });
   if (!Array.isArray(embeddings) || embeddings.length !== texts.length) {
@@ -281,8 +283,9 @@ export function embedDocTexts(
 export async function embedQueryText(
   text: string,
   indexMode: IndexTextMode,
+  { abortSignal }: { abortSignal?: AbortSignal } = {},
 ): Promise<number[] | null> {
-  const [vec] = await embedTexts([applyQueryPrefix(text, indexMode)]);
+  const [vec] = await embedTexts([applyQueryPrefix(text, indexMode)], { abortSignal });
   return vec ?? null;
 }
 

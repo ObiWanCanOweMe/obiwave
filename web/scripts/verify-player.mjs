@@ -73,7 +73,7 @@ async function fixtureServer() {
   const active = new Set();
   const requests = [];
   let rangeProbes = 0;
-  const state = { upcoming: [], history: [], djLog: [], privacy: {}, ui: { skin: 'classic', tuneInOverlay: false } };
+  const state = { upcoming: [], history: [], privacy: {}, ui: { skin: 'classic', tuneInOverlay: false } };
   const server = createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');

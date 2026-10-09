@@ -112,7 +112,7 @@ const res = spawnSync(
   // and matches the posture `CLAUDE.md` documents for both packages. If a web
   // test ever needs real parallelism, this is the line to revisit — with the
   // measurement above in hand rather than a guess.
-  ['--test', '--test-concurrency=1', ...files],
+  ['--require', './scripts/register-test-css.js', '--test', '--test-concurrency=1', ...files],
   {
     cwd: webRoot,
     stdio: 'inherit',

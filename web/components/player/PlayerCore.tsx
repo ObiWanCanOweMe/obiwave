@@ -193,6 +193,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     onPause: actions.pause,
     onStop: actions.stop,
     boothFeed: feed.session.messages,
+    leadMs: feed.leadMs,
     personaAvatarUrl,
     personaName,
   });
@@ -202,15 +203,15 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   // into every feed consumer.
   const {
     nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-    llmTokens, state, session, trackStartedAt, timezone, locale,
+    llmTokens, state, session, trackStartedAt, timezone, locale, leadMs,
   } = feed;
   const feedValue = useMemo<StationFeed>(
     () => ({
       nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-      llmTokens, state, session, trackStartedAt, timezone, locale,
+      llmTokens, state, session, trackStartedAt, timezone, locale, leadMs,
     }),
     [nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-     llmTokens, state, session, trackStartedAt, timezone, locale],
+     llmTokens, state, session, trackStartedAt, timezone, locale, leadMs],
   );
 
   const { latencyMs, quality } = signal;

@@ -2,10 +2,11 @@
 //
 // The web player bakes its base URL in at build time. The native app is
 // multi-station, so the base is resolved at runtime from StationContext.
-// Base is always the station's public origin; optional private-station auth is
-// carried only in request headers.
+// Base is always the station's public origin. Proxy credentials travel only
+// in scoped request headers; the separate station password rides stream URLs.
 
 import { mountFor, type StreamFormat } from './streamMount';
+import { stationAuthResult, withStreamAuth, type StationAuthResult } from './station-password';
 import {
   authorizationFor,
   splitStationAddress,
@@ -64,6 +65,9 @@ export interface StationApi {
   cover(subsonicId: string): StationImageSource;
   /** External avatars never receive station credentials. */
   avatar(path: string): StationImageSource;
+  /** Fail-closed station password check, with any scoped proxy login. */
+  checkStationAuth(password: string): Promise<StationAuthResult>;
+  /** Read the current station password at tune/reconnect time. */
   streamUrl(format?: StreamFormat): string;
   streamHeaders(): Record<string, string> | undefined;
 }
@@ -112,6 +116,7 @@ async function fetchWithTimeout<T>(
 export function createApi(
   rawBase: string,
   suppliedCredentials?: StationCredentials | null,
+  stationPassword: () => string | null = () => null,
 ): StationApi {
   const split = splitStationAddress(rawBase);
   const base = split.base;
@@ -188,6 +193,17 @@ export function createApi(
         /* best-effort analytics */
       }
     },
+    checkStationAuth: async (password) => {
+      try {
+        return await stationFetch(api('/station-auth'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        }, res => stationAuthResult(res.status));
+      } catch {
+        return stationAuthResult(null);
+      }
+    },
     pollRequest: (id) => stationFetch<RequestResult>(api(`/request/${encodeURIComponent(id)}`), {}, async res => {
       if (res.status === 404) return { success: false, status: 'unknown' };
       return (await res.json()) as RequestResult;
@@ -216,7 +232,7 @@ export function createApi(
       if (/^https?:\/\//i.test(path)) return { uri: path };
       return stationImage(api(path.startsWith('/') ? path : `/${path}`));
     },
-    streamUrl: (format = 'mp3') => `${base}${mountFor(format)}`,
+    streamUrl: (format = 'mp3') => withStreamAuth(`${base}${mountFor(format)}`, stationPassword()),
     streamHeaders: () => authHeaders && { ...authHeaders },
   };
 }

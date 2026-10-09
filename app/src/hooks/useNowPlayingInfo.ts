@@ -17,6 +17,8 @@ export interface UseNowPlayingInfoParams {
   tunedIn: boolean;
   nowPlaying: NowPlayingTrack | null;
   boothFeed?: SessionTurn[];
+  /** Listener buffer behind the live edge (useStationFeed.leadMs). */
+  leadMs: number;
   activeShow?: ActiveShow | null;
 }
 
@@ -25,9 +27,10 @@ export function useNowPlayingInfo({
   tunedIn,
   nowPlaying,
   boothFeed,
+  leadMs,
   activeShow,
 }: UseNowPlayingInfoParams): void {
-  const talking = useTalking(boothFeed);
+  const talking = useTalking(boothFeed, leadMs);
   const card = api ? resolveAirCard({ api, nowPlaying, activeShow, talking }) : null;
 
   const title = card?.title;
