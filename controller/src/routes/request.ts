@@ -9,13 +9,18 @@ import * as library from '../music/library.js';
 import { getFullContext } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as djAgent from '../broadcast/dj-agent.js';
+import * as budget from '../broadcast/dj-budget.js';
 import * as session from '../broadcast/session.js';
 import * as requestLog from '../broadcast/request-log.js';
 import * as listeners from '../broadcast/listeners.js';
+import * as likes from '../broadcast/likes.js';
 import { generateQueuedRequestIntro } from '../broadcast/request-intro.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName, stillInFlight, screenAck, isNamedRequester, sorryNoMatch } from '../util/request-guard.js';
+import {
+  sanitizeRequestText, stripScriptedOpener, cleanRequesterName, cleanMissedArtist, stillInFlight, screenAck,
+  isNamedRequester, sorryNoMatch,
+} from '../util/request-guard.js';
 import {
   pickStrictCandidate,
   strictFailureMessage,
@@ -32,24 +37,6 @@ import { shuffle } from '../util/shuffle.js';
 import { requestWaitClause } from '../broadcast/queue/pure.js';
 
 export const router = express.Router();
-
-// Strip prompt-injection markup from listener text before it is stored, logged,
-// displayed or fed to the LLM. A belt over the prompt framing, not the only layer.
-function sanitizeRequestText(raw: string): string {
-  return String(raw ?? '')
-    // chat/template role + instruction tokens
-    .replace(/\[\/?INST\]|<<\/?SYS>>|<\|[^|>]*\|>/gi, ' ')
-    // any HTML/XML-ish tag
-    .replace(/<\/?[a-z][^>]*>/gi, ' ')
-    // leading role markers that fake a new turn
-    .replace(/^[ \t]*(system|assistant|developer)\s*:/gim, ' ')
-    // the "ignore the previous instructions" family
-    .replace(/\b(ignore|disregard|forget|override)\b[^.!?\n]*\b(previous|prior|above|earlier|all)\b[^.!?\n]*\binstructions?\b/gi, ' ')
-    // double quotes would break out of the "${text}" framing
-    .replace(/"/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 // In-memory request ledger, ephemeral by design: a restart drops in-flight
 // requests, and the track is either already queued or it isn't.
@@ -220,6 +207,27 @@ function withWaitNotice(ack: string | null | undefined, trackId: string | null |
   return `${ack}${requestWaitClause({ waitSec: queue.airForecastSec(queue.upcoming[idx]), blockLabel })}`;
 }
 
+// The matcher's reading without the matcher: at the hard token cap with
+// requests not exempt (dj-budget.requestsAllowed()), the cleaned request text
+// goes to the library search as-is, and the cascade's mood, similar and
+// starred rungs below still fit the room — the request resolves, just without
+// a model call. No ack: screenAck supplies the fixed fallback line.
+function modelFreeMatch(text: string): Awaited<ReturnType<typeof dj.matchRequest>> {
+  return {
+    kind: 'track', search_terms: [text], artist: null, genre: null, language: null,
+    sort: null, scope: 'song', mood: null, intent: 'library search (token budget reached)', ack: '',
+  } as Awaited<ReturnType<typeof dj.matchRequest>>;
+}
+
+// Requests accepted but not yet resolved. Their track is not in the upcoming
+// queue until resolveRequest() pushes it, which can take the agent's whole
+// timeout, so the maxPending gate counts them alongside the queued ones.
+function resolvingRequestCount(): number {
+  let n = 0;
+  for (const entry of requests.values()) if (entry.status === 'pending') n++;
+  return n;
+}
+
 async function resolveRequest(entry) {
   const { requester, text } = entry;
   entry.startedAt = Date.now();
@@ -256,6 +264,9 @@ async function resolveRequest(entry) {
       // not leave 'anon' in it as if it were a name (#1347).
       text: `${isNamedRequester(requester) ? `Listener "${requester}" requests` : 'An unnamed listener requests'}: "${text}"`
         + (cur ? ` (currently playing "${cur.title}" by ${cur.artist}${cur.id ? ` [id: ${cur.id}]` : ''})` : ''),
+      // The bare text, so the echo guards can check every request still in the
+      // agents' window without the line's own framing words (not public meta).
+      meta: { requestText: text },
     });
   } catch (err) {
     queue.log('error', `Session update for request failed: ${err.message}`);
@@ -350,10 +361,9 @@ async function resolveRequest(entry) {
   let strictPlan = strictRequestPlan(false, null);
 
   if (strictRequests) {
-    matched = await dj.matchRequest(text, {
-      listenerName: requester,
-      nowPlaying: currentTrack,
-    });
+    matched = budget.requestsAllowed()
+      ? await dj.matchRequest(text, { listenerName: requester, nowPlaying: currentTrack })
+      : modelFreeMatch(text);
     strictPlan = strictRequestPlan(true, matched);
   }
 
@@ -361,7 +371,7 @@ async function resolveRequest(entry) {
   // the discovery tools and writes the intro, posting the request into the
   // live session. On any failure, fall through to the stateless matcher
   // cascade below so a request is never dropped.
-  if (strictPlan.allowAgent) {
+  if (strictPlan.allowAgent && budget.requestsAllowed()) {
     try {
       const agentRes = await djAgent.runRequest(queue, { requester, text });
       if (agentRes) {
@@ -413,10 +423,9 @@ async function resolveRequest(entry) {
   // interpreted against what's actually on-air ("match this energy",
   // "something slower than this", etc.).
   if (!matched) {
-    matched = await dj.matchRequest(text, {
-      listenerName: requester,
-      nowPlaying: currentTrack,
-    });
+    matched = budget.requestsAllowed()
+      ? await dj.matchRequest(text, { listenerName: requester, nowPlaying: currentTrack })
+      : modelFreeMatch(text);
   }
   strictPlan = strictRequestPlan(strictRequests, matched);
   const strictTarget = strictPlan.target;
@@ -598,11 +607,13 @@ async function resolveRequest(entry) {
     if (pick) pickSource = `library-mood:${ctx.dominantMood}(context)`;
   }
 
-  // 2g. Starred: the operator's favourites are always a safe pick.
+  // 2g. Starred: the operator's favourites are always a safe pick — the
+  // operator's, not a star a listener like left behind (likes.operatorStarred).
   if (!pick) {
     try {
       const starred = await subsonic.getStarred();
-      pick = randomFresh(starred);
+      await likes.load();
+      pick = randomFresh(likes.operatorStarred(starred, (settings.get() as any)?.likes));
       if (pick) pickSource = 'starred';
     } catch {}
   }
@@ -620,7 +631,10 @@ async function resolveRequest(entry) {
     const hit = got.includes(want) || want.includes(got)
       || want.split(/\s+/).some(t => t.length >= 3 && got.includes(t));
     if (!hit) {
+      // The raw reading stays on the operator's log; only the cleaned form, or
+      // nothing, may reach a prompt.
       entry.artistMiss = matched.artist;
+      entry.missedArtist = cleanMissedArtist(matched.artist);
       queue.log('miss', `Requested artist "${matched.artist}" not in library — airing ${pick.artist} instead`);
     }
   }
@@ -641,10 +655,12 @@ async function resolveRequest(entry) {
   queue.log('request', `resolved via ${pickSource}: ${pick.title} — ${pick.artist}`);
 
   // On an artist miss the up-front ack (written before the cascade knew it would
-  // miss) is a lie; replace it with an honest stand-in line.
+  // miss) is a lie; replace it with an honest stand-in line. Fixed copy that
+  // names nobody: this line is also the DJ's session turn when no intro airs,
+  // and the artist is the listener's own words read back by the matcher.
   let ack: string;
   if (entry.artistMiss) {
-    ack = `No ${entry.artistMiss} in the crates — here's something that fits the moment instead.`;
+    ack = `Couldn't find that artist in the crates — here's something that fits the moment instead.`;
   } else {
     const screened = screenAck(matched.ack, text, 'Coming right up.');
     if (screened.guard) {
@@ -654,14 +670,15 @@ async function resolveRequest(entry) {
     ack = screened.ack;
   }
 
-  // 3. DJ intro. On a miss, pass the absent artist so the intro owns the
-  // substitution. Station voice off means no intro and no model call; the ack
-  // still reaches the listener.
+  // 3. DJ intro. On a miss, flag it (and pass the cleaned name, when one
+  // survived) so the intro owns the substitution. Station voice off means no
+  // intro and no model call; the ack still reaches the listener.
   const generatedIntro = await generateQueuedRequestIntro({
     track: pick,
     context: ctx,
     requestedBy: requester,
-    artistMiss: entry.artistMiss || null,
+    artistMiss: !!entry.artistMiss,
+    missedArtist: entry.missedArtist ?? null,
     recap: queue.getDjRecap(),
     recentTracks: queue.getRecentTracks(),
     recentOpeners: queue.getRecentOpeners(),
@@ -733,7 +750,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
 
   // req.body is already the parsed shape. Only the cleaned text reaches the
   // session/prompts/air; the raw text is kept on the entry for the operator log.
-  // Sanitize never grows its input, so no re-slice is needed.
+  // The schema has bounded both the original text and its NFKC expansion.
   const { text: rawText, name: rawName } = req.body as { text: string; name: string };
   const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
   const text = stripped.text;
@@ -789,8 +806,11 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
   }
   // LISTENER requests only — an operator's own studio push carries
   // `requestedBy: 'studio'` for the air-path exemptions and must not consume a
-  // slot in the listener queue. See queue.pendingListenerRequests().
-  const pendingCount = queue.pendingListenerRequests();
+  // slot in the listener queue. See queue.pendingListenerRequests(). Requests
+  // still resolving count too: they hold no queue slot yet, so a burst
+  // accepted inside one resolution window would otherwise all pass. The brief
+  // overlap between a push and its entry settling errs toward refusing.
+  const pendingCount = queue.pendingListenerRequests() + resolvingRequestCount();
   if (pendingCount >= (Number(cfg.maxPending) || 6)) {
     res.setHeader('Retry-After', String(retryAfter));
     return res.status(429).json({

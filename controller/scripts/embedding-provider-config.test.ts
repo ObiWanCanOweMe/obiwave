@@ -103,7 +103,7 @@ await test('persisted compatible embedding bearer cannot mask the dedicated env 
   delete process.env.EMBEDDING_API_KEY;
 });
 
-await test('switching to chat-only LiteLLM retains the inherited embedding connection', async () => {
+await test('switching to chat-only LiteLLM retains the embedding endpoint without its former chat credential', async () => {
   await settings.update({
     llm: {
       provider: 'openai-compatible',
@@ -127,7 +127,7 @@ await test('switching to chat-only LiteLLM retains the inherited embedding conne
     provider: 'openai-compatible',
     model: 'text-embedding-3-small',
     baseUrl: 'https://compat-chat.example/v1',
-    apiKey: 'compat-key',
+    apiKey: '',
   });
 });
 
@@ -156,11 +156,11 @@ await test('an explicit embedding provider never receives the chat credential', 
     provider: 'locca',
     model: 'nomic-embed-text',
     baseUrl: 'https://locca-embed.example/v1',
-    apiKey: 'locca-key',
+    apiKey: '',
   });
 });
 
-await test('an explicit embedding provider inherits its same-provider LLM connection', async () => {
+await test('an explicit embedding provider retains its saved endpoint without another chat leg credential', async () => {
   await settings.update({
     llm: { provider: 'ollama', model: '' },
     embedding: {
@@ -172,7 +172,7 @@ await test('an explicit embedding provider inherits its same-provider LLM connec
     provider: 'openai-compatible',
     model: 'text-embedding-3-small',
     baseUrl: 'https://compat-chat.example/v1',
-    apiKey: 'compat-key',
+    apiKey: '',
   });
 });
 
@@ -262,7 +262,7 @@ await test('switching away from openai-compatible never reuses its embedding bea
   }
 
   assert.deepEqual(resolved, {
-    locca: 'locca-provider-key',
+    locca: '', // Locca's separate embedding server must not inherit its chat key.
     // Empty here is intentional: each managed AI SDK reads its own normal env
     // credential when no dedicated EMBEDDING_API_KEY override is supplied.
     openai: '',

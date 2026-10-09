@@ -236,7 +236,6 @@ try {
     provider: 'openai-compatible',
     baseUrl: embedding.baseUrl,
   });
-  delete process.env.EMBEDDING_API_KEY;
   assert.equal((await switchedEmbedding.json() as { ok: boolean }).ok, true);
   assert.deepEqual(embedding.requests.at(-1), {
     method: 'GET',
@@ -258,6 +257,8 @@ try {
       `regression: ${owner} discovery leaked a stored owner's bearer to an unsaved origin`,
     );
   }
+
+  delete process.env.EMBEDDING_API_KEY;
 
   for (const owner of ['chat', 'embedding', 'tts'] as const) {
     const response = await discover({

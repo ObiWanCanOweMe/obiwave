@@ -11,6 +11,7 @@ import {
   splitStationAddress,
   type StationCredentials,
 } from './station-credentials';
+import { createStationPasswordStore } from './station-password';
 import { forgetStoredStation } from './station-store';
 import { safeStationLabel, secureKeyForOrigin } from './stationSecurity';
 
@@ -19,10 +20,12 @@ const RECENTS_CAP = 8;
 const SECURE_OPTIONS = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
-const credentialVault = createCredentialVault({
-  getItemAsync: (key) => SecureStore.getItemAsync(key, SECURE_OPTIONS),
-  setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, SECURE_OPTIONS),
-});
+const secureStorage = {
+  getItemAsync: (key: string) => SecureStore.getItemAsync(key, SECURE_OPTIONS),
+  setItemAsync: (key: string, value: string) => SecureStore.setItemAsync(key, value, SECURE_OPTIONS),
+};
+const credentialVault = createCredentialVault(secureStorage);
+const stationPasswords = createStationPasswordStore(secureStorage);
 
 export interface StationRef {
   url: string;
@@ -45,6 +48,18 @@ export function featuredStation(): StationRef {
     url: splitStationAddress(rawUrl).base,
     name: safeStationLabel(f?.name || 'SUB/WAVE', rawUrl),
   };
+}
+
+export async function loadStationPassword(rawUrl: string): Promise<string | null> {
+  return stationPasswords.get(splitStationAddress(rawUrl).base);
+}
+
+export async function saveStationPassword(rawUrl: string, password: string): Promise<void> {
+  await stationPasswords.set(splitStationAddress(rawUrl).base, password);
+}
+
+export async function clearStationPassword(rawUrl: string): Promise<void> {
+  await stationPasswords.remove(splitStationAddress(rawUrl).base);
 }
 
 async function persist(store: StationStore): Promise<void> {
@@ -133,6 +148,7 @@ export async function removeRecent(url: string): Promise<StationStore> {
     removeCredential: async (base) => {
       await credentialVault.remove(base);
       await SecureStore.deleteItemAsync(secureKeyForOrigin(base));
+      await stationPasswords.remove(base);
     },
     persist,
   });

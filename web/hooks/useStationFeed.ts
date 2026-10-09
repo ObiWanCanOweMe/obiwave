@@ -40,9 +40,12 @@ export interface StationFeed {
    *  (issue #418). */
   timezone: string | null;
   locale: StationLocale;
+  /** How far this listener sits behind the live edge, in ms: the station's
+   *  stream.bufferSeconds clamped to 0–60s, 0 before the first payload. */
+  leadMs: number;
 }
 
-const EMPTY_STATE: StationState = { upcoming: [], history: [], djLog: [] };
+const EMPTY_STATE: StationState = { upcoming: [], history: [] };
 const EMPTY_SESSION: SessionPayload = { session: null, messages: [] };
 const OFFLINE_CONFIRM_POLLS = 4;
 
@@ -78,10 +81,12 @@ export function useStationFeed({
   const [locale, setLocale] = useState<StationLocale>('en-GB');
   const lastTrackKeyRef = useRef<string | null>(null);
   const offlinePollsRef = useRef(0);
-  // Listener buffer depth in ms. A ref, not state, so the polling effect never
-  // re-subscribes when it arrives. 0 until the first payload lands, degrading
-  // to live-edge behaviour rather than guessing an offset.
+  // Listener buffer depth in ms. The polling effect and hold timers read the
+  // ref, so they never re-subscribe when it arrives; the state mirror is for
+  // consumers. 0 until the first payload lands, degrading to live-edge
+  // behaviour rather than guessing an offset.
   const leadMsRef = useRef(0);
+  const [leadMs, setLeadMs] = useState(0);
   // Holds a track whose metadata has arrived but whose audio hasn't reached
   // this listener yet, until it's audible.
   const promoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,6 +124,7 @@ export function useStationFeed({
           activeFormat?.current ?? 'mp3',
           leadMsRef.current,
         );
+        setLeadMs(leadMsRef.current);
         const trackKey = np ? `${np.title}\u0000${np.artist}` : null;
         // Prefer the queue's start time over "first seen by this client": a tab
         // hidden at the transition would stamp Date.now() mid-track. Guarded to
@@ -206,5 +212,5 @@ export function useStationFeed({
     };
   }, [activeFormat, client]);
 
-  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale };
+  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale, leadMs };
 }

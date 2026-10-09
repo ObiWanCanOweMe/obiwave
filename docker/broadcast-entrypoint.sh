@@ -10,7 +10,9 @@ set -eu
 
 # Shared state bootstrap. Mode 777 because the controller, analyzer and
 # liquidsoap write here as OTHER uids; without it an operator must chown every
-# bind-mount source by hand.
+# bind-mount source by hand. The state ROOT is 1777 instead: the sticky bit
+# still lets every uid create files there, but only a file's owner can rename or
+# delete it, so a sidecar's uid cannot replace root's icecast-secrets.env.
 #
 # NOTHING in here is fatal (#1300 bug 10): under `set -eu` a bulk mkdir/chmod
 # makes every state path load-bearing, and one unwritable mount aborts this
@@ -42,12 +44,13 @@ state_writable_by_others() {
 
 state_prepare_dir() {
     local p=$1
+    local mode=${2:-777}
     mkdir -p "$p" 2>/dev/null || true
     if [ ! -d "$p" ]; then
         state_warn "state dir $p could not be created — a read-only or unwritable mount; the station boots, but anything writing there will fail"
         return 0
     fi
-    chmod 777 "$p" 2>/dev/null || true
+    chmod "$mode" "$p" 2>/dev/null || true
     if [ ! -w "$p" ] || ! state_writable_by_others "$p"; then
         state_warn "state dir $p is mode $(state_mode "$p") and chmod could not change it — the controller and analyzer containers write there as other uids; chown/chmod it on the host"
     fi
@@ -70,8 +73,10 @@ bootstrap_state_dirs() {
     local root=$1
     local dir=$2
     local sub
-    state_prepare_dir "$root"
-    state_prepare_dir "$dir"
+    state_prepare_dir "$root" 1777
+    # A single-station install serves from the root itself; a second plain 777
+    # would strip the sticky bit again.
+    [ "$dir" = "$root" ] || state_prepare_dir "$dir"
     # stems + transitions are the analyzer's (uid 10001); a fresh bind mount
     # lands root-owned 755, which it cannot write without the same 777.
     for sub in voice voices archive jingles logs sessions sfx stems transitions; do
@@ -106,6 +111,129 @@ read_state_num() {
 
 stream_buffer_seconds() {
     read_state_num liquidsoap_stream_buffer_seconds.txt 22
+}
+
+ICECAST_SECRET_CHARS='A-Z a-z 0-9 . _ ~ + = @ ! % ^ * , : / ? # -'
+
+icecast_secret_valid() {
+    case "$1" in
+        ''|*[!A-Za-z0-9._~+=@!%^*,:/?#-]*) return 1 ;;
+    esac
+    return 0
+}
+
+# The uid this script's own files land as next to $1. Normally `id -u`, but a
+# root-squashed NFS export or a user-namespaced runtime maps it, and a file this
+# script wrote must still be recognised as its own. Falls back to `id -u` when
+# the dir cannot be written.
+icecast_secrets_owner() {
+    local probe uid=''
+    probe=$(mktemp "$1.XXXXXX" 2>/dev/null) || probe=''
+    if [ -n "$probe" ]; then
+        uid=$(stat -c %u "$probe" 2>/dev/null || true)
+        rm -f "$probe" 2>/dev/null || true
+    fi
+    [ -n "$uid" ] || uid=$(id -u)
+    echo "$uid"
+}
+
+# Reads $1 into _ICS_SOURCE / _ICS_ADMIN / _ICS_RELAY, each empty when absent
+# or refused.
+read_icecast_secrets_file() {
+    local file=$1 line key val owner want
+    _ICS_SOURCE='' _ICS_ADMIN='' _ICS_RELAY=''
+    if [ -L "$file" ]; then
+        state_warn "ignoring $file — it is a symlink, not a file this script wrote; the Icecast passwords will be regenerated unless ICECAST_*_PASSWORD is set"
+        return 0
+    fi
+    [ -e "$file" ] || return 0
+    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+        state_warn "ignoring $file — not a readable regular file; the Icecast passwords will be regenerated unless ICECAST_*_PASSWORD is set"
+        return 0
+    fi
+    owner=$(stat -c %u "$file" 2>/dev/null || echo '?')
+    want=$(icecast_secrets_owner "$file")
+    if [ "$owner" != "$want" ]; then
+        state_warn "ignoring $file — owned by uid $owner, not uid $want which writes it; the Icecast passwords will be regenerated unless ICECAST_*_PASSWORD is set"
+        return 0
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%$'\r'}
+        key=${line%%=*}
+        [ "$key" != "$line" ] || continue
+        val=${line#*=}
+        case "$key" in
+            ICECAST_SOURCE_PASSWORD|ICECAST_ADMIN_PASSWORD|ICECAST_RELAY_PASSWORD) ;;
+            *) continue ;;
+        esac
+        # A hand edit may quote the value; the controller strips one pair too.
+        case "$val" in
+            \"*\") val=${val#\"}; val=${val%\"} ;;
+            \'*\') val=${val#\'}; val=${val%\'} ;;
+        esac
+        if ! icecast_secret_valid "$val"; then
+            state_warn "ignoring $key in $file — it holds a character outside [$ICECAST_SECRET_CHARS]; it will be replaced"
+            continue
+        fi
+        case "$key" in
+            ICECAST_SOURCE_PASSWORD) _ICS_SOURCE=$val ;;
+            ICECAST_ADMIN_PASSWORD) _ICS_ADMIN=$val ;;
+            ICECAST_RELAY_PASSWORD) _ICS_RELAY=$val ;;
+        esac
+    done < "$file" || true
+    return 0
+}
+
+# Sets and exports ICECAST_SOURCE/ADMIN/RELAY_PASSWORD from the env, then $1,
+# then openssl.
+resolve_icecast_secrets() {
+    local file=$1 part name fileval val
+    read_icecast_secrets_file "$file"
+    for part in SOURCE ADMIN RELAY; do
+        name=ICECAST_${part}_PASSWORD
+        fileval=_ICS_$part
+        val=${!name:-}
+        if [ -n "$val" ] && ! icecast_secret_valid "$val"; then
+            state_warn "ignoring $name from the environment — it holds a character outside [$ICECAST_SECRET_CHARS], which icecast.xml cannot carry safely; using the persisted or a generated password instead"
+            val=''
+        fi
+        [ -n "$val" ] || val=${!fileval}
+        [ -n "$val" ] || val=$(openssl rand -hex 16)
+        printf -v "$name" '%s' "$val"
+        export "${name?}"
+    done
+    return 0
+}
+
+# Written back for operator visibility + the documented "delete + restart to
+# rotate" path. Through a fresh mktemp file and a rename, so the write never
+# follows whatever sits at $1 (the rename replaces a symlink, it does not write
+# through it). 0600: only root reads it (this script, and the controller off the
+# shared mount in broadcast/listeners.ts). A failed write warns, never aborts.
+write_icecast_secrets() {
+    local file=$1 tmp
+    tmp=$(mktemp "$file.XXXXXX" 2>/dev/null) || tmp=''
+    if [ -n "$tmp" ] \
+        && printf 'ICECAST_SOURCE_PASSWORD=%s\nICECAST_ADMIN_PASSWORD=%s\nICECAST_RELAY_PASSWORD=%s\n' \
+            "$ICECAST_SOURCE_PASSWORD" "$ICECAST_ADMIN_PASSWORD" "$ICECAST_RELAY_PASSWORD" > "$tmp" 2>/dev/null \
+        && chmod 600 "$tmp" 2>/dev/null \
+        && mv -fT "$tmp" "$file" 2>/dev/null; then
+        return 0
+    fi
+    [ -z "$tmp" ] || rm -f "$tmp" 2>/dev/null || true
+    state_warn "could not write $file — the station runs on these Icecast passwords, but they will change on the next restart"
+    return 0
+}
+
+# Escapes $1 for an XML attribute value. The replacements are quoted so bash
+# 5.2's patsub_replacement does not read `&` as "the matched text".
+xml_escape() {
+    local s=$1
+    s=${s//'&'/'&amp;'}
+    s=${s//'<'/'&lt;'}
+    s=${s//'>'/'&gt;'}
+    s=${s//'"'/'&quot;'}
+    printf '%s' "$s"
 }
 
 # Sourcing with SUBWAVE_BROADCAST_LIB=1 defines the helpers above WITHOUT
@@ -152,39 +280,10 @@ if [ -f "$RADIO_LOG" ] && [ "$(stat -c %s "$RADIO_LOG" 2>/dev/null || echo 0)" -
     echo "broadcast: rotated oversized radio.log to radio.log.old" >&2
 fi
 
-# Password precedence: env override > persisted secrets file > freshly
-# generated. Capture env values FIRST so sourcing the secrets file can't clobber
-# them.
-
-ENV_SRC="${ICECAST_SOURCE_PASSWORD:-}"
-ENV_ADM="${ICECAST_ADMIN_PASSWORD:-}"
-ENV_REL="${ICECAST_RELAY_PASSWORD:-}"
-
-if [ -f "$SECRETS" ]; then
-    # shellcheck disable=SC1090
-    . "$SECRETS"
-fi
-
-[ -n "$ENV_SRC" ] && ICECAST_SOURCE_PASSWORD="$ENV_SRC"
-[ -n "$ENV_ADM" ] && ICECAST_ADMIN_PASSWORD="$ENV_ADM"
-[ -n "$ENV_REL" ] && ICECAST_RELAY_PASSWORD="$ENV_REL"
-
-[ -z "${ICECAST_SOURCE_PASSWORD:-}" ] && ICECAST_SOURCE_PASSWORD="$(openssl rand -hex 16)"
-[ -z "${ICECAST_ADMIN_PASSWORD:-}"  ] && ICECAST_ADMIN_PASSWORD="$(openssl rand -hex 16)"
-[ -z "${ICECAST_RELAY_PASSWORD:-}"  ] && ICECAST_RELAY_PASSWORD="$(openssl rand -hex 16)"
-
-# Written back for operator visibility + the documented "delete + restart to
-# rotate" path.
-cat > "$SECRETS" <<EOF
-ICECAST_SOURCE_PASSWORD=$ICECAST_SOURCE_PASSWORD
-ICECAST_ADMIN_PASSWORD=$ICECAST_ADMIN_PASSWORD
-ICECAST_RELAY_PASSWORD=$ICECAST_RELAY_PASSWORD
-EOF
-# 0600 — only root reads it (this entrypoint, and the controller container off
-# the shared mount in broadcast/listeners.ts).
-chmod 600 "$SECRETS"
-
-export ICECAST_SOURCE_PASSWORD ICECAST_ADMIN_PASSWORD ICECAST_RELAY_PASSWORD
+# Icecast passwords: env override > persisted secrets file > freshly generated,
+# read as data and validated (see resolve_icecast_secrets above).
+resolve_icecast_secrets "$SECRETS"
+write_icecast_secrets "$SECRETS"
 # Liquidsoap connects over loopback inside this container; radio.liq reads
 # ICECAST_HOST (default "icecast").
 export ICECAST_HOST=localhost

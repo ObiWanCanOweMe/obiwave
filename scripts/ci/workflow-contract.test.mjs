@@ -1047,7 +1047,7 @@ test('web quality runs the complete mounted state suite with its locked local ru
     'tsx scripts/onboarding-provider-state.test.ts',
   );
   assert.equal(webPackage.scripts['test:tts-secret-state'], 'tsx scripts/tts-secret-state.test.ts');
-  assert.equal(webPackage.scripts['test:library-liked-state'], 'tsx scripts/library-liked-state.test.ts');
+  assert.equal(webPackage.scripts['test:library-liked-state'], 'tsx --require ./scripts/register-test-css.js scripts/library-liked-state.test.ts');
   assert.equal(webPackage.scripts['test:archive-error-state'], 'tsx scripts/archive-error-state.test.ts');
   assert.equal(typeof webPackage.devDependencies?.tsx, 'string', 'tsx must be declared as a web dev dependency');
   assert.equal(typeof webLock.packages?.['node_modules/tsx']?.version, 'string', 'tsx must be installed in the web lockfile');
