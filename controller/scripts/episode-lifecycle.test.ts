@@ -16,7 +16,12 @@ const registry = await import('../src/skills/registry.js');
 const { getFullContext } = await import('../src/context.js');
 const { prepareEpisodeContext, showPreparation } = await import('../src/broadcast/show-preparation.js');
 const { config } = await import('../src/config.js');
-after(() => rm(root, { recursive: true, force: true }));
+after(async () => {
+  // Cancel the coalesced save and publish it before removing its state dir.
+  // Otherwise its timer can recreate session.json during recursive cleanup.
+  assert.equal(await session.persistNow(), true);
+  await rm(root, { recursive: true, force: true });
+});
 await settings.load();
 
 const plan = { angle: 'Episode angle', features: [], introNote: null, outroNote: null };
