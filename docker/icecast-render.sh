@@ -195,6 +195,7 @@ EOF
         <authentication type="url">
             <option name="listener_add" value="$AUTH_URL"/>
             <option name="auth_header" value="icecast-auth-user: 1"/>
+            <option name="allow_duplicate_users" value="1"/>
         </authentication>
 EOF
     fi

@@ -10,6 +10,7 @@ import { splitAudibleTurns } from '@/lib/sessionFeed';
 import { DEFAULT_STATION_LOCALE, type StationLocale } from '@/lib/format';
 import { bufferSecondsForFormat } from '@/lib/streamBuffer';
 import type { StreamFormat } from '@/lib/streamFormat';
+import { trackElapsedSeconds } from '@/lib/track-progress';
 import type {
   ActiveShow,
   DjState,
@@ -307,9 +308,8 @@ export function useStationFeed(
     const update = () => {
       if (trackStartRef.current) {
         // Clamped at 0: trackStartRef is listener-time and sits in the future
-        // while the track is still inside the buffer, so the clock holds 0:00
-        // until the audio actually starts rather than reading negative.
-        setElapsed(Math.max(0, Math.floor((Date.now() - trackStartRef.current) / 1000)));
+        // while the track is still inside the buffer.
+        setElapsed(trackElapsedSeconds(trackStartRef.current));
       }
     };
     update(); // catch up immediately on foreground

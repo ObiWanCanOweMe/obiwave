@@ -1037,7 +1037,7 @@ export const COMPOSE_ANALYZER_GPU_YML = `# GPU opt-in overlay for the analyzer �
 #   docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 #   (BYO hosts: swap in docker-compose.byo.yml.)
 #
-# Requirements: NVIDIA driver + Container Toolkit only (cu124 wheels vendor the
+# Requirements: NVIDIA driver + Container Toolkit only (cu128 wheels vendor the
 # CUDA runtime). The worker picks the device itself (ANALYZE_DEVICE=auto: cuda
 # when torch sees a GPU, else cpu with a warning — a misconfigured host
 # degrades, not fails). ANALYZE_DEVICE=cpu in .env forces CPU without dropping
@@ -1338,9 +1338,11 @@ SITE_URL=
 #                         # search loads them once and they'd otherwise sit in
 #                         # RAM/swap forever; the longer window keeps the cold
 #                         # reload off interactive sound searches).
-# ANALYZE_RECYCLE_IDLE_S= # sidecar only: seconds of no heavy use before the
-#                         # whole worker process is recycled (default 3600;
-#                         # 0 = never). The model release above hands back the
+# ANALYZE_RECYCLE_IDLE_S= # sidecar only: seconds without any request before
+#                         # the whole worker process is recycled (default 3600;
+#                         # 0 = never). A plain bpm/key pass counts too: it
+#                         # loads no models but leaves the same scratch
+#                         # resident. The model release above hands back the
 #                         # weights; the recycle also reclaims the ~1GB of
 #                         # librosa/numba/torch scratch — and on cuda the CUDA
 #                         # context — that survive it. Next request re-pays the
@@ -1451,4 +1453,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.21.0`; // x-release-please-version
+export const CLI_VERSION = `1.22.0`; // x-release-please-version
