@@ -10,4 +10,5 @@ export {
 } from './internal/speech/cloud-speech.js';
 export { listVoices, normalizeVoiceList } from './internal/speech/voice-catalog.js';
 export { probeFishKey } from './internal/speech/fish-audio.js';
+export { elevenLabsTtsModelIds } from './internal/core/pure.js';
 export type { CloudVoice, VoiceListResult } from './internal/speech/voice-catalog.js';
