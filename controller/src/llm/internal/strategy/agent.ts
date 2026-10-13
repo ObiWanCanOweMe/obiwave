@@ -10,7 +10,7 @@ import { withFailover } from '../core/failover.js';
 import { withTransientRetry, withDeadline } from '../core/retry.js';
 import { stripThinking, extractJson, perfOf, warningsOf, flattenToolCalls, failureDiagnostics, renderTerminalPrompt, isModelUnavailable, isGenerationControlError, createUsageMeter } from '../core/pure.js';
 import type { StepLike, ToolCallLike, ToolCallSummary, TokenUsage, UsageMeter } from '../core/pure.js';
-import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, runDiscoverySteps, googleSafetyOptions } from '../provider/capabilities.js';
+import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, nativeFirstStepToolChoice, runDiscoverySteps, googleSafetyOptions } from '../provider/capabilities.js';
 import type { Leg } from '../provider/legs.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { agentPlan } from './plan.js';
@@ -281,6 +281,12 @@ export async function djAgent({
               // free text still reasons.
               reasoning: reasoningFor(leg.cfg, { forceNoThink: true }),
               output: Output.object({ schema: schema! }),
+              // The schema rides every step, so an open step 0 lets the model
+              // answer before it has explored; that run is discarded below and
+              // the pick repeats in done-tool mode. Force discovery first, then
+              // leave later steps open to emit the object.
+              prepareStep: async ({ stepNumber }: { stepNumber: number }) =>
+                (stepNumber === 0 ? { toolChoice: nativeFirstStepToolChoice(leg.cfg) } : {}),
               // A run that ends on its step cap mid-exploration makes `output`
               // throw after every step was billed; count each call as it ends.
               onLanguageModelCallEnd: meter.onLanguageModelCallEnd,

@@ -432,6 +432,51 @@ cross_prev_end = ref(crossfade_duration())
 cross_last_file = ref("")
 cross_last_rid = ref("")
 cross_last_stamps = ref([])
+cross_prev_jingle = ref(false)
+
+# Identity still comes exclusively from music_meta. A dry jingle seam consumes
+# the incoming buffer only AFTER the jingle's tail, so its pre-cross metadata
+# arrives one buffer too soon. Capture it synchronously and publish that same
+# snapshot when the incoming transition buffer actually begins feeding.
+# Ordinary music seams retain the original pre-cross publication timing.
+publish_music_meta = ref(fun (m) -> ignore(m["filename"]))
+post_jingle_metadata = ref([])
+music_last_file = ref("")
+music_last_rid = ref("")
+
+def music_metadata(m) =
+  fname = m["filename"]
+  rid = m["rid"]
+  if fname == "" or fname != music_last_file() or rid != music_last_rid() then
+    music_last_file := fname
+    music_last_rid := rid
+    if cross_prev_jingle() then
+      post_jingle_metadata := m
+    else
+      publish = publish_music_meta()
+      publish(m)
+    end
+  end
+end
+
+def publish_after_jingle(s, m) =
+  original = post_jingle_metadata()
+  matches = original["filename"] != "" and
+    original["filename"] == m["filename"] and original["rid"] == m["rid"]
+  if matches then
+    published = ref(false)
+    (metadata.map(update=false, fun (chunk) -> begin
+      if not published() then
+        published := true
+        publish = publish_music_meta()
+        publish(original)
+      end
+      chunk
+    end, s) : source)
+  else
+    s
+  end
+end
 
 def cross_stamps(m) =
   # `fname`, not `file`: a local `file` shadows the stdlib file.* module
@@ -449,6 +494,7 @@ def cross_stamps(m) =
       ("liq_cross_duration", "")
     ]
     cross_prev_end := own
+    cross_prev_jingle := m["subwave_jingle"] == "true"
     cross_last_file := fname
     cross_last_rid := rid
     cross_last_stamps := stamps
@@ -518,6 +564,7 @@ def dj_transition(a, b) =
   # the `b` gestures on seams where the outgoing one used to suppress them.
   boundary_fading = a.metadata["liq_show_fade"] == "true"
   jingle_out = a.metadata["subwave_jingle"] == "true"
+  jingle_in = b.metadata["subwave_jingle"] == "true"
   washing = a.metadata["liq_washout"] == "true" and not boundary_fading
   looping = a.metadata["liq_loop"] == "true" and not washing and not boundary_fading
   sweeping = b.metadata["liq_sweep"] == "true" and not looping and not boundary_fading and not jingle_out
@@ -1082,7 +1129,23 @@ def dj_transition(a, b) =
     else
       b_source
     end
-  strip_cross_stamps(add(normalize=false, [a_source, b_source]))
+  # A JINGLE IS NEVER BLENDED. cross sizes this buffer from the SHORTER side, so
+  # for a three-second stinger `d` is the stinger's whole length: summed, it
+  # aired as nothing but its own fade-in under the outgoing track, reaching full
+  # level on its last sample (scripts/fx-render-test.sh jingledry with the old
+  # `add` restored: -58 dB rising to -36 dB against a -36 dB track). The outgoing
+  # track fades over the same buffer as before and the stinger then plays dry,
+  # start to finish. An outgoing jingle is not faded either, so one long enough
+  # to have a tail of its own keeps its last words, into a track or into another
+  # jingle. This is the one seam the INVARIANT above does not describe.
+  seam =
+    if jingle_in or jingle_out then
+      incoming = if jingle_out and not jingle_in then publish_after_jingle(b.source, b.metadata) else b.source end
+      (sequence([(if jingle_out then a.source else a_source end), incoming]) : source)
+    else
+      add(normalize=false, [a_source, b_source])
+    end
+  strip_cross_stamps(seam)
 end
 
 # The PRE-cross handle for the on_metadata hook attached further down. Hooking
@@ -1669,6 +1732,7 @@ radio = metadata.map(update=false, strip=true, fun(_) -> [], radio)
 radio = insert_metadata(radio)
 
 def on_meta(m) =
+  started_at = float_of_string(default=time(), m["subwave_music_started_at"])
   title = m["title"]
   artist = m["artist"]
   album = m["album"]
@@ -1689,7 +1753,7 @@ def on_meta(m) =
       data=json.stringify(compact=true, {
         filename = filename,
         pauseId = m["subwave_pause_id"],
-        startedAt = time()
+        startedAt = started_at
       }),
       atomic=true,
       temp_dir=pause_talk_tmp_dir,
@@ -1703,7 +1767,7 @@ def on_meta(m) =
     file.write(
       data=json.stringify(compact=true, {
         filename = filename,
-        startedAt = time()
+        startedAt = started_at
       }),
       atomic=true,
       temp_dir=bed_tmp_dir,
@@ -1714,7 +1778,7 @@ def on_meta(m) =
     pause_talk_on_air := false
     jingle_now_on_air := false
     log("on_meta: title=#{title} | artist=#{artist} | album=#{album} | id=#{subsonic_id}")
-    ts = int_of_float(time())
+    ts = int_of_float(started_at)
     # json.stringify, not interpolation: titles with embedded quotes or
     # backslashes produce invalid JSON.
     payload = json.stringify(compact=true, {
@@ -1749,9 +1813,17 @@ end
 
 # Attached to `music_meta`, the PRE-cross handle (post-cross fires twice).
 # on_metadata rather than on_track, because on_track gets swallowed by source
-# switches (request queue -> auto playlist). synchronous=false: on_meta does
-# file I/O, so it runs on the task queue, not the streaming thread.
-music_meta.on_metadata(synchronous=false, on_meta)
+# switches (request queue -> auto playlist). The synchronous handler only
+# captures identity and dispatches; file I/O stays off the streaming thread.
+publish_music_meta := fun (m) -> begin
+  stamped = list.append([("subwave_music_started_at", string(time()))], m)
+  thread.run(fun () -> begin
+    try on_meta(stamped) catch err do
+      log(label="subwave", "music metadata publication failed (#{err})")
+    end
+  end)
+end
+music_meta.on_metadata(synchronous=true, music_metadata)
 
 # OUTPUT — broadcast to Icecast.
 #

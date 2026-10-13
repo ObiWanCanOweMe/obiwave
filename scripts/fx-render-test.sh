@@ -27,6 +27,13 @@
 #       Regression check — on A -> jingle -> B, B's entry gesture must stand
 #       down on the jingle's seam yet still arm on a direct A -> B seam. Lifts
 #       the arming lines, the jingle mark and the cross stamps from radio.liq.
+#   scripts/fx-render-test.sh jingledry
+#       Regression check — a stinger shorter than the crossfade must air dry at
+#       full level, not as its own fade-in under the outgoing track. Lifts the
+#       seam block and the jingle mark from radio.liq.
+#   scripts/fx-render-test.sh jinglemarkers
+#       Marker-vs-audio timing through the actual cross stamps and dry seam.
+#       JINGLE_MARKER_MODE=pre reproduces the old early-publication failure.
 #
 # Output lands in .fx-render/ next to this script (gitignored).
 
@@ -792,13 +799,192 @@ LIQ
   echo "JINGLESEAM PASS — the jingle's seam is a plain fade; the direct seam still arms B's sweep"
 }
 
+# jdry_render <stinger.wav> <cross seconds> <out name> — A, the stinger, B through
+# the seam block LIFTED from radio.liq, rendered to $WORK/<out>.wav.
+jdry_render() {
+  awk '/^cross_prev_end = ref/{on=1} /^# BUFFER SIZING/{on=0} on' "$HERE/../liquidsoap/radio.liq" > "$WORK/jdry-stamps.liq"
+  awk '/^  seam =$/{on=1} on{print} on&&/^    end$/{exit}' "$HERE/../liquidsoap/radio.liq" > "$WORK/jdry-seam.liq"
+  local mark
+  mark=$(grep -m1 -oE 'metadata\.map\(update=true, fun \(_\) -> \[\("subwave_jingle", "true"\)\]' "$HERE/../liquidsoap/radio.liq")
+  grep -q "jingle_in" "$WORK/jdry-seam.liq" && [ -n "$mark" ] \
+    || { echo "JINGLEDRY FAIL — could not lift the seam block / jingle mark from radio.liq"; return 1; }
+  {
+    cat <<'LIQ'
+settings.log.stdout := true
+settings.log.level := 2
+sa = once(single('annotate:title="A":/work/a.wav'))
+sb = once(single('annotate:title="B":/work/b.wav'))
+LIQ
+    echo "sj = once(single('annotate:title=\"J\":/work/$1'))"
+    echo "jingle = ${mark}, sj)"
+    echo "crossfade_duration = ref($2.)"
+    echo '%include "/work/jdry-stamps.liq"'
+    cat <<'LIQ'
+music = sequence([sa, jingle, sb])
+def t(a, b) =
+  jingle_out = a.metadata["subwave_jingle"] == "true"
+  jingle_in = b.metadata["subwave_jingle"] == "true"
+  d = min(source.remaining(a.source), source.remaining(b.source))
+  a_source = fade.out(duration=d, initial_metadata=a.metadata, a.source)
+  b_source = fade.in(duration=d, initial_metadata=b.metadata, b.source)
+%include "/work/jdry-seam.liq"
+  seam
+end
+LIQ
+    echo "music = cross(duration=$2., persist_override=true, t, music)"
+    echo "output.file(%wav, fallible=true, on_stop=shutdown, \"/work/$3.wav\", music)"
+    echo 'clock.assign_new(sync="none", [music])'
+  } > "$WORK/$3.liq"
+  liq "$3.liq" > "$WORK/$3.log" || { cat "$WORK/$3.log"; return 1; }
+}
+
+# jdry_band <render> <freq> <start> — mean level of one tone over 400 ms, whole dB.
+jdry_band() {
+  local v
+  v=$(ffmpeg -v info -ss "$3" -t 0.4 -i "$WORK/$1.wav" -af "bandpass=f=$2:width_type=h:w=60,volumedetect" -f null - 2>&1 \
+    | sed -n 's/.*mean_volume: \(-\{0,1\}[0-9]*\).*/\1/p')
+  echo "${v:--99}"
+}
+
+jingledry() {
+  # Tones sit near -36 dB through the band filter; "at level" is -38 or above,
+  # "gone" is -55 or below.
+  gen_tones
+  [ -f "$WORK/j.wav" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=1000:duration=2.8" -af volume=-12dB -ar 44100 -ac 2 "$WORK/j.wav"
+  [ -f "$WORK/jlong.wav" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=1000:duration=8" -af volume=-12dB -ar 44100 -ac 2 "$WORK/jlong.wav"
+
+  # A stinger shorter than the crossfade. A is 12 s; its tail fades over the
+  # stinger's 2.8 s (9.2 -> 12.0), then the stinger runs 12.0 -> 14.8. Blended,
+  # it was already at level by 11.4 and gone by 12.0.
+  jdry_render j.wav 10 jdry || return 1
+  local early head mid under
+  early=$(jdry_band jdry 1000 11.4); head=$(jdry_band jdry 1000 12.0)
+  mid=$(jdry_band jdry 1000 13.2); under=$(jdry_band jdry 440 12.0)
+  echo "short stinger: before its start ${early} dB, head ${head} dB, middle ${mid} dB, outgoing under it ${under} dB"
+  [ "$early" -le -55 ] && [ "$head" -ge -38 ] && [ "$mid" -ge -38 ] && [ "$under" -le -55 ] \
+    || { echo "JINGLEDRY FAIL — the stinger is blended into the outgoing track's fade instead of following it"; return 1; }
+
+  # A stinger longer than the crossfade (8 s under a 3 s cross): it runs
+  # 12.0 -> 20.0 and must keep its last second, with B starting dry after it.
+  jdry_render jlong.wav 3 jdrylong || return 1
+  local tail bhead bearly
+  tail=$(jdry_band jdrylong 1000 19.4); bhead=$(jdry_band jdrylong 880 20.2); bearly=$(jdry_band jdrylong 880 19.4)
+  echo "long stinger: its last second ${tail} dB, next track under it ${bearly} dB, next track's head ${bhead} dB"
+  # 880 Hz sits close to the stinger's 1000 Hz, so the filter leaks about -47 dB
+  # of the stinger into B's band; B itself mixed under would read near -36.
+  [ "$tail" -ge -38 ] && [ "$bearly" -le -44 ] && [ "$bhead" -ge -38 ] \
+    || { echo "JINGLEDRY FAIL — the end of a long stinger is faded, or the next track is mixed under it"; return 1; }
+  echo "JINGLEDRY PASS — a stinger airs dry after the outgoing track's fade and keeps its own ending"
+}
+
+jinglemarkers() {
+  gen_tones
+  [ -f "$WORK/j.wav" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=1000:duration=2.8" -af volume=-12dB -ar 44100 -ac 2 "$WORK/j.wav"
+  [ -f "$WORK/jlong.wav" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=1000:duration=8" -af volume=-12dB -ar 44100 -ac 2 "$WORK/jlong.wav"
+  awk '/^cross_prev_end = ref/{on=1} /^# BUFFER SIZING/{on=0} on' "$HERE/../liquidsoap/radio.liq" > "$WORK/jmarker-stamps.liq"
+  awk '/^  seam =$/{on=1} on{print} on&&/^    end$/{exit}' "$HERE/../liquidsoap/radio.liq" > "$WORK/jmarker-seam.liq"
+  cat > "$WORK/jmarker.liq" <<'LIQ'
+settings.log.stdout := true
+settings.log.level := 3
+elapsed = ref(0.)
+crossfade_duration = ref(3.)
+scenario = environment.get(default="long", "SCENARIO")
+marker_mode = environment.get(default="new", "MARKER_MODE")
+%include "/work/jmarker-stamps.liq"
+publish_music_meta := fun (m) -> log("JMARKER: title=#{m['title']} at=#{elapsed()}")
+def identity(m) =
+  log("JFEED: title=#{m['title']} at=#{elapsed()}")
+  if marker_mode == "pre" then
+    publish = publish_music_meta()
+    publish(m)
+  else
+    music_metadata(m)
+  end
+end
+sa = once(single('annotate:title="A",liq_cross_duration="2":/work/a.wav'))
+sb = once(single('annotate:title="B",liq_cross_duration="4":/work/b.wav'))
+sb = insert_metadata(sb)
+sa.on_metadata(synchronous=true, identity)
+sb.on_metadata(synchronous=true, identity)
+if scenario == "replay" then
+  sb.on_position(position=1., synchronous=true, fun (_, m) -> sb.insert_metadata(new_track=false, m))
+end
+sj = once(single(if scenario == "short" then "/work/j.wav" else "/work/jlong.wav" end))
+sj = metadata.map(update=true, fun (_) -> [("subwave_jingle", "true")], sj)
+sj2 = once(single("/work/jlong.wav"))
+sj2 = metadata.map(update=true, fun (_) -> [("subwave_jingle", "true")], sj2)
+sb2 = once(single('annotate:title="B2",liq_cross_duration="4":/work/b.wav'))
+sb2.on_metadata(synchronous=true, identity)
+music = if scenario == "direct" then sequence([sa, sb])
+  elsif scenario == "consecutive" then sequence([sa, sj, sj2, sb])
+  elsif scenario == "repeated-file" then sequence([sa, sj, sb, sj2, sb2])
+  else sequence([sa, sj, sb]) end
+def transition(a, b) =
+  d = min(source.remaining(a.source), source.remaining(b.source))
+  a_source = fade.out(duration=d, initial_metadata=a.metadata, a.source)
+  b_source = fade.in(duration=d, initial_metadata=b.metadata, b.source)
+  jingle_in = b.metadata["subwave_jingle"] == "true"
+  jingle_out = a.metadata["subwave_jingle"] == "true"
+%include "/work/jmarker-seam.liq"
+  strip_cross_stamps(seam)
+end
+music = metadata.map(update=true, strip=true, cross_stamps, music)
+radio = cross(duration=crossfade_duration(), persist_override=true, transition, music)
+radio.on_frame(synchronous=true, fun () -> elapsed := elapsed() + frame.duration())
+output.file(%wav, fallible=true, on_stop=shutdown, "/work/jmarker-#{scenario}.wav", radio)
+clock.assign_new(sync="none", [radio])
+LIQ
+  local scenario log
+  for scenario in long short direct replay consecutive repeated-file; do
+    log=$(liq jmarker.liq -e SCENARIO="$scenario" -e MARKER_MODE="${JINGLE_MARKER_MODE:-new}") || { echo "$log"; return 1; }
+    printf '%s\n' "$log" > "$WORK/jmarker-$scenario.log"
+    echo "$log" | grep -E 'JMARKER:|JFEED:'
+    python3 - "$WORK" "$scenario" <<'PY'
+import array, math, pathlib, re, sys, wave
+root, scenario = pathlib.Path(sys.argv[1]), sys.argv[2]
+log = (root / f'jmarker-{scenario}.log').read_text()
+markers = [(title, float(at)) for title, at in re.findall(r'JMARKER: title=(\S+) at=([0-9.]+)', log)]
+expected = ['A', 'B', 'B2'] if scenario == 'repeated-file' else ['A', 'B']
+assert [title for title, _ in markers] == expected, f'{scenario}: unexpected/replayed/jingle identity: {markers}'
+with wave.open(str(root / f'jmarker-{scenario}.wav')) as wav:
+    rate, channels = wav.getframerate(), wav.getnchannels()
+    assert wav.getsampwidth() == 2
+    samples = array.array('h', wav.readframes(wav.getnframes()))
+if sys.byteorder != 'little': samples.byteswap()
+window = round(rate * .02)
+coefficient = 2 * math.cos(2 * math.pi * 880 / rate)
+starts, live = [], False
+for first in range(0, len(samples) // channels - window, window):
+    previous = previous2 = 0.
+    for index in range(first, first + window):
+        value = samples[index * channels] / 32768 + coefficient * previous - previous2
+        previous2, previous = previous, value
+    power = max(0., previous ** 2 + previous2 ** 2 - coefficient * previous * previous2)
+    audible = 2 * math.sqrt(power) / window > .010
+    if audible and not live: starts.append(first / rate)
+    live = audible
+assert len(starts) == len(expected) - 1, f'{scenario}: B audio starts {starts}'
+for (title, marker), audio in zip(markers[1:], starts):
+    if scenario == 'direct':
+        feed = float(re.search(r'JFEED: title=B at=([0-9.]+)', log).group(1))
+        assert marker == feed, f'direct seam changed the original pre-cross publication: {marker} != {feed}'
+    else:
+        assert abs(marker - audio) <= .06, f'{scenario}: {title} marker {marker:.2f}s vs audible audio {audio:.2f}s'
+    print(f'{scenario}: {title} marker={marker:.2f}s audio={audio:.2f}s')
+PY
+  done
+  echo "JINGLEMARKERS PASS — post-jingle markers match audible starts; normal timing and identity survive replay"
+}
+
 case "${1:-}" in
   probe)  probe ;;
   render) shift; render "$@" ;;
   loopcheck) loopcheck ;;
   loopgaps) loopgaps ;;
   jingleseam) jingleseam ;;
+  jingledry) jingledry ;;
+  jinglemarkers) jinglemarkers ;;
   xdur)   xdur ;;
   xchain) xchain ;;
-  *) echo "usage: $0 probe | render <a-audio> <b-audio> [dry|sweep|washout|both|blend|dissolve|chop|loop|all] | loopcheck | loopgaps | jingleseam | xdur | xchain"; exit 2 ;;
+  *) echo "usage: $0 probe | render <a-audio> <b-audio> [dry|sweep|washout|both|blend|dissolve|chop|loop|all] | loopcheck | loopgaps | jingleseam | jingledry | jinglemarkers | xdur | xchain"; exit 2 ;;
 esac

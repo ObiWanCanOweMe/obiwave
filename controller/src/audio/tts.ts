@@ -39,8 +39,10 @@ function personaFor(persona?: any): any {
 // seam where the 'inherit' engine sentinel is resolved; everything downstream
 // compares against a concrete engine id.
 function djPersonaTts(kind: string, persona?: any): any {
-  if (GLOBAL_VOICE_KINDS.has(kind)) return null;
-  const slot = personaFor(persona)?.tts || null;
+  // A global kind never follows the on-air persona, but a caller may name a
+  // voice for it (a jingle created with one). Only the slot is taken: language,
+  // soul and style stay off for these kinds.
+  const slot = (GLOBAL_VOICE_KINDS.has(kind) ? persona : personaFor(persona))?.tts || null;
   return resolvePersonaVoiceSlot(slot, settings.get().tts);
 }
 
@@ -173,7 +175,8 @@ export function voiceGainDb(kind: string, persona?: any): number {
   const { engine } = resolveEngine(personaTts);
   const tts: any = settings.get().tts || {};
   const engineGain = settings.clampTtsGain(tts.gainDb?.[engine]);
-  const personaGain = personaTts ? settings.clampTtsGain(personaTts.gainDb) : 0;
+  // A global kind takes a voice from its caller, never that slot's trim.
+  const personaGain = personaTts && !GLOBAL_VOICE_KINDS.has(kind) ? settings.clampTtsGain(personaTts.gainDb) : 0;
   return settings.clampTtsGain(engineGain + personaGain);
 }
 

@@ -95,6 +95,8 @@ try {
         { model_id: 'eleven_flash_v2_5', can_do_text_to_speech: true },
         { model_id: 'eleven_multilingual_v2', can_do_text_to_speech: true },
         { model_id: 'speech_to_speech_only', can_do_text_to_speech: false },
+        { model_id: 'eleven_v4', can_do_text_to_speech: true },
+        { model_id: 'unmarked_model' },
       ]), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -106,7 +108,7 @@ try {
         provider: 'elevenlabs',
         apiKey: 'eleven-unsaved-token',
       })).models,
-      ['eleven_flash_v2_5', 'eleven_multilingual_v2'],
+      ['eleven_flash_v2_5', 'eleven_multilingual_v2', 'eleven_v4'],
       'regression: ElevenLabs TTS model IDs must not be discarded by a generic name heuristic',
     );
   } finally {

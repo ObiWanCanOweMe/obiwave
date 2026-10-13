@@ -43,6 +43,23 @@ function armingLine(flag: string): string {
   return line;
 }
 
+test('a jingle\'s seam is a sequence, never the blend', () => {
+  assert.match(radio, /^ {2}jingle_in = b\.metadata\["subwave_jingle"\] == "true"$/m, 'the seam reads the INCOMING side too');
+  assert.match(radio, /if jingle_in or jingle_out then\s+incoming = if jingle_out and not jingle_in then publish_after_jingle\(b\.source, b\.metadata\) else b\.source end\s+\(sequence\(\[\(if jingle_out then a\.source else a_source end\), incoming\]\) : source\)/,
+    'either side being a jingle takes the dry seam, and an outgoing jingle is not faded');
+});
+
+test('post-jingle publication retains pre-cross identity and waits for the incoming audio buffer', () => {
+  assert.match(radio, /music_meta\.on_metadata\(synchronous=true, music_metadata\)/);
+  assert.match(radio, /if cross_prev_jingle\(\) then\s+post_jingle_metadata := m\s+else\s+publish = publish_music_meta\(\)\s+publish\(m\)/);
+  assert.match(radio, /cross_prev_jingle := m\["subwave_jingle"\] == "true"/);
+  assert.match(radio, /original\["filename"\] == m\["filename"\] and original\["rid"\] == m\["rid"\]/);
+  assert.match(radio, /metadata\.map\(update=false, fun \(chunk\) -> begin\s+if not published\(\) then/);
+  assert.match(radio, /publish\(original\)/);
+  assert.match(radio, /stamped = list\.append\(\[\("subwave_music_started_at", string\(time\(\)\)\)\], m\)/);
+  assert.ok(!radio.includes('radio.on_metadata('), 'outgoing metadata replay never owns now-playing');
+});
+
 test('every incoming-side gesture stands down on a jingle\'s seam', () => {
   assert.match(radio, /^ {2}jingle_out = a\.metadata\["subwave_jingle"\] == "true"$/m,
     'the guard reads the OUTGOING track');

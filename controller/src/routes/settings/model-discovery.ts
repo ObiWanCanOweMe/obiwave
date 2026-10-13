@@ -280,11 +280,7 @@ export async function discoverModels(input: ModelDiscoveryInput): Promise<ModelD
       const payload = await getJson('https://api.elevenlabs.io/v1/models', {
         headers: { 'xi-api-key': apiKey },
       });
-      const list = Array.isArray(payload) ? payload : [];
-      models = list
-        .filter((item) => (item as { can_do_text_to_speech?: unknown }).can_do_text_to_speech !== false)
-        .map((item) => (item as { model_id?: unknown }).model_id)
-        .filter((id): id is string => typeof id === 'string');
+      models = speech.elevenLabsTtsModelIds(payload);
       break;
     }
     case 'anthropic': {
