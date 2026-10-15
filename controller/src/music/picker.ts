@@ -4,6 +4,8 @@ import type { ArtistEpisodeSource } from './episode-source.js';
 // sources, one LLM call to pick one. Fallback for the session DJ agent.
 
 import * as subsonic from './subsonic.js';
+import { clearPickerSourceCache } from '../llm/tools.js';
+import { shortlistOffers } from './shortlist-offers.js';
 import * as library from './library.js';
 import * as dj from '../llm/dj.js';
 import { nearestId } from '../llm/sdk.js';
@@ -12,14 +14,15 @@ import * as settings from '../settings.js';
 import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
-import { artistRootIn, artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, trackKey } from './recency.js';
+import { artistRootKey, creditInRoots, filterPickerCandidates, recencyWindowsForLibrary, trackKey } from './recency.js';
 import { albumKeyFor } from './album-facts.js';
 import { applyKnownTrackCeiling } from './track-duration.js';
 import { applyTrackFloor } from './track-floor.js';
 import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, unairedFlag, type AiredIndex } from './airing.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
-import { showNoRepeatGuard } from './show-recency.js';
+import { allowsMoodPlaylistDiscovery } from './discovery-policy.js';
+import { showNoRepeatGuard, strictShowLibraryPool } from './show-recency.js';
 import * as likes from '../broadcast/likes.js';
 import { ARTIST_VARIETY_WINDOW } from '../broadcast/dj-agent/artist-guard.js';
 
@@ -101,7 +104,9 @@ async function memo(key, ttl, fn) {
 export function clearPoolCache() {
   cacheGeneration++;
   cache.clear();
+  clearPickerSourceCache();
   offered.clear();
+  shortlistOffers.clear();
 }
 
 // Offered-but-not-picked memory: a capped ranking penalty decaying with the
@@ -227,7 +232,7 @@ async function tracksFromAlbums(albums: { id: string }[], perAlbum: number, max:
   return out;
 }
 
-async function buildCandidates(mood: string | null | undefined, recentIds: Set<string>, recentKeys: Set<string>, recentArtistRoots: Set<string>, recentAlbums: Set<string>, currentTrack: Candidate | null, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, showFilter: ShowFilter = null, hardRecentIds: Set<string> = new Set(), hardRecentKeys: Set<string> = new Set(), playlistPool: PlaylistPool | null = null, playlistStrict = false, blockedArtists: Set<string> = new Set(), strictGenreResolution: StrictGenreResolution = { genres: [], warnings: [] }, lengthLimits: { minTrackSec: number | null; maxTrackSec: number | null } = { minTrackSec: null, maxTrackSec: null }, exhaustiveRotation = false, excludedIds: Set<string> | null = null, episodeSource: ArtistEpisodeSource | null = null) {
+async function buildCandidates(mood: string | null | undefined, recentIds: Set<string>, recentKeys: Set<string>, recentArtistRoots: Set<string>, recentAlbums: Set<string>, currentTrack: Candidate | null, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, showFilter: ShowFilter = null, hardRecentIds: Set<string> = new Set(), hardRecentKeys: Set<string> = new Set(), playlistPool: PlaylistPool | null = null, playlistStrict = false, blockedArtists: Set<string> = new Set(), strictGenreResolution: StrictGenreResolution = { genres: [], warnings: [] }, lengthLimits: { minTrackSec: number | null; maxTrackSec: number | null } = { minTrackSec: null, maxTrackSec: null }, exhaustiveRotation = false, excludedIds: Set<string> | null = null, episodeSource: ArtistEpisodeSource | null = null, hasPlaylistAnchor = false) {
   await library.load();
   const { minTrackSec, maxTrackSec } = lengthLimits;
   // Prohibited rows must not consume a source's finite sampling slots.
@@ -319,17 +324,10 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   }
 
   // 1d-bis. Listener favourites (#991), behind likes.influenceDj. Never a lock.
-  {
-    const likeCfg = settings.get()?.likes;
-    if (likeCfg?.enabled && likeCfg?.influenceDj) {
-      try {
-        const favs = likes
-          .topLiked({ windowDays: likeCfg.windowDays, limit: likeCfg.maxTracks })
-          .map((f) => f.track);
-        add('listener-liked', sampleFresh(lean(shuffle(favs)), recentIds, nz(CAP_LIKED)));
-      } catch {}
-    }
-  }
+  try {
+    const favs = likes.djFavourites(settings.get()?.likes).map((f) => f.track);
+    add('listener-liked', sampleFresh(lean(shuffle(favs)), recentIds, nz(CAP_LIKED)));
+  } catch {}
 
   // 1e. Show genres / decades. getRandomSongs takes ONE genre + ONE year range,
   // so it is one call per genre against eraSpan, then inYearRange, then energy-prefer.
@@ -412,7 +410,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
 
   // 3. Mood-matched Navidrome playlists. Skipped when the show pins its own
   // (1f): name-contains matching leaks other shows' playlists in (#642).
-  if (poolMoods.length && !hasPlaylist) {
+  if (poolMoods.length && allowsMoodPlaylistDiscovery({ hasPlaylistAnchor, playlistTracks: playlistPool?.tracks })) {
     try {
       const playlists = await memo('playlists', CACHE_TTL_MS, () => subsonic.getPlaylists());
       const matched = playlists.filter((p: { name?: string | null }) =>
@@ -603,7 +601,11 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   return { candidates: final, sources, strictInfo, playlistInfo };
 }
 
-function summariseRecent(queue: { current?: QueueEntry | null; history: QueueEntry[] }) {
+// The on-air track and the last HISTORY_DEPTH plays, most recent first, with
+// their moods and energy: the arc of the set. Shared by the pool prompt and the
+// Track Shortlist's selection context — neither has the Agentic route's session
+// history to read it from.
+export function summariseRecent(queue: { current?: QueueEntry | null; history: QueueEntry[] }) {
   const items: QueueEntry[] = [];
   if (queue.current) items.push(queue.current);
   items.push(...queue.history.slice(0, HISTORY_DEPTH));
@@ -685,6 +687,10 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
       resolvedGenres: strictGenreResolution.genres,
       minTrackSec,
       maxTrackSec,
+      // Same catalogue the agent path sizes its window from.
+      showLibraryPool: strictShowLibraryPool(activeShow?.filtersStrict ? library.candidateFilterTracks() : null, {
+        show: activeShow, excludedIds, resolvedGenres: strictGenreResolution.genres, minTrackSec, maxTrackSec,
+      }),
     },
   );
   const effN = noRepeat.window;
@@ -700,7 +706,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     const key = artistRootKey({ artist });
     if (key) blockedArtists.add(key);
   }
-  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentKeys, recentArtistRoots, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, { minTrackSec, maxTrackSec }, noRepeat.exhaustive, excludedIds, episodeSource);
+  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentKeys, recentArtistRoots, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, { minTrackSec, maxTrackSec }, noRepeat.exhaustive, excludedIds, episodeSource, !!activeShow?.playlistIds?.length);
 
   // Excluded playlists: hard drop, no never-starve fallback.
   const candidates = excludedIds
@@ -715,7 +721,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     return null;
   }
 
-  if (candidates.some(c => artistRootIn(artistRootKey(c), recentArtistRoots))) {
+  if (candidates.some(c => creditInRoots(c, recentArtistRoots))) {
     queue.log('picker', `artist spacing relaxed (window ${varietyWindow} slots): no candidate survived spacing with the active selection rules; keeping music available`);
     logEvent('pick.artistSpacingRelaxed', {
       agent: 'pool', basis: 'recent-window', window: varietyWindow,

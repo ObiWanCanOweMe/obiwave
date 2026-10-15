@@ -16,10 +16,10 @@ for (const module of ['store', 'normalize', 'validate', 'liquidsoap']) {
 assert.ok(
   // The fork's provider-owned credentials, search providers, and private-station
   // settings extend the upstream entry point while preserving its split modules.
-  // v1.18 adds nonpublishing settings preflight and Gemini library fields;
+  // v1.24 adds explicit selection routes and compatibility-mode migration;
   // the split remains intact.
-  settings.split('\n').length <= 2750,
-  'settings entry must not exceed 2,750 lines',
+  settings.split('\n').length <= 2850,
+  'settings entry must not exceed 2,850 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {

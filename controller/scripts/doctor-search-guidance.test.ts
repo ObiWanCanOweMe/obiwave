@@ -5,7 +5,7 @@ const searxng = webSearchNotReadyFinding('searxng');
 assert.equal(searxng.detail, 'searxng selected but no base URL');
 assert.equal(
   searxng.hint,
-  'Artist-news segments can\'t fetch. Configure the SearXNG base URL in Settings → Search, or select DuckDuckGo (keyless).',
+  'Artist-news segments can\'t fetch. Configure the SearXNG base URL in Settings → Web search, or select DuckDuckGo (keyless).',
 );
 assert.equal(/API key|SEARCH_API_KEY/i.test(searxng.hint || ''), false);
 

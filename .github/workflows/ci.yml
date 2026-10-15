@@ -113,6 +113,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Source Compose uses build.provenance/sbom (Compose >= 2.39).
+      - uses: docker/setup-compose-action@v1
+        with:
+          version: v2.39.4
+
       # The source contracts validate font imports against the installed Next catalog.
       - name: Install web dependencies for source contracts
         run: npm --prefix web ci --no-audit --no-fund

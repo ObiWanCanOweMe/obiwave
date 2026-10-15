@@ -151,7 +151,7 @@ async function runOnce(label, messagesMode) {
       messages,
       tools,
       schema: pickSchema(),
-      // Mirror the live picker call site (dj-agent.js pickViaAgent).
+      // Mirror the live picker call site (dj-agent.js pickViaSelectionRoute).
       // maxSteps/timeoutMs overridable via argv for tuning runs.
       ...agentStrategyOptions(pickerAgent),
       maxSteps: TEST_MAX_STEPS,

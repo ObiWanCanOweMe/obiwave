@@ -12,6 +12,35 @@
   independent. Operators who already reconfigured profiles under #1777 must
   mark those profiles before upgrading. See [upgrade and recovery steps](docs/multi-station.md#upgrading-existing-profiles).
 
+## [1.24.0](https://github.com/perminder-klair/subwave/compare/v1.23.0...v1.24.0) (2026-10-15)
+
+
+### Features
+
+* **llm:** auto-detect an openai-compatible connection's mode, and flag a mismatch ([#1909](https://github.com/perminder-klair/subwave/issues/1909)) ([c05e11a](https://github.com/perminder-klair/subwave/commit/c05e11a60f1e613f79a35f86e1126e962e8986ce))
+* **selection:** introduce Track Shortlist alongside Agentic Tools ([#1687](https://github.com/perminder-klair/subwave/issues/1687)) ([42e5382](https://github.com/perminder-klair/subwave/commit/42e538294d299ec80f8c55fa0b34386b2e5416d1))
+
+
+### Bug Fixes
+
+* **compose:** stop controller-only deploys recreating the mixer ([#1941](https://github.com/perminder-klair/subwave/issues/1941)) ([b9a5830](https://github.com/perminder-klair/subwave/commit/b9a58300ab62a209a97ab8e615e7676335602a0e))
+* **dj-agent:** end a pick window on the user's side when a segment airs after the ask ([#1922](https://github.com/perminder-klair/subwave/issues/1922)) ([2a08f0c](https://github.com/perminder-klair/subwave/commit/2a08f0c6f1c7c4fcdf30fea451c955cfaccaa523))
+* **dj-agent:** name individual acts, not whole credits, on the Agentic pick ask ([#1929](https://github.com/perminder-klair/subwave/issues/1929)) ([6fc38ac](https://github.com/perminder-klair/subwave/commit/6fc38ac69079f04410bb29629fc8a7f9631afbb1))
+* **dj-agent:** name the guard's recent artists on the Agentic pick ask ([#1926](https://github.com/perminder-klair/subwave/issues/1926)) ([bb9c86c](https://github.com/perminder-klair/subwave/commit/bb9c86ce4f6f59e76a5b873d30ffdeed9945db8a))
+* **llm:** accept the segment director's native "stay silent" without a tool call ([#1934](https://github.com/perminder-klair/subwave/issues/1934)) ([f668930](https://github.com/perminder-klair/subwave/commit/f6689303709d7501706a0d4a7b2f135f56d5125c))
+* **llm:** carry the native run's tool results into the done-tool run ([#1944](https://github.com/perminder-klair/subwave/issues/1944)) ([fe1fce6](https://github.com/perminder-klair/subwave/commit/fe1fce68101843a073d8ab34c829a912e50fb780))
+* **llm:** fail over on a retired model in one attempt, not three ([#1939](https://github.com/perminder-klair/subwave/issues/1939)) ([fbcacaf](https://github.com/perminder-klair/subwave/commit/fbcacaf80ab5ae3dd384802e39e609f93c4128ae))
+* **llm:** never send the done-only recovery as assistant prefill ([#1916](https://github.com/perminder-klair/subwave/issues/1916)) ([40fd35b](https://github.com/perminder-klair/subwave/commit/40fd35b95edc5d2267674889187c6147cffedf5c))
+* **llm:** record a pick the done-tool run rescued as the done-tool path ([#1949](https://github.com/perminder-klair/subwave/issues/1949)) ([710b3b6](https://github.com/perminder-klair/subwave/commit/710b3b66c8c3120afcfcd5d539438dfd33252281))
+* **llm:** send a proxied Claude model its reasoning level in hosted mode ([#1915](https://github.com/perminder-klair/subwave/issues/1915)) ([8dfb87f](https://github.com/perminder-klair/subwave/commit/8dfb87f751ee0853e02a8b023651af11b2da7edf))
+* **llm:** stop the agent re-exploring after a native miss, and cap the native leg's time ([#1948](https://github.com/perminder-klair/subwave/issues/1948)) ([de0450a](https://github.com/perminder-klair/subwave/commit/de0450a037101c3089a1ecef24eb45dff88219f6))
+* **picker:** count a credit's second-position acts in artist spacing ([#1928](https://github.com/perminder-klair/subwave/issues/1928)) ([75d0898](https://github.com/perminder-klair/subwave/commit/75d08980bfafdfe259e3a269c8f463b926f4334a))
+* **picker:** size a strict-filter show's no-repeat window from its own pool, and hand a small pool to the agent ([#1910](https://github.com/perminder-klair/subwave/issues/1910)) ([4a5e9ae](https://github.com/perminder-klair/subwave/commit/4a5e9aef2957b0aec4c559e7ed2bf43ef8303ef9))
+* **shortlist:** leave recently-played artists out of the offered list ([#1940](https://github.com/perminder-klair/subwave/issues/1940)) ([c29d62d](https://github.com/perminder-klair/subwave/commit/c29d62d96487f93c26842ff35a4722e616fd4062))
+* **shortlist:** leave the pick-anchor artist out of the offered list ([#1906](https://github.com/perminder-klair/subwave/issues/1906)) ([41c2ede](https://github.com/perminder-klair/subwave/commit/41c2edea167fa1319f981712867e91a4161b5634))
+* **shortlist:** name a one-genre run so a multi-genre show doesn't drift ([#1907](https://github.com/perminder-klair/subwave/issues/1907)) ([defddac](https://github.com/perminder-klair/subwave/commit/defddac114927cc63d55b4185859813bfeae99aa))
+* **shortlist:** say what emptied the list instead of blaming a model answer ([#1943](https://github.com/perminder-klair/subwave/issues/1943)) ([36a3293](https://github.com/perminder-klair/subwave/commit/36a32934f3ffc99cd838f472f6584781c477bb55))
+
 ## [1.23.0](https://github.com/perminder-klair/subwave/compare/v1.22.0...v1.23.0) (2026-10-13)
 
 
