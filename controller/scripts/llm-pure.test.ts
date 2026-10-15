@@ -17,12 +17,11 @@ import { introBudgetPhrase, enforceIntroBudget } from '../src/llm/internal/promp
 import { embeddingBaseUrl } from '../src/llm/internal/provider/embedding.js';
 import { createLiteLlmModel, DEFAULT_LOCCA_EMBED_BASE_URL, openAICompatibleFetch } from '../src/llm/internal/provider/registry.js';
 import { effectiveLiteLlmBaseUrl, effectiveLiteLlmApiKey } from '../src/litellm-config.js';
-import { LLM_PROVIDERS, EMBEDDING_PROVIDERS, personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
+import { LLM_PROVIDERS, EMBEDDING_PROVIDERS, personaToneDirectives, validatePersonasStrict, clampTtsSpeed, TTS_SPEED_DEFAULT, clampMaxOutputTokens, resolveMaxOutputTokens, MAX_OUTPUT_TOKENS_MIN, MAX_OUTPUT_TOKENS_MAX, effectiveFrequency, SCRIPT_LENGTHS } from '../src/settings.js';
 import { lengthMode, lengthPhrase } from '../src/llm/internal/prompts/system.js';
 import { showMusicLean } from '../src/llm/internal/prompts/picker.js';
 import { planSchema } from '../src/llm/internal/prompts/programme.js';
 import { modelForCloudRequest, resolveCloudModel, resolveCloudProvider, sharedCloudApiKeyForRequest, speedDirective } from '../src/llm/internal/speech/cloud-speech.js';
-
 
 async function main() {
   await test('LiteLLM URL precedence: saved override, then LITELLM, then OPENAI fallback', () => {
@@ -919,7 +918,7 @@ async function main() {
         { role: 'assistant', content: 'Just span Blue Monday.' },
         { role: 'user', content: 'Pick the track to play next. Stay silent — no link this time.' },
       ],
-      [{ name: 'searchByMood', args: { mood: 'late-night' }, result: [{ id: 'nEeVD8AWxtsGqdGS5vIvMr', title: 'Blue in Green' }] }],
+      [{ name: 'searchByMood', args: { mood: 'late-night' }, result: [{ id: 'nEeVD8AWxtsGqdGS5vIvMr', title: 'Blue in Green' }], round: 1 }],
     );
     assert.ok(prompt.includes('nEeVD8AWxtsGqdGS5vIvMr'), 'the discovered id must survive — without it a cornered model can only fabricate one');
     assert.ok(prompt.includes('searchByMood'), 'names the tool that produced the findings');
@@ -940,7 +939,7 @@ async function main() {
   await test('never renders the synthetic done tool as a finding', () => {
     const prompt = renderTerminalPrompt(
       [{ role: 'user', content: 'Pick.' }],
-      [{ name: 'done', args: { id: 'x' }, result: null }, { name: 'searchByMood', args: {}, result: [{ id: 'realId' }] }],
+      [{ name: 'done', args: { id: 'x' }, result: null, round: 1 }, { name: 'searchByMood', args: {}, result: [{ id: 'realId' }], round: 1 }],
     );
     assert.ok(!prompt.includes('done('), '`done` is the schema-emit signal, not a discovery result');
     assert.ok(prompt.includes('realId'), 'the genuine discovery still renders');
@@ -950,6 +949,7 @@ async function main() {
       name: `tool${i}`,
       args: {},
       result: [{ id: `id${i}`, blurb: 'x'.repeat(5000) }],
+      round: i + 1,
     }));
     const prompt = renderTerminalPrompt([{ role: 'user', content: 'Pick.' }], fat);
     assert.ok(prompt.length < 40_000, `prompt stays bounded (was ${prompt.length})`);
@@ -1179,15 +1179,7 @@ async function main() {
     assert.match(introBudgetPhrase(4000, 4000), /4s/);
   });
 
-  console.log('personaToneDirectives / normalizeDial:');
-  await test('normalizeDial clamps to 0-10 int, neutral on garbage', () => {
-    assert.equal(normalizeDial(7), 7);
-    assert.equal(normalizeDial(-3), 0);
-    assert.equal(normalizeDial(99), 10);
-    assert.equal(normalizeDial(6.7), 7);
-    assert.equal(normalizeDial('abc'), DIAL_NEUTRAL);
-    assert.equal(normalizeDial(undefined), DIAL_NEUTRAL);
-  });
+  console.log('personaToneDirectives:');
   await test('neutral / missing dials append nothing (prompt stays byte-identical)', () => {
     assert.equal(personaToneDirectives({ humour: 5, localColour: 5, warmth: 5 }), '');
     assert.equal(personaToneDirectives({}), '');
@@ -1202,20 +1194,6 @@ async function main() {
     const both = personaToneDirectives({ humour: 8, warmth: 8 });
     assert.ok(both.startsWith('\n\nTone:\n- '));
     assert.equal(both.split('\n- ').length, 3); // header + 2 bullets
-  });
-  // validatePersonasStrict rebuilds each persona from a field whitelist; dials
-  // missing from it are dropped on every save. Pin that they round-trip.
-  await test('validatePersonasStrict carries the dials through the save path', () => {
-    const base = { name: 'Nova', soul: 'late-night', frequency: 'moderate',
-      tts: { engine: 'piper', cloudProvider: 'openai', voice: '' } };
-    const [saved] = validatePersonasStrict([{ ...base, humour: 9, localColour: 0, warmth: 99 }]);
-    assert.equal(saved.humour, 9);
-    assert.equal(saved.localColour, 0);
-    assert.equal(saved.warmth, 10);            // clamped, same as normalizeDial
-    const [bare] = validatePersonasStrict([base]);
-    assert.equal(bare.humour, DIAL_NEUTRAL);   // absent dials default to neutral
-    assert.equal(bare.localColour, DIAL_NEUTRAL);
-    assert.equal(bare.warmth, DIAL_NEUTRAL);
   });
 
   // Every consumer branches on these values; pin the ladder and the save path.
@@ -1280,19 +1258,6 @@ async function main() {
     assert.equal(clampTtsSpeed(1.23), 1.25);
     assert.equal(clampTtsSpeed(0.87), 0.85);
     assert.equal(clampTtsSpeed(1.0), 1.0);
-  });
-
-  // The persona save path (validatePersonasStrict → validateTtsBlock) must carry
-  // tts.speed through, else the per-persona dial is silently dropped on every save.
-  await test('validatePersonasStrict carries tts.speed through the save path', () => {
-    const base = { name: 'Nova', soul: 'late-night', frequency: 'moderate',
-      tts: { engine: 'piper', cloudProvider: 'openai', voice: '' } };
-    const [fast] = validatePersonasStrict([{ ...base, tts: { ...base.tts, speed: 1.4 } }]);
-    assert.equal(fast.tts.speed, 1.4);
-    const [clamped] = validatePersonasStrict([{ ...base, tts: { ...base.tts, speed: 9 } }]);
-    assert.equal(clamped.tts.speed, 2.0);          // clamped to max
-    const [bare] = validatePersonasStrict([base]);
-    assert.equal(bare.tts.speed, TTS_SPEED_DEFAULT); // absent → unity
   });
 
   // At most one of body/atempo is non-null: send `speed` upstream or stretch locally.

@@ -35,10 +35,10 @@
 // only ever printed a raw `chmod:` error) drifting away from the broadcast
 // one is how this class comes back.
 //
-// Run: `tsx scripts/state-bootstrap.test.ts`.
+// Run: `npm test -- state-bootstrap`.
 //
-// node:assert-via-tsx style, matching scripts/aio-analyzer-heavy.test.ts.
 
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, chmodSync, existsSync, statSync, writeFileSync } from 'node:fs';
@@ -101,17 +101,6 @@ if [ "$1" = "-f" ] && [ "$2" = "%Lp" ]; then echo 777; exit 0; fi
 exit 1
 `);
 chmodSync(bsdStat, 0o755);
-let failures = 0;
-
-function check(label: string, fn: () => void) {
-  try {
-    fn();
-    console.log(`  ok  ${label}`);
-  } catch (err) {
-    failures++;
-    console.error(`  FAIL ${label}\n       ${(err as Error).message.split('\n')[0]}`);
-  }
-}
 
 let caseNo = 0;
 function scratch(): { root: string; dir: string } {
@@ -121,11 +110,10 @@ function scratch(): { root: string; dir: string } {
 }
 
 for (const s of SUPERVISORS) {
-  console.log(`\n${s.name}`);
 
   // 1. Happy path: every dir prepared, world-writable, and not one line of
   //    output. This is what every boot on every install does.
-  check('happy path creates every state subdir, silently', () => {
+  await test('happy path creates every state subdir, silently', () => {
     const { root, dir } = scratch();
     const r = bootstrap(s.path, s.lib, root, dir);
     assert.equal(r.status, 0, `exited ${r.status}: ${r.out}`);
@@ -152,7 +140,7 @@ for (const s of SUPERVISORS) {
   //    pins the control flow this test exists for. The genuine read-only
   //    mount is covered at the image level: `docker run` with `-v ...:ro` at
   //    /var/sub-wave/archive, which exited 1 / unhealthy before this fix.
-  check('an unusable state path warns, names itself, and does not abort', () => {
+  await test('an unusable state path warns, names itself, and does not abort', () => {
     const { root, dir } = scratch();
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'stems'), 'not a directory');
@@ -170,7 +158,7 @@ for (const s of SUPERVISORS) {
 
   // 3. A read-only mount that is ALREADY world-writable is a working config —
   //    chmod refusing to re-apply 777 changes nothing and must not warn.
-  check('an unchangeable but already-writable dir stays silent', () => {
+  await test('an unchangeable but already-writable dir stays silent', () => {
     const { root, dir } = scratch();
     for (const d of SUBDIRS) mkdirSync(join(dir, d), { recursive: true, mode: 0o777 });
     for (const d of SUBDIRS) chmodSync(join(dir, d), 0o777);
@@ -182,7 +170,7 @@ for (const s of SUPERVISORS) {
   // macOS/BSD stat rejects GNU's `-c %a`. The bootstrap also runs directly
   // from contributor checkouts, so mode detection must fall back to BSD's
   // `-f %Lp` instead of warning on every healthy directory.
-  check('BSD stat mode syntax recognises a world-writable directory', () => {
+  await test('BSD stat mode syntax recognises a world-writable directory', () => {
     const { root, dir } = scratch();
     const r = bootstrap(
       s.path,
@@ -198,7 +186,7 @@ for (const s of SUPERVISORS) {
   // 4. The analyzer writes stems as uid 10001. If the bootstrap ever stops
   //    covering that dir, relocating the stem cache to a bind mount silently
   //    goes back to being unwritable — the second half of bug 10.
-  check('stems and transitions are world-writable for the analyzer uid', () => {
+  await test('stems and transitions are world-writable for the analyzer uid', () => {
     const { root, dir } = scratch();
     const r = bootstrap(s.path, s.lib, root, dir);
     assert.equal(r.status, 0, `exited ${r.status}: ${r.out}`);
@@ -214,7 +202,7 @@ for (const s of SUPERVISORS) {
   //    root-owned 755 Docker gives a freshly created source — the analyzer
   //    (uid 10001) then cannot write one stem, and the whole reason the
   //    operator moved the cache to a bigger disk is silently undone.
-  check('a relocated stem cache root is created and world-writable', () => {
+  await test('a relocated stem cache root is created and world-writable', () => {
     const { root, dir } = scratch();
     const stems = join(root, 'relocated-stems');
     const r = bootstrap(s.path, s.lib, root, dir, { SUBWAVE_STEMS_DIR: stems });
@@ -230,7 +218,7 @@ for (const s of SUPERVISORS) {
   // 6. Same never-fatal contract as every other path: the exFAT/NTFS/NFS disk
   //    people move the stem cache onto is exactly where chmod refuses, and
   //    that must cost a warning, not the broadcast.
-  check('an unusable relocated stems root warns and does not abort', () => {
+  await test('an unusable relocated stems root warns and does not abort', () => {
     const { root, dir } = scratch();
     const stems = join(root, 'relocated-stems');
     mkdirSync(root, { recursive: true });
@@ -249,7 +237,7 @@ for (const s of SUPERVISORS) {
   //    the chmod) while only an owner can replace one. A single-station
   //    install passes the root as both arguments, so the second, plain-777
   //    prepare of the same path must not strip the bit again.
-  check('a single-station root is sticky and still world-writable', () => {
+  await test('a single-station root is sticky and still world-writable', () => {
     const { root, dir } = scratch();
     const r = bootstrap(s.path, s.lib, root, dir);
     assert.equal(r.status, 0, `exited ${r.status}: ${r.out}`);
@@ -264,7 +252,7 @@ for (const s of SUPERVISORS) {
 
   // 8. Multi-station: the station dir is not the root, gets plain 777, and
   //    the root keeps its sticky bit.
-  check('a station dir gets 777 while the root stays sticky', () => {
+  await test('a station dir gets 777 while the root stays sticky', () => {
     const { root } = scratch();
     const dir = join(root, 'stations', 'second');
     const r = bootstrap(s.path, s.lib, root, dir);
@@ -274,10 +262,4 @@ for (const s of SUPERVISORS) {
   });
 }
 
-rmSync(tmp, { recursive: true, force: true });
-
-if (failures) {
-  console.error(`\n${failures} check(s) failed`);
-  process.exit(1);
-}
-console.log('\nstate-bootstrap: all checks passed');
+after(() => rmSync(tmp, { recursive: true, force: true }));

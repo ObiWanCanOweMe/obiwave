@@ -2,7 +2,7 @@
 
 import type { ChangeEvent, ReactNode } from 'react';
 import { settingsForm } from './settings/form-state';
-import { atPath, samePath, sameForm, countLeafDiffs, dirtyPaths, ownsErrorPath, mergePatchErrors } from './settings/form-diff';
+import { atPath, samePath, sameForm, countLeafDiffs, dirtyPaths, restorePaths, ownsErrorPath, mergePatchErrors } from './settings/form-diff';
 import { archivesSavePayload, dangerSavePayload } from './settings/save-payload';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -50,9 +50,9 @@ import { reconcileSearchKeyDraftsAfterSave } from './settings/search-provider-st
 import { LibrarySection } from './settings/LibrarySection';
 import { StationSection } from './settings/StationSection';
 import { ThemeSection } from './settings/ThemeSection';
-import { ScrobbleSection } from './settings/ScrobbleSection';
-import { LikesSection } from './settings/LikesSection';
+import { ListenersSection } from './settings/ListenersSection';
 import { NavidromeSection } from './settings/NavidromeSection';
+import { MusicSelectionSection } from './settings/MusicSelectionSection';
 import {
   useSettingsMutation,
   useSettingsQuery,
@@ -230,11 +230,14 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
   // only the query changes.
   const searchParams = useSearchParams();
   useEffect(() => {
-    const s = searchParams.get('section');
-    if (s === 'jingles' || s === 'sfx' || s === 'beds') {
-      router.replace(`/admin/imaging?tab=${s}`);
+    const requested = searchParams.get('section');
+    if (requested === 'jingles' || requested === 'sfx' || requested === 'beds') {
+      router.replace(`/admin/imaging?tab=${requested}`);
       return;
     }
+    // Retired tab ids remain valid bookmarks.
+    const RENAMED: Record<string, SectionId> = { danger: 'broadcast', likes: 'listeners', scrobble: 'listeners' };
+    const s = requested && RENAMED[requested] ? RENAMED[requested] : requested;
     if (s === 'brain' && !djBrainEnabled) { activateSection('station'); return; }
     if (s && sections.some(x => x.id === s)) activateSection(s as SectionId);
   }, [activateSection, router, searchParams, djBrainEnabled, sections]);
@@ -380,7 +383,7 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
   };
 
   /**
-   * Archives and the danger zone used to carry a Save button per card — one for
+   * Archives and Broadcast & mixer used to carry a Save button per card — one for
    * the bitrate, one for the retention window, one for each stream mount. Each
    * now folds into the section's one save.
    *
@@ -394,7 +397,7 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
     if (form) saveBlock(archivesSavePayload(form));
   };
 
-  const saveDanger = () => {
+  const saveBroadcast = () => {
     if (form) saveBlock(dangerSavePayload(form));
   };
 
@@ -426,12 +429,7 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
   /** Roll this section's fields back to the last saved baseline, nothing else. */
   const discardSection = () => {
     if (!form || !baseline || !activeSpec) return;
-    const next = JSON.parse(JSON.stringify(form)) as Record<string, unknown>;
-    const from = baseline as unknown as Record<string, unknown>;
-    for (const key of activeSpec.formKeys) {
-      if (key in from) next[key] = JSON.parse(JSON.stringify(from[key] ?? null));
-    }
-    setForm(next as unknown as FormState);
+    setForm(restorePaths(form, baseline, activeSpec.formKeys));
     // The errors belonged to values that no longer exist — same ownership rule
     // the save path uses, so an unrelated section's message survives.
     setFieldErrors(prev => {
@@ -575,6 +573,10 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
             setForm(prev => (prev ? updater(prev) : prev));
           return (
           <>
+            {activeSection === 'selection' && (
+              <MusicSelectionSection data={data} form={form} setForm={updateForm} busy={busy}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} />
+            )}
             {retainedSections.tts && data.tts && (
               <RetainedDraftSection
                 section="tts" active={activeSection === 'tts'} saveSlot={saveSlot}
@@ -585,6 +587,7 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
                   saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
                 />
               </RetainedDraftSection>
+
             )}
             {activeSection === 'behaviour' && (
               <DjBehaviourSection
@@ -651,16 +654,10 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
                 adminFetch={adminFetch}
               />
             )}
-            {activeSection === 'scrobble' && (
-              <ScrobbleSection
+            {activeSection === 'listeners' && (
+              <ListenersSection
                 data={data} form={form} setForm={updateForm} busy={busy}
                 saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
-            )}
-            {activeSection === 'likes' && (
-              <LikesSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
             )}
           </>
@@ -774,12 +771,12 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
           </>
         )}
         {activeSection === 'backup' && <BackupPanel />}
-        {activeSection === 'danger' && (
+        {activeSection === 'broadcast' && (
           <>
             <SectionHeader
-              eyebrow="danger zone"
-              title="Crossfade, stream control, and mixer restart."
-              sub="Crossfade is grouped here because it needs a mixer restart to apply. Stream stop and mixer restart both affect every current listener."
+              eyebrow="broadcast & mixer"
+              title="How the station sounds on every stream."
+              sub="Crossfade, ducking, transitions, levelling and the stream mounts. Most are read by the mixer at startup, so the save bar warns before a change that needs a restart. Stopping the stream and restarting the mixer affect every current listener and ask before they run."
               metrics={[
                 {
                   n: data?.streamOnAir == null ? '—' : data.streamOnAir ? 'on air' : 'off air',
@@ -1777,8 +1774,8 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
             <SaveBar
               note="Crossfade, the encoder settings and the listener buffer only reach the stream after a mixer restart. Idle pause, loudness, dead-air trim and the track-length cap apply live."
               busy={busy}
-              onSave={saveDanger}
-              saveLabel="Save danger zone"
+              onSave={saveBroadcast}
+              saveLabel="Save broadcast & mixer"
               errors={fieldErrors}
               ownedKeys={['crossfadeDuration', 'ducking', 'maxTrackSeconds', 'maxTrackLengthMode', 'fadeAtShowEnd', 'silenceTrim', 'transitions', 'audio', 'loudness', 'stream']}
             />

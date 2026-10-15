@@ -218,7 +218,9 @@ assert.match(
 const saveBlock = blockBetween(source, 'const save = async () => {', 'const savedLlm =');
 assert.match(saveBlock, /providerBaseUrls: form\.llm\.providerBaseUrls,/);
 assert.match(saveBlock, /providerBaseUrls: form\.llm\.fallback\.providerBaseUrls,/);
-assert.match(saveBlock, /strictRequests: form\.llm\.strictRequests,/);
+const selectionSource = await readFile(new URL('../components/admin/settings/MusicSelectionSection.tsx', import.meta.url), 'utf8');
+assert.doesNotMatch(saveBlock, /strictRequests:/, 'provider saves must not overwrite music-selection drafts');
+assert.match(selectionSource, /strictRequests: form\.llm\.strictRequests,/, 'strict requests remain saved by music selection');
 assert.match(saveBlock, /INLINE_KEY_PROVIDERS\.includes\(activeProvider\)[\s\S]*?apiKey: compatKeyInput\.trim\(\)/);
 assert.match(saveBlock, /INLINE_KEY_PROVIDERS\.includes\(activeFallbackProvider\)[\s\S]*?apiKey: compatFallbackKeyInput\.trim\(\)/);
 assert.doesNotMatch(source, /form\.llm(\.fallback)?\.baseUrl/);

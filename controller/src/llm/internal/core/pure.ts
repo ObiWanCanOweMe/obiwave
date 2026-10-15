@@ -52,6 +52,8 @@ interface ToolResultLike {
 export interface StepLike {
   toolCalls?: ToolCallLike[];
   toolResults?: ToolResultLike[];
+  usage?: TokenUsage;
+  totalUsage?: TokenUsage;
 }
 
 // The flattened discovery-tool entry surfaced to /debug.
@@ -59,6 +61,8 @@ export interface ToolCallSummary {
   name: string | undefined;
   args: unknown;
   result: unknown;
+  // One-based discovery round, retained for faithful native-shortlist replay.
+  round: number;
 }
 
 // Reasoning is suppressed at the provider layer when `llm.reasoning` is off;
@@ -381,13 +385,24 @@ const MODEL_GONE_RE = /\b(?:unknown|no such|unsupported) model\b|\bmodel(?:\s+[`
 // Ollama's incident wording omits "model". Bound it to a single model-ID token
 // containing a digit, dot or colon, followed by the dated retirement sentence.
 const MODEL_ID_RETIRED_RE = /^\s*(?=[\w.:/-]*[\d.:])[\w.:/-]{1,60} was retired at \d{4}-\d{2}-\d{2}\b/i;
+// Anthropic answers a retired or unknown model id with a 404 whose error type is
+// `not_found_error` and whose whole message is `model: <id>`. A proxy relays it
+// as a tail inside its own error (CLIProxyAPI: "…; last upstream error:
+// not_found_error: model: claude-3-5-haiku-20241022)"), often under a 429 with
+// a day-long Retry-After, which is how it read as a rate limit and burned three
+// SDK attempts per call. The type name anchors the relayed form; the bare form
+// counts only on a 404, where the message IS the whole answer.
+const ANTHROPIC_MODEL_NOT_FOUND_RE = /\bnot_found_error:?\s+model:\s*[`'"]?[\w.:/-]{1,60}[`'"]?(?=$|[\s;),])/i;
+const BARE_MODEL_ID_RE = /^\s*model:\s*[`'"]?[\w.:/-]{1,60}[`'"]?\s*$/i;
 
 export function isModelUnavailable(err: ErrorLike | null | undefined): boolean {
   if (!err) return false;
   err = unwrapSdkError(err);
   if (MODEL_GONE_CODES.has(upstreamErrorCode(err))) return true;
   const msg = providerMessage(err);
-  return MODEL_GONE_RE.test(msg) || MODEL_ID_RETIRED_RE.test(msg);
+  if (MODEL_GONE_RE.test(msg) || MODEL_ID_RETIRED_RE.test(msg) || ANTHROPIC_MODEL_NOT_FOUND_RE.test(msg)) return true;
+  const status = err.statusCode ?? err.status ?? err.cause?.statusCode ?? err.cause?.status;
+  return status === 404 && BARE_MODEL_ID_RE.test(msg);
 }
 
 const AUTH_RE = /invalid[ _]?api[ _]?key|incorrect[ _]?api[ _]?key|unauthorized|authentication (failed|error)|forbidden|api key (not|is|was) /i;
@@ -456,7 +471,7 @@ export function errReason(err: ErrorLike | null | undefined): string {
 // Flatten a tool-loop result's discovery trail for /debug. Excludes the
 // synthetic `done` tool — that is the schema-emit signal, not a discovery action.
 export function flattenToolCalls(result: { steps?: StepLike[] } | null | undefined): ToolCallSummary[] {
-  return (result?.steps || []).flatMap((s) => {
+  return (result?.steps || []).flatMap((s, stepIndex) => {
     const results = s.toolResults || [];
     return (s.toolCalls || [])
       .filter((c) => c.toolName !== 'done')
@@ -464,6 +479,7 @@ export function flattenToolCalls(result: { steps?: StepLike[] } | null | undefin
         name: c.toolName,
         args: c.input ?? c.args ?? null,
         result: results[i]?.output ?? results[i]?.result ?? null,
+        round: stepIndex + 1,
       }));
   });
 }
@@ -833,4 +849,22 @@ export function soulBrief(soul: unknown, max: number = SOUL_BRIEF_MAX): string {
   const s = String(soul ?? '').trim().replace(/\s+/g, ' ');
   if (s.length <= max) return s;
   return `${String(clipText(s, max)).replace(/[,;:.]+$/, '')}…`;
+}
+
+// The user turn a replayed conversation gets when it would otherwise END on the
+// model's own turn. Wording mirrors the recovery agent's instruction.
+export const RECOVERY_USER_TURN = 'Call the `done` tool now with your final answer.';
+
+// A conversation handed back to a model must not end on an assistant turn.
+// The done-only recovery replays the first run's trail, and when that run
+// stopped with plain text instead of a tool call, the trail's last message is
+// the model's own reply. Sending that is "assistant prefill", which current
+// Claude generations refuse outright ("This model does not support assistant
+// message prefill"), so the recovery threw and the segment was lost. Appending
+// a user turn only in that case keeps strict role alternation (#555) intact:
+// a conversation already ending on a user or tool message is returned as is.
+export function endOnUserTurn<M extends { role?: string }>(messages: M[], text: string = RECOVERY_USER_TURN): M[] {
+  const last = messages[messages.length - 1];
+  if (last?.role !== 'assistant') return messages;
+  return [...messages, { role: 'user', content: text } as unknown as M];
 }

@@ -150,7 +150,7 @@ function renderSettingsSnapshot(): string {
 
   return [
     '## Current settings (tune these against the findings + host resources)',
-    `- LLM: ${providerName()} · ${activeModelLabel()} · Agentic picker ${llm.pickerAgent === false ? 'OFF' : 'ON'} · Chain-of-thought ${llm.reasoning ? 'ON' : 'OFF'} · Agent deadline ${Math.round(Number(llm.agentTimeoutMs || 0) / 1000)}s · Context window ${llm.numCtx ?? 'n/a'} · Tool choice ${llm.toolChoice || 'required'} · Max response size ${llm.maxOutputTokens || 'default'}`,
+    `- LLM: ${providerName()} · ${activeModelLabel()} · Music selection ${llm.trackSelection === 'shortlist' ? 'Track Shortlist' : 'Agentic Tools'} · Request matching ${llm.requestMatching === 'direct' ? 'Direct' : 'Agentic'} · Segments & Skills ${llm.segmentRuntime === 'direct' ? 'Direct' : 'Agentic'} · Chain-of-thought ${llm.reasoning ? 'ON' : 'OFF'} · Agent deadline ${Math.round(Number(llm.agentTimeoutMs || 0) / 1000)}s · Context window ${llm.numCtx ?? 'n/a'} · Tool choice ${llm.toolChoice || 'required'} · Max response size ${llm.maxOutputTokens || 'default'}`,
     `- Budget: ${budget} · Always answer requests ${llm.exemptRequests === false ? 'OFF' : 'ON'} · Pause DJ when empty ${llm.pauseWhenEmpty ? 'ON' : 'OFF'}`,
     `- Picking: No-repeat window ${llm.noRepeatWindow ?? 'n/a'} · Resolve described requests via web ${llm.requestWebResolve ? 'ON' : 'OFF'}`,
     `- Broadcast: crossfade ${s?.crossfadeDuration ?? '?'}s · jingle 1/${s?.jingleRatio ?? '?'} (${s?.jingleRotate === 'controller' ? 'controller' : 'mixer'}) · maxTrack ${s?.maxTrackSeconds ? s.maxTrackSeconds + 's' : 'unlimited'} · loudness ${s?.loudness?.targetLufs ?? '?'} LUFS · mounts ${mounts.join('+')} · archive ${s?.archive?.enabled ? 'ON' : 'OFF'}`,

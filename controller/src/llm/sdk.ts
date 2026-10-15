@@ -16,4 +16,4 @@ export {
   stripThinking,
   modelTolerant,
 } from './internal/core/pure.js';
-export { retryAfterMs } from './internal/core/retry.js';
+export { retryAfterMs, withDeadline } from './internal/core/retry.js';
