@@ -18,6 +18,9 @@
 //     stem cache on (a full walk took 12 min on a NAS); a plain pass still does;
 //   - a stems plan checks the stems root like a plain pass: an unmounted
 //     share gets no stems_dir.
+//   - a facet the worker reports failed is 'failed' in the table even where
+//     the columns alone read 'unmeasurable', so it is retried up to the
+//     attempt limit and no longer re-planned by `--where unmeasurable`.
 //
 // Real better-sqlite3 DB in a temp STATE_DIR; the analyzer and Navidrome are a
 // local HTTP stub. Run: `npm test -- acoustics-plan`.
@@ -29,17 +32,25 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
+import type { Facet } from '../src/music/library-db/facets.js';
+import type { WhereKind } from '../src/music/acoustics-plan.js';
 
 // ---- fake analyzer sidecar + Navidrome stream ------------------------------
 const requests: Array<Record<string, unknown>> = [];
 const clapCapable = true;
 let vocalCapable = false;
+// Facet protocol on the stub (off = an analyzer that predates it).
+let facetsCapable = false;
+// Per-facet answers the stub gives for a facet request (default: ok).
+let facetAnswers: Record<string, Record<string, unknown>> = {};
+let rejectSharedPath = false;
 function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.url?.startsWith('/health')) {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
       ok: true, engines: ['analyze'],
       analyze_audio_capable: clapCapable, analyze_vocal_capable: vocalCapable,
+      ...(facetsCapable ? { analyze_facets_capable: true } : {}),
     }));
     return;
   }
@@ -50,7 +61,32 @@ function handler(req: IncomingMessage, res: ServerResponse) {
       const r = JSON.parse(body);
       requests.push(r);
       res.setHeader('Content-Type', 'application/json');
+      if (rejectSharedPath && r.path) {
+        res.statusCode = 422;
+        res.end(JSON.stringify({ detail: { code: 'path_unavailable', message: 'isolated remote analyzer' } }));
+        return;
+      }
       const vec = Array.from({ length: 512 }, () => 0.01);
+      if (Array.isArray(r.facets)) {
+        const ok: Record<string, unknown> = {
+          head: { bpm: 99, key: 'Dm', intro_ms: 500, confidence: 0.8 },
+          loudness: { loudness_lufs: -12, peak_db: -2 },
+          tail: { tail_silence_ms: 2500, tail_start_ms: 211_500, outro: {
+            startMs: 200_000, ending: 'fade',
+            ...(r.tail_vocals ? { vocalRanges: [{ startMs: 201_000, endMs: 205_000 }] } : {}),
+          } },
+          clap: { audio_embedding: vec },
+        };
+        const facets: Record<string, unknown> = {};
+        for (const f of r.facets) facets[f] = facetAnswers[f] ?? { status: 'ok', data: ok[f] };
+        res.end(JSON.stringify({
+          ok: true, facets,
+          source: r.path
+            ? { kind: 'path', duration_s: 214, complete: r.complete ?? null }
+            : { kind: 'capped-download', duration_s: 214, complete: true },
+        }));
+        return;
+      }
       if (r.embedding_only) {
         res.end(JSON.stringify({ ok: true, audio_embedding: vec }));
         return;
@@ -273,6 +309,328 @@ test('a stems plan on an unmounted stems share sends no stems_dir', async () => 
     assert.deepEqual(left, [], 'the plan wrote into the unmounted share');
   } finally {
     sql().prepare(`UPDATE tracks SET stems_at = NULL WHERE id = 'a'`).run();
+    vocalCapable = false;
+    analyzer._resetBackendCacheForTests();
+  }
+});
+
+// Facet protocol: from here on the stub advertises analyze_facets_capable.
+test('facet protocol: the stub now advertises facets', () => {
+  facetsCapable = true;
+  analyzer._resetBackendCacheForTests();
+});
+
+const facetRow = (id: string, f: string) =>
+  sql().prepare('SELECT status, reason, source, version FROM track_facet_status WHERE track_id = ? AND facet = ?').get(id, f) as
+    { status: string; reason: string | null; source: string; version: number } | undefined;
+
+test('a tail-only plan asks for exactly the tail and writes only the tail', async () => {
+  db.upsertTrackMeta('t1', { title: 't1', artist: 'A', album: 'B', duration: 214 });
+  db.upsertTrackAnalysis('t1', { bpm: 128, musicalKey: 'G', loudnessLufs: -8, source: 'capped' });
+  requests.length = 0;
+  const p = P.planAcoustics({ ids: ['t1'], facets: ['tail'], where: { kind: 'unmeasurable' },
+    state: db.loadFacetState(['tail']), capabilities: { clap: true, demucs: false, tailVocal: false } });
+  const stats = await runAnalysisPass({ plan: p });
+  assert.equal(stats.analyzed, 1);
+  assert.equal(requests.length, 1);
+  const r = requests[0];
+  assert.deepEqual(r.facets, ['tail']);
+  assert.ok(typeof r.path === 'string', 'the staged copy is handed over, as on the flat path');
+  assert.equal(r.embed, undefined, 'a facet request carries no flat-path flags');
+  const t = db.getTrack('t1')!;
+  assert.equal(t.tailStartMs, 211_500);
+  assert.equal(t.bpm, 128, 'a tail-only answer must not rewrite BPM');
+  assert.equal(t.loudnessLufs, -8, 'a tail-only answer must not rewrite loudness');
+  const row = facetRow('t1', 'tail')!;
+  assert.equal(row.status, 'ok');
+  assert.equal(row.version, db.FACET_VERSIONS.tail);
+});
+
+test('with vocal activity on, a tail-only request asks for the tail vocals and stores them', async () => {
+  vocalCapable = true;
+  analyzer._resetBackendCacheForTests();
+  try {
+    db.upsertTrackMeta('t11', { title: 't11', artist: 'A', album: 'B', duration: 214 });
+    db.upsertTrackAnalysis('t11', { bpm: 128, musicalKey: 'G', loudnessLufs: -8, source: 'capped' });
+    const p = P.planAcoustics({ ids: ['t11'], facets: ['tail'], where: { kind: 'unmeasurable' },
+      state: db.loadFacetState(['tail']), capabilities: { clap: true, demucs: true, tailVocal: true } });
+    requests.length = 0;
+    await runAnalysisPass({ plan: p, vocalBackfill: true });
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].facets, ['tail']);
+    assert.equal(requests[0].tail_vocals, true);
+    assert.deepEqual(db.getTrack('t11')!.outro?.vocalRanges, [{ startMs: 201_000, endMs: 205_000 }]);
+    // Without vocal activity the request stays tail-only and Demucs-free.
+    db.upsertTrackMeta('t12', { title: 't12', artist: 'A', album: 'B', duration: 214 });
+    db.upsertTrackAnalysis('t12', { bpm: 128, musicalKey: 'G', loudnessLufs: -8, source: 'capped' });
+    const q = P.planAcoustics({ ids: ['t12'], facets: ['tail'], where: { kind: 'unmeasurable' },
+      state: db.loadFacetState(['tail']), capabilities: { clap: true, demucs: true, tailVocal: true } });
+    requests.length = 0;
+    await runAnalysisPass({ plan: q, vocalBackfill: false });
+    assert.equal(requests[0].tail_vocals, undefined);
+  } finally {
+    vocalCapable = false;
+    analyzer._resetBackendCacheForTests();
+  }
+});
+
+test('a stems facet request carries stems_require_marker with its stems_dir', async () => {
+  const stemCacheStore = await import('../src/music/stem-cache.js');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const path = await import('node:path');
+  const root = stemCacheStore.stemsRoot();
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, stemCacheStore.STEMS_MARKER), '');
+  vocalCapable = true;
+  analyzer._resetBackendCacheForTests();
+  try {
+    db.upsertTrackMeta('t10', { title: 't10', artist: 'A', album: 'B', duration: 214 });
+    const p = P.planAcoustics({ ids: ['t10'], facets: ['stems'], where: { kind: 'all' },
+      state: db.loadFacetState(['stems']), capabilities: { clap: true, demucs: true, tailVocal: true } });
+    assert.equal(p.items.length, 1);
+    requests.length = 0;
+    await runAnalysisPass({ plan: p });
+    assert.equal(requests.length, 1);
+    const r = requests[0];
+    assert.deepEqual(r.facets, ['stems']);
+    assert.ok(typeof r.stems_dir === 'string', JSON.stringify(r));
+    assert.equal(r.stems_require_marker, true, 'a remote analyzer must check the share before writing');
+  } finally {
+    // Leave no stems stamp behind: with the root gone it would read offline.
+    sql().prepare(`UPDATE tracks SET stems_at = NULL WHERE id = 't10'`).run();
+    (await import('../src/music/library-db/facets.js')).syncTrackFacets('t10');
+    rmSync(root, { recursive: true, force: true });
+    vocalCapable = false;
+    analyzer._resetBackendCacheForTests();
+  }
+});
+
+test('an unmeasurable tail keeps the columns and records the worker\'s reason', async () => {
+  db.upsertTrackMeta('t2', { title: 't2', artist: 'A', album: 'B', duration: 214 });
+  db.upsertTrackAnalysis('t2', { bpm: 128, musicalKey: 'G', loudnessLufs: -8, source: 'capped' });
+  facetAnswers = { tail: { status: 'unmeasurable', reason: 'silent-tail-window' } };
+  const p = P.planAcoustics({ ids: ['t2'], facets: ['tail'], where: { kind: 'unmeasurable' },
+    state: db.loadFacetState(['tail']), capabilities: { clap: true, demucs: false, tailVocal: false } });
+  await runAnalysisPass({ plan: p });
+  facetAnswers = {};
+  assert.equal(db.getTrack('t2')!.tailStartMs ?? null, null);
+  const row = facetRow('t2', 'tail')!;
+  assert.equal(row.status, 'unmeasurable');
+  assert.equal(row.reason, 'silent-tail-window');
+});
+
+test('a facet that fails counts one attempt; the others are written', async () => {
+  db.upsertTrackMeta('t3', { title: 't3', artist: 'A', album: 'B', duration: 214 });
+  facetAnswers = { clap: { status: 'failed', reason: 'decode error' } };
+  requests.length = 0;
+  const p = P.planAcoustics({ ids: ['t3'], facets: ['head', 'clap'], where: { kind: 'all' },
+    state: db.loadFacetState(['head', 'clap']), capabilities: { clap: true, demucs: false, tailVocal: false } });
+  const stats = await runAnalysisPass({ plan: p });
+  facetAnswers = {};
+  assert.equal(stats.analyzed, 1);
+  assert.deepEqual(requests[0].facets, ['head', 'clap']);
+  assert.equal(db.getTrack('t3')!.bpm, 99);
+  assert.equal(facetRow('t3', 'head')!.status, 'ok');
+  assert.equal(facetRow('t3', 'clap')!.status, 'failed');
+  assert.equal(db.analysisFailures().find((f) => f.id === 't3')?.attempts, 1);
+});
+
+test('when every facet fails, the track fails like a flat analysis', async () => {
+  db.upsertTrackMeta('t4', { title: 't4', artist: 'A', album: 'B', duration: 214 });
+  facetAnswers = { head: { status: 'failed', reason: 'boom' } };
+  const p = P.planAcoustics({ ids: ['t4'], facets: ['head'], where: { kind: 'all' },
+    state: db.loadFacetState(['head']), capabilities: { clap: true, demucs: false, tailVocal: false } });
+  const stats = await runAnalysisPass({ plan: p });
+  facetAnswers = {};
+  assert.equal(stats.failed, 1);
+  assert.equal(stats.analyzed, 0);
+});
+
+test('a tail that fails is recorded as failed, so an unmeasurable re-run stops planning it', async () => {
+  // Production, 3 Oct: a planned tail failed ("window starts before the
+  // fetched tail") on an analysed track. The row stayed 'unmeasurable /
+  // tail-not-measured', so facets-cli showed no failure and every
+  // `--where unmeasurable:tail-not-measured` run planned it again.
+  db.upsertTrackMeta('t5', { title: 't5', artist: 'A', album: 'B', duration: 106 });
+  db.upsertTrackAnalysis('t5', { bpm: 90, musicalKey: 'F', loudnessLufs: -30 });
+  const where = { kind: 'unmeasurable' as const, reason: 'tail-not-measured' };
+  const tailPlan = () => P.planAcoustics({ ids: ['t5'], facets: ['tail'], where,
+    state: db.loadFacetState(['tail']), capabilities: { clap: true, demucs: false, tailVocal: false } });
+  assert.equal(facetRow('t5', 'tail')!.reason, 'tail-not-measured');
+  assert.equal(tailPlan().items.length, 1);
+  facetAnswers = { tail: { status: 'failed', reason: 'window starts before the fetched tail' } };
+  const stats = await runAnalysisPass({ plan: tailPlan() });
+  facetAnswers = {};
+  assert.equal(stats.failed, 1);
+  const row = facetRow('t5', 'tail')!;
+  assert.equal(row.status, 'failed');
+  assert.match(row.reason ?? '', /^tail: window starts before the fetched tail/);
+  assert.equal(facetRow('t5', 'head')!.status, 'ok', 'the head stays measured');
+  assert.equal(tailPlan().items.length, 0, 'unmeasurable:<reason> no longer matches a failed tail');
+  assert.ok(db.facetNeedsIds('tail').includes('t5'), 'needs retries it while under the attempt limit');
+  for (let i = 1; i < db.FACET_MAX_ATTEMPTS; i++) db.recordAnalysisFailure('t5', 'tail: window starts before the fetched tail');
+  assert.ok(!db.facetNeedsIds('tail').includes('t5'), 'and stops at the limit');
+  // The admin "clear failures" puts the track back where it was.
+  db.clearAnalysisFailures('t5');
+  assert.deepEqual(
+    { status: facetRow('t5', 'tail')!.status, reason: facetRow('t5', 'tail')!.reason },
+    { status: 'unmeasurable', reason: 'tail-not-measured' },
+  );
+  assert.equal(tailPlan().items.length, 1);
+});
+
+test('a flat failure on an analysed track leaves its unmeasured tail unmeasurable', async () => {
+  db.upsertTrackMeta('t6', { title: 't6', artist: 'A', album: 'B', duration: 214 });
+  db.upsertTrackAnalysis('t6', { bpm: 90, musicalKey: 'F', loudnessLufs: -9, source: 'capped' });
+  db.recordAnalysisFailure('t6', 'read ECONNRESET');
+  assert.equal(facetRow('t6', 'tail')!.status, 'unmeasurable');
+  assert.equal(facetRow('t6', 'clap')!.status, 'failed');
+});
+
+test('the facet table stays consistent with the columns through facet writes', async () => {
+  const { checkFacets } = await import('../src/music/facet-check.js');
+  const r = checkFacets();
+  assert.equal(r.driftCount, 0, JSON.stringify(r.drift));
+  assert.equal(r.orphans, 0);
+});
+
+function facetPlan(ids: string[], facets: Facet[], kind: WhereKind = 'all') {
+  return P.planAcoustics({ ids, facets, where: { kind }, state: db.loadFacetState(facets),
+    capabilities: { clap: true, demucs: true, tailVocal: true } });
+}
+
+test('an unmeasurable CLAP answer settles needs and survives reopening', async () => {
+  const id = 'terminal-clap';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  facetAnswers = { clap: { status: 'unmeasurable', reason: 'no-decodable-window' } };
+  try {
+    await runAnalysisPass({ plan: facetPlan([id], ['clap'], 'needs') });
+    assert.equal(facetRow(id, 'clap')?.status, 'unmeasurable');
+    assert.equal(facetRow(id, 'clap')?.reason, 'no-decodable-window');
+    assert.equal(facetPlan([id], ['clap'], 'needs').items.length, 0);
+    const { checkFacets } = await import('../src/music/facet-check.js');
+    assert.equal(checkFacets().ok, true, 'explicit terminal answers are valid scope differences');
+    db.close();
+    await db.open({ embeddingDim: 8, adoptStoredDim: true });
+    assert.equal(facetRow(id, 'clap')?.reason, 'no-decodable-window');
+    assert.equal(facetPlan([id], ['clap'], 'needs').items.length, 0);
+    sql().prepare("UPDATE track_facet_status SET version = 0 WHERE track_id = ? AND facet = 'clap'").run(id);
+    assert.equal(facetPlan([id], ['clap'], 'needs').items.length, 1);
+    assert.equal(checkFacets().ok, true, 'older terminal answers still need work in both scopes');
+  } finally { facetAnswers = {}; }
+});
+
+test('an unavailable-only answer preserves failures and reports no analyzed work', async () => {
+  const id = 'unavailable-clap';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  db.recordAnalysisFailure(id, 'tail: decode failed');
+  db.recordAnalysisFailure(id, 'tail: decode failed');
+  facetAnswers = { clap: { status: 'unavailable', reason: 'CLAP load failed' } };
+  try {
+    const stats = await runAnalysisPass({ plan: facetPlan([id], ['clap']) });
+    assert.equal(db.analysisFailures().find(f => f.id === id)?.attempts, 2);
+    assert.equal(stats.analyzed, 0);
+    assert.equal(stats.failed, 0);
+  } finally { facetAnswers = {}; }
+});
+
+test('an unavailable-only job does not interrupt the systemic failure guard', async () => {
+  const ids = ['outage-1', 'outage-2', 'outage-3', 'outage-noop', 'outage-4', 'outage-5', 'outage-6'];
+  for (const id of ids) db.upsertTrackMeta(id, { title: id, duration: 214 });
+  const plan = facetPlan(ids, ['head']);
+  const noop = plan.items.find(i => i.id === 'outage-noop');
+  assert.ok(noop);
+  noop.facets = ['clap'];
+  noop.request = P.requestFor(['clap']);
+  facetAnswers = { head: { status: 'failed', reason: 'decoder service unavailable' },
+    clap: { status: 'unavailable', reason: 'CLAP load failed' } };
+  try {
+    const stats = await runAnalysisPass({ plan });
+    assert.deepEqual(db.analysisFailures().filter(f => ids.includes(f.id)), []);
+    assert.equal(stats.analyzed, 0);
+    assert.equal(stats.failed, 6);
+  } finally { facetAnswers = {}; }
+});
+
+test('a facet stems plan skips separation while the share is offline', async () => {
+  const stemCacheStore = await import('../src/music/stem-cache.js');
+  const id = 'offline-stems';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  rmSync(stemCacheStore.stemsRoot(), { recursive: true, force: true });
+  sql().prepare("UPDATE tracks SET stems_at = 1 WHERE id = 'a'").run();
+  try {
+    requests.length = 0;
+    const stats = await runAnalysisPass({ plan: facetPlan([id], ['stems']) });
+    assert.equal(requests.length, 0, 'no facet work can run without a stems target');
+    assert.equal(stats.analyzed, 0);
+    assert.equal(sql().prepare('SELECT stems_at FROM tracks WHERE id = ?').pluck().get(id), null);
+    assert.equal(facetPlan([id], ['stems'], 'needs').items.length, 1);
+    requests.length = 0;
+    await runAnalysisPass({ plan: facetPlan([id], ['head', 'stems']) });
+    assert.deepEqual(requests[0]?.facets, ['head'], 'other requested work still runs');
+  } finally { sql().prepare("UPDATE tracks SET stems_at = NULL WHERE id = 'a'").run(); }
+});
+
+test('URL fallback omits stems and leaves a stems-only job retryable', async () => {
+  const stemCacheStore = await import('../src/music/stem-cache.js');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const root = stemCacheStore.stemsRoot();
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, stemCacheStore.STEMS_MARKER), '');
+  const id = 'remote-stems';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  rejectSharedPath = true;
+  try {
+    requests.length = 0;
+    const stats = await runAnalysisPass({ plan: facetPlan([id], ['stems']) });
+    assert.equal(requests.length, 1, 'no URL retry may force stems without a shared output dir');
+    assert.equal(stats.analyzed, 0);
+    assert.equal(sql().prepare('SELECT stems_at FROM tracks WHERE id = ?').pluck().get(id), null);
+    assert.equal(facetPlan([id], ['stems'], 'needs').items.length, 1);
+    requests.length = 0;
+    await runAnalysisPass({ plan: facetPlan([id], ['head', 'stems']) });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1]?.facets, ['head']);
+    assert.equal(requests[1]?.stems_dir, undefined);
+  } finally {
+    rejectSharedPath = false;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fresh tail vocals complete a current head-only vocal measurement', async () => {
+  const id = 'fresh-tail-vocals';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  db.upsertTrackAnalysis(id, { bpm: 120, vocalRanges: [],
+    outro: { startMs: 200_000, ending: 'cold', lufs: null, bpm: null, beats: null, bars: null } });
+  assert.equal(facetRow(id, 'vocal')?.reason, 'head-only');
+  vocalCapable = true;
+  analyzer._resetBackendCacheForTests();
+  try {
+    await runAnalysisPass({ plan: facetPlan([id], ['tail']), vocalBackfill: true });
+    assert.equal(facetRow(id, 'vocal')?.reason, null);
+    assert.equal(facetRow(id, 'vocal')?.version, db.FACET_VERSIONS.vocal);
+    assert.equal(facetPlan([id], ['vocal'], 'needs').items.length, 0);
+  } finally {
+    vocalCapable = false;
+    analyzer._resetBackendCacheForTests();
+  }
+});
+
+test('fresh tail vocals do not promote an older complete head vocal measurement', async () => {
+  const id = 'older-head-vocals';
+  db.upsertTrackMeta(id, { title: id, duration: 214 });
+  db.upsertTrackAnalysis(id, { bpm: 120, vocalRanges: [],
+    outro: { startMs: 200_000, ending: 'cold', lufs: null, bpm: null,
+      beats: null, bars: null, vocalRanges: [] } });
+  sql().prepare("UPDATE track_facet_status SET version = 0 WHERE track_id = ? AND facet = 'vocal'").run(id);
+  vocalCapable = true;
+  analyzer._resetBackendCacheForTests();
+  try {
+    await runAnalysisPass({ plan: facetPlan([id], ['tail']), vocalBackfill: true });
+    assert.equal(facetRow(id, 'vocal')?.version, 0);
+    assert.equal(facetPlan([id], ['vocal'], 'needs').items.length, 1);
+  } finally {
     vocalCapable = false;
     analyzer._resetBackendCacheForTests();
   }

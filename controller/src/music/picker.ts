@@ -7,6 +7,7 @@ import * as subsonic from './subsonic.js';
 import { clearPickerSourceCache } from '../llm/tools.js';
 import { shortlistOffers } from './shortlist-offers.js';
 import * as library from './library.js';
+import { isInstrumental } from './lyric-vocal.js';
 import * as dj from '../llm/dj.js';
 import { nearestId } from '../llm/sdk.js';
 import { logEvent } from '../observability/events.js';
@@ -22,9 +23,10 @@ import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, una
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import { allowsMoodPlaylistDiscovery } from './discovery-policy.js';
-import { showNoRepeatGuard, strictShowLibraryPool } from './show-recency.js';
+import { hardRecentFor, showNoRepeatGuard, strictShowLibraryPool } from './show-recency.js';
 import * as likes from '../broadcast/likes.js';
 import { ARTIST_VARIETY_WINDOW } from '../broadcast/dj-agent/artist-guard.js';
+import { groundPickNote } from '../broadcast/dj-agent/pick-note.js';
 
 // Raw Subsonic child, slimTrack library row, or Last.fm stub. A structural
 // superset of show-filter's FilterTrack and recency's CandidateLike.
@@ -637,7 +639,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   await library.load();
   ctx = await prepareEpisodeContext(ctx);
   const episodeSource = showPreparation.read({ context: ctx }).music;
-  const stats = library.stats();
+  const stats = library.pickStats(); // per pick: the narrow, cached counts (#1723)
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
   const librarySize = stats.mirrorTotal || stats.total;
   const windows = recencyWindowsForLibrary(stats.distinctArtists, librarySize);
@@ -694,7 +696,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     },
   );
   const effN = noRepeat.window;
-  const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
+  // Same history as the agent path: a full rotation's own airings (#1919).
+  const { ids: hardRecentIds, keys: hardRecentKeys } = hardRecentFor(noRepeat, queue);
   // Pinned anchor resolved to nothing: same warning as the agent path.
   if (activeShow?.playlistIds?.length && !playlistPool) {
     queue.log('picker', `show "${activeShow.name}" pins ${activeShow.playlistIds.length} playlist(s) but none resolved to tracks — anchor ignored${playlistStrict ? ' (STRICT toggle has no effect)' : ''}. Stale playlist id (deleted/recreated in Navidrome?) or a Navidrome error; re-select the playlists in the show editor.`);
@@ -813,10 +816,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           pace: c.paceMean ?? rec?.paceMean ?? undefined,
           // Mirrors the agent picker's `sections`.
           sections: library.sectionCount(c) ?? library.sectionCount(rec) ?? undefined,
-          // Instrumental flag from measured vocal ranges ([] = no vocals).
-          instrumental: Array.isArray(rec?.vocalRanges)
-            ? rec.vocalRanges.length === 0
-            : undefined,
+          // Instrumental flag from the shared measured-duration policy.
+          instrumental: isInstrumental(rec?.vocalRanges, rec?.vocalRangesInvalid) ?? undefined,
           unaired: neverAired,
           source: c._source || null,
           // Cosine similarity to the expected predecessor, KNN sources only.
@@ -875,7 +876,9 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   if (chosen.id) offered.delete(chosen.id);
   return {
     song: chosen,
-    reason: pickRaw.reason || null,
+    // A reason that names another candidate as this one (#1978) is dropped,
+    // and the session records the plain `Selected "<title>".` instead.
+    reason: groundPickNote(queue, pickRaw.reason, { track: chosen, candidates, pickAnchor: currentTrack, show: activeShow, route: 'pool' }) || null,
     source: chosen._source,
     // Present only when effects were active; applyMixTransition validates it.
     transition: pickRaw.transition ?? null,

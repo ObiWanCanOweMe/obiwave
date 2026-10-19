@@ -109,14 +109,16 @@ export async function resolveShowPlaylistPool(show: any): Promise<PlaylistPool |
 }
 
 // Per-playlist member-id sets for the blocklist's `playlist` rules, which hold
-// them in module state so matchOf stays synchronous. Shares the `playlist:${id}`
-// memo, so an id used as both anchor and rule is fetched once; a failed id is
-// absent from the map rather than fatal.
+// them in module state so matchOf stays synchronous. Raw member sets have their
+// own memo key so the airing filter cannot remove the rule's own members; a
+// failed id is absent from the map rather than fatal.
 export async function resolvePlaylistMemberSets(ids: string[]): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>();
   for (const id of [...new Set(ids.filter(Boolean))]) {
     try {
-      const songs = await memoFetch(`playlist:${id}`, () => subsonic.getPlaylist(id));
+      // Unfiltered, under its own key: this set is what the blocklist filter
+      // reads, so the filtered fetch would drop the rule's own members.
+      const songs = await memoFetch(`playlist-raw:${id}`, () => subsonic.getPlaylist(id, { includeBlocked: true }));
       out.set(id, new Set((songs || []).map((t: any) => t?.id).filter(Boolean)));
     } catch (err) {
       console.warn(`[show-playlist] rule playlist ${id} failed to resolve: ${(err as Error)?.message}`);

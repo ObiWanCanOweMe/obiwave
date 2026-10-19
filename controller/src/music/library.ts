@@ -108,7 +108,8 @@ export function get(songId: string): any {
     // symmetric with what slimTrack gives library-sourced candidates.
     durationSec: t.durationSec,
     structure: t.structure,
-    vocalRanges: t.vocalRanges, // [] = instrumental, null = not computed
+    vocalRanges: t.vocalRanges, // clean timing spans; classify through isInstrumental
+    vocalRangesInvalid: t.vocalRangesInvalid,
     paceMean: paceMeanOf(t.pace),
     // Boundary keys for bpmKeyFor / queue.mixAnalysisFor.
     keyRanges: t.keyRanges,
@@ -309,9 +310,23 @@ function slimTrack(r: db.EnergyPoolRecord) {
     loudnessLufs: r.loudnessLufs,
     structure: r.structure,
     vocalRanges: r.vocalRanges,
+    vocalRangesInvalid: r.vocalRangesInvalid,
     // Scalar mean pace (0..1); the full curve stays in the record.
     paceMean: paceMeanOf(r.pace),
   };
+}
+
+// Ids only, for callers that sample a bucket rather than read it: no row
+// mapping, no JSON parsing. Not blocklist-filtered — check what you keep.
+export function idsByEnergy(energy: string | null | undefined): string[] {
+  if (!energy || !loaded) return [];
+  if (energy !== 'low' && energy !== 'medium' && energy !== 'high') return [];
+  return db.idsByEnergy(energy);
+}
+
+export function isBlockedId(id: string): boolean {
+  const t = loaded ? db.getTrack(id) : null;
+  return !!t && blocklist.isBlocked(slimTrack(t));
 }
 
 export function songsByEnergy(energy: string | null | undefined): any[] {
@@ -533,11 +548,20 @@ export function deepCuts(days: number = DEEP_CUT_DAYS, k = 60): any[] {
   }
 }
 
-export function stats() {
+// What a live pick needs from the library counts, long-cached (#1723). Use
+// this on the pick path; stats() is the dashboard's full aggregate.
+export function pickStats(): db.PickStats {
+  if (!loaded) {
+    return { total: 0, mirrorTotal: 0, distinctArtists: 0, withEmbedding: 0, withAudioEmbedding: 0, hasMoodCoverage: false, hasEnergyCoverage: false, byMood: {} };
+  }
+  return db.pickStats();
+}
+
+export function stats(opts: { fresh?: boolean } = {}) {
   if (!loaded) {
     return { total: 0, mirrorTotal: 0, distinctArtists: 0, byMood: {}, byEnergy: {}, byGenre: {}, updatedAt: null, embeddingMeta: null };
   }
-  const s = db.stats();
+  const s = db.stats(opts);
   return {
     total: s.total,
     // Every row, tagged or not — NOT `total`, which counts only what the
@@ -593,7 +617,7 @@ export async function consolidateScenes(
 export function labelOnlyShare(): number | null {
   if (!loaded) return null;
   try {
-    const embedded = db.stats().withEmbedding ?? 0;
+    const embedded = db.pickStats().withEmbedding;
     if (!embedded) return null;
     return db.labelOnlyVectorCount() / embedded;
   } catch {
@@ -601,8 +625,8 @@ export function labelOnlyShare(): number | null {
   }
 }
 
-// How many tracks have had a vocal pass at all (a stored "[]", an analysed
-// instrumental, counts as done). Deliberately NOT folded into stats() — only
+// How many tracks have had a vocal pass at all. A stored "[]" is a measured
+// absence of spans and counts as done. Not folded into stats() — only
 // the vocal show filter needs it, so only its callers pay for the COUNT.
 export function vocalAnalyzedCount(): number {
   if (!loaded) return 0;
@@ -644,8 +668,7 @@ export interface FilteredRow {
   source?: string | null;
   taggedAt?: string | null;
   // Acoustic analysis, null when the analyze pass hasn't touched the track.
-  // `instrumental` is derived: null = not computed, true = analysed with no
-  // vocal ranges, false = analysed with vocals.
+  // `instrumental` uses isInstrumental's measured-duration rule; null = unknown.
   bpm?: number | null;
   musicalKey?: string | null;
   loudnessLufs?: number | null;
@@ -679,7 +702,7 @@ export function filter(opts: FilterOpts = {}): { total: number; rows: FilteredRo
       musicalKey: r.musicalKey,
       loudnessLufs: r.loudnessLufs,
       paceMean: paceMeanOf(r.pace),
-      instrumental: isInstrumental(r.vocalRanges),
+      instrumental: isInstrumental(r.vocalRanges, r.vocalRangesInvalid),
     })),
   };
 }

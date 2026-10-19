@@ -180,6 +180,16 @@ const allowed = new Map([
   ['settings/BrainSection.tsx', new Map([
     ['brain-connection-probe', { callee: 'adminResponse', method: 'POST', path: /^\/settings\/llm\/probe-compat$/ }],
   ])],
+  ['settings/LlmSection.tsx', new Map([
+    // The swap confirm dialog's preview: read once per dialog open, against
+    // settings and live latency that the swap it previews is about to change,
+    // so a cached copy would only ever be stale. Like discovery-tool-preview.
+    ['llm-swap-fit-preview', {
+      callee: 'adminResponse',
+      method: 'GET',
+      path: /^\/settings\/llm\/swap\/fit$/,
+    }],
+  ])],
   ['settings/LibrarySection.tsx', new Map([
     ['locca-discovery-probe', {
       callee: 'adminResponse',

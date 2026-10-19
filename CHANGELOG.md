@@ -12,6 +12,65 @@
   independent. Operators who already reconfigured profiles under #1777 must
   mark those profiles before upgrading. See [upgrade and recovery steps](docs/multi-station.md#upgrading-existing-profiles).
 
+## [1.25.0](https://github.com/perminder-klair/subwave/compare/v1.24.0...v1.25.0) (2026-10-18)
+
+
+### Features
+
+* **analyze:** planned runs speak the facet protocol ([#1920](https://github.com/perminder-klair/subwave/issues/1920)) ([b5d1c4c](https://github.com/perminder-klair/subwave/commit/b5d1c4c159d5146239a9a933d36397a681fd1039))
+* **llm:** swap the primary and backup LLM in one press, with a fit warning for the agentic routes ([#1970](https://github.com/perminder-klair/subwave/issues/1970)) ([b5fe41b](https://github.com/perminder-klair/subwave/commit/b5fe41bea6975ff38ec40397b6a57d42f7c906b6))
+* **web:** mark the station's current time on the schedule board ([#1938](https://github.com/perminder-klair/subwave/issues/1938)) ([a73d3d4](https://github.com/perminder-klair/subwave/commit/a73d3d45b08fa6dbada61ed446f5d99ed4484db4))
+
+
+### Bug Fixes
+
+* **blocklist:** resolve playlist-rule members without the blocklist filter ([#1945](https://github.com/perminder-klair/subwave/issues/1945)) ([0b7f674](https://github.com/perminder-klair/subwave/commit/0b7f67419018465d8cf132d28c18b7c643de9350))
+* **dash:** DJ Latency reads successful calls only, and says when some failed ([#1972](https://github.com/perminder-klair/subwave/issues/1972)) ([1494fb0](https://github.com/perminder-klair/subwave/commit/1494fb003bd6cb2896e107aaec6475dd9e64e603))
+* **dj-agent:** an album re-pick never lands on the on-air artist ([#1981](https://github.com/perminder-klair/subwave/issues/1981)) ([e1b1a10](https://github.com/perminder-klair/subwave/commit/e1b1a10e34af18639a9ff30f0be9cf865f1a4801))
+* **dj-agent:** check a pick's note names the track it queued ([#1978](https://github.com/perminder-klair/subwave/issues/1978)) ([#1987](https://github.com/perminder-klair/subwave/issues/1987)) ([5bc0804](https://github.com/perminder-klair/subwave/commit/5bc0804b9d1f1fb252091310fbbb240cd6e794ab))
+* **dj-agent:** end DJ-mode runs at a show change and keep journeys inside the show ([#1911](https://github.com/perminder-klair/subwave/issues/1911)) ([#1971](https://github.com/perminder-klair/subwave/issues/1971)) ([6adb679](https://github.com/perminder-klair/subwave/commit/6adb679c9a58c3eca3d1813c40d90639263bc9ea))
+* **dj-agent:** give the Leanings review the show's lane on an Agentic journey pick ([#1977](https://github.com/perminder-klair/subwave/issues/1977)) ([#1985](https://github.com/perminder-klair/subwave/issues/1985)) ([aa9cd80](https://github.com/perminder-klair/subwave/commit/aa9cd8076a3864f8994e2dd178b0777cfea551d6))
+* **dj-agent:** keep a pick note that names a credited title by its core ([#1995](https://github.com/perminder-klair/subwave/issues/1995)) ([9efb706](https://github.com/perminder-klair/subwave/commit/9efb706d5ff79c6c3677af8c59c44edd35ac6510))
+* **dj-agent:** read a pick note's capitalised names against what the pick knows ([#2004](https://github.com/perminder-klair/subwave/issues/2004)) ([7cb507f](https://github.com/perminder-klair/subwave/commit/7cb507f517d7483c25c75918d1659804daddc357))
+* **dj-agent:** when spacing relaxes, the artist heard longest ago plays ([#1982](https://github.com/perminder-klair/subwave/issues/1982)) ([e9e201a](https://github.com/perminder-klair/subwave/commit/e9e201a82ab0327d457c47e4967a4f9c6b6e3079))
+* **library:** bound genre-suggestion staleness and key it on the walk's own inputs ([#1991](https://github.com/perminder-klair/subwave/issues/1991)) ([#1999](https://github.com/perminder-klair/subwave/issues/1999)) ([fbd01ff](https://github.com/perminder-klair/subwave/commit/fbd01ffda3d061e6e11f35a041c215eb427bf712))
+* **liquidsoap:** align stem-blend clip seams on the cue lead, not the buffer ([#1933](https://github.com/perminder-klair/subwave/issues/1933)) ([8bbf68b](https://github.com/perminder-klair/subwave/commit/8bbf68b24af8a1511bc682c36390ccf894a74452))
+* **llm:** fail over on a 5xx that survived same-leg retries, and remember a down primary ([#1923](https://github.com/perminder-klair/subwave/issues/1923)) ([462cdde](https://github.com/perminder-klair/subwave/commit/462cddea90953b29e16ee119af7f65237fa022cc))
+* **llm:** say which way a native pass missed in its log line ([#1954](https://github.com/perminder-klair/subwave/issues/1954)) ([9d3b1af](https://github.com/perminder-klair/subwave/commit/9d3b1afdef24bd8210aff615e31db97e2b40dfe4))
+* **mcp:** auto-detect the controller URL for the stdio server ([#1990](https://github.com/perminder-klair/subwave/issues/1990)) ([ea229bb](https://github.com/perminder-klair/subwave/commit/ea229bba6e9fd95cff8feb62706b35c7de117ab3))
+* **mix:** stamp the length cap's cue-out only on tracks that run past it ([#1935](https://github.com/perminder-klair/subwave/issues/1935)) ([e74c56b](https://github.com/perminder-klair/subwave/commit/e74c56b25a677af1cfca3bbefefb243353ee5d26))
+* **personas:** never read a Musical Leanings "avoid" line as a preference ([#1994](https://github.com/perminder-klair/subwave/issues/1994)) ([#2001](https://github.com/perminder-klair/subwave/issues/2001)) ([7b26de4](https://github.com/perminder-klair/subwave/commit/7b26de4fe5978a6be374243e12b45f9e86dc8c0a))
+* **personas:** Remove no longer crashes the panel, and Delete persists immediately ([#1950](https://github.com/perminder-klair/subwave/issues/1950)) ([#1969](https://github.com/perminder-klair/subwave/issues/1969)) ([69a4283](https://github.com/perminder-klair/subwave/commit/69a42835beed68ca08dbf888e808a0e6fea98d72))
+* **picker:** tolerate vocal bleed and widen strict discovery ([#1881](https://github.com/perminder-klair/subwave/issues/1881)) ([5b6ca54](https://github.com/perminder-klair/subwave/commit/5b6ca5452cad49d22063f9091fa317d70a0c8e95))
+* **prompt-memory:** keep RAW /dj/say text out of later DJ prompts ([#1908](https://github.com/perminder-klair/subwave/issues/1908)) ([#1967](https://github.com/perminder-klair/subwave/issues/1967)) ([cc691a9](https://github.com/perminder-klair/subwave/commit/cc691a92e7da2b1ec5b3b2a0eb4d2f712467418a))
+* **queue:** hand over to the coast when a dropped pick is past the re-pick budget ([#1975](https://github.com/perminder-klair/subwave/issues/1975)) ([#1988](https://github.com/perminder-klair/subwave/issues/1988)) ([cf4feaa](https://github.com/perminder-klair/subwave/commit/cf4feaa74ecc568ad366de831237a25a9b1fb15d))
+* **queue:** rebuild the coast when picking stops for the token cap or auto-pick off ([#1992](https://github.com/perminder-klair/subwave/issues/1992)) ([#1997](https://github.com/perminder-klair/subwave/issues/1997)) ([a51ad71](https://github.com/perminder-klair/subwave/commit/a51ad71babe24b567d617d2fff13cf2834dfe48d))
+* **recency:** one act spelled with a hyphen and with a space keys as one ([#1983](https://github.com/perminder-klair/subwave/issues/1983)) ([d0a0896](https://github.com/perminder-klair/subwave/commit/d0a089669a6eae1614cb41eee0b79af1222f4639))
+* **requests:** a "more of this" ask names the on-air artist; an ask's own "for" is not a dedication ([#1979](https://github.com/perminder-klair/subwave/issues/1979)) ([#1989](https://github.com/perminder-klair/subwave/issues/1989)) ([f4b4abd](https://github.com/perminder-klair/subwave/commit/f4b4abd9c48f467e4295f9496ee9baae3f2b2d35))
+* **requests:** check request lines name the track they queue ([#1918](https://github.com/perminder-klair/subwave/issues/1918)) ([#1974](https://github.com/perminder-klair/subwave/issues/1974)) ([bee3bb4](https://github.com/perminder-klair/subwave/commit/bee3bb4cf95da5a427ad68f1043923c68da2932b))
+* **requests:** hold a request's stand-in to artist spacing ([#1979](https://github.com/perminder-klair/subwave/issues/1979)) ([#1984](https://github.com/perminder-klair/subwave/issues/1984)) ([db430ac](https://github.com/perminder-klair/subwave/commit/db430acc964804824b0df4cee40f038eb279e93d))
+* **requests:** space a stand-in in the stateless request cascade ([#1993](https://github.com/perminder-klair/subwave/issues/1993)) ([#1998](https://github.com/perminder-klair/subwave/issues/1998)) ([3a89a82](https://github.com/perminder-klair/subwave/commit/3a89a82ee5aa2ca8d436a5bb7e8fe853145b1e17))
+* **scheduler:** rebuild the coast when the DJ stops picking for an empty room ([#1975](https://github.com/perminder-klair/subwave/issues/1975)) ([#1980](https://github.com/perminder-klair/subwave/issues/1980)) ([095aecc](https://github.com/perminder-klair/subwave/commit/095aeccb936a296e295976d61155f0bb845b3ce4))
+* **shows:** rotate a full playlist over its own airings, and stop the coast looping ([#1919](https://github.com/perminder-klair/subwave/issues/1919)) ([#1968](https://github.com/perminder-klair/subwave/issues/1968)) ([d75122f](https://github.com/perminder-klair/subwave/commit/d75122f007c6eb4d244228ed677d15eac270eb12))
+* **voice:** level each clip at the mixer handoff ([#1899](https://github.com/perminder-klair/subwave/issues/1899)) ([44ea4c1](https://github.com/perminder-klair/subwave/commit/44ea4c107c5ea1fb45c857d68539ac0e5ed161d5))
+
+
+### Performance
+
+* **library:** keep admin library reads off the wide track rows ([#1937](https://github.com/perminder-klair/subwave/issues/1937)) ([#1973](https://github.com/perminder-klair/subwave/issues/1973)) ([c747650](https://github.com/perminder-klair/subwave/commit/c7476507297610d0e9b1722bce775527cd4ce0bc))
+* **library:** walk genre suggestions in slices and answer from the last walk ([#1976](https://github.com/perminder-klair/subwave/issues/1976)) ([#1986](https://github.com/perminder-klair/subwave/issues/1986)) ([7c982d7](https://github.com/perminder-klair/subwave/commit/7c982d7c8de0af0ba59b0f9caba33494c2514281))
+* **pick:** find and remove the pre-pick stall ([#1723](https://github.com/perminder-klair/subwave/issues/1723) follow-up) ([#1921](https://github.com/perminder-klair/subwave/issues/1921)) ([62a1a8b](https://github.com/perminder-klair/subwave/commit/62a1a8bd3266b3ef8f7a47e0b8413c7edef15240))
+
+
+### Documentation
+
+* retire Candidate Pool / pickerAgent wording after Track Shortlist ([#1687](https://github.com/perminder-klair/subwave/issues/1687)) ([#1953](https://github.com/perminder-klair/subwave/issues/1953)) ([d7e9c73](https://github.com/perminder-klair/subwave/commit/d7e9c73dcd43a04a6efd197f6208e236f1a93888))
+
+
+### Refactors
+
+* **silence-trim:** per-edge trim ceilings, 30 s head and 600 s tail ([#1962](https://github.com/perminder-klair/subwave/issues/1962)) ([64e147e](https://github.com/perminder-klair/subwave/commit/64e147ee7f8f60397748595f78d6c3d713abbf89))
+
 ## [1.24.0](https://github.com/perminder-klair/subwave/compare/v1.23.0...v1.24.0) (2026-10-15)
 
 

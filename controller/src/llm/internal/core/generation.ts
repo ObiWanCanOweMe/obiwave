@@ -1,6 +1,7 @@
 // Non-streaming provider generation lifecycle. Counts are client observations in
 // this process, never provider queue depth or a promise of remote slot release.
 import { randomUUID } from 'node:crypto';
+import { shouldFailoverRefusal } from './retry-policy.js';
 import { wrapLanguageModel, type LanguageModel } from 'ai';
 import { isModelUnavailable, isQuotaOrAuthError } from './pure.js';
 
@@ -161,9 +162,12 @@ export function createGenerationLifecycle(now = () => performance.now(), wallNow
 // 12s, before failover tried the backup. Clearing the flag here, where every
 // failover leg's model is wrapped, lets the one classifier the controller
 // already trusts decide; transient errors keep the SDK's retries unchanged.
+// A refusal skips SDK retries only in an unpinned primary attempt with a
+// usable backup, sharing withTransientRetry's scope. Other attempts retain
+// their existing retries.
 export function withPermanentNotRetryable(err: unknown): unknown {
   const e = err as { isRetryable?: unknown } | null;
-  if (e && typeof e === 'object' && e.isRetryable === true && (isModelUnavailable(e as any) || isQuotaOrAuthError(e as any))) {
+  if (e && typeof e === 'object' && e.isRetryable === true && (isModelUnavailable(e as any) || isQuotaOrAuthError(e as any) || shouldFailoverRefusal(e as any))) {
     try { e.isRetryable = false; } catch { /* a frozen error keeps its retries */ }
   }
   return err;
