@@ -28,6 +28,14 @@ test('cold hydration preserves defaults and independent primary/fallback fields'
   assert.deepEqual(form.llm.headers, [{ name: 'X-Route', value: 'set' }]);
   assert.deepEqual(form.llm.fallback.headers, [{ name: 'X-Other', value: 'set' }]);
 
+  // Tool choice is per leg: neither leg's value leaks into the other, so a
+  // swap that moves an 'auto' onto the backup shows up on the backup's control.
+  assert.equal(form.llm.fallback.toolChoice, 'required');
+  const auto = settingsForm({ llm: { toolChoice: 'required', fallback: { toolChoice: 'auto' } } });
+  assert.equal(auto.llm.toolChoice, 'required');
+  assert.equal(auto.llm.fallback.toolChoice, 'auto');
+  assert.equal(settingsForm({ llm: { toolChoice: 'auto' } }).llm.fallback.toolChoice, 'required');
+
   const shortlist = settingsForm({ llm: {
     trackSelection: 'shortlist', shortlistPasses: 5, shortlistSearchPreparation: true, guestMusicalLeanings: true,
     requestMatching: 'direct', segmentRuntime: 'direct',
@@ -38,6 +46,16 @@ test('cold hydration preserves defaults and independent primary/fallback fields'
   assert.equal(shortlist.llm.guestMusicalLeanings, true);
   assert.equal(shortlist.llm.requestMatching, 'direct');
   assert.equal(shortlist.llm.segmentRuntime, 'direct');
+});
+
+test('voice levelling hydrates OFF for older stations and preserves the explicit operator choice', () => {
+  const baseline = settingsForm({});
+  assert.equal(baseline.tts.voiceLevelling, false);
+  assert.equal(settingsForm({ tts: { voiceLevelling: false } }).tts.voiceLevelling, false);
+  const enabled = settingsForm({ tts: { voiceLevelling: true } });
+  assert.equal(enabled.tts.voiceLevelling, true);
+  assert.deepEqual(dirtyPaths(enabled, baseline, ['tts']), ['tts']);
+  assert.equal(restorePaths(enabled, baseline, ['tts']).tts.voiceLevelling, false);
 });
 
 test('whole-block saves refuse blank numbers and preserve explicit zero and decimal coercion', () => {

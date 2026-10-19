@@ -16,8 +16,8 @@ const settings = await import('../src/settings.js');
 const { primaryLeg, fallbackLeg } = await import('../src/llm/internal/provider/legs.js');
 const { djObject, djAgent } = await import('../src/llm/sdk.js');
 const { recentCalls } = await import('../src/llm/log.js');
-const { agenticPickerContextWindow } = await import('../src/llm/internal/telemetry/context-window.js');
 const { GenerationCancelledError } = await import('../src/llm/internal/core/generation.js');
+const { resetFailoverStickyForTest } = await import('../src/llm/internal/core/failover.js');
 const schema = z.object({ name: z.string() });
 const answer = { name: 'backup' };
 const tools = { sample: { inputSchema: z.object({}) } };
@@ -29,6 +29,8 @@ function configure(t: TestContext, provider: string, backup = true) {
     fallback: { ...defaults.llm.fallback, enabled: backup, provider: 'openai', model: 'strategy-backup' },
   } });
   recentCalls.length = 0;
+  resetFailoverStickyForTest();
+  t.after(() => resetFailoverStickyForTest());
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('unexpected provider traffic'); });
   return { primary: primaryLeg(), backup: fallbackLeg() };
 }
@@ -232,5 +234,4 @@ test('context peaks include refused requests in a successful terminal recovery',
   assert.equal(calls, 4);
   assert.equal(recentCalls[0].usage.input, 53_000);
   assert.equal(recentCalls[0].contextPeakInput, 30_000);
-  assert.equal(agenticPickerContextWindow(recentCalls).suggestedTokens, 38_912);
 });

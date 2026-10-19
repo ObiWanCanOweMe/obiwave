@@ -34,6 +34,7 @@ const FORM = {
   kokoroLang: 'en-us',
   tts: {
     enabled: true,
+    voiceLevelling: false,
     defaultEngine: 'cloud',
     // v1.4 makes the normalized fallback slot part of every settings form.
     // Keep this fixture representative of the real SettingsPanel hydrator so

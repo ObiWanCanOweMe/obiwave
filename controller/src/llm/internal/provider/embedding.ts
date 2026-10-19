@@ -18,7 +18,8 @@ const embedCache = new Map();
 
 // Resolve unsaved probe values before deciding which credentials may follow.
 function embeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
-  const s: any = settings.get().embedding || {};
+  const stored = settings.get();
+  const s: any = stored.embedding || {};
   const llm = llmCfg();
   const savedProvider = s.provider || llm.provider || 'ollama';
   const provider = overrides.provider || savedProvider;
@@ -29,10 +30,17 @@ function embeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
   const sameSavedEndpoint = provider === savedProvider
     && embeddingBaseUrl({ provider, baseUrl }).replace(/\/+$/, '')
       === embeddingBaseUrl({ provider, baseUrl: savedBaseUrl }).replace(/\/+$/, '');
-  const sharesChat = embeddingSharesChatCredential(
-    { provider: llm.provider, baseUrl: chatBaseUrl(llm) },
-    { provider, baseUrl: embeddingBaseUrl({ provider, baseUrl }) },
-  );
+  // A swap moves the former primary to fallback; the provider-owned secret
+  // remains usable only while an enabled chat leg still names this service.
+  // Never construct a model here: embedding resolution is independent of the
+  // chat model's validity, and the existing endpoint policy owns the decision.
+  const fallback = stored.llm?.fallback;
+  const chat = [llm, ...(fallback?.enabled
+    ? [{ ...fallback, apiKey: settings.llmKeyFor(fallback.provider) }] : [])]
+    .find(leg => embeddingSharesChatCredential(
+      { provider: leg.provider, baseUrl: chatBaseUrl(leg) },
+      { provider, baseUrl: embeddingBaseUrl({ provider, baseUrl }) },
+    ));
   // Saved embedding secrets and probe sentinels stay at their saved endpoint.
   const ownHeaders = overrides.headers !== undefined ? overrides.headers
     : sameSavedEndpoint ? s.headers : {};
@@ -47,7 +55,7 @@ function embeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
   const dedicatedKey = !customEndpoint || dedicatedEndpoint ? process.env.EMBEDDING_API_KEY : '';
   // Vendor keys are provider-owned. A custom server's chat key follows only
   // when both legs resolve to the same service; Anthropic embeds via OpenAI.
-  const providerKey = sharesChat ? llm.apiKey
+  const providerKey = chat ? chat.apiKey
     : !customEndpoint && embeddingSharesChatCredential({ provider }, { provider })
       ? settings.llmKeyFor(provider) : '';
   return {
@@ -58,7 +66,7 @@ function embeddingCfg(overrides: Partial<EmbeddingCfg> = {}): EmbeddingCfg {
     ollamaUrl: overrides.ollamaUrl ?? (s.ollamaUrl || llm.ollamaUrl || ''),
     baseUrl,
     headers: Object.keys(ownHeaders || {}).length ? ownHeaders
-      : sharesChat ? (llm.headers || {}) : {},
+      : chat ? (chat.headers || {}) : {},
   };
 }
 

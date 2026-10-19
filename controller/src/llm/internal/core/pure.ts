@@ -10,6 +10,7 @@ interface ErrorLike {
   message?: unknown;
   statusCode?: unknown;
   status?: unknown;
+  status_code?: unknown;
   code?: unknown;
   name?: unknown;
   cause?: ErrorLike;
@@ -260,6 +261,11 @@ export function budgetMode(
 //                          same-leg retry gets first crack and only a persistent
 //                          overload reaches failover.
 //   isModelUnavailable   → fail over; permanent even with a transient status.
+//   isServerExhausted    → fail over; a 5xx that survived same-leg retries means
+//                          this leg cannot serve the call (bare-500 servers have
+//                          no wording for the message classifiers to match).
+//   isConnectionRefused  → NOT transient in practice: withTransientRetry skips
+//                          same-leg retries for it so failover decides at once.
 
 // AI_RetryError is a wrapper with no statusCode/cause/responseHeaders of its
 // own; the real APICallError lives in err.lastError / err.errors[]. Every
@@ -344,6 +350,52 @@ export function isUnreachable(err: ErrorLike | null | undefined): boolean {
   const msg = providerMessage(err);
   if (/fetch failed|socket hang up|getaddrinfo|connect ECONNREFUSED|connect ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(msg)) {
     return true;
+  }
+  return false;
+}
+
+// A 5xx that SURVIVED same-leg retries: the leg answered but cannot serve this
+// call. The canonical case is a server with no model loaded — it answers a bare
+// 500 with no wording, so every message classifier (isModelUnavailable and
+// friends) sees nothing to match, and the call dies with the configured backup
+// sitting idle. Status-based by design: only the 5xx subset that isTransient
+// retries ({500, 502, 503, 504}) can reach failover having burned its same-leg
+// budget. The status code, when the error carries one, is the whole answer: a
+// 400 whose MESSAGE happens to contain "500" ("max_tokens must be at most
+// 500") is a bad request, not a server that cannot serve, and reading it as one
+// would park a healthy primary for the whole sticky window. The message is
+// consulted only for an error with no status at all (a transport that folds the
+// status into its text), mirroring isTransient's wording band for that case.
+const EXHAUSTED_STATUS = new Set([500, 502, 503, 504]);
+
+export function isServerExhausted(err: ErrorLike | null | undefined): boolean {
+  if (!err) return false;
+  err = unwrapSdkError(err);
+  if (isGenerationControlError(err)) return false;
+  const status = err.statusCode ?? err.status ?? err.status_code
+    ?? err.cause?.statusCode ?? err.cause?.status ?? err.cause?.status_code;
+  if (typeof status === 'number') return EXHAUSTED_STATUS.has(status);
+  const msg = providerMessage(err);
+  return /\b(500|502|503|504)\b/.test(msg);
+}
+
+// A host that refuses the connection or cannot be resolved is not coming back
+// within a retry backoff (0.5s + 1.5s): same-leg retries against it only add
+// latency before failover gets to decide, and a service mid-restart is better
+// served by the backup than by waiting out the port. EAI_AGAIN (temporary DNS
+// failure) stays retryable — it can clear in a second.
+const CONNECTION_REFUSED_CODE = new Set(['ECONNREFUSED', 'ENOTFOUND']);
+
+export function isConnectionRefused(err: ErrorLike | null | undefined): boolean {
+  const seen = new Set<ErrorLike>();
+  while (err && typeof err === 'object' && !seen.has(err)) {
+    seen.add(err);
+    if (isGenerationControlError(err) || isLocalParseError(err)) return false;
+    const inner = unwrapSdkError(err);
+    if (inner !== err) { err = inner; continue; }
+    if (typeof err.code === 'string' && CONNECTION_REFUSED_CODE.has(err.code)) return true;
+    if (/connect ECONNREFUSED|ENOTFOUND/i.test(providerMessage(err))) return true;
+    err = err.cause;
   }
   return false;
 }

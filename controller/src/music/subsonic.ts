@@ -795,9 +795,14 @@ export async function getPlaylists({ signal }: { signal?: AbortSignal } = {}) {
   return r.playlists?.playlist || [];
 }
 
-export async function getPlaylist(id, { signal }: { signal?: AbortSignal } = {}) {
+// `includeBlocked` is for the blocklist's OWN playlist-rule resolver: it builds
+// the member set that `rejectBlocked` consults, so reading through the filter
+// returned the playlist minus its own members on every refresh after the first
+// (0 tracks, rule inert, flipping back each TTL). Airing paths take the default.
+export async function getPlaylist(id, { signal, includeBlocked = false }: { signal?: AbortSignal; includeBlocked?: boolean } = {}) {
   const r = await call('getPlaylist', { id }, { ...RETRY_FAST_TRANSPORT, signal });
-  return rejectArchive(r.playlist?.entry || []);
+  const songs = (r.playlist?.entry || []).filter((s) => !isStationArchive(s));
+  return includeBlocked ? songs : blocklist.rejectBlocked(songs);
 }
 
 // Playlist mutations: song-id lists ride the query string, so they are chunked
@@ -911,7 +916,7 @@ export function getPlayableUri(song, resolveProbeId: string | null = null) {
 export function escAnnotate(s) {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
-export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null } = {}) {
+export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null; clipLeadSec?: number | null } = {}) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
@@ -931,6 +936,10 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
   // configured crossfade) or a washout's 12s canvas outlives its transition.
   const crossSec = song.crossSec ?? settings.get()?.crossfadeDuration ?? null;
   if (crossSec != null) fields.push(`liq_cross_duration="${escAnnotate(crossSec)}"`);
+  // The outgoing side of a stem-blend clip seam: how far its cue-out sits past
+  // the clip's start (broadcast/stem-seam.ts). radio.liq buffers past it and
+  // aligns the clip on it; an older mixer ignores the key.
+  if (opts.clipLeadSec != null) fields.push(`liq_clip_lead="${escAnnotate(opts.clipLeadSec)}"`);
   // Per-track loudness gain offset, in the "<n> dB" form Liquidsoap's amplify
   // override parses. Applied before the ducking layers. Absent = unity.
   if (song.gainDb != null) fields.push(`liq_amplify="${escAnnotate(song.gainDb)} dB"`);
@@ -956,7 +965,9 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
   // Hard track-length cap (#447): a positive cap stamps `liq_cue_out` and
   // radio.liq's `cue_cut` stops the track there. Only the capped paths set it
   // (autonomous picks + auto.m3u); listener requests pass null and play in
-  // full. A cue_out past the track's end is a no-op. An explicit cueOutSec (a
+  // full. Callers pass the cap only for a track that runs past it
+  // (track-floor.capCueOutSec): a cue_out past the end is NOT a no-op when the
+  // decoder cannot measure the stream, it defeats the crossfade. An explicit cueOutSec (a
   // stem blend's start in the OUTGOING track) competes with the cap and the
   // earlier cut wins, so a blend can't resurrect audio past the cap. cueInSec
   // skips the INCOMING track past the head its rendered clip already played.
@@ -984,6 +995,9 @@ export function getClipUri(song, clipPath: string, crossSec: number) {
     `subsonic_id="${escAnnotate(song.id)}"`,
     'subwave_clip="1"',
     `liq_cross_duration="${escAnnotate(crossSec)}"`,
+    // The cue lead both clip seams were cut with (broadcast/stem-seam.ts):
+    // radio.liq aligns the clip on it rather than on what `cross` buffered.
+    `liq_clip_lead="${escAnnotate(crossSec)}"`,
   ];
   // No liq_amplify: the render already gain-matched both sources, so a stamp
   // here would double-apply.
