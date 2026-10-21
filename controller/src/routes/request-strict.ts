@@ -53,7 +53,7 @@ export function strictRequestTarget(matched: any): StrictRequestTarget {
     ? matched.artist.trim()
     : null;
   const artistKey = clean(artist);
-  const title = (Array.isArray(matched?.search_terms) ? matched.search_terms : [])
+  const title = (typeof matched?.title === 'string' && matched.title.trim() ? matched.title.trim() : null) || (Array.isArray(matched?.search_terms) ? matched.search_terms : [])
     .map((term: unknown) => String(term ?? '').trim())
     .filter(Boolean)
     .find((term: string) => clean(term) !== artistKey) || null;

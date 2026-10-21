@@ -61,7 +61,7 @@ FIXTURE_HELPER = Path(__file__).with_name("verify-library-fixture.py")
 # Rows are divs; history reuses only the title class.
 ROW = ".lib-row"
 TITLE = ".lib-title"
-MOOD_CHIP = ".lib-chip"
+MOOD_CHIP = ".lib-chip:has(.n)"  # Mood facets have counts; query examples share lib-chip.
 ACTIVE_CHIP = ".lib-active-chip"
 BLOCK_BTN = '[title="Never play this on air"]'
 EDIT_BTN = '[title="Edit moods manually"]'

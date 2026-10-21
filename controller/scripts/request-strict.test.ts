@@ -41,6 +41,12 @@ test('title and artist request only accepts the exact library hit', () => {
   assert.equal(strictRequestSatisfied(target, midnight), true);
 });
 
+test('explicit interpreter title takes precedence over search terms', () => {
+  const target = strictRequestTarget({ title: 'Midnight City', artist: 'M83', search_terms: ['M83'] });
+  assert.deepEqual(target, { title: 'Midnight City', artist: 'M83', specific: true });
+  assert.equal(pickStrictCandidate(target, [intro, midnight]), midnight);
+});
+
 test('artist-only request is strict about the artist but not the song title', () => {
   const target = strictRequestTarget({
     search_terms: ['M83'],

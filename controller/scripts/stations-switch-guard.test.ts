@@ -1,5 +1,5 @@
 // Regression for the station-switch lifecycle race.
-// Run: npx tsx scripts/stations-switch-guard.test.ts
+// Run: npm test -- stations-switch-guard
 
 import assert from 'node:assert/strict';
 import {
