@@ -74,9 +74,10 @@ test('controller production dependency locks meet the scanner fixed versions', a
 test('web dependency locks pull the Next release with fixed Sharp', async () => {
   const manifest = await json('web/package.json');
   const lock = await json('web/package-lock.json');
-  assert.equal(manifest.dependencies.next, '^16.4.0');
-  assert.equal(manifest.dependencies['@next/third-parties'], '^16.4.0');
-  assert.ok(lockVersions(lock, 'sharp').every((version) => atLeast(version, '0.35.0')));
+  assert.equal(manifest.dependencies.next, '^16.4.2');
+  assert.equal(manifest.dependencies['@next/third-parties'], '^16.4.2');
+  assert.ok(lockVersions(lock, 'next').every((version) => atLeast(version, '16.4.2')));
+  assert.ok(lockVersions(lock, 'sharp').every((version) => atLeast(version, '0.35.5')));
 });
 
 test('web font imports exist in the installed Next Google-font catalog', async () => {
