@@ -15,6 +15,7 @@ import { djPromptsSchema, personasSchema, ttsVoiceSlotSchema } from '../schemas/
 import { resolveDjPromptIds, resolvePersonaIds } from '../schemas/persona-server.js';
 import { scheduleSchema, scheduleOverrideSchema } from '../schemas/schedule.js';
 import { firstMessage } from '../util/zod-error.js';
+import { resolveThemeId } from '../util/theme-id.js';
 
 /**
  * Strict validator for a `{engine, voice, cloudProvider}` voice slot.
@@ -74,7 +75,12 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     themeIds: [...allowedThemeIds],
     minTrackSeconds: minTrackSeconds(),
   };
-  const parsed = showsSchema(ctx).safeParse(raw);
+  const compatible = Array.isArray(raw) ? raw.map(show => {
+    if (!show || typeof show !== 'object' || typeof show.themeId !== 'string') return show;
+    const themeId = resolveThemeId(show.themeId.trim(), allowedThemeIds);
+    return themeId ? { ...show, themeId } : show;
+  }) : raw;
+  const parsed = showsSchema(ctx).safeParse(compatible);
   if (!parsed.success) throw new Error(firstMessage(parsed.error, 'shows'));
   // The schema drops a themeId it doesn't recognise (see the comment on that
   // field). Reporting it is the caller's job, so the mirrored module stays

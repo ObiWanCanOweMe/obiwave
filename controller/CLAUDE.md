@@ -84,3 +84,7 @@ one deadline and accounts for all attempted model calls.
 - Sticky LLM failover identities include hashed credentials and sorted routing headers, matching compatibility-cache isolation. Swaps run on the server and pin inherited embedding identity before exchanging legs; the derived flat embedding URL is still pinned when its provider map is empty.
 - Jingle prose enters the editorial session only after the durable manual-origin air marker, with both its reservation id and `VERBATIM_META`. Operator announcements remain visible in the booth while every later DJ prompt withholds them.
 - Liquidsoap 2.4.6 replaces the fork 2.4.5 unifier backport and fixes partial frames for aligned stem seams. Both images retain Icecast-KH and the fork post-jingle incoming marker delay.
+
+### v1.27 theme registry
+
+Theme token descriptors include closed `texture` and `finish` keyword sets, alongside colors, fonts and grain. Their validator and generated web mirror share one registry. Bundled Phosphor/Riso replace Signal/Flare; upgrades must preserve a saved operator selection through the rename while continuing to accept independently saved custom themes.

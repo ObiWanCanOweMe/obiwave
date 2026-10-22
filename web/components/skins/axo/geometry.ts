@@ -2,7 +2,7 @@
 // (components/iso/geometry.ts): every box is its three faces in a shear
 // matrix, silhouettes traced separately at a heavier pen. Pure data, no React.
 
-import { arrow, drawBlock, hatchStrip, loop, poly, project, round2, type DrawnBlock, type Pt } from '@/components/iso/geometry';
+import { drawBlock, poly, project, round2, type DrawnBlock, type Pt } from '@/components/iso/geometry';
 
 export type { DrawnBlock };
 
@@ -53,8 +53,44 @@ const lidQuad = (pts: Array<[number, number, number]>) => poly(pts.map(([x, dy, 
 const { x0: L0, x1: L1, d: LD, h: LH } = LID;
 const lidCorners: Pt[] = [0, LD].flatMap(dy => [0, LH].flatMap(dz => [lidAt(L0, dy, dz), lidAt(L1, dy, dz)]));
 
-const pw = project(152, 142, 64), mu = project(152, 142, 33);
-const lcdA = project(22, 142, 44), lcdB = project(124, 142, 30);
+// The cover's panel as a flat sheet, for anything laid out ON the glass (the
+// focus-mode screen): u runs along the hinge left to right, v down from the
+// cover's free edge, both in world units. The projection is affine, so one
+// matrix carries the whole sheet onto the screen; measured across the full
+// panel so the 2-decimal rounding in `project` washes out.
+const LW = L1 - L0;
+const sheetO = lidAt(L0, LD, LH);
+const sheetU: Pt = [(lidAt(L1, LD, LH)[0] - sheetO[0]) / LW, (lidAt(L1, LD, LH)[1] - sheetO[1]) / LW];
+const sheetV: Pt = [(lidAt(L0, 0, LH)[0] - sheetO[0]) / LD, (lidAt(L0, 0, LH)[1] - sheetO[1]) / LD];
+const sheetDet = sheetU[0] * sheetV[1] - sheetV[0] * sheetU[1];
+/** A screen point back onto the sheet. */
+const toSheet = ([x, y]: Pt): Pt => {
+  const px = x - sheetO[0], py = y - sheetO[1];
+  return [(px * sheetV[1] - py * sheetV[0]) / sheetDet, (py * sheetU[0] - px * sheetU[1]) / sheetDet];
+};
+// Each wall runs from a panel edge to the matching rim edge, so where the rim
+// lands on the sheet says how much of each edge a wall hides.
+const [rimU, rimV] = toSheet(lidAt(L0, LD, 0));
+const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+const sheetM = [...sheetU, ...sheetV, ...sheetO].map(r4) as [number, number, number, number, number, number];
+
+export const LID_SHEET = {
+  /** The sheet-to-screen map, as SVG matrix(a b c d e f) numbers. */
+  m: sheetM,
+  transform: `matrix(${sheetM.join(' ')})`,
+  w: LW,
+  h: LD,
+  /** Seen from inside through the open rim, the sheet must still read left to
+   *  right: a negative determinant would mirror everything printed on it. */
+  mirrored: sheetDet < 0,
+  /** The part of the sheet no wall stands in front of. */
+  clear: {
+    x0: round2(Math.max(0, rimU)),
+    y0: round2(Math.max(0, rimV)),
+    x1: round2(LW + Math.min(0, rimU)),
+    y1: round2(LD + Math.min(0, rimV)),
+  },
+} as const;
 
 // The rack: three shelves on four corner posts. Each post is drawn as the
 // segments BETWEEN shelves, so a shelf passes in front of the post it rests
@@ -98,7 +134,13 @@ export const AXO = {
   tt: unit(232, 24),
   /** Hinge knuckles straddling the plinth's back edge, over the cover's foot. */
   hinges: [drawBlock({ x: 40, y: 7, z: 256, w: 14, d: 7, h: 4 }), drawBlock({ x: 166, y: 7, z: 256, w: 14, d: 7, h: 4 })],
-  hatch: hatchStrip(-50, -24, 26, 120, 7) + hatchStrip(240, 270, 8, 150, 7) + hatchStrip(370, 396, 26, 120, 7),
+  /** The shadow each floor-standing piece casts on the floor beside it, away
+   *  from the light: flat strips at z = 0, faded outward along world x. */
+  floor: [
+    drawBlock({ x: -50, y: 26, z: 0, w: 26, d: 94, h: 0 }),
+    drawBlock({ x: 240, y: 8, z: 0, w: 30, d: 142, h: 0 }),
+    drawBlock({ x: 370, y: 26, z: 0, w: 26, d: 94, h: 0 }),
+  ],
   lid: {
     /** The top panel, seen from inside through the open rim. */
     panel: lidQuad([[L0, 0, LH], [L1, 0, LH], [L1, LD, LH], [L0, LD, LH]]),
@@ -120,16 +162,11 @@ export const AXO = {
   arcs: [[0, 0], [0, 1], [1, 0], [1, 1]] as Array<[number, number]>,
   /** Screen position of each woofer's centre, which the sound lines radiate from. */
   woofers: [project(-90, 120, 72), project(330, 120, 72)] as [Pt, Pt],
-  loopPower: loop(pw[0], pw[1], 18, 13),
-  loopMute: loop(mu[0], mu[1], 20, 12),
-  arrowPress: arrow(-62, 198, -20, 190, -2, 102),
-  arrowMute: arrow(-96, 184, -50, 176, -14, 132),
-  crossLcd: `M${lcdA.join(' ')}L${lcdB.join(' ')}M${project(22, 142, 30).join(' ')}L${project(124, 142, 44).join(' ')}`,
 } as const;
 
-/** Both frame the whole stack. Desktop leaves room for the inked notes beside
- *  it; mobile, which draws no notes, hugs the speakers, the open lid and the
- *  sound lines, so the drawing fills as much of a phone as it can. */
+/** Both frame the whole stack. Desktop leaves room for the ON AIR sign above
+ *  it; mobile hugs the speakers, the open lid and the sound lines, so the
+ *  drawing fills as much of a phone as it can. */
 export const VIEWBOX = {
   desk: '-250 -410 590 680',
   mobile: '-254 -404 570 672',

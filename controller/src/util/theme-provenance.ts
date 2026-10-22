@@ -2,6 +2,8 @@
 // Keep active's existing contract and use activeShow:null when the default wins.
 // Browser overrides remain client-side.
 
+import { resolveThemeId } from './theme-id.js';
+
 /** The subset of a resolved show this read touches. */
 interface ActiveShowLike {
   id?: unknown;
@@ -38,19 +40,19 @@ export function resolveThemeProvenance(args: {
   activeShow?: ActiveShowLike | null;
   themeIds: Iterable<string>;
 }): ThemeProvenance {
-  const { stationDefault } = args;
   const known = new Set(args.themeIds);
+  const stationDefault = resolveThemeId(args.stationDefault, known) ?? args.stationDefault;
   const show = args.activeShow ?? null;
-  const showThemeId = str(show?.themeId);
+  const showThemeId = resolveThemeId(str(show?.themeId), known);
   // A stale pin (theme deleted) falls back to the station default, as getTheme()
   // does. Narrowing to the show OBJECT keeps the rest free of `!` assertions.
   const winner = show && showThemeId && known.has(showThemeId) ? show : null;
 
   return {
-    active: winner ? showThemeId : stationDefault,
+    active: winner && showThemeId ? showThemeId : stationDefault,
     activeSource: winner ? 'show' : 'station',
     stationDefault,
-    activeShow: winner
+    activeShow: winner && showThemeId
       ? { id: str(winner.id), name: str(winner.name), themeId: showThemeId }
       : null,
   };

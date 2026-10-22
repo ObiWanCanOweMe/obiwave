@@ -24,7 +24,8 @@ import { readFile, unlink, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { STATE_DIR } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
-import { DEFAULT_THEME_ID, isValidThemeId, listThemes } from './themes.js';
+import { DEFAULT_THEME_ID, listThemes } from './themes.js';
+import { resolveThemeId } from './util/theme-id.js';
 import { isValidTimezone, setStationTimezone } from './time.js';
 import { effectiveLiteLlmBaseUrl } from './litellm-config.js';
 // The bitrate vocabularies are no longer read here — the archive/stream
@@ -1661,15 +1662,15 @@ export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySe
     const t = parseSettingsPatchKey<{ active?: string }>('theme', patch.theme);
     if (t.active !== undefined) {
       const v = t.active;
-      // A stale active theme (a retired built-in renamed in 58c3782b, or a
-      // custom theme that isn't on disk) falls back to the built-in default
+      // Renamed built-ins resolve to their replacement unless a custom theme
+      // owns the exact ID. An unknown theme falls back to the built-in default
       // rather than failing the save — same tolerance as shows[].themeId above
       // and the serve-time fallback in GET /themes, and the same precedent as the
       // activeDjPromptId reset. Throwing here aborted the whole restore for any
       // install whose active theme id had since been retired (issue #917).
-      const valid = themeIds ? themeIds.has(v) : await isValidThemeId(v);
-      next.theme.active = valid ? v : DEFAULT_THEME_ID;
-      if (next.theme.active !== v) {
+      const known = themeIds ?? new Set((await listThemes()).map(t => t.id));
+      next.theme.active = resolveThemeId(v, known) ?? DEFAULT_THEME_ID;
+      if (!resolveThemeId(v, known)) {
         console.warn(`[theme] active theme "${v}" is not a known theme id — falling back to "${DEFAULT_THEME_ID}"`);
       }
     }

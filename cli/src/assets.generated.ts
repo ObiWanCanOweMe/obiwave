@@ -744,7 +744,7 @@ volumes:
 `;
 
 // docker-compose.dev.yml
-export const COMPOSE_DEV_YML = `# SUB/WAVE — dev compose (local smoke test): Broadcast + Controller only.
+export const COMPOSE_DEV_YML = `# SUB/WAVE — dev compose (local smoke test): Broadcast, Controller, analyzer and docker-socket-proxy.
 # The Next.js UI runs separately via \`cd web && npm run dev\` for hot reload.
 # State + sounds + radio.liq are bind-mounted so dev cycles need no rebuilds.
 
@@ -1522,4 +1522,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.26.0`; // x-release-please-version
+export const CLI_VERSION = `1.27.0`; // x-release-please-version

@@ -71,3 +71,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+### v1.27 integration notes
+
+The Appearance menu presents theme specimens and skin miniatures, plus the lite-mode toggle. Phosphor and Riso replace the bundled Signal and Flare themes. Theme texture/finish values are closed keywords mirrored from the controller token registry; regenerate the mirror rather than editing it. AXO and Platter support focus modes, and the TTY focus view includes ANSI landscapes, a scope pane and ASCII covers. Reduced motion and lite mode must remain compatible with the headless player's playback and credential state.
+
+The Dash uses a unified Skip control for ordinary skips and Never Play choices. Blocking still requires a fresh server read before a targeted skip and retains the expected-track guard; a visual control redesign must not bypass that race protection. The admin shell uses one DJ Doc buddy per page. `/llms.txt` is a public document route and must not expose admin data or credentials.
