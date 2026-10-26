@@ -3,7 +3,7 @@
 // privatePlayer replaces the UI; listenerAuth overlays it and adds the stored token to the stream
 // URL. Validate with fail-closed /station-auth; /listener-auth can fail open.
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
 import { useStationOrigin } from '@/lib/stationOrigin';
 import {
   checkStationAuth,
@@ -16,6 +16,14 @@ import {
   type StationAuthState,
 } from '@/lib/stationAuth';
 import { usePlayerFeed } from './PlayerCore';
+
+// The shell owns password verification; gated reads share that result rather
+// than checking the password again or spending a refused request before unlock.
+const StationReadsContext = createContext(true);
+export const StationReadsProvider = StationReadsContext.Provider;
+export function useStationReadsOpen(): boolean {
+  return useContext(StationReadsContext);
+}
 
 // Is a stored token still good? Exported so the shell can decide whether to
 // render the player at all before this component mounts.

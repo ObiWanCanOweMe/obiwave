@@ -1,6 +1,6 @@
 {
   "name": "sub-wave-controller",
-  "version": "1.27.0",
+  "version": "1.28.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "test": "tsx scripts/run-tests.ts",
     "bench:lookups": "tsx scripts/library-lookup-scale.bench.ts",
     "bench:admin": "tsx scripts/admin-library-scale.bench.ts",
+    "bench:observatory": "tsx scripts/observatory-scale.bench.ts",
     "leanings:replay": "tsx scripts/agentic-leanings-replay.ts",
     "llm-bench": "tsx scripts/llm-bench/cli.ts",
     "llm-bench:publish": "tsx scripts/llm-bench/publish-manual.ts",
@@ -46,14 +47,14 @@
     "helmet": "^8.3.0",
     "liqe": "^3.8.7",
     "mmdb-lib": "^3.0.3",
-    "multer": "^2.4.0",
+    "multer": "^2.5.0",
     "node-cron": "^4.6.0",
     "re2js": "^2.8.6",
     "sqlite-vec": "^0.1.9",
     "tsx": "^4.23.15",
     "umap-js": "^1.4.0",
     "yaml": "^2.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

@@ -5,6 +5,7 @@
 // Base is always the station's public origin. Proxy credentials travel only
 // in scoped request headers; the separate station password rides stream URLs.
 
+import { lyricsResultFor, type LyricsResult } from './lyrics';
 import { mountFor, type StreamFormat } from './streamMount';
 import { stationAuthResult, withStreamAuth, type StationAuthResult } from './station-password';
 import {
@@ -65,6 +66,8 @@ export interface StationApi {
   cover(subsonicId: string): StationImageSource;
   /** External avatars never receive station credentials. */
   avatar(path: string): StationImageSource;
+  /** Lyrics for the listener's track; includes station password and scoped proxy login. */
+  currentLyrics(songId: string): Promise<LyricsResult>;
   /** Fail-closed station password check, with any scoped proxy login. */
   checkStationAuth(password: string): Promise<StationAuthResult>;
   /** Read the current station password at tune/reconnect time. */
@@ -224,6 +227,20 @@ export function createApi(
         return await stationFetch(api('/like'), {}, res => res.json() as Promise<LikeStatus>);
       } catch {
         return null;
+      }
+    },
+    currentLyrics: async (songId) => {
+      try {
+        const password = stationPassword();
+        return await stationFetch(api(`/lyrics/current?songId=${encodeURIComponent(songId)}`), {
+          cache: 'no-store',
+          headers: password ? { 'x-station-auth': password } : undefined,
+        }, async res => {
+          const body: unknown = res.ok ? await res.json().catch(() => undefined) : undefined;
+          return lyricsResultFor(res.status, res.headers.get('Retry-After'), body);
+        });
+      } catch {
+        return { kind: 'unavailable', retryAfterSec: null };
       }
     },
     cover: (subsonicId) => stationImage(api(`/cover/${encodeURIComponent(subsonicId)}`)),

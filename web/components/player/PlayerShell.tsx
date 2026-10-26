@@ -24,7 +24,7 @@ import {
 import { SkinSelectionProvider, type SkinSelection } from '@/components/skins/SkinContext';
 import type { SkinComponent } from '@/components/skins/types';
 import { PlayerCoreProvider, usePlayerAudio, usePlayerFeed } from './PlayerCore';
-import { StationPasswordGate, useStationAuth } from './StationGate';
+import { StationPasswordGate, StationReadsProvider, useStationAuth } from './StationGate';
 
 export interface PlayerShellProps {
   /** Explicit skin — bypasses registry resolution (previews, tests). */
@@ -180,7 +180,9 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
                 never disturbs the <audio> element above it — playback rides
                 through a skin change. */}
             <Suspense fallback={null}>
-              <Skin contained={contained} portalNode={portalNode} />
+              <StationReadsProvider value={!auth.required || auth.phase === 'ok'}>
+                <Skin contained={contained} portalNode={portalNode} />
+              </StationReadsProvider>
               <RevealWhenMounted ready={hydrated} />
             </Suspense>
             {/* Same prompt, overlaid, when only the stream is locked —

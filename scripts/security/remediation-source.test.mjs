@@ -67,17 +67,24 @@ test('controller production dependency locks meet the scanner fixed versions', a
   const lock = await json('controller/package-lock.json');
   assert.equal(manifest.dependencies['adm-zip'], '^0.6.1');
   assert.ok(lockVersions(lock, 'adm-zip').every((version) => atLeast(version, '0.6.0')));
-  assert.ok(lockVersions(lock, 'fast-uri').every((version) => atLeast(version, '3.1.5')));
-  assert.ok(lockVersions(lock, 'ip-address').every((version) => atLeast(version, '10.3.1')));
+  assert.ok(lockVersions(lock, 'fast-uri').every((version) => atLeast(version, '3.1.9')));
+  assert.ok(lockVersions(lock, 'ip-address').every((version) => atLeast(version, '10.7.4')));
+  assert.ok(lockVersions(lock, 'zod').every((version) => atLeast(version, '4.6.6')));
+  assert.ok(lockVersions(lock, 'undici').every((version) => atLeast(version, '7.30.1')));
+  assert.ok(lockVersions(lock, 'body-parser').every((version) => atLeast(version, '2.4.0')));
+  assert.ok(lockVersions(lock, 'multer').every((version) => atLeast(version, '2.5.0')));
 });
 
-test('web dependency locks pull the Next release with fixed Sharp', async () => {
+test('web dependency locks meet the production security fixed versions', async () => {
   const manifest = await json('web/package.json');
   const lock = await json('web/package-lock.json');
   assert.equal(manifest.dependencies.next, '^16.4.2');
   assert.equal(manifest.dependencies['@next/third-parties'], '^16.4.2');
   assert.ok(lockVersions(lock, 'next').every((version) => atLeast(version, '16.4.2')));
   assert.ok(lockVersions(lock, 'sharp').every((version) => atLeast(version, '0.35.5')));
+  assert.ok(lockVersions(lock, 'dompurify').every((version) => atLeast(version, '3.4.17')));
+  assert.ok(lockVersions(lock, 'undici').every((version) => atLeast(version, '7.30.1')));
+  assert.ok(lockVersions(lock, 'zod').every((version) => atLeast(version, '4.6.6')));
 });
 
 test('web font imports exist in the installed Next Google-font catalog', async () => {
