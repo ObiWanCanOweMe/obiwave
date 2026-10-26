@@ -22,6 +22,11 @@ export interface CommandPaletteProps {
   onOpenDrawer: (kind: PlayerDrawer) => void;
   onToggleMute: () => void;
   onShowShortcuts: () => void;
+  /** Whether the station offers lyrics at all. */
+  lyrics?: boolean;
+  /** This listener's choice to show them (AmbientLyrics). */
+  lyricsShown?: boolean;
+  onToggleLyrics?: () => void;
 }
 
 interface PaletteItem {
@@ -41,6 +46,9 @@ export default function CommandPalette({
   onOpenDrawer,
   onToggleMute,
   onShowShortcuts,
+  lyrics = false,
+  lyricsShown = true,
+  onToggleLyrics,
 }: CommandPaletteProps) {
   const run = (fn: () => void) => () => {
     onOpenChange(false);
@@ -54,6 +62,9 @@ export default function CommandPalette({
     { label: 'Make a request', hint: '3', onSelect: run(() => onOpenDrawer('request')) },
     { label: 'Open Schedule', hint: '4', onSelect: run(() => onOpenDrawer('schedule')) },
     { label: 'Audio format', hint: '', onSelect: run(() => onOpenDrawer('audio')) },
+    ...(lyrics && onToggleLyrics
+      ? [{ label: lyricsShown ? 'Hide lyrics' : 'Show lyrics', hint: 'L', onSelect: run(onToggleLyrics) }]
+      : []),
     { label: muted ? 'Unmute' : 'Mute', hint: 'M', onSelect: run(onToggleMute) },
     { label: 'Keyboard shortcuts', hint: '?', onSelect: run(onShowShortcuts) },
   ];

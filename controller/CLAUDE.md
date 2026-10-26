@@ -88,3 +88,11 @@ one deadline and accounts for all attempted model calls.
 ### v1.27 theme registry
 
 Theme token descriptors include closed `texture` and `finish` keyword sets, alongside colors, fonts and grain. Their validator and generated web mirror share one registry. Bundled Phosphor/Riso replace Signal/Flare; upgrades must preserve a saved operator selection through the rename while continuing to accept independently saved custom themes.
+
+### v1.28 jingle overlays
+
+- Over-music IDs (`jinglePlacement: over | both`, default `between`): `broadcast/jingle-overlay.ts` decides, and `queue.maybeAirJingleOverlay()`, driven by the now-playing watcher, writes the ID to `intro.txt` through the shared `airVoice` lock. It is the one automatic talker outside the slot table, so it stands down to any speech, including speech still being written (`queue.whileTalkInFlight`). In `both` it rides the rotate's own count and can never share a song with it. It publishes no `voice.*`/`dj.say` webhook. Both opt-ins force controller ownership without overwriting the saved `jingleRotate`. See `docs/internals/broadcast.md` and `scripts/jingle-overlay.test.ts`.
+
+### v1.28 lyrics workload
+
+`music/lyrics-sources.ts` admits at most 32 complete background lookup jobs before any async preflight reads, coalesces matching track IDs, and drops overflow without stamping failure backoff. Only queue/air hooks start LRCLIB work; public reads report whether a job already exists. External lyrics remain separate from analyzer inputs.

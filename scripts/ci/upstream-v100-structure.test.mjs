@@ -17,9 +17,10 @@ assert.ok(
   // The fork's provider-owned credentials, search providers, and private-station
   // settings extend the upstream entry point while preserving its split modules.
   // v1.24 adds explicit selection routes and compatibility-mode migration;
+  // v1.28 adds lyrics and jingle placement (23 entry-point lines);
   // the split remains intact.
-  settings.split('\n').length <= 2850,
-  'settings entry must not exceed 2,850 lines',
+  settings.split('\n').length <= 2900,
+  'settings entry must not exceed 2,900 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {

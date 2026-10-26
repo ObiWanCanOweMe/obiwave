@@ -528,6 +528,12 @@ export const jingleRatioSchema = settingsIntLike(
   `jingleRatio must be int in [${JINGLE_RATIO_BOUNDS.min}, ${JINGLE_RATIO_BOUNDS.max}]`,
 );
 
+export const JINGLE_PLACEMENTS = ['between', 'over', 'both'] as const;
+export type JinglePlacement = (typeof JINGLE_PLACEMENTS)[number];
+export const jinglePlacementSchema = z.enum(JINGLE_PLACEMENTS, {
+  error: `jinglePlacement must be one of ${JINGLE_PLACEMENTS.join(', ')}`,
+});
+
 /**
  * WHO counts the tracks between jingles (#1619).
  *
@@ -1028,6 +1034,17 @@ const searchApiKeysPatchSchema = z
     }
   })
   .transform((raw) => raw as Record<string, unknown>);
+// The listener Lyrics panel and its public read (`GET /lyrics/current`). On by
+// default, and an operator can switch it off: it republishes third-party lyric
+// text on an unauthenticated route and turns listener polling into calls
+// against the music server.
+export const lyricsPatchSchema = settingsBlockOf({
+  enabled: settingsBoolLike(),
+  // The LRCLIB fallback for tracks with no timed lyrics on the music server.
+  // Its own switch, also on by default: it sends what the station plays to a
+  // third party.
+  lrclib: settingsBoolLike(),
+});
 
 export const searchPatchSchema = settingsBlockOf({
   provider: settingsStrictOneOf(

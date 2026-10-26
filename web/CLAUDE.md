@@ -77,3 +77,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 The Appearance menu presents theme specimens and skin miniatures, plus the lite-mode toggle. Phosphor and Riso replace the bundled Signal and Flare themes. Theme texture/finish values are closed keywords mirrored from the controller token registry; regenerate the mirror rather than editing it. AXO and Platter support focus modes, and the TTY focus view includes ANSI landscapes, a scope pane and ASCII covers. Reduced motion and lite mode must remain compatible with the headless player's playback and credential state.
 
 The Dash uses a unified Skip control for ordinary skips and Never Play choices. Blocking still requires a fresh server read before a targeted skip and retains the expected-track guard; a visual control redesign must not bypass that race protection. The admin shell uses one DJ Doc buddy per page. `/llms.txt` is a public document route and must not expose admin data or credentials.
+
+## v1.28 lyrics
+
+Classic and Drift read lyrics through stationClient, with timing composed from the listener playback edge and active codec buffer. Lyrics requests must retain station credentials and abort or ignore stale track/station responses. Credentials and requests remain station-scoped; the device lyrics timing nudge intentionally applies across tracks and stations because it compensates for the device output delay. LRCLIB text is external data, never HTML or an analyzer input. Preserve the fork audio format controls alongside the lyrics command palette entries.
+
+The shell shares station-read readiness through `StationReadsProvider`. Lyrics must wait for that readiness and fetch after unlock even when the skin stays mounted in stream-only auth mode; a failed pre-unlock request must not leave the same track permanently locked.
