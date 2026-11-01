@@ -1,19 +1,15 @@
-// Runtime API client.
-//
-// The web player bakes its base URL in at build time. The native app is
-// multi-station, so the base is resolved at runtime from StationContext.
-// Base is always the station's public origin. Proxy credentials travel only
-// in scoped request headers; the separate station password rides stream URLs.
+// The runtime station base is the site root, with /api and stream mounts
+// on the same origin (docker/Caddyfile).
 
 import { lyricsResultFor, type LyricsResult } from './lyrics';
 import { mountFor, type StreamFormat } from './streamMount';
-import { stationAuthResult, withStreamAuth, type StationAuthResult } from './station-password';
+import { sanitizeDiagnostic } from './stationSecurity';
+import { rateLimitedUntil, stationAuthResult, withStreamAuth, type StationAuthResult } from './station-password';
 import {
-  authorizationFor,
-  splitStationAddress,
+  normalizeStationBase,
+  resolveStationConnection,
   type StationCredentials,
 } from './station-credentials';
-import { sanitizeDiagnostic } from './stationSecurity';
 import type {
   DjPublic,
   LikeResult,
@@ -31,16 +27,30 @@ export interface RequestBody {
   name?: string;
 }
 
-/** POST /beacon payload — audience-source analytics. */
+/** POST /beacon payload. An app has no referrer or UTM query, so callers
+ *  report the platform via `utmSource`. */
 export interface BeaconBody {
   referrer?: string;
   path?: string;
   utmSource?: string;
 }
 
+/** Why a health probe failed. `network` is the catch-all for DNS, refused
+ *  connections and TLS errors, which RN's fetch collapses into one rejection
+ *  with no detail. `http` is a response with a non-2xx status (usually /api
+ *  not routed to the controller); `challenge` is its `WWW-Authenticate`
+ *  header as sent, absent without one. An HTTP auth layer in front of the
+ *  station sends one and the controller never does (#1873); loginRefused
+ *  reads its scheme. `timeout` is our own abort firing. */
 export type HealthResult =
   | { ok: true }
-  | { ok: false; kind: 'timeout' | 'http' | 'network'; status?: number; message?: string };
+  | {
+      ok: false;
+      kind: 'timeout' | 'http' | 'network';
+      status?: number;
+      challenge?: string;
+      message?: string;
+    };
 
 export interface StationImageSource {
   uri: string;
@@ -56,48 +66,76 @@ export interface StationApi {
   dj(signal?: AbortSignal): Promise<DjPublic>;
   themes(signal?: AbortSignal): Promise<ThemesPayload>;
   health(signal?: AbortSignal): Promise<boolean>;
+  /** Like health(), but returns why it failed instead of throwing. */
   probeHealth(signal?: AbortSignal): Promise<HealthResult>;
   postRequest(body: RequestBody): Promise<RequestResult>;
   pollRequest(id: string): Promise<RequestResult>;
+  /** Like the currently playing track (#991). `songId` is what the client
+   *  believes is on air; the controller rejects a stale tap. Error statuses
+   *  come back as a LikeResult with `error`; null when no answer could be read:
+   *  a network error, a body that is not JSON, or one that never arrives. */
   likeCurrent(songId: string): Promise<LikeResult | null>;
+  /** Liked-state + count for the current airing. null as for likeCurrent. */
   likeStatus(): Promise<LikeStatus | null>;
+  /** Fire-and-forget audience beacon; all failures are swallowed. */
   postBeacon(body: BeaconBody): Promise<void>;
-  /** Credential-free URL plus optional station-scoped headers. */
-  cover(subsonicId: string): StationImageSource;
-  /** External avatars never receive station credentials. */
-  avatar(path: string): StationImageSource;
-  /** Lyrics for the listener's track; includes station password and scoped proxy login. */
+  /** Lyrics for the track this listener is hearing (now-playing's
+   *  `subsonic_id`). A private station gates it on the station password,
+   *  sent as `x-station-auth`. Never throws. */
   currentLyrics(songId: string): Promise<LyricsResult>;
-  /** Fail-closed station password check, with any scoped proxy login. */
+  /** Check a private-station password against `POST /station-auth` (#478),
+   *  which fails closed and is rate-limited. Never throws. */
   checkStationAuth(password: string): Promise<StationAuthResult>;
-  /** Read the current station password at tune/reconnect time. */
+  /** When the latest `/station-auth` answer said to ask again: a 429's
+   *  `Retry-After`, or 0 for none. The limit covers the whole address, so this
+   *  holds whichever check saw it. */
+  stationAuthHeldUntil(): number;
+  /** Credential-free image URL with station-scoped login headers. */
+  cover(subsonicId: string): StationImageSource;
+  /** External avatar URLs never receive station credentials. */
+  avatar(path: string): StationImageSource;
+  /** The Icecast mount for `format`, defaulting to the MP3 floor. Callers gate
+   *  a non-MP3 format on platform + station support first. Carries no embedded
+   *  login (see streamHeaders()), but does carry the private-station password
+   *  as `?auth=` when one is saved — read at call time, so unlocking a station
+   *  never has to rebuild this client. */
   streamUrl(format?: StreamFormat): string;
+  /** `{ Authorization: 'Basic …' }` when the station has credentials, else
+   *  undefined (loginHeaders). iOS AVPlayer ignores URL userinfo, so the
+   *  credential must travel as a header or the stream 401s (#764). */
   streamHeaders(): Record<string, string> | undefined;
 }
 
-/** Canonical public station origin. Userinfo/path/query never survive. */
+/** Strip a trailing slash; default to https:// if the user typed a bare host. */
 export function normalizeBase(raw: string): string {
-  return splitStationAddress(raw).base;
+  return normalizeStationBase(raw);
 }
 
-export function splitCredentials(rawBase: string): {
-  base: string;
-  authorization: string | null;
-} {
-  const split = splitStationAddress(rawBase);
-  return {
-    base: split.base,
-    authorization: split.credentials ? authorizationFor(split.credentials) : null,
-  };
+export function splitCredentials(rawBase: string): { base: string; authorization: string | null } {
+  const { base, authorization } = resolveStationConnection(rawBase);
+  return { base, authorization };
 }
 
-const FETCH_TIMEOUT_MS = 8000;
+/** `headers` plus the Station login as `Authorization`, when there is one:
+ *  the one source of that header for everything the app asks a station for
+ *  (API requests, the stream, covers and avatars). Android's fetch (OkHttp)
+ *  and image loaders never send a login from URL userinfo, and AVPlayer drops
+ *  it, so the header is the only route that works everywhere (#764, #1873). */
+export function loginHeaders(
+  authorization: string | null,
+  headers?: Record<string, string>,
+): Record<string, string> | undefined {
+  return authorization ? { ...headers, Authorization: authorization } : headers;
+}
 
-async function fetchWithTimeout<T>(
-  url: string,
-  init: RequestInit,
-  consume: (response: Response) => T | Promise<T>,
-): Promise<T> {
+// Compose timeouts manually: RN fetch lacks AbortSignal.timeout and any.
+export const FETCH_TIMEOUT_MS = 8000;
+
+/** What can still end a request past its headers, for readJson: fetch resolves
+ *  on them, and fetchWithTimeout lets go of its timer and the caller's signal. */
+const openRequests = new WeakMap<Response, { ctrl: AbortController; outer?: AbortSignal | null }>();
+
+export function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   const outer = init?.signal;
@@ -106,125 +144,164 @@ async function fetchWithTimeout<T>(
     if (outer.aborted) ctrl.abort();
     else outer.addEventListener('abort', onAbort);
   }
+  return fetch(url, { ...init, signal: ctrl.signal })
+    .then((res) => {
+      openRequests.set(res, { ctrl, outer });
+      return res;
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onAbort);
+    });
+}
+
+/** A fetchWithTimeout response's JSON body, with its own FETCH_TIMEOUT_MS from
+ *  the start of the read, so a call takes at most twice that: headers, then body.
+ *  A caller with one budget for both passes what is left of it as `timeoutMs`
+ *  (readDirectory). The deadline or the caller's signal aborts the request, which
+ *  is what closes the connection of a stalled body, and rejects here too, because
+ *  the abort alone doesn't end the read: expo/fetch's native text() waits for a
+ *  complete body. After a cancel iOS never has one (NativeResponse.swift ends in
+ *  errorReceived), and Android calls whatever arrived complete
+ *  (NativeResponse.kt), so the read never settles on one and resolves with a
+ *  truncated body on the other. */
+export async function readJson(res: Response, timeoutMs = FETCH_TIMEOUT_MS): Promise<unknown> {
+  const { ctrl, outer } = openRequests.get(res) ?? {};
+  let stop = () => {};
+  const stopped = new Promise<never>((_, reject) => {
+    stop = () => {
+      ctrl?.abort();
+      reject(new Error('Request aborted'));
+    };
+  });
+  const timer = setTimeout(stop, timeoutMs);
+  if (outer?.aborted) stop();
+  else outer?.addEventListener('abort', stop);
   try {
-    // Keep the deadline and outer cancellation alive through body consumption.
-    // A headers-only timeout can wedge the serialized poll on stalled JSON.
-    return await consume(await fetch(url, { ...init, signal: ctrl.signal }));
+    return await Promise.race([res.json(), stopped]);
   } finally {
     clearTimeout(timer);
-    outer?.removeEventListener('abort', onAbort);
+    outer?.removeEventListener('abort', stop);
   }
 }
 
+/** A JSON body, or undefined when it is not JSON or has not arrived in time
+ *  (readJson), for an answer that makes its own sense of a missing body:
+ *  stationAuthResult and lyricsResultFor. */
+function readJsonOrUndefined(res: Response): Promise<unknown> {
+  return readJson(res).catch(() => undefined);
+}
+
+type StationRequestInit = Omit<RequestInit, 'headers'> & { headers?: Record<string, string> };
+
 export function createApi(
   rawBase: string,
-  suppliedCredentials?: StationCredentials | null,
+  credentials?: StationCredentials | null,
   stationPassword: () => string | null = () => null,
 ): StationApi {
-  const split = splitStationAddress(rawBase);
-  const base = split.base;
-  if (!base) throw new Error('Enter a valid HTTP(S) station address');
-  const credentials = suppliedCredentials === undefined
-    ? split.credentials
-    : suppliedCredentials;
-  const authorization = credentials ? authorizationFor(credentials) : null;
-  const authHeaders: Record<string, string> | undefined = authorization
-    ? { Authorization: authorization }
-    : undefined;
-  const api = (path: string) => `${base}/api${path}`;
-  const withAuth = (init: RequestInit = {}): RequestInit => ({
-    ...init,
-    ...(authHeaders
-      ? { headers: { ...authHeaders, ...(init.headers as Record<string, string> | undefined) } }
-      : {}),
-  });
-  const stationFetch = <T>(url: string, init: RequestInit, consume: (res: Response) => T | Promise<T>) =>
-    fetchWithTimeout(url, withAuth(init), consume);
-  const getJson = <T>(url: string, signal?: AbortSignal): Promise<T> =>
-    stationFetch(url, { signal }, async res => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as T;
-    });
+  const connection = resolveStationConnection(rawBase, credentials);
+  // Persist credential-free bases (#1300). Requests go to the clean base with
+  // the login as a header, as the stream does (#764): the two login checks
+  // then send exactly what the player sends (#1873).
+  const { base: cleanBase, authorization } = connection;
+  const authHeaders = loginHeaders(authorization);
+  const api = (p: string) => `${cleanBase}/api${p}`;
+  const send = (p: string, init: StationRequestInit = {}) =>
+    fetchWithTimeout(api(p), { ...init, headers: loginHeaders(authorization, init.headers) });
+  const getJson = async <T>(p: string, signal?: AbortSignal): Promise<T> => {
+    const res = await send(p, { signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await readJson(res)) as T;
+  };
   const stationImage = (uri: string): StationImageSource => ({
     uri,
     ...(authHeaders ? { headers: { ...authHeaders } } : {}),
   });
+  let stationAuthHold = 0;
   const probeHealth = async (signal?: AbortSignal): Promise<HealthResult> => {
     try {
-      return await stationFetch<HealthResult>(api('/health'), { cache: 'no-store', signal },
-        res => res.ok ? { ok: true } : { ok: false, kind: 'http', status: res.status });
-    } catch (error) {
-      const err = error as { name?: string; message?: string };
+      const res = await send('/health', { cache: 'no-store', signal });
+      if (res.ok) return { ok: true };
+      const challenge = res.headers.get('www-authenticate') ?? undefined;
+      return { ok: false, kind: 'http', status: res.status, challenge };
+    } catch (e) {
+      const err = e as { name?: string; message?: string };
       const aborted = signal?.aborted || err?.name === 'AbortError';
-      return {
-        ok: false,
-        kind: aborted ? 'timeout' : 'network',
-        message: sanitizeDiagnostic(err?.message),
-      };
+      return { ok: false, kind: aborted ? 'timeout' : 'network', message: sanitizeDiagnostic(err?.message) };
     }
   };
-
   return {
-    base,
-    nowPlaying: (signal) => getJson<NowPlayingResponse>(api('/now-playing'), signal),
-    state: (signal) => getJson<StationState>(api('/state'), signal),
-    session: (signal) => getJson<SessionPayload>(api('/session'), signal),
-    schedule: (signal) => getJson<SchedulePayload>(api('/schedule'), signal),
-    dj: (signal) => getJson<DjPublic>(api('/dj'), signal),
-    themes: (signal) => getJson<ThemesPayload>(api('/themes'), signal),
+    base: cleanBase,
+    nowPlaying: (signal) => getJson<NowPlayingResponse>('/now-playing', signal),
+    state: (signal) => getJson<StationState>('/state', signal),
+    session: (signal) => getJson<SessionPayload>('/session', signal),
+    schedule: (signal) => getJson<SchedulePayload>('/schedule', signal),
+    dj: (signal) => getJson<DjPublic>('/dj', signal),
+    themes: (signal) => getJson<ThemesPayload>('/themes', signal),
+    // useSignal relies on network/TLS/timeout errors throwing; HTTP failures return false.
     health: async (signal) => {
-      const result = await probeHealth(signal);
-      if (result.ok) return true;
-      if (result.kind === 'http') return false;
-      throw new Error(result.message || result.kind);
+      const r = await probeHealth(signal);
+      if (r.ok) return true;
+      if (r.kind === 'http') return false;
+      throw new Error(r.message || r.kind);
     },
     probeHealth,
     postRequest: (body) =>
-      stationFetch(api('/request'), {
+      send('/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }, res => res.json() as Promise<RequestResult>),
+      }).then((r) => readJson(r) as Promise<RequestResult>),
     postBeacon: async (body) => {
       try {
-        await stationFetch(api('/beacon'), {
+        await send('/beacon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }, () => undefined);
+        });
       } catch {
         /* best-effort analytics */
       }
     },
     checkStationAuth: async (password) => {
       try {
-        return await stationFetch(api('/station-auth'), {
+        const res = await send('/station-auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
-        }, res => stationAuthResult(res.status));
+        });
+        stationAuthHold = res.status === 429 ? rateLimitedUntil(res.headers.get('Retry-After'), Date.now()) : 0;
+        return stationAuthResult(res.status, {
+          challenged: res.headers.has('www-authenticate'),
+          // Only these bodies are read: they say who answered (stationAuthResult).
+          body: res.status === 200 || res.status === 401 ? await readJsonOrUndefined(res) : undefined,
+        });
       } catch {
         return stationAuthResult(null);
       }
     },
-    pollRequest: (id) => stationFetch<RequestResult>(api(`/request/${encodeURIComponent(id)}`), {}, async res => {
+    stationAuthHeldUntil: () => stationAuthHold,
+    pollRequest: async (id) => {
+      const res = await send(`/request/${encodeURIComponent(id)}`);
       if (res.status === 404) return { success: false, status: 'unknown' };
-      return (await res.json()) as RequestResult;
-    }),
+      return (await readJson(res)) as RequestResult;
+    },
     likeCurrent: async (songId) => {
       try {
-        return await stationFetch(api('/like'), {
+        const res = await send('/like', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ songId }),
-        }, res => res.json() as Promise<LikeResult>);
+        });
+        return (await readJson(res)) as LikeResult;
       } catch {
         return null;
       }
     },
     likeStatus: async () => {
       try {
-        return await stationFetch(api('/like'), {}, res => res.json() as Promise<LikeStatus>);
+        const res = await send('/like');
+        return (await readJson(res)) as LikeStatus;
       } catch {
         return null;
       }
@@ -232,13 +309,12 @@ export function createApi(
     currentLyrics: async (songId) => {
       try {
         const password = stationPassword();
-        return await stationFetch(api(`/lyrics/current?songId=${encodeURIComponent(songId)}`), {
+        const res = await send(`/lyrics/current?songId=${encodeURIComponent(songId)}`, {
           cache: 'no-store',
           headers: password ? { 'x-station-auth': password } : undefined,
-        }, async res => {
-          const body: unknown = res.ok ? await res.json().catch(() => undefined) : undefined;
-          return lyricsResultFor(res.status, res.headers.get('Retry-After'), body);
         });
+        const body = res.ok ? await readJsonOrUndefined(res) : undefined;
+        return lyricsResultFor(res.status, res.headers.get('Retry-After'), body);
       } catch {
         return { kind: 'unavailable', retryAfterSec: null };
       }
@@ -249,7 +325,7 @@ export function createApi(
       if (/^https?:\/\//i.test(path)) return { uri: path };
       return stationImage(api(path.startsWith('/') ? path : `/${path}`));
     },
-    streamUrl: (format = 'mp3') => withStreamAuth(`${base}${mountFor(format)}`, stationPassword()),
+    streamUrl: (format = 'mp3') => withStreamAuth(`${cleanBase}${mountFor(format)}`, stationPassword()),
     streamHeaders: () => authHeaders && { ...authHeaders },
   };
 }

@@ -40,9 +40,20 @@ export interface StationFeed {
    *  (issue #418). */
   timezone: string | null;
   locale: StationLocale;
-  /** How far this listener sits behind the live edge, in ms: the station's
-   *  stream.bufferSeconds clamped to 0–60s, 0 before the first payload. */
+  /** How far this listener sits behind the live edge, in ms: `bufferMs`, less
+   *  whatever the player skipped of a woken station's stale silence (#2072). */
   leadMs: number;
+  /** How far a fresh connection sits behind the live edge, in ms: the
+   *  station's stream.bufferSeconds clamped to 0–60s, 0 before the first
+   *  payload. */
+  bufferMs: number;
+}
+
+export interface StationFeedOptions {
+  activeFormat?: { readonly current: AudioFormat };
+  /** Ms of the buffer the player skipped on its current connection (#2072):
+   *  that listener sits this much nearer the live edge than `bufferMs`. */
+  leadTrimMs?: number;
 }
 
 const EMPTY_STATE: StationState = { upcoming: [], history: [] };
@@ -55,16 +66,24 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
   setter(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 }
 
-export interface StationFeedTiming {
-  activeFormat?: { readonly current: AudioFormat };
+/** The feed's copy of a /state payload. `streamIdleWindow` is published as
+ *  ages, so it differs on every poll once the controller has paused: kept, it
+ *  would defeat setIfChanged and re-render every feed consumer every 5s.
+ *  Nothing renders it, and the player's skip reads /state fresh (#2072). */
+export function feedState(st: StationState): StationState {
+  if (!st || typeof st !== 'object') return st;
+  const { streamIdleWindow: _ages, ...rest } = st;
+  return rest;
 }
 
 // 5s polling of /now-playing + /state + /session, paused while the tab is
-// hidden (with an immediate refetch on return). Single source of truth for
-// "what's on air right now".
-export function useStationFeed({
-  activeFormat,
-}: StationFeedTiming = {}): StationFeed {
+// hidden (with an immediate refetch on return).
+//
+// The listener offset is the advertised stream.bufferSeconds, less what the
+// player reports it skipped (leadTrimMs). Never measure it as
+// `buffered.end − currentTime`: that reports only the demuxed window (2.25s
+// against a true 22.5s offset), which flips every title ~20s early.
+export function useStationFeed({ leadTrimMs = 0, activeFormat }: StationFeedOptions = {}): StationFeed {
   const client = useStationClient();
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
   const [context, setContext] = useState<StationContext | null>(null);
@@ -81,10 +100,14 @@ export function useStationFeed({
   const [locale, setLocale] = useState<StationLocale>('en-GB');
   const lastTrackKeyRef = useRef<string | null>(null);
   const offlinePollsRef = useRef(0);
-  // Listener buffer depth in ms. The polling effect and hold timers read the
-  // ref, so they never re-subscribe when it arrives; the state mirror is for
-  // consumers. 0 until the first payload lands, degrading to live-edge
-  // behaviour rather than guessing an offset.
+  // Listener buffer depth in ms: the advertised buffer less the player's trim.
+  // The polling effect and hold timers read the refs, so they never
+  // re-subscribe when the buffer arrives; the state mirrors are for consumers.
+  // 0 until the first payload lands, degrading to live-edge behaviour rather
+  // than guessing an offset.
+  const bufferMsRef = useRef(0);
+  const [bufferMs, setBufferMs] = useState(0);
+  const trimMsRef = useRef(0);
   const leadMsRef = useRef(0);
   const [leadMs, setLeadMs] = useState(0);
   // Holds a track whose metadata has arrived but whose audio hasn't reached
@@ -96,6 +119,11 @@ export function useStationFeed({
   const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // A trim moves this listener nearer the live edge (#2072). The track clock
+    // shifts with it now, and the poll restarts below, so a held track switch
+    // and held lines are re-derived at once rather than on the next 5s tick.
+    const trimMs = Math.max(0, leadTrimMs);
+    const trimmed = trimMs !== trimMsRef.current;
     // Re-derive the visible feed and re-arm for the next line to become
     // audible. Runs on every poll and on its own timer, so a held line lands on
     // time rather than on the 5s poll grid.
@@ -108,6 +136,15 @@ export function useStationFeed({
         ? null
         : setTimeout(applySession, Math.max(0, nextChangeMs - Date.now()));
     };
+    if (trimmed) {
+      trimMsRef.current = trimMs;
+      const next = Math.max(0, bufferMsRef.current - trimMs);
+      const delta = next - leadMsRef.current;
+      leadMsRef.current = next;
+      setLeadMs(next);
+      setTrackStartedAt(prev => (prev == null ? prev : prev + delta));
+      applySession();
+    }
     const tick = async (signal: AbortSignal) => {
       try {
         const [npRes, stRes, seRes] = await Promise.all([
@@ -117,13 +154,11 @@ export function useStationFeed({
         ]);
         if (signal.aborted) return;
         const np = npRes.nowPlaying;
-        // Clamped: a bad value here would either park the clock in the far
-        // future or wind it back past the track start.
-        leadMsRef.current = listenerLeadMsForFormat(
-          npRes.stream,
-          activeFormat?.current ?? 'mp3',
-          leadMsRef.current,
+        bufferMsRef.current = listenerLeadMsForFormat(
+          npRes.stream, activeFormat?.current ?? 'mp3', bufferMsRef.current,
         );
+        setBufferMs(bufferMsRef.current);
+        leadMsRef.current = Math.max(0, bufferMsRef.current - trimMsRef.current);
         setLeadMs(leadMsRef.current);
         const trackKey = np ? `${np.title}\u0000${np.artist}` : null;
         // Prefer the queue's start time over "first seen by this client": a tab
@@ -190,7 +225,7 @@ export function useStationFeed({
         if (typeof npRes.llmTokens === 'number') setIfChanged<number | null>(setLlmTokens, npRes.llmTokens);
         if (typeof npRes.timezone === 'string' && npRes.timezone) setTimezone(npRes.timezone);
         if (npRes.locale === 'en-US' || npRes.locale === 'en-GB') setLocale(npRes.locale);
-        setIfChanged(setState, stRes);
+        setIfChanged(setState, feedState(stRes));
         if (seRes && Array.isArray(seRes.messages)) {
           rawSessionRef.current = seRes;
           applySession();
@@ -210,7 +245,7 @@ export function useStationFeed({
         voiceTimerRef.current = null;
       }
     };
-  }, [activeFormat, client]);
+  }, [activeFormat, client, leadTrimMs]);
 
-  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale, leadMs };
+  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs };
 }

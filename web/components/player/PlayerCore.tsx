@@ -8,6 +8,7 @@ import {
   useContext,
   useMemo,
   useRef,
+  useState,
   type Dispatch,
   type RefCallback,
   type ReactNode,
@@ -19,7 +20,7 @@ import { usePlayer, type PlayerStatus } from '@/hooks/usePlayer';
 import { useSignal, type Signal } from '@/hooks/useSignal';
 import { useMediaSession } from '@/hooks/useMediaSession';
 import { useStationClient, type LikeResult, type LikeStatus } from '@/lib/stationClient';
-import { streamEnablementFor, type AudioFormat, type FormatAvailability } from '@/lib/audioFormat';
+import { listenerLeadMsForFormat, streamEnablementFor, type AudioFormat, type FormatAvailability } from '@/lib/audioFormat';
 import { listenerRequestSchema } from '@/lib/schemas.generated';
 import type { RequestResult } from '@/lib/types';
 
@@ -85,10 +86,11 @@ export function usePlayerActions(): PlayerActions {
 
 export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
+  const [leadTrimMs, setLeadTrimMs] = useState(0);
   // Break the feed/player dependency cycle without duplicating format state:
   // the poll reads the latest player-owned selection.
   const activeFormatRef = useRef<AudioFormat>('mp3');
-  const feed = useStationFeed({ activeFormat: activeFormatRef });
+  const feed = useStationFeed({ activeFormat: activeFormatRef, leadTrimMs });
   const opusEnabled = feed.stream?.opusEnabled === true;
   const aacEnabled = feed.stream?.aacEnabled === true;
   const flacEnabled = feed.stream?.flacEnabled === true;
@@ -118,7 +120,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     availability,
     selectFormat,
     formatFailure,
-  } = usePlayer({ streamEnablement });
+  } = usePlayer({ streamEnablement, bufferSeconds: listenerLeadMsForFormat(feed.stream, 'mp3') / 1000, onLeadTrim: setLeadTrimMs });
   activeFormatRef.current = format;
 
   // Only an explicit false is offline — see PlayerAudio.offline.
@@ -203,15 +205,15 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   // into every feed consumer.
   const {
     nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-    llmTokens, state, session, trackStartedAt, timezone, locale, leadMs,
+    llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs,
   } = feed;
   const feedValue = useMemo<StationFeed>(
     () => ({
       nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-      llmTokens, state, session, trackStartedAt, timezone, locale, leadMs,
+      llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs,
     }),
     [nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-     llmTokens, state, session, trackStartedAt, timezone, locale, leadMs],
+     llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs],
   );
 
   const { latencyMs, quality } = signal;

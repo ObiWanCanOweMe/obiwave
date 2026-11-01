@@ -2,7 +2,7 @@
 // segment-tools.js). There is no standalone "web-search skill" object — the
 // segment-director agent (skills/_agent.js) decides when artist news airs.
 //
-// Five backends, chosen via settings.search.provider:
+// Six backends, chosen via settings.search.provider:
 //   - duckduckgo (default) — DuckDuckGo's Instant Answer API. Free, no key,
 //     officially documented. Returns useful results only for entity / definition
 //     queries; for most artist queries it returns nothing, which the segment
@@ -15,6 +15,7 @@
 //   - searxng — self-hosted meta-search, keyless, needs settings.search.baseUrl.
 //     settings.search.searxngEngines optionally pins the engine set for these
 //     calls only (#1353), leaving the instance's browser traffic on its defaults.
+//   - keenable — keyless web search, optional provider-owned KEENABLE_API_KEY.
 //   - kagi — paid privacy-oriented web search, with a dedicated saved key or
 //     KAGI_API_KEY fallback.
 //
@@ -30,6 +31,7 @@ import { BoundedKeyMap } from '../util/bounded-key-map.js';
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const DDG_ENDPOINT = 'https://api.duckduckgo.com/';
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
+const KEENABLE_ENDPOINT = 'https://api.keenable.ai/v1/search';
 const KAGI_ENDPOINT = 'https://kagi.com/api/v1/search';
 
 type SearchResult = { title: string; content: string };
@@ -443,6 +445,99 @@ export const searchCacheKey = (
   recency?: Recency,
 ): string => `${provider}:${recency || ''}:${query.toLowerCase()}`;
 
+// Keenable backend. Keyless by default: without a key the call goes to the
+// public endpoint, which is free and rate limited per IP. A Keenable key
+// (`keen_…`) in its provider-owned slot or KEENABLE_API_KEY moves
+// it to the keyed endpoint and raises that limit. Only a `keen_` value is
+// sent; a malformed value keeps the call keyless rather than failing it.
+export async function keenableSearch(
+  query: string,
+  recency?: 'day' | 'week' | 'month',
+): Promise<SearchResponse> {
+  const apiKey = settings.searchKeyFor('keenable');
+  const { url, init } = buildKeenableRequest({ query, apiKey, recency });
+  const res = await fetchWithTimeout(url, { ...init, timeoutMs: 30_000 });
+  if (!res.ok) throw new Error(`Keenable HTTP ${res.status}`);
+  const data = await res.json();
+  return parseKeenableResponse(data);
+}
+
+// The one test for "is this a Keenable key": the request builder, the admin
+// key probe and keenableKeySource all ask it.
+export function isKeenableKey(key: string): boolean {
+  return key.trim().startsWith('keen_');
+}
+
+// Where the key a Keenable search would send comes from, or null when it runs
+// keyless. GET /settings exposes only its source, never the credential.
+export function keenableKeySource(): 'settings' | 'env' | null {
+  const key = settings.searchKeyFor('keenable');
+  const source = settings.get().search?.apiKeys?.keenable ? 'settings' : process.env.KEENABLE_API_KEY ? 'env' : null;
+  return isKeenableKey(key) ? source : null;
+}
+
+// Pure request builder for a Keenable search. Exported alongside
+// parseKeenableResponse so endpoint, headers and body can be pinned without
+// mocking fetch. `X-Keenable-Title` is required on the keyless endpoint (it
+// answers 400 without it) and names the app on both. Recency becomes a
+// `published_after` date; pages with no known publish date can still come back.
+export function buildKeenableRequest(opts: {
+  query: string;
+  apiKey?: string;
+  recency?: 'day' | 'week' | 'month';
+  now?: Date;
+}): { url: string; init: RequestInit } {
+  const apiKey = (opts.apiKey || '').trim();
+  const keyed = isKeenableKey(apiKey);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Keenable-Title': 'subwave',
+  };
+  if (keyed) headers['X-API-Key'] = apiKey;
+
+  const body: Record<string, unknown> = {
+    query: opts.query,
+    max_results: 5,
+    snippet_max_length: 300,
+  };
+  if (opts.recency) {
+    const days = { day: 1, week: 7, month: 30 }[opts.recency];
+    const since = new Date((opts.now ?? new Date()).getTime() - days * 86_400_000);
+    body.published_after = since.toISOString().slice(0, 10);
+  }
+
+  return {
+    url: keyed ? KEENABLE_ENDPOINT : `${KEENABLE_ENDPOINT}/public`,
+    init: { method: 'POST', headers, body: JSON.stringify(body) },
+  };
+}
+
+// Pure parser for Keenable's search JSON (results[] of title/url/snippet/
+// description). The page text is in `snippet`; `description` is usually an
+// empty string, so the pick is on emptiness, not presence. Snippets keep the
+// page's line breaks, so whitespace is collapsed before the 300-char cap the
+// other parsers use. There is no answer field. Tolerant of malformed input:
+// any shape mismatch yields { answer: '', results: [] }.
+export function parseKeenableResponse(data: unknown): SearchResponse {
+  if (!data || typeof data !== 'object') return { answer: '', results: [] };
+  const raw = (data as Record<string, unknown>).results;
+
+  const text = (v: unknown): string =>
+    typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+  const results: SearchResult[] = [];
+  for (const r of Array.isArray(raw) ? raw : []) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    const title = text(rec.title);
+    const content = (text(rec.snippet) || text(rec.description)).slice(0, 300);
+    if (!title || !content) continue;
+    results.push({ title, content });
+    if (results.length >= 5) break;
+  }
+
+  return { answer: '', results };
+}
+
 // Provider dispatcher — reads the active provider from live settings on every
 // call so admin-UI changes take effect immediately. Wraps the backend in a
 // 30-min memo. Cache key includes recency so two callsites with different
@@ -458,6 +553,7 @@ export async function searchWeb(
     if (provider === 'searxng') return searxngSearch(query, recency);
     if (provider === 'tavily') return tavilySearch(query);
     if (provider === 'brave') return braveSearch(query, recency);
+    if (provider === 'keenable') return keenableSearch(query, recency);
     if (provider === 'kagi') return kagiSearch(query, recency);
     return duckduckgoSearch(query);
   });
@@ -471,7 +567,7 @@ export async function searchWeb(
 export function searchReady(): boolean {
   const s = settings.get().search;
   const provider = s?.provider || 'duckduckgo';
-  if (provider === 'duckduckgo') return true;
+  if (provider === 'duckduckgo' || provider === 'keenable') return true;
   if (provider === 'searxng') return !!(s?.baseUrl && s.baseUrl.trim());
   if (provider === 'tavily' || provider === 'brave' || provider === 'kagi') {
     return !!settings.searchKeyFor(provider);

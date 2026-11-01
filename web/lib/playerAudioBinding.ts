@@ -34,12 +34,14 @@ export function playerStatusAfterAudioEvent(
 
 export function bindPlayerAudioEvents(
   element: Pick<HTMLAudioElement, 'addEventListener' | 'removeEventListener'>,
-  handlers: Record<PlayerAudioEvent, EventListener>,
+  handlers: Record<PlayerAudioEvent, EventListener> & { ended?: EventListener },
 ): () => void {
   for (const event of ['playing', 'waiting', 'stalled', 'timeupdate', 'error'] as const) {
     element.addEventListener(event, handlers[event]);
   }
+  if (handlers.ended) element.addEventListener('ended', handlers.ended);
   return () => {
+    if (handlers.ended) element.removeEventListener('ended', handlers.ended);
     for (const event of ['playing', 'waiting', 'stalled', 'timeupdate', 'error'] as const) {
       element.removeEventListener(event, handlers[event]);
     }

@@ -25,24 +25,27 @@ import {
   type StreamEnablement,
 } from '@/lib/audioFormat';
 
-import { bindPlayerAudioEvents, playerAudioIsAdvancing, playerStatusAfterAudioEvent } from '@/lib/playerAudioBinding';
+import { bindPlayerAudioEvents, playerStatusAfterAudioEvent } from '@/lib/playerAudioBinding';
 import { isIOSDevice } from '@/lib/platform';
 import { useStationOrigin } from '@/lib/stationOrigin';
 import { withStreamAuth } from '@/lib/stationAuth';
 import { loadVolumePref, saveVolumePref } from '@/lib/volume';
 import { createPausedMediaUrl } from '@/lib/pausedMedia';
+import { useStationClient } from '@/lib/stationClient';
+import { SKIP_CUSHION_SECONDS } from '@/lib/idleSkip';
+import { skipIdleSilence } from '@/lib/idleSkipPlayback';
+import { HAVE_FUTURE_DATA, watchdogCall } from '@/lib/streamWatchdog';
 
-// Reconnect backoff for the watchdog's error path: quick first retry, doubling to a minute.
+// Reconnect backoff for a stream that errored or ended: quick first retry, doubling to a minute.
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 60_000;
+// How long the media clock may stand still before the watchdog reconnects.
+const WATCHDOG_MS = 5000;
 
 // Idle cutoff (#343). A forgotten tab counts as a listener and holds the DJ's
 // pause-when-empty gate open, so tune out after this long with no pointer/key/focus activity.
 const IDLE_TUNE_OUT_MS = 8 * 60 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 60_000;
-
-// HTMLMediaElement.HAVE_FUTURE_DATA, read as a constant so the checks below work on a detached element.
-const HAVE_FUTURE_DATA = 3;
 
 function freshStreamUrl(apiUrl: string, streamUrl: string, generation: number): string {
   const url = new URL(streamUrl, document.baseURI);
@@ -80,6 +83,8 @@ export interface Player {
 export interface UsePlayerOptions {
   initialVolume?: number;
   streamEnablement?: StreamEnablement;
+  bufferSeconds?: number;
+  onLeadTrim?: (ms: number) => void;
 }
 
 const MP3_ONLY: StreamEnablement = { mp3: true, opus: false, aac: false, flac: false };
@@ -100,7 +105,7 @@ function detectBrowserSupport(): BrowserSupport {
 // Owns the <audio> element + tune-in state. The audioRef must be attached to
 // an <audio> tag rendered by the consumer (so the Waveform's Web Audio API
 // can also reach it).
-export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: UsePlayerOptions = {}): Player {
+export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY, bufferSeconds = 0, onLeadTrim }: UsePlayerOptions = {}): Player {
   const { apiUrl, streams } = useStationOrigin();
   // Callers may derive enablement inline from a feed snapshot. Normalize it on
   // scalar flags so an equivalent fresh object cannot retrigger preference
@@ -116,6 +121,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     streamEnablement.aac,
     streamEnablement.flac,
   ]);
+  const client = useStationClient();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const gen = useRef(0);
   const tunedInRef = useRef(false);
@@ -139,6 +145,23 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     el.load();
     releasePausedMedia();
   }, [releasePausedMedia]);
+  // The skip over a woken station's stale idle silence (#2072): one run per
+  // connection, cancelled when the connection ends. The latest buffer, client
+  // and trim callback are read through refs, so play() and the watchdog's
+  // reconnect always see them.
+  const idleSkipCancel = useRef<(() => void) | null>(null);
+  const bufferSecondsRef = useRef(bufferSeconds);
+  const clientRef = useRef(client);
+  const onLeadTrimRef = useRef(onLeadTrim);
+  useEffect(() => { bufferSecondsRef.current = bufferSeconds; }, [bufferSeconds]);
+  useEffect(() => { clientRef.current = client; }, [client]);
+  useEffect(() => { onLeadTrimRef.current = onLeadTrim; }, [onLeadTrim]);
+  // Back to 1x and to the advertised offset.
+  const endIdleSkip = useCallback(() => {
+    idleSkipCancel.current?.();
+    idleSkipCancel.current = null;
+    onLeadTrimRef.current?.(0);
+  }, []);
   // audioRef.current mirrored into state so the listener effect can depend on it:
   // refs don't notify on attach, so a swapped element has to announce itself.
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
@@ -150,13 +173,14 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
       ++gen.current;
       tunedInRef.current = false;
       clearWatchdog();
+      endIdleSkip();
       unloadAudio(audioRef.current);
       setPlaybackState('none');
       setStatus('idle');
     }
     audioRef.current = el;
     setAudioEl(el);
-  }, [clearWatchdog, unloadAudio]);
+  }, [clearWatchdog, endIdleSkip, unloadAudio]);
   // SSR and first render use MP3; hydration restores the station-scoped preference.
   const [streamUrl, setStreamUrl] = useState<string>(streams.mp3);
   const [format, setFormat] = useState<AudioFormat>('mp3');
@@ -186,12 +210,30 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
   useEffect(() => { streamsRef.current = streams; }, [streams]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
 
+  // Call right after setting a fresh src. Only the MP3 mount is sized: it is
+  // CBR, so its burst is bufferSeconds long. Opus is CBR too since #2138, but on
+  // an older broadcast image it is VBR, and idle silence costs it so few bytes
+  // that its burst reaches back past the pause into the music before it
+  // (measured). The player can't tell which it is tuned to, so an Opus listener
+  // plays it out as before.
+  const startIdleSkip = useCallback((el: HTMLAudioElement) => {
+    endIdleSkip();
+    const buffer = bufferSecondsRef.current;
+    if (streamUrlRef.current !== streamsRef.current.mp3 || !(buffer > SKIP_CUSHION_SECONDS)) return;
+    idleSkipCancel.current = skipIdleSilence(el, {
+      bufferSeconds: buffer,
+      readState: signal => clientRef.current.state({ signal }),
+      onTrim: ms => onLeadTrimRef.current?.(ms),
+    });
+  }, [endIdleSkip]);
   const switchLiveStream = useCallback((nextUrl: string, errorLabel: string) => {
     clearWatchdog();
+    endIdleSkip();
     if (!tunedInRef.current || !audioRef.current) return;
     const audio = audioRef.current;
     const myGen = ++gen.current;
     audio.src = freshStreamUrl(apiUrl, nextUrl, myGen);
+    startIdleSkip(audio);
     audio.volume = volumeRef.current;
     setStatus('connecting');
     const p = audio.play();
@@ -202,7 +244,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
         console.error(`${errorLabel}:`, err);
       }
     });
-  }, [apiUrl, clearWatchdog]);
+  }, [apiUrl, clearWatchdog, endIdleSkip, startIdleSkip]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -279,27 +321,33 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
 
   // Drive `status` from the <audio> element's own events and reconnect when it
   // wedges. 'playing' clears the watchdog; 'waiting'/'stalled' arm a 5s timer
-  // that re-sets src if the media clock hasn't moved; 'error' reconnects with
-  // backoff. Re-runs when the element is replaced (attachAudio).
+  // that re-sets src once the media clock stops moving (lib/streamWatchdog.ts);
+  // 'error' and 'ended' reconnect with backoff. Re-runs when the element is
+  // replaced (attachAudio).
   useEffect(() => {
     const el = audioEl;
     if (!el) return;
 
     const isLive = () => tunedInRef.current && audioRef.current === el;
 
-    const reconnect = () => {
+    const reconnect = (rewatch: boolean) => {
       clearWatchdog();
       if (!isLive()) return;
       const audio = el;
+      const call = watchdogCall(audio, watchdogArmedAt.current, rewatch);
+      if (call === 'stand-down') return;
       // The media clock moved while the watchdog was pending, so the listener is hearing
-      // audio. Re-setting src would cut sound for nothing; reconcile the UI instead (#1232).
-      if (playerAudioIsAdvancing(audio, watchdogArmedAt.current)) {
+      // audio. Re-setting src would cut sound for nothing; reconcile the UI instead (#1232),
+      // and look again, since the bytes behind that clock may already be gone.
+      if (call === 'keep-watching') {
         retryCount.current = 0;
         setStatus('playing');
+        armWatchdog(WATCHDOG_MS, true);
         return;
       }
       const myGen = ++gen.current;
       audio.src = freshStreamUrl(apiUrl, streamUrlRef.current, myGen);
+      startIdleSkip(audio);
       audio.volume = volumeRef.current;
       setStatus('connecting');
       const p = audio.play();
@@ -312,12 +360,17 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
       });
     };
 
-    const armWatchdog = (delay: number) => {
+    const armWatchdog = (delay: number, rewatch = false) => {
       if (!isLive()) return;
       clearWatchdog();
       // Sample the media clock so the fire can tell a dead stream from late bytes.
       watchdogArmedAt.current = audioRef.current?.currentTime ?? 0;
-      watchdogTimer.current = setTimeout(reconnect, delay);
+      watchdogTimer.current = setTimeout(() => reconnect(rewatch), delay);
+    };
+    const reconnectWithBackoff = () => {
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
+      retryCount.current += 1;
+      armWatchdog(delay);
     };
 
     const onPlaying = () => {
@@ -330,13 +383,13 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     const onWaiting = () => {
       if (!isLive()) return;
       setStatus(s => playerStatusAfterAudioEvent(s, 'waiting', el));
-      armWatchdog(5000);
+      armWatchdog(WATCHDOG_MS);
     };
     // 'stalled' is a NETWORK event (no bytes for ~3s) and fires routinely on a
     // live mount while playback continues from buffer, so no second 'playing' is
     // coming. Arm the watchdog only (#1232).
     const onStalled = () => {
-      armWatchdog(5000);
+      armWatchdog(WATCHDOG_MS);
     };
     // timeupdate fires only while the clock actually moves, so it reconciles a status left
     // on 'connecting' by event sequences the handlers above don't model.
@@ -351,7 +404,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
         if (pausedMediaUrl.current) unloadAudio(el);
         return;
       }
-      setStatus('idle');
+      setStatus('connecting');
       const { mp3 } = streamsRef.current;
       const failedFormat = activeFormatRef.current;
       if (failedFormat !== 'mp3') {
@@ -362,15 +415,21 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
         setFormat('mp3');
         setStreamUrl(mp3);
       }
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryCount.current, RECONNECT_MAX_MS);
-      retryCount.current += 1;
-      armWatchdog(delay);
+      reconnectWithBackoff();
+    };
+    // A live mount has no end, so 'ended' means the server closed the connection and the
+    // buffer has played out: Icecast's killclient, a source restart, or on Firefox an RST
+    // whose 'error' came while the buffer was still audible. Nothing fires after it.
+    const onEnded = () => {
+      if (!isLive()) return;
+      setStatus('connecting');
+      reconnectWithBackoff();
     };
     const unbind = bindPlayerAudioEvents(el, {
-      playing: onPlaying, waiting: onWaiting, stalled: onStalled, timeupdate: onTimeUpdate, error: onError,
+      playing: onPlaying, waiting: onWaiting, stalled: onStalled, timeupdate: onTimeUpdate, error: onError, ended: onEnded,
     });
     return () => { clearWatchdog(); unbind(); };
-  }, [apiUrl, audioEl, clearWatchdog, unloadAudio]);
+  }, [apiUrl, audioEl, clearWatchdog, startIdleSkip, unloadAudio]);
 
   // Idle cutoff (#343): a tab with no activity for IDLE_TUNE_OUT_MS is tuned out
   // so it doesn't sit on the mount as a phantom listener. Sweeps once a minute.
@@ -402,6 +461,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     ++gen.current;
     tunedInRef.current = false;
     clearWatchdog();
+    endIdleSkip();
     setPlaybackState('none');
     setStatus('idle');
     if (audioRef.current) unloadAudio(audioRef.current);
@@ -414,6 +474,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     ++gen.current;
     tunedInRef.current = false;
     clearWatchdog();
+    endIdleSkip();
     setPlaybackState('paused');
     setStatus('idle');
     const el = audioRef.current;
@@ -456,6 +517,7 @@ export function usePlayer({ initialVolume = 1, streamEnablement = MP3_ONLY }: Us
     );
     el.src = freshStreamUrl(apiUrl, target.streamUrl, myGen);
     el.load();
+    startIdleSkip(el);
     releasePausedMedia();
     el.volume = target.volume;
     // Commands and event handlers read this synchronously, including repeated

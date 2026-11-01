@@ -220,6 +220,7 @@ const bindEvents = (element: FakeAudioEventTarget) => {
     stalled: () => eventLifecycle.push(`${element.id}:stalled`),
     timeupdate: () => eventLifecycle.push(`${element.id}:timeupdate`),
     error: () => eventLifecycle.push(`${element.id}:error`),
+    ended: () => eventLifecycle.push(`${element.id}:ended`),
   });
   return () => {
     unbind();
@@ -232,14 +233,17 @@ replacePlayerAudioElement!(eventRef, eventCleanupRef, firstAudio, bindEvents);
 firstAudio.dispatch('playing');
 replacePlayerAudioElement!(eventRef, eventCleanupRef, secondAudio, bindEvents);
 firstAudio.dispatch('error');
+firstAudio.dispatch('ended');
 secondAudio.dispatch('stalled');
 secondAudio.dispatch('timeupdate');
+secondAudio.dispatch('ended');
 replacePlayerAudioElement!(eventRef, eventCleanupRef, null, bindEvents);
 assert.deepEqual(eventLifecycle, [
   'a:playing',
   'a:cleanup',
   'b:stalled',
   'b:timeupdate',
+  'b:ended',
   'b:cleanup',
 ]);
 

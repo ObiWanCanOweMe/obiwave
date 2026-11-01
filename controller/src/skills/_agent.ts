@@ -918,6 +918,10 @@ export function skillCatalog() {
         requiresKey = null;
         keyUrl = null;
         hint = 'SearXNG self-hosted meta-search. Configure base URL in admin → Settings → Search.';
+      } else if (searchProvider === 'keenable') {
+        requiresKey = null;
+        keyUrl = null;
+        hint = 'Keenable web search, keyless. An optional Keenable key (SEARCH_API_KEY) raises the rate limit.';
       } else {
         requiresKey = null;
         keyUrl = null;

@@ -527,22 +527,12 @@ init_secrets() {
 # buffer/bitrate setting, the same way the split stack's container restart
 # re-runs its entrypoint.
 # ---------------------------------------------------------------------------
-read_state_num() {
-	# $1 = filename under $STATE_DIR, $2 = fallback. Non-numeric/missing → fallback.
-	local _v
-	_v=$(cat "$STATE_DIR/$1" 2>/dev/null || true)
-	case "$_v" in
-		''|*[!0-9]*) echo "$2" ;;
-		*) echo "$_v" ;;
-	esac
-}
-
-# Keep the listener-time offset under controller ownership. Accepting an env
-# override here would make the Icecast burst disagree with /now-playing and
-# voice-event timing even though all four processes share this container.
-stream_buffer_seconds() {
-	read_state_num liquidsoap_stream_buffer_seconds.txt 22
-}
+# Source shared rendering in this shell so encoder snapshots reach Liquidsoap.
+_icecast_render_lib=/usr/local/bin/icecast-render
+if [ ! -f "$_icecast_render_lib" ]; then
+    _icecast_render_lib="$(dirname "${BASH_SOURCE[0]}")/../icecast-render.sh"
+fi
+SUBWAVE_ICECAST_RENDER_LIB=1 source "$_icecast_render_lib"
 
 render_icecast() {
 	ICECAST_STATE_DIR="$STATE_DIR" \
@@ -550,7 +540,7 @@ render_icecast() {
 	ICECAST_RENDERED="$RENDERED" \
 	ICECAST_TRUSTED_PROXY_IPS="${ICECAST_TRUSTED_PROXY_IPS:-127.0.0.1 ::1}" \
 	LISTENER_AUTH_URL="${LISTENER_AUTH_URL:-http://localhost:7701/listener-auth}" \
-		/usr/local/bin/icecast-render
+		render_icecast_config
 	chown icecast2 "$RENDERED" 2>/dev/null || true
 }
 

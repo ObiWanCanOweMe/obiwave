@@ -1,28 +1,8 @@
-export const SEARCH_PROVIDER_META = {
-  duckduckgo: { label: 'DuckDuckGo (free, no key)' },
-  tavily: {
-    label: 'Tavily (paid web search)',
-    name: 'Tavily',
-    placeholder: 'tvly-…',
-    keyUrl: 'https://app.tavily.com/home',
-    envVar: 'SEARCH_API_KEY',
-  },
-  brave: {
-    label: 'Brave Search (API key, free monthly credits)',
-    name: 'Brave Search',
-    placeholder: 'BSA…',
-    keyUrl: 'https://api-dashboard.search.brave.com/app/keys',
-    envVar: 'SEARCH_API_KEY',
-  },
-  searxng: { label: 'SearXNG (self-hosted)' },
-  kagi: {
-    label: 'Kagi (paid Search API)',
-    name: 'Kagi',
-    placeholder: 'Kagi API key',
-    keyUrl: 'https://kagi.com/settings?p=api',
-    envVar: 'KAGI_API_KEY',
-  },
-} as const;
+import { SEARCH_PROVIDER_CATALOG, type SearchProviderEntry } from '../../../lib/schemas.generated.ts';
+
+export const SEARCH_PROVIDER_META: Record<string, SearchProviderEntry & { name?: string; placeholder?: string }> = Object.fromEntries(
+  SEARCH_PROVIDER_CATALOG.map(p => [p.id, { ...p, name: 'keyName' in p ? p.keyName : undefined, placeholder: 'keyPlaceholder' in p ? p.keyPlaceholder : undefined }]),
+);
 
 export type SearchKeyDraft = string | null;
 

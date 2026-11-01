@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import React from 'react';
+import * as schemas from '../lib/schemas.generated.ts';
 import ts from 'typescript';
 import * as searchProviderState from '../components/admin/settings/search-provider-state.ts';
 import {
@@ -17,6 +18,10 @@ import {
   searchKeySource,
 } from '../components/admin/settings/search-provider-state.ts';
 
+assert.ok(SEARCH_PROVIDER_META.kagi);
+assert.ok(SEARCH_PROVIDER_META.brave);
+assert.ok(SEARCH_PROVIDER_META.keenable);
+assert.equal(SEARCH_PROVIDER_META.keenable.envVar, 'KEENABLE_API_KEY');
 assert.equal(SEARCH_PROVIDER_META.kagi.label, 'Kagi (paid Search API)');
 assert.equal(SEARCH_PROVIDER_META.kagi.envVar, 'KAGI_API_KEY');
 assert.equal(SEARCH_PROVIDER_META.brave.envVar, 'SEARCH_API_KEY');
@@ -94,6 +99,7 @@ const components = {
   SelectContent: function SelectContent() {},
   SelectItem: function SelectItem() {},
   SelectGroup: function SelectGroup() {},
+  SelectLabel: function SelectLabel() {},
   Card: function Card() {},
   Btn: function Btn() {},
   Pill: function Pill() {},
@@ -123,7 +129,7 @@ const useState = (initial: unknown) => {
   ];
 };
 const dependencyMocks = new Map<string, unknown>([
-  ['@/lib/schemas.generated', { SETTINGS_SEARXNG_ENGINES_MAX: 500 }],
+  ['@/lib/schemas.generated', schemas],
   ['react', { useState }],
   ['../../../lib/notify', { errorMessage: (error: unknown) => String(error) }],
   ['../../../lib/admin-query', {
@@ -142,6 +148,7 @@ const dependencyMocks = new Map<string, unknown>([
     SelectContent: components.SelectContent,
     SelectItem: components.SelectItem,
     SelectGroup: components.SelectGroup,
+    SelectLabel: components.SelectLabel,
   }],
   ['../ui', {
     Card: components.Card,

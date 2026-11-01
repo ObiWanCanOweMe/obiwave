@@ -6,10 +6,12 @@ import * as settings from '../../settings.js';
 import * as llmProvider from '../../llm/provider.js';
 import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
-import { SECRET_ENV_KEYS } from '../../setup/secrets.js';
+import { SECRET_ENV_KEYS, secretValueIssue } from '../../setup/secrets.js';
+import { OPENAI_COMPATIBLE_GATEWAYS } from '../../schemas/providers.js';
 import { applyCustomHeadersPatch } from '../../settings/vocab.js';
 import type { EmbeddingCfg } from '../../llm/provider.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
+import { isKeenableKey } from '../../skills/web-search.js';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -141,8 +143,9 @@ async function probeKey(
       const u = await r.json() as { first_name?: string };
       return { ok: true, message: `✓ ElevenLabs key valid${u.first_name ? ` · account: ${u.first_name}` : ''}` };
     }
+    case 'KEENABLE_API_KEY':
     case 'SEARCH_API_KEY': {
-      const provider = hint || settings.get().search?.provider || 'tavily';
+      const provider = key === 'KEENABLE_API_KEY' ? 'keenable' : hint || settings.get().search?.provider || 'tavily';
       if (provider === 'brave') {
         const url = new URL('https://api.search.brave.com/res/v1/web/search');
         url.searchParams.set('q', 'test');
@@ -160,6 +163,23 @@ async function probeKey(
           return { ok: false, message: rejected ? 'Key rejected — check it\'s correct and active' : `Request failed (${r.status})` };
         }
         return { ok: true, message: '✓ Brave Search key valid' };
+      }
+      if (provider === 'keenable') {
+        // keenableSearch sends only a keen_ value and runs keyless otherwise,
+        // so any other key is not a rejected key, just one that goes unused.
+        if (!isKeenableKey(value)) {
+          return { ok: false, message: 'Not a Keenable key (they start with keen_) — searches run keyless without one' };
+        }
+        const r = await fetch('https://api.keenable.ai/v1/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': value, 'X-Keenable-Title': 'subwave' },
+          body: JSON.stringify({ query: 'test', max_results: 1 }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) {
+          return { ok: false, message: r.status === 401 || r.status === 403 ? 'Key rejected — check it\'s correct and active' : `Request failed (${r.status})` };
+        }
+        return { ok: true, message: '✓ Keenable key valid' };
       }
       const r = await fetch('https://api.tavily.com/search', {
         method: 'POST',
@@ -230,8 +250,22 @@ async function probeKey(
       }
       return { ok: true, message: `✓ ListenBrainz token valid${j.user_name ? ` · user: ${j.user_name}` : ''}` };
     }
-    default:
-      return { ok: false, message: `No probe defined for ${key}` };
+    default: {
+      // A fixed-endpoint gateway's model list, with the key as a Bearer; no
+      // model is called, as in the CLI's probeGatewayModels. Requesty's list is
+      // public, but a bearer it can't verify is a 403 ("Invalid authorization
+      // token"), so 401 and 403 both read as a rejected key.
+      const gw = OPENAI_COMPATIBLE_GATEWAYS.find(g => g.envVar === key);
+      if (!gw) return { ok: false, message: `No probe defined for ${key}` };
+      const r = await fetch(`${gw.openaiCompatible.baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${value}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) {
+        return { ok: false, message: r.status === 401 || r.status === 403 ? 'Key rejected — check it\'s correct and active' : `Request failed (${r.status})` };
+      }
+      return { ok: true, message: `✓ ${gw.label} key valid` };
+    }
   }
 }
 
@@ -258,6 +292,9 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
     if (searchProvider !== 'tavily' && searchProvider !== 'brave') {
       return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
     }
+  } else if (key === 'KEENABLE_API_KEY') {
+    searchProvider = requestedProvider || 'keenable';
+    if (searchProvider !== 'keenable') return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
   } else if (key === 'KAGI_API_KEY') {
     searchProvider = requestedProvider || 'kagi';
     if (searchProvider !== 'kagi') {
@@ -266,7 +303,7 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   }
   let targetValue = typeof value === 'string' ? value.trim() : '';
   if (!targetValue) {
-    const isSearchProbe = key === 'SEARCH_API_KEY' || key === 'KAGI_API_KEY';
+    const isSearchProbe = key === 'SEARCH_API_KEY' || key === 'KAGI_API_KEY' || key === 'KEENABLE_API_KEY';
     if (isSearchProbe && searchProvider) {
       targetValue = settings.searchKeyFor(searchProvider);
     }
@@ -277,6 +314,8 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
       return res.status(400).json({ ok: false, message: 'value is required when key is not set in environment', latencyMs: 0 });
     }
   }
+  const issue = secretValueIssue(targetValue);
+  if (issue) return res.json({ ok: false, message: issue, latencyMs: 0 });
   const t0 = Date.now();
   try {
     const result = await probeKey(
@@ -572,6 +611,8 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
     const v = (req.body || {})[k];
     if (typeof v === 'string' && v.trim()) overrides[k] = v.trim();
   }
+  const keyIssue = overrides.apiKey ? secretValueIssue(overrides.apiKey) : null;
+  if (keyIssue) return res.json({ ok: false, dim: null, code: 'invalid', message: keyIssue });
   if ((req.body || {}).headers !== undefined) {
     try {
       const saved = llmProvider.resolveEmbeddingCfg(overrides).headers || {};

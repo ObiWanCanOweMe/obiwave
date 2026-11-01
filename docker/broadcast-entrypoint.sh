@@ -97,22 +97,6 @@ bootstrap_state_dirs() {
     return 0
 }
 
-# Listener buffer depth comes only from the controller-written handoff. An env
-# override would change Icecast's real burst without changing /now-playing or
-# voice-event timing, putting every listener-facing clock on the wrong offset.
-read_state_num() {
-    # $1 = filename, $2 = fallback. Non-numeric or missing → fallback.
-    _v=$(cat "$STATE_DIR/$1" 2>/dev/null || true)
-    case "$_v" in
-        ''|*[!0-9]*) echo "$2" ;;
-        *) echo "$_v" ;;
-    esac
-}
-
-stream_buffer_seconds() {
-    read_state_num liquidsoap_stream_buffer_seconds.txt 22
-}
-
 ICECAST_SECRET_CHARS='A-Z a-z 0-9 . _ ~ + = @ ! % ^ * , : / ? # -'
 
 icecast_secret_valid() {
@@ -236,6 +220,13 @@ xml_escape() {
     printf '%s' "$s"
 }
 
+# Source shared rendering in this shell so encoder snapshots reach Liquidsoap.
+_icecast_render_lib=/usr/local/bin/icecast-render
+if [ ! -f "$_icecast_render_lib" ]; then
+    _icecast_render_lib="$(dirname "${BASH_SOURCE[0]}")/icecast-render.sh"
+fi
+SUBWAVE_ICECAST_RENDER_LIB=1 source "$_icecast_render_lib"
+
 # Sourcing with SUBWAVE_BROADCAST_LIB=1 defines the helpers above WITHOUT
 # booting a station, so scripts/state-bootstrap.test.ts can drive them.
 if [ "${SUBWAVE_BROADCAST_LIB:-}" = "1" ]; then
@@ -296,7 +287,7 @@ ICECAST_TEMPLATE="$TEMPLATE" \
 ICECAST_RENDERED="$RENDERED" \
 ICECAST_TRUSTED_PROXY_HOSTS="${ICECAST_TRUSTED_PROXY_HOSTS:-caddy}" \
 LISTENER_AUTH_URL="${LISTENER_AUTH_URL:-http://controller:7701/listener-auth}" \
-    /usr/local/bin/icecast-render
+    render_icecast_config
 chown icecast2 "$RENDERED" 2>/dev/null || true
 
 # Launch the pair, then wait for either to die.

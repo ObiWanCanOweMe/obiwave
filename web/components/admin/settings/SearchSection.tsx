@@ -7,9 +7,12 @@ import { adminResponse } from '../../../lib/admin-query';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
 } from '../../ui/select';
-import { SETTINGS_SEARXNG_ENGINES_MAX } from '@/lib/schemas.generated';
+import {
+  SEARCH_PROVIDER_CATALOG, SEARCH_PROVIDER_GROUPS, SETTINGS_SEARCH_PROVIDERS, SETTINGS_SEARXNG_ENGINES_MAX,
+  type SearchProviderEntry, type SearchProviderGroup,
+} from '@/lib/schemas.generated';
 import { Card, Btn, Pill } from '../ui';
 import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult,
@@ -24,6 +27,12 @@ import {
   searchKeySource,
   type SearchKeyDraft,
 } from './search-provider-state';
+
+const searchProvider = (id: string | undefined): SearchProviderEntry | undefined => SEARCH_PROVIDER_CATALOG.find(p => p.id === id);
+const SEARCH_GROUP_LABELS: Record<SearchProviderGroup, string> = { keyless: 'No key needed', keyed: 'Needs an API key', 'self-hosted': 'Self-hosted' };
+export function groupSearchProviders(ids: readonly string[]): { label: string; ids: string[] }[] {
+  return [...SEARCH_PROVIDER_GROUPS.map(group => ({ label: SEARCH_GROUP_LABELS[group], ids: ids.filter(id => searchProvider(id)?.group === group) })), { label: 'Other', ids: ids.filter(id => !searchProvider(id)) }].filter(g => g.ids.length > 0);
+}
 
 const searchProviderLabel = (id: string | undefined): string =>
   (id && SEARCH_PROVIDER_META[id as keyof typeof SEARCH_PROVIDER_META]?.label) || id || '—';
@@ -40,10 +49,10 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
   const [searxngTestOwnership] = useState(() => createSearchKeyTestOwnership());
 
   const savedSearch = data.values?.search || {};
-  const providers = data.search?.providers || ['duckduckgo', 'tavily', 'brave', 'searxng', 'kagi'];
+  const providers = data.search?.providers || [...SETTINGS_SEARCH_PROVIDERS];
   const provider = form.search.provider;
   const meta = SEARCH_PROVIDER_META[provider as keyof typeof SEARCH_PROVIDER_META];
-  const keyed = meta && 'envVar' in meta ? meta : null;
+  const keyed = meta?.envVar ? { ...meta, envVar: meta.envVar } : null;
   const draft = keyed ? form.search.apiKeys[provider] : undefined;
   const savedKey = keyed ? savedSearch.apiKeys?.[provider] ?? undefined : undefined;
   const envPresent = keyed ? !!data.env?.[keyed.envVar] : false;
@@ -141,7 +150,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
         sub={<>
           The segment director can air a single line of recent artist context between
           tracks, when the active backend returns something worth saying. DuckDuckGo
-          is free and keyless; Tavily, Brave, and Kagi return web results; SearXNG is
+          and Keenable are free and keyless; Tavily, Brave, and Kagi return web results; SearXNG is
           keyless if you self-host it. Switching here reroutes the next call, no restart.
         </>}
         metrics={[{ n: String(providers.length), l: 'providers' }]}
@@ -178,30 +187,23 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
             >
               <SelectTrigger className="max-w-[360px]" aria-label="Provider"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectGroup>
-                  {providers.map(p => (
-                    <SelectItem key={p} value={p}>{searchProviderLabel(p)}</SelectItem>
-                  ))}
-                </SelectGroup>
+                {groupSearchProviders(providers).map(g => (
+                  <SelectGroup key={g.label}>
+                    <SelectLabel>{g.label}</SelectLabel>
+                    {g.ids.map(p => (
+                      <SelectItem key={p} value={p}>{searchProviderLabel(p)}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
               </SelectContent>
             </Select>
-            <div className="field-hint">
-              {provider === 'duckduckgo'
-                ? 'DuckDuckGo Instant Answer, free and keyless. Useful for definitions and well-known entities; silent otherwise. The segment director treats silence as a valid outcome.'
-                : provider === 'tavily'
-                ? 'Tavily, paid web search with full results and an answer summary. Needs an API key.'
-                : provider === 'brave'
-                ? 'Brave Search API: real web + news results for artist queries. Metered billing with $5/month in free credits (~1,000 queries; a card on file is required). SUB/WAVE caches every search for 30 minutes.'
-                : provider === 'kagi'
-                ? 'Kagi is a paid, privacy-oriented straight Search API with a dedicated key. SUB/WAVE caches every search for 30 minutes.'
-                : 'SearXNG, self-hosted meta-search aggregating Google, Brave, DDG and more. No API key needed, just a running SearXNG instance.'}
-            </div>
+            <div className="field-hint">{meta?.hint}</div>
           </div>
 
           {keyed && (
             <>
               <div className="field">
-                <Label>{keyed.name} API key</Label>
+                <Label>{keyed.keyName} API key{keyed.key === 'optional' ? ' (optional)' : ''}</Label>
                 <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                   <Input
                     type="password"
@@ -228,13 +230,15 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                   )}
                 </div>
                 <div className="field-hint">
-                  Get one at <a href={keyed.keyUrl} target="_blank" rel="noreferrer" className="underline">{keyed.keyUrl.replace(/^https:\/\//, '')}</a>.
+                  {keyed.key === 'optional' && <>Not needed to search; a key raises the rate limit. </>}
+                  {keyed.keyPrefix && <>Only a <code>{keyed.keyPrefix}…</code> key is used: an invalid value is ignored and searches run keyless. Keys saved for other providers are never used. </>}
+                  Get one at <a href={keyed.keyUrl} target="_blank" rel="noreferrer" className="underline">{keyed.keyUrl?.replace(/^https:\/\//, '')}</a>.
                   Stored alongside the other admin settings. Falls back to
                   <code> {keyed.envVar}</code> in <code>.env</code> when blank. Set
                   one or the other, not both.
                 </div>
               </div>
-              <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing'} source={keySource} />
+              {(keyed.key !== 'optional' || keySource !== 'missing') && <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing'} source={keySource} />}
               {keyTest && <KeyTestResult result={keyTest} />}
             </>
           )}
