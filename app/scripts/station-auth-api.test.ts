@@ -7,7 +7,7 @@ test('station auth keeps proxy credentials scoped and reads stream passwords at 
   const calls: { url: string; init: RequestInit }[] = [];
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     calls.push({ url, init });
-    return { status: 200 };
+    return Response.json({ ok: true });
   });
   let password: string | null = null;
   const api = createApi('https://radio.example', { username: 'listener', password: 'proxy-secret' }, () => password);

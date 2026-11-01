@@ -96,8 +96,10 @@ export const DEFAULTS = {
     // entrypoint converts per mount (#993).
     //
     // This is also how far behind the live edge every listener sits for their
-    // whole connection, so /now-playing publishes it as stream.bufferSeconds and
-    // players subtract it to line titles up with the audio in someone's ears (#1114).
+    // whole connection, so /now-playing publishes the burst last rendered
+    // (stream-mounts.json, #2142; this setting when there is no usable one) as
+    // stream.bufferSeconds, and players subtract that to line titles up with the
+    // audio in someone's ears (#1114).
     bufferSeconds: 22,
     // Legacy ICY (out-of-band) title compatibility for the Opus mount. FLAC
     // always uses native chained Ogg tags; MP3/AAC behavior is unaffected. Keep
@@ -636,7 +638,7 @@ export const DEFAULTS = {
   // provider that consumes them, so changing providers never reuses a key.
   search: {
     provider: 'duckduckgo',
-    apiKeys: { tavily: '', brave: '', kagi: '' },
+    apiKeys: { tavily: '', brave: '', kagi: '', keenable: '' },
     baseUrl: '',
     // Optional comma-separated SearXNG engine pin (#1353). Empty means "send no
     // engines= param", i.e. the instance's own default engine set.
@@ -681,6 +683,12 @@ export const DEFAULTS = {
     pairDrain: true,
     // Needs pairDrain plus the heavy analyzer with a warmed stem cache.
     stemBlends: false,
+    // Fade curve for PLAIN song-to-song crossfades: false = linear (two
+    // different songs dip ~3 dB mid-fade), true = equal-power (cos out, sin^1.5
+    // in, level held within 0.7 dB). Effects, stem-blend clip seams, jingles
+    // and beds keep their own curves. Read once by the mixer at startup, so a
+    // change needs a restart.
+    equalPowerCrossfade: false,
     // Per-effect kill switches (#1565). All on: the kit is what DJ mode IS, and
     // before this block the only way to drop one gesture was to turn djMode off
     // and lose all six. Resolved through settings/transition-effects.ts, which

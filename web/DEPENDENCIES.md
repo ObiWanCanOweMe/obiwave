@@ -37,3 +37,8 @@ instead. The advisory is [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHS
 
 Run `npm run lint`, `npm test`, and `npm run build` after dependency changes.
 For Zod changes, run the controller's checks and regenerate the schema mirror too.
+
+
+## October 31 integration audit
+
+Next, its third-party integration and lint config move together to 16.4.3. RE2JS is patched to 2.8.7 for GHSA-gg6h-894w-4m9c. The newly published minimatch advisory GHSA-g3hv-75wg-m249 affects development lint dependencies; its only fixed line is 11.0.1. Do not force the callable minimatch 3 consumers onto that incompatible API or downgrade ESLint/Next as npm suggests. Production dependency audits remain a separate check; revisit a compatible lint-tooling update when available.

@@ -10,7 +10,6 @@ export {
   activeOllamaUrl,
   loccaBaseUrl,
   DEFAULT_LOCCA_BASE_URL,
-  DEFAULT_REQUESTY_BASE_URL,
   OPENROUTER_APP_HEADERS,
   customHeaders,
   noThinkFetch,

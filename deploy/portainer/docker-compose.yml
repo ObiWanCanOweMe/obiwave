@@ -214,6 +214,9 @@ services:
       # disappears, the replacement worker exits instead of loading on CPU.
       TTS_HEAVY_STRICT_DEVICE: "1"
       POCKET_TTS_VOICE: ${POCKET_TTS_VOICE:-alba}
+      # Match source-compose on-air level controls; empty retains worker defaults.
+      CHATTERBOX_TARGET_RMS: ${CHATTERBOX_TARGET_RMS:-}
+      POCKET_TTS_TARGET_RMS: ${POCKET_TTS_TARGET_RMS:-}
       # Optional — enables PocketTTS voice CLONING (issue #238). Cloning weights
       # are gated on Hugging Face; accept the terms at
       # huggingface.co/kyutai/pocket-tts and set HF_TOKEN in Portainer.

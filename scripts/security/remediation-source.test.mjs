@@ -73,13 +73,14 @@ test('controller production dependency locks meet the scanner fixed versions', a
   assert.ok(lockVersions(lock, 'undici').every((version) => atLeast(version, '7.30.1')));
   assert.ok(lockVersions(lock, 'body-parser').every((version) => atLeast(version, '2.4.0')));
   assert.ok(lockVersions(lock, 'multer').every((version) => atLeast(version, '2.5.0')));
+  assert.ok(lockVersions(lock, 're2js').every((version) => atLeast(version, '2.8.7')));
 });
 
 test('web dependency locks meet the production security fixed versions', async () => {
   const manifest = await json('web/package.json');
   const lock = await json('web/package-lock.json');
-  assert.equal(manifest.dependencies.next, '^16.4.2');
-  assert.equal(manifest.dependencies['@next/third-parties'], '^16.4.2');
+  assert.ok(atLeast(manifest.dependencies.next.replace(/^\^/, ''), '16.4.2'));
+  assert.ok(atLeast(manifest.dependencies['@next/third-parties'].replace(/^\^/, ''), '16.4.2'));
   assert.ok(lockVersions(lock, 'next').every((version) => atLeast(version, '16.4.2')));
   assert.ok(lockVersions(lock, 'sharp').every((version) => atLeast(version, '0.35.5')));
   assert.ok(lockVersions(lock, 'dompurify').every((version) => atLeast(version, '3.4.17')));

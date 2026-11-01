@@ -355,8 +355,8 @@ command until the ark migration reaches its release checkpoint.
 That fork-qualified tag is the only automatic publication boundary. It builds
 and publishes the full fork image matrix under the exact tag only after the
 reusable CI gate repeats all package quality checks, deployment-contract tests,
-and image smoke builds for the tagged commit. A ten-tag preflight matrix checks
-the nine locally built images plus the one mirrored CUDA analyzer after login;
+and image smoke builds for the tagged commit. An eleven-tag preflight matrix checks
+the ten locally built images plus the one mirrored CUDA analyzer after login;
 the complete preflight must pass before any image build can start. Workflow
 concurrency serializes runs for the same
 qualified tag without cancellation. It then scans the authenticated private

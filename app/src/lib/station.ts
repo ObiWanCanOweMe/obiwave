@@ -50,6 +50,13 @@ export function featuredStation(): StationRef {
   };
 }
 
+/** Replace or remove a login without changing the active station or recents. */
+export async function saveStationCredentials(rawUrl: string, credentials: StationCredentials | null): Promise<void> {
+  const base = splitStationAddress(rawUrl).base;
+  if (credentials) await credentialVault.set(base, credentials);
+  else await credentialVault.remove(base);
+}
+
 export async function loadStationPassword(rawUrl: string): Promise<string | null> {
   return stationPasswords.get(splitStationAddress(rawUrl).base);
 }

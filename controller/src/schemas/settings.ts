@@ -264,6 +264,37 @@ export function settingsTrimmedString(max: number, message: string) {
 }
 
 /**
+ * A control character (C0 or DEL) in a saved secret. No real key holds one, and
+ * fetch refuses a header value with a NUL, CR or LF in it, quoting the whole
+ * value in its error. Every save path strips them, as the admin form's inputs
+ * already do for line breaks, so a key pasted across a wrap through the API or
+ * a restored backup is joined rather than refused; the key probes refuse one
+ * instead (setup/secrets.ts secretValueIssue). The load path leaves a stored
+ * value alone. Defined here because a mirrored module may import only zod.
+ */
+export const SECRET_CONTROL_CHAR_RE = /[\x00-\x1F\x7F]/;
+
+export function stripSecretControlChars(value: string): string {
+  return value.replace(new RegExp(SECRET_CONTROL_CHAR_RE.source, 'g'), '');
+}
+
+/**
+ * `String(raw)` with NO trim and NO nullish default — search.apiKey's posture.
+ *
+ * `null` becomes the four-character string 'null' and is STORED. That is not a
+ * good design, but it is the shipping one, and a secret field is the last place
+ * to change storage behaviour by accident.
+ */
+export function settingsRawStringLike(max: number, message: string) {
+  return z
+    .unknown()
+    .superRefine((raw, ctx) => {
+      if (String(raw).length > max) ctx.addIssue({ code: 'custom', message });
+    })
+    .transform((raw) => String(raw));
+}
+
+/**
  * The header-name grammar `stream.countryHeader` accepts.
  *
  * RFC 7230 token characters minus the separators nobody puts in a proxy header,
@@ -387,14 +418,66 @@ export const SETTINGS_LOUDNESS_SOURCES = [
   'measured',
 ] as const;
 
-export const SETTINGS_SEARCH_PROVIDERS = [
-  'duckduckgo',
-  'tavily',
-  'brave',
-  'searxng',
-  'kagi',
-] as const;
-export const SETTINGS_SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi'] as const;
+// The search Select's groups, in display order.
+export const SEARCH_PROVIDER_GROUPS = ['keyless', 'keyed', 'self-hosted'] as const;
+export type SearchProviderGroup = (typeof SEARCH_PROVIDER_GROUPS)[number];
+
+export interface SearchProviderEntry {
+  id: string;
+  group: SearchProviderGroup;
+  // The Settings → Web search dropdown label, and the hint under it.
+  label: string;
+  hint: string;
+  // How the backend takes its provider-owned key: it needs one, it searches
+  // without one and a key raises its limits, or it takes none.
+  key: 'required' | 'optional' | 'none';
+  // The key field: whose key it is, its placeholder, and where to get one.
+  keyName?: string;
+  envVar?: string;
+  keyPlaceholder?: string;
+  keyUrl?: string;
+  // An optional key is sent only when it starts with this; malformed values
+  // leave the provider keyless. Every saved key belongs to its own provider.
+  keyPrefix?: string;
+}
+
+// The web-search backends, one record each and data only, in the order
+// GET /settings serves them. Lives beside searchPatchSchema because a mirrored
+// module may not import a sibling. The backends themselves are
+// skills/web-search.ts and the key probes routes/settings/llm.ts.
+export const SEARCH_PROVIDER_CATALOG = [
+  {
+    id: 'duckduckgo', group: 'keyless', label: 'DuckDuckGo (free, no key)', key: 'none',
+    hint: 'DuckDuckGo Instant Answer, free and keyless. Useful for definitions and well-known entities; silent otherwise. The segment director treats silence as a valid outcome.',
+  },
+  {
+    id: 'tavily', group: 'keyed', label: 'Tavily (paid web search)', key: 'required',
+    keyName: 'Tavily', envVar: 'SEARCH_API_KEY', keyPlaceholder: 'tvly-…', keyUrl: 'https://app.tavily.com/home',
+    hint: 'Tavily, paid web search with full results and an answer summary. Needs an API key.',
+  },
+  {
+    id: 'brave', group: 'keyed', label: 'Brave Search (API key, free monthly credits)', key: 'required',
+    keyName: 'Brave Search', envVar: 'SEARCH_API_KEY', keyPlaceholder: 'BSA…', keyUrl: 'https://api-dashboard.search.brave.com/app/keys',
+    hint: 'Brave Search API: real web + news results for artist queries. Metered billing with $5/month in free credits (~1,000 queries; a card on file is required). SUB/WAVE caches every search for 30 minutes.',
+  },
+  {
+    id: 'searxng', group: 'self-hosted', label: 'SearXNG (self-hosted)', key: 'none',
+    hint: 'SearXNG, self-hosted meta-search aggregating Google, Brave, DDG and more. No API key needed, just a running SearXNG instance.',
+  },
+  {
+    id: 'kagi', group: 'keyed', label: 'Kagi (paid Search API)', key: 'required',
+    keyName: 'Kagi', envVar: 'KAGI_API_KEY', keyPlaceholder: 'Kagi API key', keyUrl: 'https://kagi.com/settings?p=api',
+    hint: 'Kagi is a paid, privacy-oriented straight Search API with a dedicated key. SUB/WAVE caches every search for 30 minutes.',
+  },
+  {
+    id: 'keenable', group: 'keyless', label: 'Keenable (free, no key needed)', key: 'optional',
+    keyName: 'Keenable', envVar: 'KEENABLE_API_KEY', keyPlaceholder: 'keen_…', keyUrl: 'https://keenable.ai/console', keyPrefix: 'keen_',
+    hint: 'Keenable web search: real web results with no signup or API key, rate limited per IP. An optional Keenable key raises the limit. SUB/WAVE caches every search for 30 minutes.',
+  },
+] as const satisfies readonly SearchProviderEntry[];
+
+export const SETTINGS_SEARCH_PROVIDERS = SEARCH_PROVIDER_CATALOG.map((p) => p.id);
+export const SETTINGS_SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi', 'keenable'] as const;
 
 /**
  * Cap for the optional SearXNG `engines=` pin. Generous on purpose — the value
@@ -646,6 +729,7 @@ export const transitionsPatchSchema = settingsBlockOf({
   // save-time refusal. Do not add one here.
   pairDrain: settingsBoolLike(),
   stemBlends: settingsBoolLike(),
+  equalPowerCrossfade: settingsBoolLike(),
   effects: transitionEffectsPatchSchema,
 });
 
@@ -1088,15 +1172,15 @@ export const searchPatchSchema = settingsBlockOf({
 const scrobbleLastfmSchema = settingsBlockOf({
   enabled: settingsBoolLike(),
   username: settingsTrimmedString(40, 'scrobble.lastfm.username must be 0-40 chars'),
-  apiKey: settingsTrimmedString(200, 'scrobble.lastfm.apiKey must be 0-200 chars'),
-  apiSecret: settingsTrimmedString(200, 'scrobble.lastfm.apiSecret must be 0-200 chars'),
-  sessionKey: settingsTrimmedString(200, 'scrobble.lastfm.sessionKey must be 0-200 chars'),
+  apiKey: settingsTrimmedString(200, 'scrobble.lastfm.apiKey must be 0-200 chars').transform(stripSecretControlChars),
+  apiSecret: settingsTrimmedString(200, 'scrobble.lastfm.apiSecret must be 0-200 chars').transform(stripSecretControlChars),
+  sessionKey: settingsTrimmedString(200, 'scrobble.lastfm.sessionKey must be 0-200 chars').transform(stripSecretControlChars),
 });
 
 const scrobbleListenbrainzSchema = settingsBlockOf({
   enabled: settingsBoolLike(),
   username: settingsTrimmedString(40, 'scrobble.listenbrainz.username must be 0-40 chars'),
-  userToken: settingsTrimmedString(200, 'scrobble.listenbrainz.userToken must be 0-200 chars'),
+  userToken: settingsTrimmedString(200, 'scrobble.listenbrainz.userToken must be 0-200 chars').transform(stripSecretControlChars),
   // No trailing-slash strip: the consumer appends /submit-listens.
   baseUrl: settingsUrlLike({
     max: 500,

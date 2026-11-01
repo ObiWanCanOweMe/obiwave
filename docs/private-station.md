@@ -60,8 +60,20 @@ every listener connect, so:
 
 - **Web player** — asks for the password once and remembers it in the
   browser. If the private player is on too, the single prompt unlocks both the
-  interface and the audio. Under the hood it rides a `?auth=PASSWORD` token on
-  the stream URL (browsers can't attach basic auth to an `<audio>` element).
+  interface and the audio. Until the password is accepted, the player behind
+  the prompt ignores taps and keys, so the first tap can't tune in without it.
+  Under the hood it rides a `?auth=PASSWORD` token on the stream URL (browsers
+  can't attach basic auth to an `<audio>` element).
+  A typed password is saved only when the station accepts it. The saved one is
+  checked again on each visit and forgotten only when the station itself
+  refuses it. If the check gets no answer from the station (a network blip, the
+  rate limit, a proxy's 401 or login page), the password is kept and the player
+  opens with it, because the stream still checks it on every connect. If the
+  player then can't connect, it asks the station again, at most every two
+  minutes, and waits out the rate limit. Once the station refuses the password,
+  usually because you changed it, the player stops and asks for the new one,
+  saying the saved password was not accepted. Changing the password never drops
+  anyone who is already listening; it reaches them the next time they reconnect.
 - **Radio apps / VLC / Sonos / hardware** — use a credentialed URL:
   `https://listener:PASSWORD@your-station.example/stream.mp3`
   (any username works; only the password is checked).
@@ -127,6 +139,29 @@ Things to know:
   entered at the app's private-station prompt, it rides the stream URL.
 - **Special characters need no percent-encoding in the fields.** Type the real
   username and password, including `@` or `:`.
+- **A saved login can be changed or removed.** In **Stations**, tap the key on
+  a saved station, or **Station login** on the station you're tuned in to. The
+  app checks a changed login with the station before saving it: a login the
+  proxy refuses is never saved, and one it couldn't check (the station is
+  unreachable, or its answer says nothing about the login) is saved only if
+  you tap **Save anyway**. On a station with the
+  stream password on and no proxy guarding `/api`, the login's password is
+  checked as the stream password. A refusal there offers **Save anyway** too:
+  a proxy that guards only the audio stream may still want that login, and the
+  app has no way to ask it.
+- **A login the station stops accepting stops the player.** When the proxy
+  answers the saved login with a 401 whose `WWW-Authenticate` challenge asks
+  for Basic (what an HTTP Basic Auth proxy sends for a wrong login), the player
+  stops reconnecting and says **Station login rejected**, with a button to the
+  same screen. Nothing else does this: not a network drop or a timeout, not a
+  challenge in another scheme (Bearer, Digest), which the login can't answer
+  whatever it is, and not a 403, which an IP allowlist, a WAF or a Cloudflare
+  challenge page sends whatever the login is. The edit screen reads
+  `/api/health` by the same rule: only a 401 asking for Basic there is the
+  proxy refusing a login, and any other failure leaves it unchecked.
+  The app finds out by asking `/api/health`, never the stream (that would count
+  a listener), so a proxy that guards only the audio stream and not `/api`
+  goes unnoticed.
 
 Older app versions accepted `https://user:pass@host` addresses. On upgrade,
 the app removes that userinfo from the saved station URL and migrates the
@@ -146,3 +181,8 @@ listener the stream without handing them the console.
   station, which is at odds with private mode; leave `SUBWAVE_HOMEPAGE=player`
   (the default) on a private install.
 - The `?auth=` token appears in Icecast's access log on your own box.
+
+
+### v1.29 password recovery
+
+A stalled player rechecks a saved station password at most every two minutes and honors Retry-After. Only the controller's own unchallenged refusal clears that password. Native saved logins can be edited or removed from Stations → Station login; a proxy refusal counts only when HTTP 401 carries a Basic challenge. API calls and image sources remain credential-free URLs with explicit headers scoped to the station; public and third-party artwork never receives that header. Playback logs redact station credentials.

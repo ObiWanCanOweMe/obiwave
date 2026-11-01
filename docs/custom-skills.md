@@ -206,7 +206,7 @@ weave into this segment. Valid fields:
 | `date` | day of week, date, season |
 | `clock` | local clock time, plus weekend / late-night / commute tags |
 | `time` | the daypart and its vibe (e.g. "morning, productive") |
-| `weather` | current condition, temperature, location |
+| `weather` | current condition, temperature, and the on-air location unless the DJ prompt template drops `{location}` |
 | `festival` | the named festival, if today is one |
 | `show` | the scheduled show on air, if any |
 | `listeners` | how many people are tuned in |
@@ -704,3 +704,8 @@ tries up to five artists from Navidrome's artist index. Research is optional in
 the example: no search results means the DJ must stick to supplied library facts.
 Existing custom tools that return arbitrary data need this result envelope to
 serve as preparation skills.
+
+
+### v1.29 integration notes
+
+| `services.searchWeb(query, opts?)` | web search via the configured provider (DuckDuckGo / Tavily / Brave / SearXNG / Keenable) |

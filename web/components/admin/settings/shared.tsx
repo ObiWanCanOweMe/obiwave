@@ -15,15 +15,14 @@ import { useSectionChrome, useReportDirty } from './section-chrome';
 import { Button } from '../../ui/button';
 import { FieldError } from '../../ui/field';
 import type { TransitionEffect, JingleRotateOwner, JinglePlacement, GeminiSafety } from '../../../lib/schemas.generated';
+import { LLM_PROVIDER_CATALOG } from '../../../lib/schemas.generated';
 export type { TransitionEffect } from '../../../lib/schemas.generated';
 
 export const KEY_HINTS: Record<string, string> = {
-  ANTHROPIC_API_KEY: 'sk-ant-...',
-  OPENAI_API_KEY: 'sk-...',
-  GOOGLE_GENERATIVE_AI_API_KEY: 'AIza...',
-  DEEPSEEK_API_KEY: 'sk-...',
-  OPENROUTER_API_KEY: 'sk-or-v1-...',
-  AI_GATEWAY_API_KEY: 'gateway API key',
+  // The LLM providers' key fields, from the provider catalogue.
+  ...Object.fromEntries(
+    LLM_PROVIDER_CATALOG.flatMap(p => (p.envVar && p.keyPlaceholder ? [[p.envVar, p.keyPlaceholder]] : [])),
+  ),
   ELEVENLABS_API_KEY: 'el_...',
   // Fish keys have no documented prefix — point at where to mint one instead.
   FISH_API_KEY: 'key from fish.audio/app/api-keys',
@@ -306,6 +305,7 @@ export interface LoudnessForm {
 export interface TransitionsForm {
   pairDrain: boolean;   // hold picks until the successor is known (#749 fix)
   stemBlends: boolean;  // pre-rendered stem-blend seams (needs pairDrain + stem cache)
+  equalPowerCrossfade: boolean;  // plain crossfade curve: false = linear, true = equal-power (mixer restart)
   stemCache: boolean;   // settings.audio.stemCache — persist Demucs stems during analysis
   stemCacheGb: string;  // settings.audio.stemCacheGb — byte budget the LRU sweep enforces
   /** settings.transitions.effects — which gestures the DJ may reach for. Always
@@ -442,6 +442,7 @@ export interface SettingsData {
     transitions?: {
       pairDrain?: boolean;
       stemBlends?: boolean;
+      equalPowerCrossfade?: boolean;
       effects?: Partial<Record<TransitionEffect, boolean>>;
     };
     audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean; stemCacheGb?: number };
@@ -599,6 +600,8 @@ export interface SettingsData {
   };
   search?: {
     providers?: string[];
+    // Where the key a Keenable search sends comes from; null when it runs keyless.
+    keenableKeySource?: 'settings' | 'env' | null;
   };
   defaults?: {
     search?: Partial<SearchForm>;
@@ -828,7 +831,9 @@ export function SaveBar({ note, busy, onSave, saveLabel, errors, ownedKeys, dirt
       )}
       <span className="min-w-0 flex-1 text-[12px] leading-[1.5] break-words text-muted">{note}</span>
       <span className="ml-auto flex w-full gap-2 sm:w-auto">
-        <m.span whileTap={{ scale: 0.97 }} className="inline-flex flex-1 sm:flex-none">
+        {/* whileTap makes motion give the span tabIndex 0 unless one is set,
+            which would put a dead Tab stop before Save. */}
+        <m.span whileTap={{ scale: 0.97 }} tabIndex={-1} className="inline-flex flex-1 sm:flex-none">
           <Btn tone="accent" onClick={onSave} disabled={busy} className="w-full sm:w-auto">{saveLabel}</Btn>
         </m.span>
       </span>

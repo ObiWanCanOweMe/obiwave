@@ -297,6 +297,11 @@ services:
       # The local (AIO) chatterbox path already honoured this; forwarding it
       # here is what makes the sidecar agree (#1591).
       - CHATTERBOX_REFERENCE_WAV=\${CHATTERBOX_REFERENCE_WAV:-}
+      # On-air level of each engine's clips: the linear RMS a clip is
+      # normalised to before the soft limiter. Read by the workers, which
+      # inherit this env; empty keeps each worker's own default.
+      - CHATTERBOX_TARGET_RMS=\${CHATTERBOX_TARGET_RMS:-}
+      - POCKET_TTS_TARGET_RMS=\${POCKET_TTS_TARGET_RMS:-}
       # Optional — PocketTTS voice CLONING (#238): the cloning weights are
       # gated on HF; accept the terms at huggingface.co/kyutai/pocket-tts and
       # set HF_TOKEN. Without it, cloned .wav voices revert to a built-in.
@@ -655,6 +660,9 @@ services:
       # Fallback Chatterbox reference WAV when a line has no persona voice of
       # its own — a path inside this container (see docker-compose.yml).
       - CHATTERBOX_REFERENCE_WAV=\${CHATTERBOX_REFERENCE_WAV:-}
+      # On-air level targets (linear RMS); empty keeps each worker's default.
+      - CHATTERBOX_TARGET_RMS=\${CHATTERBOX_TARGET_RMS:-}
+      - POCKET_TTS_TARGET_RMS=\${POCKET_TTS_TARGET_RMS:-}
       # Optional — PocketTTS voice cloning (#238): accept the terms at
       # huggingface.co/kyutai/pocket-tts and set HF_TOKEN.
       - HF_TOKEN=\${HF_TOKEN:-}
@@ -956,6 +964,9 @@ services:
       # Fallback Chatterbox reference WAV when a line has no persona voice of
       # its own — a path inside this container (see docker-compose.yml).
       - CHATTERBOX_REFERENCE_WAV=\${CHATTERBOX_REFERENCE_WAV:-}
+      # On-air level targets (linear RMS); empty keeps each worker's default.
+      - CHATTERBOX_TARGET_RMS=\${CHATTERBOX_TARGET_RMS:-}
+      - POCKET_TTS_TARGET_RMS=\${POCKET_TTS_TARGET_RMS:-}
       # Optional — PocketTTS voice cloning (#238); weights gated on HF.
       - HF_TOKEN=\${HF_TOKEN:-}
     volumes:
@@ -1250,6 +1261,16 @@ SITE_URL=
 # directly lets a single spoofed header defeat every limit listed above.
 # TRUST_CF_CONNECTING_IP=1
 
+# The admin brute-force lockout: ten DIFFERENT wrong passwords lock sign-in for
+# 15 minutes, and the right password is refused until it lifts. A client
+# re-sending one old password counts once, so a forgotten tab can't trip it.
+# The lock is held in memory: \`docker compose restart controller\` clears it now.
+#
+# Set this to turn the lockout off altogether, on a station that can't be reached
+# from the internet. Nothing then limits password guesses, so ADMIN_PASS alone
+# guards the admin API. Compose reads it at recreate, not at restart.
+# ADMIN_LOCKOUT=off
+
 # Offline GeoIP database for the Stats page's listener-country rollup.
 #
 # Stats reads CF-IPCountry first, then whatever header you name in
@@ -1307,6 +1328,7 @@ SITE_URL=
 # ELEVENLABS_API_KEY=
 # FISH_API_KEY=
 # SEARCH_API_KEY=tvly-...           # Tavily or Brave Search key (optional, paid/metered)
+# KEENABLE_API_KEY=keen_...        # Optional dedicated Keenable key (raises its free limit)
 # KAGI_API_KEY=...                  # Kagi Search API environment fallback
 # SearXNG: no env var. Configure base URL in admin UI → Settings → Search.
 # Embedding key — only when embeddings use a different provider/key than chat
@@ -1510,6 +1532,15 @@ SITE_URL=
 # all-in-one image reads the same variable for its in-process Chatterbox.
 # CHATTERBOX_REFERENCE_WAV=/var/sub-wave/voices/house.wav
 #
+# On-air level of the heavy voices: the linear RMS each clip is normalised to
+# before a soft limiter catches its peaks (x1.12 is about +1 dB). Chatterbox's
+# default sits it beside Piper and Kokoro; PocketTTS's is deliberately hot.
+# Empty keeps the default, and anything that isn't a positive number is
+# ignored with a warning. Read by the tts-heavy sidecar and the in-process
+# workers alike.
+# CHATTERBOX_TARGET_RMS=0.135
+# POCKET_TTS_TARGET_RMS=0.245
+#
 # Own TTS server? There's nothing to set here — the *Remote* engine points the
 # DJ at any HTTP server that answers GET /health and returns rendered audio from
 # POST /speak (a GPU box, a Tailscale peer, a bridge in front of a vendor API
@@ -1530,4 +1561,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.28.0`; // x-release-please-version
+export const CLI_VERSION = `1.29.0`; // x-release-please-version

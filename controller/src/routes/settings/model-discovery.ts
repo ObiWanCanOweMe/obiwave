@@ -9,6 +9,7 @@ import {
   effectiveLiteLlmBaseUrl,
 } from '../../litellm-config.js';
 import { createGateway } from 'ai';
+import { EMBEDDING_PROVIDER_IDS, llmProviderEntry, openaiCompatibleGateway } from '../../schemas/providers.js';
 
 export type ModelOwner = 'chat' | 'embedding' | 'tts';
 export type ChatLeg = 'primary' | 'fallback' | 'onboarding';
@@ -28,15 +29,7 @@ export interface ModelDiscoveryResult {
   provider: string;
 }
 
-const EMBEDDING_PROVIDERS = new Set([
-  'ollama',
-  'openai-compatible',
-  'locca',
-  'openrouter',
-  'openai',
-  'google',
-  'requesty',
-]);
+const EMBEDDING_PROVIDERS = new Set(EMBEDDING_PROVIDER_IDS);
 const TTS_PROVIDERS = new Set(['openai', 'elevenlabs', 'openai-compatible']);
 
 function endpoint(value: unknown): string {
@@ -185,15 +178,8 @@ function managedApiKey(input: ModelDiscoveryInput): string {
       if (inline) return inline;
     }
   }
-  const envByProvider: Record<string, string> = {
-    openai: 'OPENAI_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-    google: 'GOOGLE_GENERATIVE_AI_API_KEY',
-    deepseek: 'DEEPSEEK_API_KEY',
-    requesty: 'REQUESTY_API_KEY',
-    gateway: 'AI_GATEWAY_API_KEY',
-  };
-  return envByProvider[input.provider] ? envKey(envByProvider[input.provider]) : '';
+  const envVar = llmProviderEntry(input.provider)?.envVar;
+  return envVar ? envKey(envVar) : '';
 }
 
 async function discoverLiteLlm(input: ModelDiscoveryInput): Promise<string[]> {
@@ -326,14 +312,6 @@ export async function discoverModels(input: ModelDiscoveryInput): Promise<ModelD
       models = modelsFromOpenAiPayload(await getJson(url));
       break;
     }
-    case 'requesty': {
-      if (!apiKey) throw new Error('Requesty API key not set');
-      models = modelsFromOpenAiPayload(await getJson(
-        `${llmProvider.DEFAULT_REQUESTY_BASE_URL}/models`,
-        { headers: { Authorization: `Bearer ${apiKey}` } },
-      ));
-      break;
-    }
     case 'gateway': {
       const gateway = createGateway({
         ...(apiKey ? { apiKey } : {}),
@@ -346,8 +324,13 @@ export async function discoverModels(input: ModelDiscoveryInput): Promise<ModelD
         .filter((id): id is string => typeof id === 'string');
       break;
     }
-    default:
-      throw new Error(`unknown provider: ${provider}`);
+    default: {
+      const gw = openaiCompatibleGateway(provider);
+      if (!gw) throw new Error(`unknown provider: ${provider}`);
+      if (!apiKey) throw new Error(`${gw.label} API key not set`);
+      models = modelsFromOpenAiPayload(await getJson(`${gw.openaiCompatible.baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` } }));
+      break;
+    }
   }
 
   return { models: filterForOwner(models, owner, provider), provider };
