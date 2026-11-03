@@ -223,3 +223,5 @@ and clears show playlist IDs in both current and legacy settings storage.
 ### Trusted proxy diagnostics
 
 The shared `docker/icecast-render.sh` now writes `trusted-proxies.json` on every render with the resolved addresses, source and dropped inputs. Admin Listeners reads this marker; an absent or invalid marker remains unknown. Marker writes fail open and never prevent broadcasting.
+
+**Main station settings permissions.** The operator requires `state/stations/main/settings.json` at exactly `0644`. `settings/file.ts` applies this only to that station path at startup and after ordinary or station-management writes, including under a restrictive umask. Other station settings remain owner-only; duplicating main writes the new station's settings through the private-file policy. The protected production workflow verifies Docker's file metadata with HEAD and never downloads the settings contents.

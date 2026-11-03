@@ -24,6 +24,7 @@ import { readFile, unlink, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { STATE_DIR } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
+import { ensureMainSettingsMode, writeSettingsFile } from './settings/file.js';
 import { DEFAULT_THEME_ID, listThemes } from './themes.js';
 import { resolveThemeId } from './util/theme-id.js';
 import { isValidTimezone, setStationTimezone } from './time.js';
@@ -379,6 +380,9 @@ export async function load() {
   if (existsSync(SETTINGS_PATH)) {
     try {
       stored = JSON.parse(await readFile(SETTINGS_PATH, 'utf8'));
+      await ensureMainSettingsMode(SETTINGS_PATH).catch(() => {
+        console.warn('[settings] could not apply main station settings permissions');
+      });
     } catch {}
   }
 
@@ -2861,11 +2865,8 @@ async function applySettingsUpdate(patch) {
   // resolveActiveShow / getEffectivePersona / the integrity sweep all
   // continue to work against one merged view.
   const { shows: _shows, schedule: _schedule, scheduleOverride: _override, ...settingsPersist } = next;
-  // Atomic replace — a crash mid-write must not take the operator's whole
-  // config (or show schedule) with it. Owner-only: settings.json carries every
-  // inline credential getRedacted() masks, in a state dir other accounts can
-  // list. schedule.json holds none and keeps whatever mode it has.
-  await writeFileAtomic(SETTINGS_PATH, JSON.stringify(settingsPersist, null, 2), { mode: 0o600 });
+  // Keep atomic publication and the station-specific permission policy together.
+  await writeSettingsFile(SETTINGS_PATH, JSON.stringify(settingsPersist, null, 2));
   // Every save writes the whole llm block, the derived trackSelection with it,
   // so the Candidate Pool migration is now on disk as an ordinary choice.
   candidatePoolMigrated = false;

@@ -15,6 +15,7 @@ import { stationCreateSchema, stationRenameSchema } from '../schemas/station.js'
 import { stationCapMessage, uniqueStationId } from '../schemas/station-server.js';
 import { hasNavidrome, NAVIDROME_PROFILE_POLICY, type NavidromeCredentials } from '../setup/navidrome-policy.js';
 import { writeFileAtomicSync } from '../util/atomic-file.js';
+import { writeSettingsFileSync } from '../settings/file.js';
 import { firstMessage } from '../util/zod-error.js';
 
 // Thrown by createStation(). `converted` says the legacy-root conversion already
@@ -91,7 +92,7 @@ function patchSettingsStation(dir: string, name: string): void {
     // absent or corrupt — seed minimal; load() fills the rest from DEFAULTS
   }
   s.station = name;
-  writeFileSync(p, JSON.stringify(s, null, 2));
+  writeSettingsFileSync(p, JSON.stringify(s, null, 2));
 }
 
 function stationHasNavidrome(dir: string): boolean {
@@ -114,8 +115,8 @@ function clearCopiedPlaylistIds(dir: string): void {
       delete show.playlistIds;
       delete show.excludedPlaylistIds;
     }
-    // settings.json carries inline credentials; keep it owner-only.
-    writeFileAtomicSync(path, JSON.stringify(data, null, 2), name === 'settings.json' ? { mode: 0o600 } : {});
+    if (name === 'settings.json') writeSettingsFileSync(path, JSON.stringify(data, null, 2));
+    else writeFileAtomicSync(path, JSON.stringify(data, null, 2));
   }
 }
 

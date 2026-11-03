@@ -57,9 +57,12 @@ function setSearch(t: TestContext, search: Record<string, unknown>) {
   const original = structuredClone(settings.get().search);
   t.after(async () => {
     delete process.env.SEARCH_API_KEY;
+    await settings.update({ search: { apiKeys: Object.fromEntries(Object.keys(settings.get().search.apiKeys).map(p => [p, null])) } });
     await settings.update({ search: original });
   });
-  return settings.update({ search });
+  const { apiKey, ...rest } = search;
+  const provider = String(rest.provider || settings.get().search.provider);
+  return settings.update({ search: { ...rest, apiKeys: { [provider]: apiKey || null } } });
 }
 
 const row = (name: string) => {
@@ -122,10 +125,10 @@ test("Tavily and Brave name another provider's key too, and pass any other", asy
   assert.equal(row('web-search').ready, false);
   assert.equal(row('web-search').keyProblem, 'The key on file is a Firecrawl key, not a Tavily key');
 
-  await settings.update({ search: { provider: 'brave', apiKey: 'tvly-left-over' } });
+  await settings.update({ search: { provider: 'brave', apiKeys: { 'brave': 'tvly-left-over' } } });
   assert.equal(row('web-search').keyProblem, 'The key on file is a Tavily key, not a Brave Search key');
 
-  await settings.update({ search: { provider: 'brave', apiKey: 'BSA-a-real-one' } });
+  await settings.update({ search: { provider: 'brave', apiKeys: { 'brave': 'BSA-a-real-one' } } });
   assert.equal(searchKeyProblem(), null);
   assert.equal(row('web-search').ready, true);
   assert.equal(row('web-search').keyProblem, null);
@@ -153,7 +156,7 @@ test('Run now keeps its existing hints for a missing key and an unrelated gate',
   await setSearch(t, { provider: 'firecrawl', apiKey: '' });
   await assert.rejects(runCapability('web-search', {}), /set SEARCH_API_KEY or paste a Firecrawl key/);
   await assert.rejects(runCapability('custom-keyed', {}), /set SKILL_SEARCH_KEY_TEST/);
-  await settings.update({ search: { provider: 'firecrawl', apiKey: 'tvly-left-over' } });
+  await settings.update({ search: { provider: 'firecrawl', apiKeys: { 'firecrawl': 'tvly-left-over' } } });
   await assert.rejects(runCapability('custom-keyed', {}), /set SKILL_SEARCH_KEY_TEST/);
 });
 

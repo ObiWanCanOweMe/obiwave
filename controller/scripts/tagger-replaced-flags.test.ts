@@ -28,7 +28,7 @@ process.env.LIQUIDSOAP_PORT = '1';
 const started: string[][] = [];
 const spawn = cp.spawn;
 cp.spawn = ((command: string, args: readonly string[], opts: cp.SpawnOptions) => {
-  if (command === 'npx' && opts?.cwd === '/app') {
+  if (command.endsWith('/node_modules/.bin/tsx') && args.some(arg => arg.includes('music/tag-library'))) {
     started.push([...args]);
     return spawn(process.execPath, ['-e', 'process.exit(0)'], { ...opts, cwd: STATE });
   }
