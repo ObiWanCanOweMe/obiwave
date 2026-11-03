@@ -2,7 +2,7 @@
 // segment-tools.js). There is no standalone "web-search skill" object — the
 // segment-director agent (skills/_agent.js) decides when artist news airs.
 //
-// Six backends, chosen via settings.search.provider:
+// Seven backends, chosen via settings.search.provider:
 //   - duckduckgo (default) — DuckDuckGo's Instant Answer API. Free, no key,
 //     officially documented. Returns useful results only for entity / definition
 //     queries; for most artist queries it returns nothing, which the segment
@@ -23,16 +23,22 @@
 // — so callers don't have to branch. searchWeb() wraps every call in a 30-min
 // memo to keep the homelab polite under DDG's unofficial fair-use limits and
 // to avoid burning metered-provider credits on duplicate ticks.
+// Firecrawl uses a provider-owned saved key or SEARCH_API_KEY (fc- prefix required).
 
 import * as settings from '../settings.js';
+import { SETTINGS_SEARCH_PROVIDERS } from '../schemas/settings.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
 import { BoundedKeyMap } from '../util/bounded-key-map.js';
+import {
+  searchKeyFits, searchKeyMismatch, searchKeyRequired,
+} from './search-key-policy.js';
 
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const DDG_ENDPOINT = 'https://api.duckduckgo.com/';
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const KEENABLE_ENDPOINT = 'https://api.keenable.ai/v1/search';
 const KAGI_ENDPOINT = 'https://kagi.com/api/v1/search';
+const FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev/v2/search';
 
 type SearchResult = { title: string; content: string };
 type SearchResponse = { answer: string; results: SearchResult[] };
@@ -66,8 +72,17 @@ async function memo(
   return val;
 }
 
+// The sentence for a key on file that `provider` refuses, or null when it
+// doesn't (an empty key included). search-key-policy.ts decides.
+function keyOnFileRefusal(provider: string, key: string): string | null {
+  const mismatch = searchKeyMismatch(provider, key);
+  return mismatch && `The key on file is ${mismatch}`;
+}
+
 export async function tavilySearch(query: string): Promise<SearchResponse> {
   const apiKey = settings.searchKeyFor('tavily');
+  const refusal = keyOnFileRefusal('tavily', apiKey);
+  if (refusal) throw new Error(refusal);
   const res = await fetchWithTimeout(TAVILY_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -242,6 +257,8 @@ export async function braveSearch(
 ): Promise<SearchResponse> {
   const apiKey = settings.searchKeyFor('brave');
   if (!apiKey) throw new Error('Brave Search API key not configured');
+  const refusal = keyOnFileRefusal('brave', apiKey);
+  if (refusal) throw new Error(refusal);
 
   const url = new URL(BRAVE_ENDPOINT);
   url.searchParams.set('q', query);
@@ -263,10 +280,11 @@ export async function braveSearch(
   return parseBraveResponse(data);
 }
 
-// Strips residual markup from Brave snippets. text_decorations=0 removes the
-// highlighting, but descriptions can still carry entities (&#x27; etc.) and
-// the occasional stray tag depending on the source page.
-function braveText(raw: unknown): string {
+// Strips residual markup from a search snippet. Brave and Firecrawl both pass
+// through page descriptions, which can carry entities (&#x27; etc.) and the
+// occasional stray tag depending on the source page, even with Brave's
+// text_decorations=0 removing the highlighting.
+function cleanSnippet(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw
     .replace(/<[^>]+>/g, '')
@@ -336,14 +354,14 @@ export function parseBraveResponse(data: unknown): SearchResponse {
   // one-element array — accept either.
   const ibRaw = sub(d.infobox, 'results');
   const ib = Array.isArray(ibRaw) ? ibRaw[0] : ibRaw;
-  const answer = braveText(sub(ib, 'long_desc') || sub(ib, 'description'));
+  const answer = cleanSnippet(sub(ib, 'long_desc') || sub(ib, 'description'));
 
   const results: SearchResult[] = [];
   const push = (r: unknown) => {
     if (!r || typeof r !== 'object' || results.length >= 10) return;
     const rec = r as Record<string, unknown>;
-    const title = braveText(rec.title);
-    const content = braveText(rec.description).slice(0, 300);
+    const title = cleanSnippet(rec.title);
+    const content = cleanSnippet(rec.description).slice(0, 300);
     if (!title || !content) return;
     results.push({ title, content });
   };
@@ -410,6 +428,8 @@ export async function kagiSearch(
 ): Promise<SearchResponse> {
   const apiKey = options.apiKey || settings.searchKeyFor('kagi');
   if (!apiKey) throw new Error('Kagi Search API key not configured');
+  const refusal = keyOnFileRefusal('kagi', apiKey);
+  if (refusal) throw new Error(refusal);
   const after = kagiAfterDate(recency, options.now);
   const response = await fetchWithTimeout(KAGI_ENDPOINT, {
     method: 'POST',
@@ -462,10 +482,10 @@ export async function keenableSearch(
   return parseKeenableResponse(data);
 }
 
-// The one test for "is this a Keenable key": the request builder, the admin
-// key probe and keenableKeySource all ask it.
+// "Is this a Keenable key": the request builder, the admin key probe and
+// keenableKeySource all ask it. The rule is search-key-policy.ts's.
 export function isKeenableKey(key: string): boolean {
-  return key.trim().startsWith('keen_');
+  return searchKeyFits('keenable', key);
 }
 
 // Where the key a Keenable search would send comes from, or null when it runs
@@ -538,6 +558,102 @@ export function parseKeenableResponse(data: unknown): SearchResponse {
   return { answer: '', results };
 }
 
+// Firecrawl resolves its provider-owned saved key, then SEARCH_API_KEY.
+// A pasted key or environment fallback may belong to another provider, so anything but
+// an `fc-` value is refused here and reads as not ready in searchReady(). Threads
+// optional recency through Firecrawl's `tbs` param (qdr:d/w/m).
+export async function firecrawlSearch(
+  query: string,
+  recency?: 'day' | 'week' | 'month',
+): Promise<SearchResponse> {
+  const apiKey = settings.searchKeyFor('firecrawl');
+  if (!apiKey) throw new Error('Firecrawl API key not configured');
+  const refusal = keyOnFileRefusal('firecrawl', apiKey);
+  if (refusal) throw new Error(refusal);
+  const { url, init } = buildFirecrawlRequest({ query, apiKey, recency });
+  const res = await fetchWithTimeout(url, { ...init, timeoutMs: 30_000 });
+  if (!res.ok) throw new Error(`Firecrawl HTTP ${res.status}`);
+  const data = await res.json();
+  return parseFirecrawlResponse(data);
+}
+
+// "Is this a Firecrawl key", with the rule in search-key-policy.ts. It matches
+// Firecrawl's own CLI, which refuses any cloud key without the prefix. Their API
+// still accepts a legacy key as a bare UUID, but that key also works as `fc-` +
+// the UUID without its dashes, so nothing valid is locked out.
+export function isFirecrawlKey(key: string): boolean {
+  return searchKeyFits('firecrawl', key);
+}
+
+// Where the key a Firecrawl search would send comes from, or null when the slot
+// holds none or holds another provider's. GET /settings serves this because the
+// admin only sees a redacted key, and can't tell whose it is.
+export function firecrawlKeySource(): 'settings' | 'env' | null {
+  const key = settings.searchKeyFor('firecrawl');
+  const source = settings.get().search?.apiKeys?.firecrawl ? 'settings' : key ? 'env' : null;
+  return isFirecrawlKey(key) ? source : null;
+}
+
+// Why the selected provider refuses the key on file, or null when it doesn't.
+// No key at all is null too: that one keeps its own "set a key" wording, which
+// can't fix this state, because a saved key shadows SEARCH_API_KEY. Only a
+// provider that needs a key has a problem: Keenable runs keyless instead.
+export function searchKeyProblem(): string | null {
+  const provider = settings.get().search?.provider || 'duckduckgo';
+  if (!searchKeyRequired(provider)) return null;
+  return keyOnFileRefusal(provider, settings.searchKeyFor(provider));
+}
+
+// The keyed providers that would refuse the key on file. GET /settings serves
+// it because the admin only sees a redacted key, and the provider dropdown can
+// change before a save.
+export function searchKeyRefusedBy(): string[] {
+  return SETTINGS_SEARCH_PROVIDERS.filter(provider => !!keyOnFileRefusal(provider, settings.searchKeyFor(provider)));
+}
+
+// Pure request builder for a Firecrawl search, exported so endpoint, headers
+// and body can be pinned without mocking fetch.
+export function buildFirecrawlRequest(opts: {
+  query: string;
+  apiKey: string;
+  recency?: 'day' | 'week' | 'month';
+}): { url: string; init: RequestInit } {
+  const body: Record<string, unknown> = { query: opts.query, limit: 5 };
+  if (opts.recency) body.tbs = { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m' }[opts.recency];
+  return {
+    url: FIRECRAWL_ENDPOINT,
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.apiKey.trim()}` },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
+// Pure parser for Firecrawl's search JSON (data.web[] of url/title/
+// description). Descriptions can carry HTML entities, so they go through the
+// same cleanup as Brave's, then whitespace is collapsed before the 300-char
+// cap. There is no answer field. Any shape mismatch yields { answer: '', results: [] }.
+export function parseFirecrawlResponse(data: unknown): SearchResponse {
+  if (!data || typeof data !== 'object') return { answer: '', results: [] };
+  const inner = (data as Record<string, unknown>).data;
+  const raw = inner && typeof inner === 'object' ? (inner as Record<string, unknown>).web : undefined;
+
+  const text = (v: unknown): string => cleanSnippet(v).replace(/\s+/g, ' ').trim();
+  const results: SearchResult[] = [];
+  for (const r of Array.isArray(raw) ? raw : []) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    const title = text(rec.title);
+    const content = text(rec.description).slice(0, 300);
+    if (!title || !content) continue;
+    results.push({ title, content });
+    if (results.length >= 5) break;
+  }
+
+  return { answer: '', results };
+}
+
 // Provider dispatcher — reads the active provider from live settings on every
 // call so admin-UI changes take effect immediately. Wraps the backend in a
 // 30-min memo. Cache key includes recency so two callsites with different
@@ -555,6 +671,7 @@ export async function searchWeb(
     if (provider === 'brave') return braveSearch(query, recency);
     if (provider === 'keenable') return keenableSearch(query, recency);
     if (provider === 'kagi') return kagiSearch(query, recency);
+    if (provider === 'firecrawl') return firecrawlSearch(query, recency);
     return duckduckgoSearch(query);
   });
 }
@@ -563,14 +680,12 @@ export async function searchWeb(
 //   duckduckgo:   always ready (no key, no URL)
 //   tavily/brave: needs a provider-owned saved key, or SEARCH_API_KEY env
 //   kagi:        needs a provider-owned saved key, or KAGI_API_KEY env
+//   firecrawl:    needs a provider-owned key or SEARCH_API_KEY with fc- prefix
 //   searxng:      needs settings.search.baseUrl (no env fallback by design)
 export function searchReady(): boolean {
   const s = settings.get().search;
   const provider = s?.provider || 'duckduckgo';
   if (provider === 'duckduckgo' || provider === 'keenable') return true;
   if (provider === 'searxng') return !!(s?.baseUrl && s.baseUrl.trim());
-  if (provider === 'tavily' || provider === 'brave' || provider === 'kagi') {
-    return !!settings.searchKeyFor(provider);
-  }
-  return false;
+  return searchKeyFits(provider, settings.searchKeyFor(provider));
 }

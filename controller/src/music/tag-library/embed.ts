@@ -47,6 +47,8 @@ export async function phaseEmbed(
     const eraYears = songs.map(t =>
       resolveEraYear(t.year, t.originalYear, t.yearUntrusted),
     );
+    // Measured acoustics only (#1246), through the one mapping.
+    const acoustics = songs.map(t => embeddings.trackAcoustics(t));
     const texts = songs.map((t, index) =>
       embeddings.formatTrackText(
         {
@@ -55,13 +57,7 @@ export async function phaseEmbed(
           eraYear: eraYears[index],
         },
         { lastfmTags: t.lastfmTags, lyricExcerpt: t.lyricExcerpt },
-        // Measured acoustics only (#1246). Nothing the tagger decides may enter
-        // here: phases 2-4 vote over the graph these vectors form.
-        {
-          bpm: t.bpm, musicalKey: t.musicalKey, audioMoods: t.audioMoods,
-          vocalRanges: t.vocalRanges,
-          vocalRangesInvalid: t.vocalRangesInvalid,
-        },
+        acoustics[index],
       ),
     );
     let vecs: number[][];
@@ -90,7 +86,7 @@ export async function phaseEmbed(
       result: vecs,
       commit: vecs => {
         for (let j = 0; j < songs.length; j++) {
-          db.upsertTrackVector(songs[j].id, vecs[j], eraYears[j]);
+          db.upsertTrackVector(songs[j].id, vecs[j], eraYears[j], embeddings.soundWords(acoustics[j]));
         }
       },
       onCommitted: () => {

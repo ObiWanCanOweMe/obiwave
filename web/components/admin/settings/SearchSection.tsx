@@ -37,6 +37,20 @@ export function groupSearchProviders(ids: readonly string[]): { label: string; i
 const searchProviderLabel = (id: string | undefined): string =>
   (id && SEARCH_PROVIDER_META[id as keyof typeof SEARCH_PROVIDER_META]?.label) || id || '—';
 
+// True when a key is on file but the picked provider's searches would refuse it,
+// because it is another provider's (a Firecrawl key under Tavily, a Tavily key
+// under Firecrawl). The key reaches this page redacted, so the controller decides,
+// through keyRefusedBy: the keyed providers that would refuse it. That covers the
+// picked provider before a save. `undefined` is a controller that doesn't send
+// the field, which says nothing about the key.
+export function searchKeyIsForeign(
+  provider: string,
+  keyOnFile: boolean,
+  refusedBy: string[] | undefined,
+): boolean {
+  return keyOnFile && !!refusedBy?.includes(provider);
+}
+
 interface SearchSectionProps extends SectionProps {
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
 }
@@ -57,6 +71,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
   const savedKey = keyed ? savedSearch.apiKeys?.[provider] ?? undefined : undefined;
   const envPresent = keyed ? !!data.env?.[keyed.envVar] : false;
   const keySource = searchKeySource(savedKey, envPresent);
+  const foreignKey = searchKeyIsForeign(provider, keySource !== 'missing', data.search?.keyRefusedBy);
   const apiKeyPatch = keyed ? searchKeyPatch(draft) : undefined;
   const searchPatch = {
     provider,
@@ -150,7 +165,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
         sub={<>
           The segment director can air a single line of recent artist context between
           tracks, when the active backend returns something worth saying. DuckDuckGo
-          and Keenable are free and keyless; Tavily, Brave, and Kagi return web results; SearXNG is
+          and Keenable are free and keyless; Tavily, Brave, Kagi, and Firecrawl return web results; SearXNG is
           keyless if you self-host it. Switching here reroutes the next call, no restart.
         </>}
         metrics={[{ n: String(providers.length), l: 'providers' }]}
@@ -238,7 +253,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                   one or the other, not both.
                 </div>
               </div>
-              {(keyed.key !== 'optional' || keySource !== 'missing') && <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing'} source={keySource} />}
+              {(keyed.key !== 'optional' || keySource !== 'missing') && <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing' && !foreignKey} detail={foreignKey ? <>The key on file is not a {keyed.keyName} key. Paste a {keyed.keyName} key and save.</> : undefined} source={keySource} />}
               {keyTest && <KeyTestResult result={keyTest} />}
             </>
           )}

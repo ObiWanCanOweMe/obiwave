@@ -11,7 +11,8 @@ import { OPENAI_COMPATIBLE_GATEWAYS } from '../../schemas/providers.js';
 import { applyCustomHeadersPatch } from '../../settings/vocab.js';
 import type { EmbeddingCfg } from '../../llm/provider.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
-import { isKeenableKey } from '../../skills/web-search.js';
+import { isFirecrawlKey, isKeenableKey } from '../../skills/web-search.js';
+import { searchKeyMismatch } from '../../skills/search-key-policy.js';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -146,7 +147,16 @@ async function probeKey(
     case 'KEENABLE_API_KEY':
     case 'SEARCH_API_KEY': {
       const provider = key === 'KEENABLE_API_KEY' ? 'keenable' : hint || settings.get().search?.provider || 'tavily';
+      // Brave and Tavily searches refuse a key carrying another provider's
+      // prefix, so the probe refuses it too, before any request: a Firecrawl key
+      // pasted under Tavily must not reach Tavily (search-key-policy.ts).
+      const refused = (target: string) => {
+        const mismatch = searchKeyMismatch(target, value);
+        return mismatch ? { ok: false, message: mismatch.charAt(0).toUpperCase() + mismatch.slice(1) } : null;
+      };
       if (provider === 'brave') {
+        const refusal = refused('brave');
+        if (refusal) return refusal;
         const url = new URL('https://api.search.brave.com/res/v1/web/search');
         url.searchParams.set('q', 'test');
         url.searchParams.set('count', '1');
@@ -181,6 +191,34 @@ async function probeKey(
         }
         return { ok: true, message: '✓ Keenable key valid' };
       }
+      if (provider === 'firecrawl') {
+        // firecrawlSearch refuses anything but an fc- key, so another provider's
+        // key is not sent here either.
+        if (!isFirecrawlKey(value)) {
+          return { ok: false, message: 'Not a Firecrawl key (they start with fc-)' };
+        }
+        // credit-usage rather than a search, which would spend credits on every
+        // click. It answers a bad key with a 401 all the same.
+        const r = await fetch('https://api.firecrawl.dev/v2/team/credit-usage', {
+          headers: { Authorization: `Bearer ${value}` },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) {
+          return { ok: false, message: r.status === 401 || r.status === 403 ? 'Key rejected — check it\'s correct and active' : `Request failed (${r.status})` };
+        }
+        // A 200 proves the key, not its balance, so the count goes in the message
+        // and a drained key doesn't read as valid. A body without a count stays a
+        // plain pass: the key itself was accepted.
+        const j = await r.json().catch(() => ({})) as { data?: { remainingCredits?: unknown } };
+        const left = j?.data?.remainingCredits;
+        if (typeof left !== 'number' || !Number.isFinite(left)) {
+          return { ok: true, message: '✓ Firecrawl key valid' };
+        }
+        if (left <= 0) return { ok: false, message: 'Firecrawl key valid, but it has no credits left' };
+        return { ok: true, message: `✓ Firecrawl key valid · ${left} credit${left === 1 ? '' : 's'} left` };
+      }
+      const refusal = refused('tavily');
+      if (refusal) return refusal;
       const r = await fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${value}` },
@@ -288,8 +326,8 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   if (key === 'SEARCH_API_KEY') {
     const savedProvider = settings.get().search?.provider || '';
     searchProvider = requestedProvider
-      || (savedProvider === 'tavily' || savedProvider === 'brave' ? savedProvider : 'tavily');
-    if (searchProvider !== 'tavily' && searchProvider !== 'brave') {
+      || (savedProvider === 'tavily' || savedProvider === 'brave' || savedProvider === 'firecrawl' ? savedProvider : 'tavily');
+    if (searchProvider !== 'tavily' && searchProvider !== 'brave' && searchProvider !== 'firecrawl') {
       return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
     }
   } else if (key === 'KEENABLE_API_KEY') {

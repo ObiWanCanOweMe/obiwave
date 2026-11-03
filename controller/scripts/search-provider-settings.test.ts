@@ -16,16 +16,16 @@ const settings = await import('../src/settings.js');
 assert.deepEqual(settings.normalizeSearchApiKeys({
   provider: 'tavily',
   apiKey: 'legacy-tavily',
-}), { tavily: 'legacy-tavily', brave: '', kagi: '', keenable: '' });
+}), { tavily: 'legacy-tavily', brave: '', kagi: '', keenable: '', firecrawl: '' });
 assert.deepEqual(settings.normalizeSearchApiKeys({
   provider: 'duckduckgo',
   apiKey: 'owner-unknown',
-}), { tavily: '', brave: '', kagi: '', keenable: '' });
+}), { tavily: '', brave: '', kagi: '', keenable: '', firecrawl: '' });
 assert.deepEqual(settings.normalizeSearchApiKeys({
   provider: 'brave',
   apiKey: 'legacy',
   apiKeys: { brave: 'mapped-wins', kagi: 'kagi-saved' },
-}), { tavily: '', brave: 'mapped-wins', kagi: 'kagi-saved', keenable: '' });
+}), { tavily: '', brave: 'mapped-wins', kagi: 'kagi-saved', keenable: '', firecrawl: '' });
 
 await settings.load();
 assert.equal(settings.get().search.apiKeys.brave, 'legacy-brave');

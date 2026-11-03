@@ -18,9 +18,9 @@ assert.ok(
   // settings extend the upstream entry point while preserving its split modules.
   // v1.24 adds explicit selection routes and compatibility-mode migration;
   // v1.28 adds lyrics and jingle placement (23 entry-point lines);
-  // the split remains intact.
-  settings.split('\n').length <= 2900,
-  'settings entry must not exceed 2,900 lines',
+  // v1.30 adds library/source settings; the split remains intact.
+  settings.split('\n').length <= 2950,
+  'settings entry must not exceed 2,950 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {
