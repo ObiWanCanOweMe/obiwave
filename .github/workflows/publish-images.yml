@@ -137,6 +137,10 @@ jobs:
       # builds have very different durations, so capping concurrency spreads the
       # completions out. Costs wall-clock on a release run; tag pushes are rare.
       max-parallel: 4
+      # publish-cli.yml's `wait-for-images` job holds the CLI release until the
+      # images the CLI's compose files reference are on GHCR at this version.
+      # Adding or renaming one of those images here means updating its IMAGES
+      # list too (the aio images are deliberately not waited on).
       matrix:
         include:
           - image: subwave-caddy
@@ -305,3 +309,10 @@ jobs:
           SUBWAVE_STREAM_URL: ${{ vars.SUBWAVE_STREAM_URL }}
           SUBWAVE_STREAM_PASSWORD: ${{ secrets.SUBWAVE_STREAM_PASSWORD }}
           SUBWAVE_TTS_DIGEST_DIRECTORY: ${{ runner.temp }}/cuda-tts-build-digest
+
+      - name: Verify main station settings permissions
+        run: node scripts/deploy/main-settings-mode.mjs
+        env:
+          PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}

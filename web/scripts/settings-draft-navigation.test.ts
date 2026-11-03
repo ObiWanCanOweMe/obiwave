@@ -88,6 +88,9 @@ Object.defineProperty(globalThis, 'fetch', {
     // Count only redacted request metadata. Draft credentials remain solely in
     // the component and transient Request body, never in this behavior ledger.
     requests.push({ url, method: init.method || 'GET', ...(owner ? { owner } : {}) });
+    if (url.endsWith('/settings/navidrome/players')) {
+      return Response.json({ state: 'not-read', reason: null, server: null, switched: 0, autoEnable: false, players: [] });
+    }
     if (url.endsWith('/settings/llm/models')) {
       return new Response(JSON.stringify({ ok: true, models: ['fixture-model'] }), {
         status: 200,

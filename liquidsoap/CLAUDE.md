@@ -83,6 +83,7 @@ When the controller owns automatic rotation (`jingleRotateOwner`), every automat
 
 **Transitions**
 - Fade duration equals the buffer (`d` is what is actually buffered); shorter fades in a fixed buffer sum to +6 dB. There are two measured exceptions: the chop's incoming fade runs on `chop_dd`, and a stem-blend clip seam fades both sides over the cue lead.
+- Every `amplify` inside `dj_transition` passes `override=null`. Its default override reads `liq_amplify`, which the incoming source carries from its first sample, so a gain curve or constant there is replaced by the track's loudness gain, applied a second time.
 - The equal-power crossfade (`transitions.equalPowerCrossfade`, default off → linear) applies to plain song-to-song seams only (`equal_power_seam`): cos out and sin^1.5 in, so in² + out² stays within 0.9 dB of 1, because two uncorrelated songs add in power and a linear seam dips −3 dB. The incoming is sin^1.5, not sin, so it rises no faster than linear: a quiet ending into a loud start is a fade-in from silence, and plain sin made it abrupt. Liquidsoap's `fade type="sin"` is sin², not equal-power. A stem-blend clip seam stays linear (equal-power over two aligned copies of the same audio sums +3 dB). Read once at startup; `scripts/fx-render-test.sh eqpower` and `controller/scripts/equal-power-seam.test.ts` pin it.
 - `cross_stamps` is the only translator of a track's `liq_cross_duration` into end/start durations, and `strip_cross_stamps` removes them from `dj_transition`'s output. Keep the controller's contract: one stamp per track, governing that track's own end.
 - A clip seam aligns on its cue lead by delaying the incoming side. That is sample-accurate on 2.4.6 only (`scripts/stem-seam-test.sh`).
@@ -98,3 +99,7 @@ When the controller owns automatic rotation (`jingleRotateOwner`), every automat
 ## Testing
 
 `scripts/fx-render-test.sh` (`xchain`, `loopcheck`, `loopgaps`, `jingledry`, `jingleseam`) and `scripts/stem-seam-test.sh` render lifted copies of this file's blocks in Docker. A harness that has drifted from `radio.liq` proves nothing: `controller/scripts/dissolve-wash-shape.test.ts` and `transition-mixer-seams.test.ts` pin the mirrored harness copies to it, and `stem-seam-cues.test.ts` covers the stem-seam harness. `jingle-play.test.ts` pins radio.liq's jingle code directly. A harness that tests the dead-air guard must build the duck and bed `add`s; `output.dummy` on the bare rotate is how a false claim shipped once.
+
+### v1.30 local-file and transition checks
+
+The controller asks `path_readable` about the actual mapped local file and uses the local URI only after the mixer proves it can read that file. Preserve `liq_amplify` independence in transition gains and the linear sweep's continuous blend gain. The new `ampgain` and `sweepstep` render modes exercise those transition contracts.

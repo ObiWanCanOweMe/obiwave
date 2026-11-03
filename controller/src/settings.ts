@@ -24,6 +24,7 @@ import { readFile, unlink, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { STATE_DIR } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
+import { ensureMainSettingsMode, writeSettingsFile } from './settings/file.js';
 import { DEFAULT_THEME_ID, listThemes } from './themes.js';
 import { resolveThemeId } from './util/theme-id.js';
 import { isValidTimezone, setStationTimezone } from './time.js';
@@ -379,6 +380,9 @@ export async function load() {
   if (existsSync(SETTINGS_PATH)) {
     try {
       stored = JSON.parse(await readFile(SETTINGS_PATH, 'utf8'));
+      await ensureMainSettingsMode(SETTINGS_PATH).catch(() => {
+        console.warn('[settings] could not apply main station settings permissions');
+      });
     } catch {}
   }
 
@@ -1228,6 +1232,10 @@ export async function load() {
           typeof stored.embedding?.enrichment?.lastfmTags === 'boolean'
             ? stored.embedding.enrichment.lastfmTags
             : DEFAULTS.embedding.enrichment.lastfmTags,
+        lastfmTrackTags:
+          typeof stored.embedding?.enrichment?.lastfmTrackTags === 'boolean'
+            ? stored.embedding.enrichment.lastfmTrackTags
+            : DEFAULTS.embedding.enrichment.lastfmTrackTags,
         lyrics:
           typeof stored.embedding?.enrichment?.lyrics === 'boolean'
             ? stored.embedding.enrichment.lyrics
@@ -1254,6 +1262,10 @@ export async function load() {
       stemCacheGb: Number.isFinite(stored.audio?.stemCacheGb) && stored.audio.stemCacheGb > 0
         ? stored.audio.stemCacheGb
         : DEFAULTS.audio.stemCacheGb,
+      stemOrphanPurgeEnabled:
+        typeof stored.audio?.stemOrphanPurgeEnabled === 'boolean'
+          ? stored.audio.stemOrphanPurgeEnabled
+          : DEFAULTS.audio.stemOrphanPurgeEnabled,
       analyzeQuietOnly:
         typeof stored.audio?.analyzeQuietOnly === 'boolean'
           ? stored.audio.analyzeQuietOnly
@@ -1265,6 +1277,7 @@ export async function load() {
     transitions: {
       pairDrain: typeof stored.transitions?.pairDrain === 'boolean' ? stored.transitions.pairDrain : DEFAULTS.transitions.pairDrain,
       stemBlends: typeof stored.transitions?.stemBlends === 'boolean' ? stored.transitions.stemBlends : DEFAULTS.transitions.stemBlends,
+      pickTimeStems: typeof stored.transitions?.pickTimeStems === 'boolean' ? stored.transitions.pickTimeStems : DEFAULTS.transitions.pickTimeStems,
       equalPowerCrossfade: typeof stored.transitions?.equalPowerCrossfade === 'boolean' ? stored.transitions.equalPowerCrossfade : DEFAULTS.transitions.equalPowerCrossfade,
       // Per-effect kill switches (#1565) — same absent-means-default repair as
       // every sibling, and the default is `true`, so a stored block missing a
@@ -1402,6 +1415,12 @@ export async function load() {
         typeof stored.lyrics?.lrclib === 'boolean'
           ? stored.lyrics.lrclib
           : DEFAULTS.lyrics.lrclib,
+    },
+    musicSource: {
+      reportRealPath:
+        typeof stored.musicSource?.reportRealPath === 'boolean'
+          ? stored.musicSource.reportRealPath
+          : DEFAULTS.musicSource.reportRealPath,
     },
   };
   setCache(loaded);
@@ -2476,8 +2495,14 @@ export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySe
     }
     if (e.enrichment !== undefined) {
       const en = e.enrichment || {};
+      // Tri-state, like the default: null is auto (on when a Last.fm key is set)
+      // and stays null. Coercing it with !! stored false, so a save that kept
+      // auto switched enrichment off (#2233).
       if (en.lastfmTags !== undefined) {
-        next.embedding.enrichment.lastfmTags = !!en.lastfmTags;
+        next.embedding.enrichment.lastfmTags = en.lastfmTags === null ? null : !!en.lastfmTags;
+      }
+      if (en.lastfmTrackTags !== undefined) {
+        next.embedding.enrichment.lastfmTrackTags = !!en.lastfmTrackTags;
       }
       if (en.lyrics !== undefined) {
         next.embedding.enrichment.lyrics = !!en.lyrics;
@@ -2527,13 +2552,14 @@ export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySe
       'stemCacheGb',
       'analyzeQuietOnly',
       'analyzeQuietMinutes',
+      'stemOrphanPurgeEnabled',
     ] as const) {
       if (au[k] !== undefined) (next.audio as Record<string, unknown>)[k] = au[k];
     }
   }
   if ('transitions' in patch) {
     const tr = parseSettingsPatchKey<Record<string, unknown>>('transitions', patch.transitions);
-    for (const k of ['pairDrain', 'stemBlends'] as const) {
+    for (const k of ['pairDrain', 'stemBlends', 'pickTimeStems'] as const) {
       if (tr[k] !== undefined) (next.transitions as Record<string, unknown>)[k] = tr[k];
     }
     // Read once by the mixer at startup (liquidsoap_equal_power_crossfade.txt),
@@ -2764,6 +2790,11 @@ export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySe
       || '';
   }
 
+  if ('musicSource' in patch) {
+    const ms = parseSettingsPatchKey<Record<string, unknown>>('musicSource', patch.musicSource);
+    if (ms.reportRealPath !== undefined) next.musicSource.reportRealPath = ms.reportRealPath as boolean;
+  }
+
   // Post-patch integrity sweep — a personas/shows change in this patch may
   // have orphaned a show owner, a schedule slot, or the active persona.
   {
@@ -2834,11 +2865,8 @@ async function applySettingsUpdate(patch) {
   // resolveActiveShow / getEffectivePersona / the integrity sweep all
   // continue to work against one merged view.
   const { shows: _shows, schedule: _schedule, scheduleOverride: _override, ...settingsPersist } = next;
-  // Atomic replace — a crash mid-write must not take the operator's whole
-  // config (or show schedule) with it. Owner-only: settings.json carries every
-  // inline credential getRedacted() masks, in a state dir other accounts can
-  // list. schedule.json holds none and keeps whatever mode it has.
-  await writeFileAtomic(SETTINGS_PATH, JSON.stringify(settingsPersist, null, 2), { mode: 0o600 });
+  // Keep atomic publication and the station-specific permission policy together.
+  await writeSettingsFile(SETTINGS_PATH, JSON.stringify(settingsPersist, null, 2));
   // Every save writes the whole llm block, the derived trackSelection with it,
   // so the Candidate Pool migration is now on disk as an ordinary choice.
   candidatePoolMigrated = false;

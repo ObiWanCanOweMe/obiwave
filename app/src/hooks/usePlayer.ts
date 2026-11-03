@@ -34,6 +34,8 @@ export interface Player {
   setVolume: (v: number) => void;
   tune: () => void;
   stop: () => void;
+  /** Changes even when a stop arrives while already stopped. */
+  stopIntentRef: { current: number };
   toggleMute: () => void;
   muted: boolean;
 }
@@ -52,6 +54,7 @@ export function usePlayer(
   const preMuteVolume = useRef(initialVolume || 1);
 
   const tunedInRef = useRef(tunedIn);
+  const stopIntentRef = useRef(0);
   const apiRef = useRef(api);
   const formatRef = useRef(streamFormat);
   const volumeRef = useRef(volume);
@@ -141,6 +144,7 @@ export function usePlayer(
     (event) => {
       plog(playbackEventLine(event));
       if (event.type === Event.RemotePause || event.type === Event.RemoteStop) {
+        stopIntentRef.current++;
         // A tune-out, not a failure. Both flip synchronously so the trailing
         // Stopped event can't arm a reconnect before the re-render.
         recoveryRef.current?.tuneOut();
@@ -173,6 +177,12 @@ export function usePlayer(
         }
       } else if (state === State.Buffering || state === State.Loading) {
         setStatus((s) => (s === 'playing' ? 'connecting' : s));
+      } else if (state === State.Ended || state === State.Stopped || state === State.Error) {
+        // A dead item, as PlaybackError says above: an `ended` brings no
+        // PlaybackError, and an item that played waits up to PLAYED_MAX_MS for
+        // its reload, so without this the UI says playing over that silence
+        // and a regained link (gated on status below) never fires.
+        if (tunedInRef.current) setStatus((s) => (s === 'playing' ? 'connecting' : s));
       }
       recoveryRef.current?.onState(state);
     },
@@ -187,7 +197,9 @@ export function usePlayer(
   useEffect(() => {
     const sub = addAudioRouteChangeListener((e) => {
       plog(`route change reason=${e.reason} outputs=${e.outputs}`);
-      if (e.reason !== ROUTE_REASON_OLD_DEVICE_UNAVAILABLE || !tunedInRef.current) return;
+      if (e.reason !== ROUTE_REASON_OLD_DEVICE_UNAVAILABLE) return;
+      stopIntentRef.current++;
+      if (!tunedInRef.current) return;
       // Same synchronous flip as the RemotePause handler above.
       recoveryRef.current?.tuneOut();
       tunedInRef.current = false;
@@ -213,6 +225,8 @@ export function usePlayer(
   }, [isConnected, status]);
 
   const stop = useCallback(() => {
+    stopIntentRef.current++;
+    tunedInRef.current = false;
     recoveryRef.current?.tuneOut();
     setTunedIn(false);
     setStatus('idle');
@@ -273,6 +287,7 @@ export function usePlayer(
     setVolume,
     tune,
     stop,
+    stopIntentRef,
     toggleMute,
     muted: volume === 0,
   };

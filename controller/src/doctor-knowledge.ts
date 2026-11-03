@@ -116,6 +116,7 @@ needs a self-hosted instance URL. If a keyed provider is selected without its ke
 news segments can't fetch — tell them to save the provider's key in Admin → Search
 or switch to the keyless DuckDuckGo/SearXNG alternatives. Credentials are
 provider-specific and are never shared between search providers.
+Firecrawl uses its provider-owned saved key or SEARCH_API_KEY and requires an fc- key. Tavily and Brave refuse known foreign key prefixes before any request. A diagnostic timeout is not proof that all searches fail, and no provider is guaranteed never to time out.
 
 ## Backups
 There is a Backup feature (Admin → Backup) that exports settings, personas, custom
@@ -202,7 +203,7 @@ regular cadence — it's cheap insurance.
   via web search — so it depends on Settings → Web search being configured. If it's on
   while search isn't ready, the feature is dead; either configure search or turn it off.
 
-## Stem transitions (Settings → Broadcast & mixer → Stem transitions)
+## Stem transitions (Settings → Stems → Stem transitions)
 - **Stem cache budget** is the disk budget in GB. If it holds too few tracks,
   raise it to cover more of the library, then run the analysis pass to backfill.
 - **Stem cache** keeps the separated stems on disk. **Stem-blend seams** needs

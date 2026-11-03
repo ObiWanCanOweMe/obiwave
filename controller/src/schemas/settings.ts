@@ -474,10 +474,15 @@ export const SEARCH_PROVIDER_CATALOG = [
     keyName: 'Keenable', envVar: 'KEENABLE_API_KEY', keyPlaceholder: 'keen_…', keyUrl: 'https://keenable.ai/console', keyPrefix: 'keen_',
     hint: 'Keenable web search: real web results with no signup or API key, rate limited per IP. An optional Keenable key raises the limit. SUB/WAVE caches every search for 30 minutes.',
   },
+  {
+    id: 'firecrawl', group: 'keyed', label: 'Firecrawl (API key)', key: 'required',
+    keyName: 'Firecrawl', envVar: 'SEARCH_API_KEY', keyPlaceholder: 'fc-…', keyUrl: 'https://www.firecrawl.dev/app/api-keys',
+    hint: 'Firecrawl web search: real web results for artist queries. Needs an API key. SUB/WAVE caches every search for 30 minutes.',
+  },
 ] as const satisfies readonly SearchProviderEntry[];
 
 export const SETTINGS_SEARCH_PROVIDERS = SEARCH_PROVIDER_CATALOG.map((p) => p.id);
-export const SETTINGS_SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi', 'keenable'] as const;
+export const SETTINGS_SEARCH_KEY_PROVIDERS = ['tavily', 'brave', 'kagi', 'keenable', 'firecrawl'] as const;
 
 /**
  * Cap for the optional SearXNG `engines=` pin. Generous on purpose — the value
@@ -729,6 +734,7 @@ export const transitionsPatchSchema = settingsBlockOf({
   // save-time refusal. Do not add one here.
   pairDrain: settingsBoolLike(),
   stemBlends: settingsBoolLike(),
+  pickTimeStems: settingsBoolLike(),
   equalPowerCrossfade: settingsBoolLike(),
   effects: transitionEffectsPatchSchema,
 });
@@ -1048,6 +1054,7 @@ export const audioPatchSchema = settingsBlockOf({
     { min: 1, max: 1000 },
     'audio.stemCacheGb must be between 1 and 1000',
   ),
+  stemOrphanPurgeEnabled: settingsBoolLike(),
   analyzeQuietMinutes: settingsNumberFloorLike(
     { min: 1, max: 120 },
     'audio.analyzeQuietMinutes must be between 1 and 120',
@@ -1128,6 +1135,10 @@ export const lyricsPatchSchema = settingsBlockOf({
   // Its own switch, also on by default: it sends what the station plays to a
   // third party.
   lrclib: settingsBoolLike(),
+});
+
+export const musicSourcePatchSchema = settingsBlockOf({
+  reportRealPath: settingsBoolLike(),
 });
 
 export const searchPatchSchema = settingsBlockOf({

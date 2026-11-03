@@ -47,6 +47,11 @@ export interface PlayerActions {
   play: () => void;
   pause: () => void;
   stop: () => void;
+  /** The station gate took this listener off the air and holds them for the right password
+   *  (lib/gateResume.ts). Written only by the gate; `pause` and `stop` drop it, because any other
+   *  tune-out does. Here rather than in the gate so a Media Session command under the prompt reaches
+   *  it, and so it dies with this provider on a showcase switch. */
+  gateHoldRef: RefObject<boolean>;
   toggleMute: () => void;
   selectFormat: (format: AudioFormat) => void;
   setVolume: Dispatch<SetStateAction<number>>;
@@ -141,13 +146,21 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   stopRef.current = stop;
   muteRef.current = toggleMute;
   selectFormatRef.current = selectFormat;
+  const gateHoldRef = useRef(false);
 
   const actions = useMemo<PlayerActions>(
     () => ({
       tune: () => tuneRef.current(),
       play: () => playRef.current(),
-      pause: () => pauseRef.current(),
-      stop: () => stopRef.current(),
+      pause: () => {
+        gateHoldRef.current = false;
+        pauseRef.current();
+      },
+      stop: () => {
+        gateHoldRef.current = false;
+        stopRef.current();
+      },
+      gateHoldRef,
       toggleMute: () => muteRef.current(),
       selectFormat: next => selectFormatRef.current(next),
       setVolume,

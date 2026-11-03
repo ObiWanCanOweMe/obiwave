@@ -4,7 +4,7 @@
 // Part of the doctor/ split - see ../doctor.ts for the section runner.
 
 import { recentCalls } from '../llm/log.js';
-import { searchReady, searchWeb } from '../skills/web-search.js';
+import { searchKeyProblem, searchReady, searchWeb } from '../skills/web-search.js';
 import * as system from '../system.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
 import * as analyzer from '../music/analyzer.js';
@@ -29,7 +29,15 @@ export async function checkCapabilities(s: StationSettings | null): Promise<Find
   try { ready = searchReady(); } catch { ready = true; }
 
   if (!ready) {
-    out.push(webSearchNotReadyFinding(provider));
+    // "The key on file is …", lowercased to follow "selected but".
+    const wrongKey = searchKeyProblem();
+    out.push({
+      ...webSearchNotReadyFinding(provider),
+      ...(wrongKey ? {
+        detail: `${provider} selected but ${wrongKey.charAt(0).toLowerCase()}${wrongKey.slice(1)}`,
+        hint: 'Artist-news segments cannot fetch with this key. Save a key for the selected provider in Settings → Web search, or choose a keyless provider.',
+      } : {}),
+    });
     return out;
   }
 
@@ -350,7 +358,7 @@ export async function checkTuning(s: StationSettings | null): Promise<Finding[]>
           detail: `only ${cached.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} tracks have stems on disk` +
             (attempted > cached ? ` (${attempted.toLocaleString('en-GB')} attempted)` : ''),
           hint: holds < total
-            ? `Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade. The ${budgetGb} GB budget only holds ~${holds.toLocaleString('en-GB')} tracks — raise Stem cache budget in Settings → Broadcast & mixer → Stem transitions to cover more of the library, then let the analysis pass backfill the rest.`
+            ? `Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade. The ${budgetGb} GB budget only holds ~${holds.toLocaleString('en-GB')} tracks — raise Stem cache budget in Settings → Stems → Stem transitions to cover more of the library, then let the analysis pass backfill the rest.`
             : 'Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade until the backfill catches up. Run the analysis pass (it now targets tracks with no cached stems) and this fills in over a few runs.',
         });
       }
@@ -362,7 +370,7 @@ export async function checkTuning(s: StationSettings | null): Promise<Finding[]>
         label: 'stem transitions',
         status: 'warn',
         detail: 'stem blends are on but pair-drain scheduling is off',
-        hint: 'Stem-blend seams requires Pair-aware transitions — a blend can only be inserted at a pair-aware drain. Re-enable Pair-aware transitions or turn Stem-blend seams off in Settings → Broadcast & mixer → Stem transitions.',
+        hint: 'Stem-blend seams requires Pair-aware transitions — a blend can only be inserted at a pair-aware drain. Re-enable Pair-aware transitions or turn Stem-blend seams off in Settings → Stems → Stem transitions.',
       });
     }
   } catch { /* analyzer unavailable — skip */ }

@@ -610,6 +610,7 @@ export const TTS_CLOUD_PROVIDERS: readonly string[] = TTS_CLOUD_PROVIDER_VALUES;
 // results; `brave` is Brave's Search API (metered, $5/mo free credits), and
 // `kagi` provides its own paid API. `searxng` is keyless self-hosted meta-search
 // via settings.search.baseUrl.
+// Firecrawl uses its provider-owned saved key or SEARCH_API_KEY.
 export const SEARCH_PROVIDERS = SETTINGS_SEARCH_PROVIDERS;
 export const SEARCH_KEY_PROVIDERS = SETTINGS_SEARCH_KEY_PROVIDERS;
 export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
@@ -619,6 +620,7 @@ const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
   brave: '',
   kagi: '',
   keenable: '',
+  firecrawl: '',
 });
 
 export function normalizeSearchApiKeys(raw: unknown): Record<SearchKeyProvider, string> {
@@ -964,6 +966,9 @@ export interface NormalizedShow {
    *  order and resume across airings. Inert without it. */
   playlistInOrder: boolean;
   excludedPlaylistIds: string[];
+  /** A clean show: tracks tagged explicit stay off air. Only a positive tag
+   *  counts. See music/explicit-policy.ts. */
+  excludeExplicit: boolean;
   /** Operator organisation tags. Filters the admin list; steers nothing on
    *  air, which is why resolveShow() does not carry them through. */
   tags: string[];

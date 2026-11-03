@@ -135,6 +135,7 @@ export function useCast(
 
   const castTune = useCallback(() => {
     if (castTunedInRef.current) {
+      localRef.current.stopIntentRef.current++;
       client?.stop().catch(() => {});
       setCastTunedIn(false);
       return;
@@ -143,6 +144,7 @@ export function useCast(
   }, [client, loadToCast]);
 
   const castStop = useCallback(() => {
+    localRef.current.stopIntentRef.current++;
     client?.stop().catch(() => {});
     setCastTunedIn(false);
   }, [client]);
@@ -198,6 +200,7 @@ export function useCast(
             setVolume: castSetVolume,
             tune: castTune,
             stop: castStop,
+            stopIntentRef: local.stopIntentRef,
             toggleMute: castToggleMute,
             muted: castVolume === 0,
           }
