@@ -95,3 +95,8 @@ export function stemsSavePayload(form: FormState) {
   };
   return { patch, fieldErrors: n.bad };
 }
+
+export function qobuzSavePayload(form: FormState) {
+  const n = numberFields();
+  return { patch: { qobuz: { enabled: form.qobuz.enabled, cacheMaxGb: n.num('qobuz.cacheMaxGb', form.qobuz.cacheMaxGb) } }, fieldErrors: n.bad };
+}

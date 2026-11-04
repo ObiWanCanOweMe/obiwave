@@ -413,6 +413,7 @@ export interface FormState {
   likes: LikesForm;
   lyrics: LyricsForm;
   requests: RequestsForm;
+  qobuz: { enabled: boolean; cacheMaxGb: string };
 }
 
 export interface JingleEntry {
@@ -552,6 +553,7 @@ export interface SettingsData {
       password?: string;
       publishPersonaSouls?: boolean;
     };
+    qobuz?: { enabled?: boolean; cacheMaxGb?: number };
     requests?: {
       enabled?: boolean;
       maxPending?: number;
