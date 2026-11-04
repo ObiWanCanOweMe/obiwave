@@ -1,0 +1,23 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createQobuzService } from '../src/music/qobuz/service.js';
+import { createQobuzCache } from '../src/music/qobuz/cache.js';
+import { accountKeyOf } from '../src/music/qobuz/client.js';
+const metadata = { id: '123', title: 'Song', artist: 'Artist', album: 'Album', duration: 200, explicit: false };
+test('concurrent requests share acquisition and a subsequent hit has no provider lookup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'qobuz-service-')); let downloads = 0; let searches = 0;
+  const credentials = { appId: 'app', appSecret: 'secret', userAuthToken: 'token', userId: '42' };
+  let authority = { accountKey: accountKeyOf('42'), revision: 1 };
+  const cache = createQobuzCache({ root, capacityBytes: () => 1024**3, freeBytes: async () => 2*1024**3, references: () => [] }); await cache.load();
+  const service = createQobuzService({ cache, enabled: () => true, credentials: () => credentials, authority: () => authority, verify: () => authority, allowed: () => true, client: () => ({ testConnection: async () => ({ accountKey: authority.accountKey, fullTrackAccess: true }), search: async () => { searches++; return [metadata]; }, fileUrl: async () => ({ url: 'https://example.com/media', duration: 200, sample: false }) }), download: async (_url, path) => { downloads++; await writeFile(path, 'data'); return { bytes: 4, duration: 200, suffix: 'flac', samplingRate: 44100, bitDepth: 16, channelCount: 2 }; } });
+  const match = { title: 'Song', artist: 'Artist' };
+  const [a,b] = await Promise.all([service.acquire(match), service.acquire(match)]);
+  assert.ok(a); assert.ok(b); a.release(); b.release();
+  const c = await service.acquire(match); assert.ok(c); c.release();
+  assert.equal(downloads, 1); assert.equal(searches, 1);
+  authority = { ...authority, revision: 2 };
+  await rm(root, { recursive: true, force: true });
+});
