@@ -1,5 +1,6 @@
 'use client';
 
+import { qobuzStatusSchema } from '../../../lib/schemas.generated';
 import { useCallback, useRef } from 'react';
 import {
   useMutation,
@@ -233,7 +234,7 @@ export function useLlmSwapMutation<TSettings>({
 export function useQobuzStatusQuery(adminFetch: AdminFetch) {
   return useAdminQuery<import('../../../lib/schemas.generated').QobuzStatus>({
     key: ['settings', 'qobuz'], adminFetch, enabled: true,
-    request: (fetcher, signal) => adminJson(fetcher, '/settings/qobuz', undefined, signal),
+    request: async (fetcher, signal) => qobuzStatusSchema.parse(await adminJson(fetcher, '/settings/qobuz', undefined, signal)),
     toastOnError: false,
   });
 }

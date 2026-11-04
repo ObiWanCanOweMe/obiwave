@@ -11,3 +11,8 @@ test('all live queue references survive cleanup, including sent handoffs and rec
   queue.upcoming = []; queue.current = null; queue.history = [];
   assert.equal(duplicateAction('qobuz-cache'), 'skip'); assert.equal(conversionAction('qobuz-cache'), 'move');
 });
+test('a recovered external on-air ID with unknown generation retains a conservative cache pin', () => {
+  queue.current = { track: { id: 'qobuz:123', title: 'Song' } };
+  assert.deepEqual(queue.qobuzReferences(), [{ provider: 'qobuz', trackId: '123', accountKey: '*', generation: '*' }]);
+  queue.current = null;
+});

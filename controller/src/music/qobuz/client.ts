@@ -37,9 +37,18 @@ export function createQobuzClient(credentials: QobuzCredentials, deps: { transpo
       return { accountKey: accountKeyOf(credentials.userId), fullTrackAccess: params?.lossless_streaming === true || params?.hires_streaming === true };
     },
     async search(query: string, signal?: AbortSignal): Promise<QobuzTrack[]> {
-      const data = await call('catalog/search', { query: query.slice(0, 512), type: 'tracks', limit: '50', offset: '0' }, signal);
-      if (!Array.isArray(data.tracks?.items)) throw new QobuzError('invalid search response');
-      return data.tracks.items.slice(0, 50).flatMap((track: any) => {
+      const deadline = AbortSignal.any([AbortSignal.timeout(Math.min(deps.timeoutMs ?? 15_000, 15_000)), ...(signal ? [signal] : [])]);
+      const rows: any[] = [];
+      for (let offset = 0; offset < 500; offset += 50) {
+        const data = await call('catalog/search', { query: query.slice(0, 512), type: 'tracks', limit: '50', offset: String(offset) }, deadline);
+        if (!Array.isArray(data.tracks?.items) || data.tracks.items.length > 50) throw new QobuzError('invalid search response');
+        const items = data.tracks.items;
+        const total = Number(data.tracks.total ?? offset + items.length);
+        if (!Number.isInteger(total) || total < 0 || total > 500 || (items.length < 50 && offset + items.length < total)) throw new QobuzError('search results incomplete');
+        rows.push(...items);
+        if (offset + items.length >= total) break;
+      }
+      return rows.flatMap((track: any) => {
         const artist = track.performer?.name || track.album?.artist?.name;
         if (!/^\d+$/.test(String(track.id)) || typeof track.title !== 'string' || !track.title.trim() || typeof artist !== 'string' || !artist.trim() || !Number.isFinite(track.duration) || track.duration <= 0 || track.streamable === false) return [];
         const version = typeof track.version === 'string' ? track.version.trim().slice(0, 128) : '';
@@ -53,7 +62,7 @@ export function createQobuzClient(credentials: QobuzCredentials, deps: { transpo
       const timestamp = String(Math.floor((deps.now ?? Date.now)() / 1000));
       const base = 'trackgetFileUrl' + Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => key + value).join('') + timestamp + credentials.appSecret;
       const data = await call('track/getFileUrl', { ...params, request_ts: timestamp, request_sig: createHash('md5').update(base).digest('hex') }, signal);
-      if (data.sample || !Number.isFinite(data.duration) || data.duration <= 30 || typeof data.url !== 'string') throw new QobuzError('preview or unavailable recording');
+      if (data.sample || !Number.isFinite(data.duration) || data.duration <= 0 || typeof data.url !== 'string') throw new QobuzError('preview or unavailable recording');
       return { url: data.url as string, sample: false, duration: data.duration as number };
     },
   };

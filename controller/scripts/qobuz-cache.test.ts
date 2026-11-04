@@ -1,6 +1,7 @@
 import { test } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, access, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, access, symlink, rm, mkdir, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createQobuzCache } from '../src/music/qobuz/cache.js';
@@ -74,5 +75,46 @@ test('corrupt index and symlink cache root fail closed without touching unrelate
   await symlink(join(f.root, 'cache'), join(f.root, 'linked'));
   await assert.rejects(make(join(f.root, 'linked')).load(), /cache/);
   assert.equal(await readFile(outside, 'utf8'), 'keep');
+  await rm(f.root, { recursive: true, force: true });
+});
+test('an opaque on-air ID protects every owned generation when recovery lost its exact generation', async () => {
+  const f = await fixture(); f.lease.release();
+  f.setClock(100000 + week + 200000);
+  f.setRefs([{ provider: 'qobuz', trackId: '123', generation: '*', accountKey: '*' }]);
+  await f.cache.cleanup(); assert.ok(await f.cache.resolve(f.lease.track.providerRef));
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('failed cleanup is counted and retried without stopping the station', async () => {
+  const f = await fixture(); const path = await f.cache.resolve(f.lease.track.providerRef); f.lease.release();
+  await rm(path!); await mkdir(path!); f.setClock(100000 + week + 200000);
+  await f.cache.cleanup(); assert.equal(f.cache.status().cleanupFailures, 1);
+  await rm(path!, { recursive: true }); await f.cache.cleanup();
+  assert.equal(f.cache.status().cleanupFailures, 0); assert.equal(f.cache.status().items, 0);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('entry admission cannot create an index that exceeds the recovery bound', async () => {
+  const f = await fixture(); f.lease.release();
+  const path = join(f.root, 'cache/index.json'); const index = JSON.parse(await readFile(path, 'utf8'));
+  index.entries = Array.from({ length: 10000 }, () => ({ ...index.entries[0], generation: randomUUID() }));
+  await writeFile(path, JSON.stringify(index));
+  const cache = createQobuzCache({ root: join(f.root, 'cache'), now: () => 200000, references: () => [], capacityBytes: () => 1024**3, freeBytes: async () => 2*1024**3 });
+  await cache.load(); await assert.rejects(cache.reserve(4), /capacity/);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('failed manifest publication removes its unpublished audio generation', async () => {
+  const f = await fixture(); const root = join(f.root, 'cache');
+  await rm(join(root, 'index.json')); await mkdir(join(root, 'index.json'));
+  const part = await f.cache.reserve(4); await writeFile(part.path, 'data');
+  await assert.rejects(f.cache.publish({ ...metadata, id: '124' }, { path: part.path, audio }, authority)); part.release();
+  assert.equal((await readdir(root)).filter(name => name.endsWith('.flac')).length, 1);
+  f.lease.release(); await rm(f.root, { recursive: true, force: true });
+});
+test('fresh crash orphans count toward the cache disk budget', async () => {
+  const f = await fixture(); f.lease.release();
+  await writeFile(join(f.root, 'cache', `${randomUUID()}.flac`), Buffer.alloc(400));
+  await assert.rejects(f.cache.reserve(800), /capacity/);
   await rm(f.root, { recursive: true, force: true });
 });

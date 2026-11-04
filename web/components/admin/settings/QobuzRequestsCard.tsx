@@ -41,6 +41,7 @@ export function QobuzRequestsCard({ form, setForm, fieldErrors, adminFetch }: Pi
       <p className="field-hint">Save station settings to apply the enable switch and cache limit.</p>
     </div>
     {status.data && <p className="field-hint">Cache: {status.data.cache.items} recordings, {(status.data.cache.bytes / 1024**2).toFixed(1)} MiB. {status.data.ready ? 'All credential fields configured.' : 'Credentials or cache setup incomplete.'}</p>}
+    {!!status.data?.cache.cleanupFailures && <p role="status">Cleanup will retry {status.data.cache.cleanupFailures} files it could not remove.</p>}
     {status.isError && <p role="status">Could not load Qobuz status.</p>}
     {status.data?.lastError && <p role="status">Recent acquisition: {status.data.lastError.code}.</p>}
     <div className="grid gap-4 sm:grid-cols-2">

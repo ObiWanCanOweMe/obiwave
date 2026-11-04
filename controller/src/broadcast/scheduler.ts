@@ -1441,9 +1441,6 @@ async function overrideJanitor() {
 }
 
 export function startScheduler() {
-  cron.schedule('*/15 * * * *', async () => {
-    try { await qobuzService.cleanup(); } catch { console.warn('[qobuz] cache cleanup unavailable; retrying next interval'); }
-  }, { noOverlap: true });
   refreshAutoPlaylist({ automatic: true }).catch(err => queue.log('error', `Initial playlist failed: ${err.message}`));
 
   const refreshCron = autoPlaylistRefreshCron(config.show.autoQueueRefreshMinutes);
@@ -1456,6 +1453,10 @@ export function startScheduler() {
       queue.log('error', `Periodic playlist failed: ${err.message}`);
     }
   });
+
+  cron.schedule('*/15 * * * *', async () => {
+    try { await qobuzService.cleanup(); } catch { console.warn('[qobuz] cache cleanup unavailable; retrying next interval'); }
+  }, { noOverlap: true });
 
   // Every spoken segment the station produces on its own, plus the
   // unconditional :00 session roll: one tick over one slot table (#1500).

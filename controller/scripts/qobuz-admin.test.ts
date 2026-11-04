@@ -5,10 +5,13 @@ import { readFile, stat, access } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 process.env.ADMIN_USER = 'operator'; process.env.ADMIN_PASS = 'test-password'; process.env.QOBUZ_APP_ID = 'boot-app';
 const { createQobuzSettingsRouter } = await import('../src/routes/settings/qobuz.js');
+const { router: coreRouter } = await import('../src/routes/settings/core.js');
+const settings = await import('../src/settings.js');
 const { STATE_DIR } = await import('../src/config.js');
 const { effectiveQobuzCredentials } = await import('../src/music/qobuz/credentials.js');
 let tested: unknown;
 const app = express(); app.use(express.json()); app.use(createQobuzSettingsRouter({ client: credentials => ({ testConnection: async () => { tested = credentials; return { accountKey: 'a'.repeat(64), fullTrackAccess: true }; } }) }));
+app.use(coreRouter);
 const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const headers = { 'Content-Type': 'application/json', Authorization: `Basic ${Buffer.from('operator:test-password').toString('base64')}` };
@@ -36,4 +39,11 @@ test('save preserves blank secrets, rejects environment edits and supports expli
 test('control characters and hostile probe failures never leak submitted credentials', async () => {
   const response = await post('/settings/qobuz/test', { appSecret: 'secret\nline', userAuthToken: 'token', userId: '42' });
   assert.equal(response.status, 400); assert.equal((await response.text()).includes('secret'), false);
+});
+
+test('the real settings response hydrates the saved Qobuz controls after reload', async () => {
+  await settings.load(); await settings.update({ qobuz: { enabled: true, cacheMaxGb: 2 } });
+  const response = await fetch(base+'/settings', { headers }); assert.equal(response.status, 200);
+  const data = await response.json() as any;
+  assert.deepEqual(data.values.qobuz, { enabled: true, cacheMaxGb: 2 });
 });

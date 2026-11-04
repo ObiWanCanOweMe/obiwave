@@ -54,7 +54,12 @@ test('both writers of a capped annotation route the cap through capCueOutSec', (
   const drain = src('broadcast/queue.ts');
   const coast = src('broadcast/scheduler.ts');
   for (const [name, text] of [['queue.ts', drain], ['scheduler.ts', coast]] as const) {
-    const call = text.slice(text.indexOf('subsonic.getAnnotatedUri('), text.indexOf('subsonic.getAnnotatedUri(') + 400);
+    const start = name === 'queue.ts' ? text.indexOf('const annotation = {') : text.indexOf('subsonic.getAnnotatedUri(');
+    const call = text.slice(start, start + 800);
+    if (name === 'queue.ts') {
+      assert.match(text, /annotateTrackUri\(item\.track, localPath!, annotation\)/);
+      assert.match(text, /subsonic\.getAnnotatedUri\(item\.track, annotation\)/);
+    }
     assert.match(call, /maxDurationSec:\s*capCueOutSec\(/, `${name} must pass the cap through capCueOutSec`);
   }
 });

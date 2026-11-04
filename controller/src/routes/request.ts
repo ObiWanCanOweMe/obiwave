@@ -390,8 +390,15 @@ async function resolveRequest(entry) {
   if (strictRequests || qobuzEnabled) await interpret();
   if (qobuzEnabled) {
     const minutes = settings.get().requests.repeatCooldownMin ?? 120;
+    const preflightSignal = AbortSignal.timeout(30_000);
     const probe = await probeRequestedRecording(matched, {
-      text, catalog: { ...subsonic, searchPage: (term, options) => subsonic.searchPage(term, { ...options, includeBlocked: true }), getAlbum: id => subsonic.getAlbum(id, { includeBlocked: true }) },
+      signal: preflightSignal,
+      text, catalog: { ...subsonic,
+        searchPage: (term, options) => subsonic.searchPage(term, { ...options, includeBlocked: true, signal: preflightSignal }),
+        resolveArtist: name => subsonic.resolveArtist(name, { signal: preflightSignal, requireComplete: true }),
+        getArtist: id => subsonic.getArtist(id, { signal: preflightSignal }),
+        getAlbum: id => subsonic.getAlbum(id, { includeBlocked: true, signal: preflightSignal }),
+      },
       recentIds: minutes > 0 ? queue.recentlyPlayedIds(minutes / 60) : new Set<string>(), queuedIds: queue.queuedIds(), currentId: currentTrack?.id,
       blocked: song => !!blocklist.hitOf(song), heldBack,
     });

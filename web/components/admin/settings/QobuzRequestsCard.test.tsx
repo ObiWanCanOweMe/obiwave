@@ -27,3 +27,12 @@ test('credential inputs stay empty on hydration, survive refusal and clear after
   assert.equal(JSON.stringify(client.getMutationCache().getAll().map(m => m.state)).includes('typed-private-value'), false);
   await act(async () => renderer.unmount()); client.clear();
 });
+test('an incompatible status response leaves the settings page usable', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  function Harness() { const [form,setForm] = useState(settingsForm({})); return createElement(QobuzRequestsCard, { form, setForm, fieldErrors: {}, adminFetch: async () => Response.json({ values: {} }) }); }
+  let renderer: ReactTestRenderer;
+  await act(async () => { renderer = create(createElement(QueryClientProvider, { client }, createElement(Harness))); await new Promise(r => setTimeout(r, 30)); });
+  await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+  assert.ok(renderer!.root.findAllByProps({ role:'status' }).some(node => node.children.includes('Could not load Qobuz status.')));
+  await act(async () => renderer!.unmount()); client.clear();
+});

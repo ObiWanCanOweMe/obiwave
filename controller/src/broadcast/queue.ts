@@ -5391,7 +5391,12 @@ class Queue {
   qobuzReferences(): QobuzRef[] {
     const cutoff = Date.now() - 120_000;
     return [...this.upcoming, this.current, ...this.history.filter(item => !item.endedAt || Date.parse(item.endedAt) > cutoff)]
-      .flatMap(item => item && isQobuzTrack(item.track) ? [item.track.providerRef] : []);
+      .flatMap(item => {
+        if (!item) return [];
+        if (isQobuzTrack(item.track)) return [item.track.providerRef];
+        const opaque = /^qobuz:(\d{1,20})$/.exec(String(item.track?.id || ''));
+        return opaque ? [{ provider: 'qobuz' as const, trackId: opaque[1], accountKey: '*', generation: '*' }] : [];
+      });
   }
 
   snapshot() {

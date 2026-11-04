@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { createQobuzClient } from '../src/music/qobuz/client.js';
-import { isPublicAddress, publicHttps, type HttpTransport } from '../src/music/qobuz/http.js';
+import { isPublicAddress, publicHttps, openPublicResource, type HttpTransport } from '../src/music/qobuz/http.js';
 const creds = { appId: 'app', appSecret: 'secret', userAuthToken: 'token', userId: '42' };
 const reply = (data: unknown, status = 200) => ({ status, headers: {}, body: (async function* () { yield Buffer.from(JSON.stringify(data)); })() });
 test('file URL request signs CD FLAC parameters and rejects previews', async () => {
@@ -47,4 +48,28 @@ test('provider edition metadata remains part of recording identity', async () =>
   const client = createQobuzClient(creds, { transport: async () => reply({ tracks: { items: [{ id: 123, title: 'Song', version: 'Live', performer: { name: 'Artist' }, album: { title: 'Album' }, duration: 200, parental_warning: true }] } }) });
   const [track] = await client.search('Song Artist');
   assert.equal(track.title, 'Song (Live)'); assert.equal(track.explicit, true);
+});
+test('incomplete catalogue pages cannot establish an unambiguous recording', async () => {
+  const client = createQobuzClient(creds, { transport: async () => reply({ tracks: { total: 200, items: [{ id: 123, title: 'Song', performer: { name: 'Artist' }, duration: 200 }] } }) });
+  await assert.rejects(client.search('Song'), /incomplete/);
+});
+
+test('redirect responses close their native body before opening the next destination', async () => {
+  const body = Readable.from([Buffer.from('redirect body')]); let calls = 0;
+  await openPublicResource(new URL('https://media.example/start'), AbortSignal.timeout(1000), async () => ++calls === 1 ? { status: 302, headers: { location: 'https://media.example/final' }, body } : reply({}));
+  assert.equal(body.destroyed, true);
+});
+test('bounded pagination checks the complete recording result set', async () => {
+  const offsets: string[] = [];
+  const row = (id: number) => ({ id, title: `Song ${id}`, performer: { name: 'Artist' }, album: { title: 'Album' }, duration: 200, streamable: true });
+  const client = createQobuzClient(creds, { transport: async url => {
+    const offset = url.searchParams.get('offset')!; offsets.push(offset);
+    return reply({ tracks: { total: 60, items: Array.from({ length: offset === '0' ? 50 : 10 }, (_, i) => row(i+Number(offset)+1)) } });
+  }});
+  assert.equal((await client.search('Song Artist')).length, 60);
+  assert.deepEqual(offsets, ['0','50']);
+});
+test('a genuine short recording is not mistaken for a preview', async () => {
+  const client = createQobuzClient(creds, { transport: async () => reply({ url:'https://media.example/short.flac', sample:false, duration:20 }) });
+  assert.equal((await client.fileUrl('123')).duration, 20);
 });

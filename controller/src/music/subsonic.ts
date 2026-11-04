@@ -456,7 +456,7 @@ const ARTIST_MATCH_THRESHOLD = 0.82;
 // against the whole query either way.
 const RESOLVE_ARTIST_MAX_TOKEN_SEARCHES = 6;
 
-export async function resolveArtist(name, { artistCount = 10, signal }: { artistCount?: number; signal?: AbortSignal } = {}) {
+export async function resolveArtist(name, { artistCount = 10, signal, requireComplete = false }: { artistCount?: number; signal?: AbortSignal; requireComplete?: boolean } = {}) {
   const query = normArtist(name);
   if (!query) return null;
 
@@ -472,12 +472,12 @@ export async function resolveArtist(name, { artistCount = 10, signal }: { artist
   const candidates = new Map<string, any>();
   for (const a of exact) candidates.set(a.id, a);
   for (const token of [...new Set(tokens)].slice(0, RESOLVE_ARTIST_MAX_TOKEN_SEARCHES)) {
-    if (signal?.aborted) break;
+    if (signal?.aborted) { if (requireComplete) signal.throwIfAborted(); break; }
     try {
       for (const a of await searchArtists(token, { artistCount, signal })) {
         candidates.set(a.id, a);
       }
-    } catch {}
+    } catch (error) { if (requireComplete) throw error; }
   }
   if (candidates.size === 0) return null;
 
@@ -670,8 +670,8 @@ export async function getSong(id) {
   return r.song || null;
 }
 
-export async function getArtist(id) {
-  const r = await call('getArtist', { id }, RETRY_FAST_TRANSPORT);
+export async function getArtist(id, { signal }: { signal?: AbortSignal } = {}) {
+  const r = await call('getArtist', { id }, { ...RETRY_FAST_TRANSPORT, signal });
   return r.artist || null;
 }
 

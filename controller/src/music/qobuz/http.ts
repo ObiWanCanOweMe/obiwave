@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 // Public HTTPS only. DNS answers are checked by the socket's own lookup callback,
 // eliminating the gap between a preflight DNS check and a second resolution.
 import https from 'node:https';
@@ -42,7 +43,7 @@ export async function openPublicResource(url: URL, signal: AbortSignal, transpor
     const response = await transport(url, signal);
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     // Close the old body before opening another connection.
-    await response.body[Symbol.asyncIterator]().return?.();
+    closeHttpBody(response.body);
     const location = response.headers.location;
     if (redirects >= 3 || typeof location !== 'string') throw new QobuzError('redirect refused');
     url = new URL(location, url);
@@ -66,4 +67,9 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<
     signal.addEventListener('abort', abort, { once: true });
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
   });
+}
+
+export function closeHttpBody(body: AsyncIterable<Buffer>): void {
+  if (body instanceof Readable) { body.destroy(); return; }
+  try { void Promise.resolve(body[Symbol.asyncIterator]().return?.()).catch(() => {}); } catch { /* already closed */ }
 }

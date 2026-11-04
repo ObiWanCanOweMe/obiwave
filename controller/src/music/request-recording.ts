@@ -1,5 +1,5 @@
 // Shared recording identity: no provider-specific fuzzy matching.
-import { requestArtistMatches, requestTitleMatches, requestName, resolveDirectRequest, requestedTitle, explicitRequestAttribute, type RequestCatalog, type RequestMatch, type RequestSong } from './request-match.js';
+import { requestArtistMatches, requestTitleMatches, requestName, resolveDirectRequest, requestedTitle, explicitRequestAttribute, type RequestCatalog, type RequestMatch, type RequestSong, type RequestSelection } from './request-match.js';
 export function selectExactRecording(match: RequestMatch, candidates: RequestSong[]): RequestSong | null {
   if (!match.title?.trim() || match.kind === 'chat') return null;
   const exact = candidates.filter(song => requestTitleMatches(match.title, song.title) && requestArtistMatches(match.artist, song) && (!match.album || requestName(match.album) === requestName(song.album)));
@@ -14,7 +14,7 @@ export function selectExactRecording(match: RequestMatch, candidates: RequestSon
 
 export type RecordingProbe = { kind: 'not-specific' | 'absent' | 'indeterminate' | 'refused'; errors: string[] } | { kind: 'found'; track: RequestSong; outcome: 'matched' | 'cooldown' | 'already-queued'; errors: string[] };
 export interface RecordingProbeDeps {
-  catalog: RequestCatalog; text: string; recentIds: Set<string>; queuedIds: Set<string>; currentId?: string | null;
+  signal?: AbortSignal; catalog: RequestCatalog; text: string; recentIds: Set<string>; queuedIds: Set<string>; currentId?: string | null;
   blocked(song: RequestSong): boolean; heldBack(song: RequestSong): boolean;
 }
 export async function probeRequestedRecording(match: RequestMatch, deps: RecordingProbeDeps): Promise<RecordingProbe> {
@@ -22,9 +22,22 @@ export async function probeRequestedRecording(match: RequestMatch, deps: Recordi
   if (!title || match.kind === 'chat') return { kind: 'not-specific', errors: [] };
   // Provider metadata cannot prove a listener's hard language/genre condition.
   if ([match.genre, match.language].some(value => value && explicitRequestAttribute(deps.text, match, value))) return { kind: 'indeterminate', errors: [] };
-  const result = await resolveDirectRequest({ ...match, title }, {
-    ...deps, identityOnly: true, heldBack: song => deps.blocked(song) || deps.heldBack(song), moodSongs: async () => [], fallbackSongs: async () => [],
+  if (deps.signal?.aborted) return { kind: 'indeterminate', errors: ['local catalogue deadline exceeded'] };
+  const catalog = new Proxy(deps.catalog, { get(target, property) {
+    const member = Reflect.get(target, property);
+    return typeof member === 'function' ? (...args: unknown[]) => { deps.signal?.throwIfAborted(); return Reflect.apply(member, target, args); } : member;
+  } });
+  const resolution = resolveDirectRequest({ ...match, title, genre: null, language: null, mood: null }, {
+    ...deps, catalog, identityOnly: true, heldBack: song => deps.blocked(song) || deps.heldBack(song), moodSongs: async () => [], fallbackSongs: async () => [],
   });
+  let abort: (() => void) | undefined;
+  const deadline = new Promise<RequestSelection>(resolve => {
+    abort = () => resolve({ track: null, source: 'lookup-error', outcome: 'no-match', errors: ['local catalogue deadline exceeded'], incomplete: true });
+    deps.signal?.addEventListener('abort', abort, { once: true });
+  });
+  let result: RequestSelection;
+  try { result = await (deps.signal ? Promise.race([resolution, deadline]) : resolution); }
+  finally { if (abort) deps.signal?.removeEventListener('abort', abort); }
   if (result.track) {
     if (deps.blocked(result.track) || deps.heldBack(result.track)) return { kind: 'refused', errors: result.errors };
     return { kind: 'found', track: result.track, outcome: result.outcome === 'cooldown' || result.outcome === 'already-queued' ? result.outcome : 'matched', errors: result.errors };

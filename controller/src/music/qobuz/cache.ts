@@ -23,8 +23,8 @@ const entrySchema = z.object({
 type Entry = z.infer<typeof entrySchema>;
 export function createQobuzCache(deps: { root: string; now?: () => number; references: () => QobuzRef[]; capacityBytes: () => number; freeBytes?: () => Promise<number> }) {
   const root = resolve(deps.root); const now = deps.now ?? Date.now;
-  let entries: Entry[] = []; let loaded = false; let parent = ''; let chain: Promise<unknown> = Promise.resolve();
-  const leases = new Map<string, number>(); const grace = new Map<string, number>(); const activeParts = new Set<string>(); let reserved = 0;
+  let entries: Entry[] = []; let loaded = false; let parent = ''; let cleanupFailures = 0; let diskBytes = 0; let chain: Promise<unknown> = Promise.resolve();
+  const leases = new Map<string, number>(); const grace = new Map<string, number>(); const activeParts = new Map<string, number>(); let reserved = 0;
   function serial<T>(run: () => Promise<T>): Promise<T> { const result = chain.then(run); chain = result.catch(() => {}); return result; }
   async function safeRoot() {
     if (!loaded || (await realpath(dirname(root))) !== parent || !(await lstat(root)).isDirectory() || (await lstat(root)).isSymbolicLink()) throw new QobuzError('cache unavailable');
@@ -37,7 +37,20 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       try { const stat = await file.stat(); return stat.isFile() && stat.size === entry.audio.bytes; } finally { await file.close(); }
     } catch { return false; }
   }
-  async function persist() { await safeRoot(); await writeFileAtomic(join(root, 'index.json'), JSON.stringify({ version: 1, entries }), { mode: 0o600 }); }
+  async function persist() {
+    await safeRoot(); const body = JSON.stringify({ version: 1, entries });
+    if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw new QobuzError('cache index capacity unavailable');
+    await writeFileAtomic(join(root, 'index.json'), body, { mode: 0o600 });
+  }
+  async function ownedDiskUsage(): Promise<number> {
+    await safeRoot(); let bytes = 0;
+    for (const name of await readdir(root)) {
+      if (!owned.test(name) || activeParts.has(name)) continue;
+      const stat = await lstat(join(root, name)).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+      if (stat?.isFile()) bytes += stat.size;
+    }
+    return bytes;
+  }
   function reference(entry: Entry): QobuzRef { return { provider: 'qobuz', trackId: entry.metadata.id, accountKey: entry.accountKey, generation: entry.generation }; }
   function trackOf(entry: Entry): CachedTrack {
     return { ...entry.metadata, ...entry.audio, id: `qobuz:${entry.metadata.id}`, replayGain: null, explicitStatus: entry.metadata.explicit ? 'explicit' : 'clean', coverArt: `qobuz-${entry.metadata.id}`, providerRef: reference(entry) };
@@ -57,15 +70,20 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
   }
   function protectedGenerations() {
     const protectedSet = new Set(leases.keys());
-    for (const ref of deps.references()) { protectedSet.add(ref.generation); grace.set(ref.generation, now() + GRACE_MS); }
+    for (const ref of deps.references()) {
+      // Recovery can know what is on air without knowing which immutable file
+      // the mixer owns. A wildcard pin is internal-only, never a playable ref.
+      const generations = ref.generation === '*' ? entries.filter(e => e.metadata.id === ref.trackId).map(e => e.generation) : [ref.generation];
+      for (const generation of generations) { protectedSet.add(generation); grace.set(generation, now() + GRACE_MS); }
+    }
     for (const [gen, until] of grace) { if (until > now()) protectedSet.add(gen); else grace.delete(gen); }
     return protectedSet;
   }
   async function cleanupInner() {
-    await safeRoot(); const protectedSet = protectedGenerations(); let changed = false;
+    await safeRoot(); const protectedSet = protectedGenerations(); let changed = false; cleanupFailures = 0;
     for (const entry of [...entries]) {
       if (entry.expiresAt > now() || protectedSet.has(entry.generation)) continue;
-      try { await unlink(pathFor(entry.generation)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') continue; }
+      try { await unlink(pathFor(entry.generation)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { cleanupFailures++; continue; } }
       entries = entries.filter(e => e !== entry); changed = true;
       await unlink(pathFor(entry.generation, 'cover')).catch(() => {});
     }
@@ -74,8 +92,9 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
     for (const name of await readdir(root)) {
       if (!owned.test(name) || activeParts.has(name) || known.has(name.slice(0, 36)) || protectedSet.has(name.slice(0, 36))) continue;
       const stat = await lstat(join(root, name)).catch(() => null);
-      if (stat && now() - stat.mtimeMs > 24 * 60 * 60 * 1000) await unlink(join(root, name)).catch(() => {});
+      if (stat && now() - stat.mtimeMs > 24 * 60 * 60 * 1000) await unlink(join(root, name)).catch(() => { cleanupFailures++; });
     }
+    diskBytes = await ownedDiskUsage();
   }
   return {
     root,
@@ -100,7 +119,7 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
         }
         entries = []; await persist();
       }
-      protectedGenerations();
+      protectedGenerations(); diskBytes = await ownedDiskUsage();
     },
     // Implemented below to keep all writes behind the same serializer.
     lookup(match: RequestMatch, authority: QobuzAuthority): Promise<CacheLease | null> { return serial(async () => {
@@ -114,10 +133,10 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
     lease(ref: QobuzRef, renew = false): Promise<CacheLease | null> { return serial(async () => { const entry = entries.find(e => same(e, ref)); return entry && entry.expiresAt > now() && await validFile(entry) ? leaseFor(entry, renew) : null; }); },
     reserve(bytes = MAX_AUDIO_BYTES + 2 * 1024 * 1024): Promise<{ path: string; release(): void }> { return serial(async () => {
       await cleanupInner();
-      const used = entries.reduce((n, e) => n + (e.audio.bytes + (e.coverBytes || 0)), 0);
+      const used = await ownedDiskUsage(); diskBytes = used;
       const free = await (deps.freeBytes ? deps.freeBytes() : statfs(root).then(s => s.bavail * s.bsize));
-      if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES + 2 * 1024 * 1024 || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
-      reserved += bytes; const name = `${randomUUID()}.part`; activeParts.add(name); let released = false;
+      if (entries.length >= 10000 || !Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES + 2 * 1024 * 1024 || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
+      reserved += bytes; const name = `${randomUUID()}.part`; activeParts.set(name, bytes); let released = false;
       return { path: join(root, name), release() { if (released) return; released = true; reserved -= bytes; activeParts.delete(name); } };
     }); },
     publish(metadata: QobuzTrack, partial: { path: string; audio: ValidatedAudio; artwork?: QobuzArtwork | null }, authority: QobuzAuthority): Promise<CacheLease> { return serial(async () => {
@@ -126,17 +145,28 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       const stat = await lstat(partial.path);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== partial.audio.bytes) throw new QobuzError('incomplete audio');
       const entry = entrySchema.parse({ generation: randomUUID(), accountKey: authority.accountKey, metadata, audio: partial.audio, completedAt: now(), lastHitAt: null, expiresAt: now() + QOBUZ_RETENTION_MS });
-      await rename(partial.path, pathFor(entry.generation)); await chmod(pathFor(entry.generation), 0o644);
+      try { await rename(partial.path, pathFor(entry.generation)); await chmod(pathFor(entry.generation), 0o644); }
+      catch (error) { await unlink(pathFor(entry.generation)).catch(() => {}); throw error; }
       if (partial.artwork) {
         const artwork = rasterArtwork(partial.artwork.bytes);
-        const used = entries.reduce((sum, e) => sum + e.audio.bytes + (e.coverBytes || 0), 0) + entry.audio.bytes;
-        if (artwork && used + artwork.bytes.length <= deps.capacityBytes()) {
-          await writeFileAtomic(pathFor(entry.generation, 'cover'), artwork.bytes, { mode: 0o644 });
-          entry.coverBytes = artwork.bytes.length;
+        const used = await ownedDiskUsage();
+        if (artwork && used + artwork.bytes.length + reserved - (activeParts.get(name) || 0) <= deps.capacityBytes()) {
+          try {
+            await writeFileAtomic(pathFor(entry.generation, 'cover'), artwork.bytes, { mode: 0o644 });
+            entry.coverBytes = artwork.bytes.length;
+          } catch { /* optional artwork must not prevent validated music publication */ }
         }
       }
       entries.push(entry);
-      try { await persist(); } catch (error) { entries = entries.filter(e => e !== entry); throw error; }
+      try { await persist(); }
+      catch (error) {
+        entries = entries.filter(e => e !== entry);
+        await unlink(pathFor(entry.generation)).catch(() => {});
+        await unlink(pathFor(entry.generation, 'cover')).catch(() => {});
+        diskBytes = await ownedDiskUsage().catch(() => diskBytes);
+        throw error;
+      }
+      diskBytes = await ownedDiskUsage().catch(() => diskBytes + entry.audio.bytes + (entry.coverBytes || 0));
       return leaseFor(entry, false);
     }); },
     cleanup(): Promise<void> { return serial(cleanupInner); },
@@ -156,7 +186,7 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       } catch { return null; }
     },
     metadata(id: string, accountKey?: string) { const entry = [...entries].reverse().find(e => `qobuz:${e.metadata.id}` === id && (!accountKey || e.accountKey === accountKey)); return entry ? trackOf(entry) : null; },
-    status() { return { bytes: entries.reduce((sum, e) => sum + (e.audio.bytes + (e.coverBytes || 0)), 0), items: entries.length }; },
+    status() { return { bytes: diskBytes, items: entries.length, cleanupFailures }; },
   };
 }
 export type QobuzCache = ReturnType<typeof createQobuzCache>;

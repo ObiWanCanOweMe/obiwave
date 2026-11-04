@@ -1,14 +1,15 @@
 import { open, unlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { openPublicResource, type HttpTransport } from './http.js';
+import { openPublicResource, closeHttpBody, type HttpTransport } from './http.js';
 import { QobuzError, type ValidatedAudio } from './types.js';
 const run = promisify(execFile);
 export async function downloadQobuzAudio(url: string, partialPath: string, expectedDuration: number, caller?: AbortSignal, deps: { transport?: HttpTransport; maxBytes?: number } = {}): Promise<ValidatedAudio> {
   const signal = AbortSignal.any([AbortSignal.timeout(180_000), ...(caller ? [caller] : [])]);
-  let created = false;
+  let created = false; let body: AsyncIterable<Buffer> | undefined;
   try {
     const response = await openPublicResource(new URL(url), signal, deps.transport);
+    body = response.body;
     if (response.status !== 200) throw new QobuzError('download unavailable');
     const limit = Math.min(deps.maxBytes ?? 200 * 1024 * 1024, 200 * 1024 * 1024);
     const declared = Number(response.headers['content-length']);
@@ -36,5 +37,5 @@ export async function downloadQobuzAudio(url: string, partialPath: string, expec
     if (created) await unlink(partialPath).catch(() => {});
     if (error instanceof QobuzError) throw error;
     throw new QobuzError(signal.aborted ? 'download cancelled or timed out' : 'audio validation failed');
-  }
+  } finally { if (body) closeHttpBody(body); }
 }

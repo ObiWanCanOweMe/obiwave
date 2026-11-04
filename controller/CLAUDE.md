@@ -101,3 +101,7 @@ Theme token descriptors include closed `texture` and `finish` keyword sets, alon
 ### v1.29 integration notes
 
 - Per-provider behaviour is a capability descriptor in `llm/internal/provider/capabilities.ts`, a pure function of the leg's cfg, and strategy code never branches on `provider ===`. Which providers exist, their labels, keys and embedding defaults, is the catalogue in `schemas/providers.ts`; a fixed-endpoint OpenAI-compatible gateway is one entry there (`docs/internals/music.md` → Adding an LLM provider).
+
+### Qobuz requests
+
+`music/qobuz/` is the standalone bounded provider/cache layer; `routes/request-qobuz.ts` uses shared admission and the existing queue. Read `docs/qobuz-requests.md` and the Qobuz section in `docs/internals/music.md` before changing it. Accepted cache hits renew a seven-day deadline; inspection/refusal never renews. Namespaced external IDs retain the mixer metadata key `subsonic_id` for compatibility but must never reach Navidrome endpoints. Queue recovery restores pins before cache cleanup/draining. The feature defaults off and ordinary tests mock the provider.
