@@ -63,3 +63,9 @@ Deferred minors: none. Declined-to-judge items: none.
 ## Release CI dependency correction
 
 The first Linux PR runs failed only because the controller quality runner lacked ffmpeg, which the new full FLAC validation test requires. The production controller image already installs it. The controller CI job now explicitly installs ffmpeg (including ffprobe) before the full suite and reports both versions. A workflow-contract regression reproduced the missing prerequisite before the fix. Audio validation remains enabled, rather than being skipped.
+
+## Release-gate test isolation correction
+
+The first immutable release candidate passed both PR controller suites, then its repeated release gate exposed an existing library-mount fixture race. A missing local pick launches a background proof refresh; resetting proof generation for the next test before that refresh settles makes the next test join the old request. The resulting timeout leaves its drain running into teardown.
+
+A 50 ms fake-mixer response delay reproduced the same two failures locally. The fixture now settles the prior proof before resetting generation, retaining the delayed peer to exercise this ordering. All four cases and the broader 59-test mount/Qobuz playback/recovery regression pass. No production source changed. Candidate v1.30.0-obiwave.2 published no images and was not deployed; its tag is preserved and a new revision will carry the fixture correction.
