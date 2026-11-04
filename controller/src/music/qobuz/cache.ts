@@ -37,10 +37,10 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       try { const stat = await file.stat(); return stat.isFile() && stat.size === entry.audio.bytes; } finally { await file.close(); }
     } catch { return false; }
   }
-  async function persist() {
+  async function persist(beforeCommit?: () => void) {
     await safeRoot(); const body = JSON.stringify({ version: 1, entries });
     if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw new QobuzError('cache index capacity unavailable');
-    await writeFileAtomic(join(root, 'index.json'), body, { mode: 0o600 });
+    await writeFileAtomic(join(root, 'index.json'), body, { mode: 0o600, beforeCommit });
   }
   async function ownedDiskUsage(): Promise<number> {
     await safeRoot(); let bytes = 0;
@@ -127,19 +127,24 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       const candidates = entries.filter(e => e.accountKey === authority.accountKey && e.expiresAt > now());
       const found = selectExactRecording(match, candidates.map(e => ({ ...e.metadata, id: `qobuz:${e.metadata.id}` })));
       if (!found) return null;
-      const entry = candidates.find(e => `qobuz:${e.metadata.id}` === found.id);
-      return entry && await validFile(entry) ? leaseFor(entry, true) : null;
+      for (const entry of [...candidates].reverse()) {
+        if (`qobuz:${entry.metadata.id}` === found.id && await validFile(entry)) return leaseFor(entry, true);
+      }
+      return null;
     }); },
     lease(ref: QobuzRef, renew = false): Promise<CacheLease | null> { return serial(async () => { const entry = entries.find(e => same(e, ref)); return entry && entry.expiresAt > now() && await validFile(entry) ? leaseFor(entry, renew) : null; }); },
     reserve(bytes = MAX_AUDIO_BYTES + 2 * 1024 * 1024): Promise<{ path: string; release(): void }> { return serial(async () => {
       await cleanupInner();
       const used = await ownedDiskUsage(); diskBytes = used;
       const free = await (deps.freeBytes ? deps.freeBytes() : statfs(root).then(s => s.bavail * s.bsize));
-      if (entries.length >= 10000 || !Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES + 2 * 1024 * 1024 || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
+      if (entries.length + activeParts.size >= 10000 || !Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES + 2 * 1024 * 1024 || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
       reserved += bytes; const name = `${randomUUID()}.part`; activeParts.set(name, bytes); let released = false;
       return { path: join(root, name), release() { if (released) return; released = true; reserved -= bytes; activeParts.delete(name); } };
     }); },
-    publish(metadata: QobuzTrack, partial: { path: string; audio: ValidatedAudio; artwork?: QobuzArtwork | null }, authority: QobuzAuthority): Promise<CacheLease> { return serial(async () => {
+    publish(metadata: QobuzTrack, partial: { path: string; audio: ValidatedAudio; artwork?: QobuzArtwork | null }, authority: QobuzAuthority, authorized: () => boolean = () => true): Promise<CacheLease> { return serial(async () => {
+      const guard = () => { if (!authorized()) throw new QobuzError('credentials changed'); };
+      guard();
+      if (entries.length >= 10000) throw new QobuzError('cache capacity unavailable');
       await safeRoot(); const name = partial.path.slice(root.length + 1);
       if (dirname(partial.path) !== root || !activeParts.has(name) || !owned.test(name)) throw new QobuzError('invalid cache publication');
       const stat = await lstat(partial.path);
@@ -158,7 +163,7 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
         }
       }
       entries.push(entry);
-      try { await persist(); }
+      try { await persist(guard); }
       catch (error) {
         entries = entries.filter(e => e !== entry);
         await unlink(pathFor(entry.generation)).catch(() => {});

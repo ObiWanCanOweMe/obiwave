@@ -118,3 +118,22 @@ test('fresh crash orphans count toward the cache disk budget', async () => {
   await assert.rejects(f.cache.reserve(800), /capacity/);
   await rm(f.root, { recursive: true, force: true });
 });
+
+test('concurrent acquisitions reserve manifest slots and preserve restart recovery at the limit', async () => {
+  const f = await fixture(); f.lease.release();
+  const path = join(f.root, 'cache/index.json'); const index = JSON.parse(await readFile(path, 'utf8'));
+  index.entries = Array.from({ length: 9999 }, () => ({ ...index.entries[0], generation: randomUUID() }));
+  await writeFile(path, JSON.stringify(index));
+  const make = () => createQobuzCache({ root: join(f.root, 'cache'), now: () => 200000, references: () => [], capacityBytes: () => 1024**3, freeBytes: async () => 2*1024**3 });
+  const cache = make(); await cache.load();
+  const reservations = await Promise.allSettled([cache.reserve(4), cache.reserve(4)]);
+  for (const result of reservations) {
+    if (result.status !== 'fulfilled') continue;
+    await writeFile(result.value.path, 'data');
+    const lease = await cache.publish(metadata, { path: result.value.path, audio }, authority); lease.release(); result.value.release();
+  }
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).entries.length, 10000);
+  await make().load();
+  assert.equal(reservations.filter(r => r.status === 'fulfilled').length, 1);
+  await rm(f.root, { recursive: true, force: true });
+});

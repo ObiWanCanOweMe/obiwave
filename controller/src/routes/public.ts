@@ -114,17 +114,17 @@ const coverCache = new Map<string, { buf: Buffer; contentType: string }>();
 router.get('/cover/:id', async (req, res) => {
   const { id } = req.params;
   if (/^qobuz[:-]\d{1,20}$/.test(id)) {
-    return requireStationAuth(req, res, async () => {
-      try {
-        const trackId = id.replace('qobuz-', 'qobuz:');
-        const current = queue.current?.track;
-        const ref = current?.id === trackId && isQobuzTrack(current) ? current.providerRef : undefined;
-        const artwork = await qobuzCache.cover(trackId, ref?.accountKey ?? qobuzAuthority()?.accountKey, ref?.generation);
-        if (!artwork) return res.status(404).end();
-        res.setHeader('Content-Type', artwork.contentType); res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('Cache-Control', 'private, no-store'); return res.send(artwork.bytes);
-      } catch { return res.status(404).end(); }
-    });
+    // Covers follow the existing public artwork policy. Current web/native
+    // image helpers omit the station password; audio/settings keep their gates.
+    try {
+      const trackId = id.replace('qobuz-', 'qobuz:');
+      const current = queue.current?.track;
+      const ref = current?.id === trackId && isQobuzTrack(current) ? current.providerRef : undefined;
+      const artwork = await qobuzCache.cover(trackId, ref?.accountKey ?? qobuzAuthority()?.accountKey, ref?.generation);
+      if (!artwork) return res.status(404).end();
+      res.setHeader('Content-Type', artwork.contentType); res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store'); return res.send(artwork.bytes);
+    } catch { return res.status(404).end(); }
   }
   // Subsonic ids are short alphanumerics; anything else would make this an SSRF
   // surface.

@@ -1,6 +1,5 @@
 // External request admission, sharing queue safety and ordinary intro generation.
 import * as settings from '../settings.js';
-import { qobuzAuthority } from '../music/qobuz/credentials.js';
 import { qobuzService } from '../music/qobuz/runtime.js';
 import type { QobuzService } from '../music/qobuz/service.js';
 import type { CachedTrack, QobuzTrack } from '../music/qobuz/types.js';
@@ -31,7 +30,7 @@ export async function tryQobuzRequest({ match, text, requester, context, queue, 
   try { lease = await service.acquire(match, undefined, guard); }
   catch { return refusal ?? { kind: 'continue' }; }
   if (!lease) return { kind: 'continue' };
-  const authority = qobuzAuthority();
+  const authority = lease.authority;
   try {
     const generated = await generateQueuedRequestIntro({ track: lease.track, context, requestedBy: requester, recap: queue.getDjRecap(), recentTracks: queue.getRecentTracks(), recentOpeners: queue.getRecentOpeners() }, text);
     if (settings.get().qobuz?.enabled !== true || !service.stillValid(authority)) return { kind: 'continue' };

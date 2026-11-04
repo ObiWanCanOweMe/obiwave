@@ -3,7 +3,7 @@ import { createQobuzClient, type QobuzClient } from './client.js';
 import { downloadQobuzAudio } from './download.js';
 import { selectExactRecording } from '../request-recording.js';
 import { requestName, type RequestMatch } from '../request-match.js';
-import { QobuzError, type CacheLease, type QobuzAuthority, type QobuzCredentials, type QobuzRef, type QobuzTrack } from './types.js';
+import { QobuzError, type AcquisitionLease, type QobuzAuthority, type QobuzCredentials, type QobuzRef, type QobuzTrack } from './types.js';
 import type { QobuzCache } from './cache.js';
 import { unlink } from 'node:fs/promises';
 export function createQobuzService(deps: {
@@ -32,7 +32,7 @@ export function createQobuzService(deps: {
     const current = deps.authority();
     return !!authority && deps.enabled() && current?.accountKey === authority.accountKey && current.revision === authority.revision;
   }
-  async function acquire(match: RequestMatch, caller?: AbortSignal, admit?: (track: QobuzTrack) => void): Promise<CacheLease | null> {
+  async function acquire(match: RequestMatch, caller?: AbortSignal, admit?: (track: QobuzTrack) => void): Promise<AcquisitionLease | null> {
     if (!deps.enabled() || !match.title?.trim() || match.kind === 'chat') return null;
     const credentials = deps.credentials(); if (!credentials) throw new QobuzError('credentials missing');
     const authority = await authorityFor(credentials);
@@ -41,7 +41,7 @@ export function createQobuzService(deps: {
     if (cached) {
       if (!stillValid(authority) || !deps.allowed({ ...cached.track, id: cached.track.providerRef.trackId } as QobuzTrack)) { cached.release(); throw new QobuzError('request unavailable'); }
       try { admit?.(cached.track); } catch (error) { cached.release(); throw error; }
-      return cached;
+      return { ...cached, authority };
     }
     const key = JSON.stringify([authority.accountKey, authority.revision, requestName(match.title), requestName(match.artist), requestName(match.album)]);
     let work = queries.get(key);
@@ -69,7 +69,7 @@ export function createQobuzService(deps: {
               if (!stillValid(authority) || !deps.allowed(metadata)) throw new QobuzError('credentials or policy changed');
               const artwork = metadata.artworkUrl ? await fetchQobuzArtwork(metadata.artworkUrl, caller).catch(() => null) : null;
               if (!stillValid(authority)) throw new QobuzError('credentials changed');
-              const lease = await deps.cache.publish(metadata, { path: reservation.path, audio, artwork }, authority);
+              const lease = await deps.cache.publish(metadata, { path: reservation.path, audio, artwork }, authority, () => stillValid(authority));
               const ref = lease.track.providerRef; lease.release(); return ref;
             } finally { reservation.release(); await unlink(reservation.path).catch(() => {}); }
           })().finally(() => { active--; tracks.delete(trackKey); });
@@ -84,8 +84,14 @@ export function createQobuzService(deps: {
       if (!stillValid(authority)) throw new QobuzError('credentials changed');
       if (!ref) return null;
       const lease = await deps.cache.lease(ref);
-      if (lease) { try { admit?.(lease.track); } catch (error) { lease.release(); throw error; } }
-      return lease;
+      if (lease) {
+        try {
+          if (!stillValid(authority)) throw new QobuzError('credentials changed');
+          if (!deps.allowed({ ...lease.track, id: lease.track.providerRef.trackId })) throw new QobuzError('request unavailable');
+          admit?.(lease.track);
+        } catch (error) { lease.release(); throw error; }
+      }
+      return lease ? { ...lease, authority } : null;
     } catch (error) {
       lastError = { code: error instanceof QobuzError ? error.code : 'acquisition failed', at: Date.now() };
       throw new QobuzError(lastError.code);

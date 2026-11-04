@@ -21,7 +21,7 @@ beforeEach(async context => {
   await settings.load(); await settings.update({ qobuz: { enabled: true }, tts: { enabled: false }, requests: { onePendingPerIp: false, maxPending: 50, globalHourlyCap: 1000, perIpHourlyCap: 100 }, llm: { requestMatching: 'direct', strictRequests: false, provider: 'openai-compatible', compatibleMode: 'local', baseUrl: 'http://model.invalid/v1', model: 'test', fallback: { enabled: false } } });
   queue.upcoming = []; queue.current = null; queue.history = []; queue._recentPlays = []; queue.senderBusy = true;
   externalCalls = agentCalls = renewals = releases = 0; local = false; invalidateWeatherCache();
-  t.mock.method(qobuzService, 'acquire', async (_match, _signal, guard) => { externalCalls++; guard?.(cached); return { track: cached, release() { releases++; }, async accepted() { renewals++; } }; });
+  t.mock.method(qobuzService, 'acquire', async (_match, _signal, guard) => { externalCalls++; guard?.(cached); return { track: cached, authority: { accountKey: cached.providerRef.accountKey, revision: 1 }, release() { releases++; }, async accepted() { renewals++; } }; });
   t.mock.method(qobuzService, 'stillValid', () => true);
   t.mock.method(requestAgent, 'run', async () => { agentCalls++; throw Error('unexpected substitution'); });
   const leg = primaryLeg();
@@ -63,4 +63,10 @@ test('disabled Qobuz preserves the ordinary Direct request path', async () => {
 test('local cooldown refuses acquisition rather than buying around station policy', async () => {
   local = true; queue._recentPlays = [{ id: 'local-song', title: 'Song', artist: 'Artist', endedAt: new Date().toISOString() }];
   const result = await submit(); assert.equal(result.outcome, 'cooldown'); assert.equal(externalCalls, 0); assert.equal(queue.upcoming.length, 0);
+});
+
+test('queue admission checks the authority carried by the acquisition lease', async t => {
+  t.mock.method(qobuzService, 'stillValid', authority => authority?.revision !== 1);
+  const result = await tryQobuzRequest({ match: { title: 'Song', artist: 'Artist' }, text: 'Play Song by Artist', requester: 'Listener', context: {}, queue, service: qobuzService });
+  assert.equal(result.kind, 'continue'); assert.equal(queue.upcoming.length, 0); assert.equal(renewals, 0); assert.equal(releases, 1);
 });
