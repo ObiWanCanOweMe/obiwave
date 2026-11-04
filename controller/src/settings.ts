@@ -22,6 +22,7 @@
 
 import { readFile, unlink, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { qobuzPatchSchema } from './schemas/qobuz.js';
 import { STATE_DIR } from './config.js';
 import { writeFileAtomic } from './util/atomic-file.js';
 import { ensureMainSettingsMode, writeSettingsFile } from './settings/file.js';
@@ -788,6 +789,10 @@ export async function load() {
     // Listener-request pipeline gates. Absent/malformed settings.json (every
     // install predating this key) coerces field-by-field to DEFAULTS.requests,
     // never undefined/NaN — later tasks gate on settings.get()?.requests.
+    qobuz: {
+      enabled: stored.qobuz?.enabled === true,
+      cacheMaxGb: qobuzPatchSchema.safeParse({ cacheMaxGb: stored.qobuz?.cacheMaxGb }).data?.cacheMaxGb ?? 5,
+    },
     requests: {
       enabled:
         typeof stored.requests?.enabled === 'boolean'
@@ -2677,6 +2682,7 @@ export async function prepareUpdate(patch, { themeIds }: { themeIds?: ReadonlySe
       throw new Error('set a station password before turning on a privacy lock');
     }
   }
+  if ('qobuz' in patch) next.qobuz = { ...next.qobuz, ...parseSettingsPatchKey<Record<string, unknown>>('qobuz', patch.qobuz) };
   if ('requests' in patch) {
     // The schema decides "usable or absent" per field; the fallback to the
     // CURRENT value is this spread. Same result as the old per-field ternaries,

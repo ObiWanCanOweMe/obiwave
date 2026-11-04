@@ -28,6 +28,7 @@ export const SECRET_ENV_KEYS = [
   'ELEVENLABS_API_KEY',
   'FISH_API_KEY',
   'SEARCH_API_KEY',
+  'QOBUZ_APP_ID', 'QOBUZ_APP_SECRET', 'QOBUZ_USER_AUTH_TOKEN', 'QOBUZ_USER_ID',
   'KAGI_API_KEY',
   'KEENABLE_API_KEY',
   // Embeddings. Only needed when the embedding provider uses a different key
@@ -41,6 +42,9 @@ export const SECRET_ENV_KEYS = [
   'LISTENBRAINZ_USER_TOKEN',
   'LISTENBRAINZ_API_URL',
 ];
+
+// Capture actual startup overrides before loadSecretsIntoEnv installs saved values.
+export const SECRET_BOOT_OVERRIDES = Object.fromEntries(SECRET_ENV_KEYS.filter(k => !!process.env[k]).map(k => [k, process.env[k]!]));
 
 // A key with a control character in it (one pasted across a line wrap, say)
 // can't go in an HTTP header: fetch throws, and its message quotes the whole
@@ -122,7 +126,13 @@ export async function loadSecretsIntoEnv(): Promise<{ loaded: string[]; skipped:
 
 // Persist a batch of API keys, merged over what is already there. An empty value
 // is written as `KEY=` rather than deleted, so the next boot falls back to env.
-export async function saveSecrets(rawPatch: Record<string, string>): Promise<void> {
+let saveChain: Promise<void> = Promise.resolve();
+export function saveSecrets(rawPatch: Record<string, string>): Promise<void> {
+  const pending = saveChain.then(() => saveSecretsOnce(rawPatch));
+  saveChain = pending.catch(() => {});
+  return pending;
+}
+async function saveSecretsOnce(rawPatch: Record<string, string>): Promise<void> {
   // Control characters stripped as every secret's save path does
   // (schemas/settings.ts), so a key with a line break is joined, not refused.
   const patch = Object.fromEntries(
@@ -152,8 +162,12 @@ export async function saveSecrets(rawPatch: Record<string, string>): Promise<voi
   // effect in-process while being absent from the file. Live env and disk stay in
   // lockstep, and a later AI SDK call sees the new key without a restart.
   for (const [key, value] of Object.entries(patch)) {
-    if (!SECRET_ENV_KEYS.includes(key) || !value) continue;
-    process.env[key] = value;
+    if (!SECRET_ENV_KEYS.includes(key)) continue;
+    if (key.startsWith('QOBUZ_')) {
+      if (SECRET_BOOT_OVERRIDES[key]) continue;
+      if (value) process.env[key] = value;
+      else delete process.env[key];
+    } else if (value) process.env[key] = value;
   }
 }
 

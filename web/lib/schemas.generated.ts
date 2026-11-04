@@ -2207,6 +2207,21 @@ export const OPENAI_COMPATIBLE_GATEWAYS: readonly OpenAICompatibleGateway[] = LL
     return gw ? [gw] : [];
   });
 
+// ─── from controller/src/schemas/qobuz.ts ────────────────────────────────
+
+export const qobuzPatchSchema = z.object({
+  enabled: z.boolean({ error: 'qobuz.enabled must be a boolean' }).optional(),
+  cacheMaxGb: z.number({ error: 'qobuz.cacheMaxGb must be a number' }).min(0.25, 'qobuz.cacheMaxGb must be at least 0.25').max(1024, 'qobuz.cacheMaxGb must be at most 1024').optional(),
+});
+export const QOBUZ_CREDENTIAL_FIELDS = ['appId', 'appSecret', 'userAuthToken', 'userId'] as const;
+export const qobuzStatusSchema = z.object({
+  enabled: z.boolean(), ready: z.boolean(),
+  credentials: z.record(z.enum(QOBUZ_CREDENTIAL_FIELDS), z.object({ present: z.boolean(), source: z.enum(['environment', 'saved', 'unset']) })),
+  cache: z.object({ bytes: z.number(), items: z.number() }),
+  lastError: z.object({ code: z.string(), at: z.number() }).nullable(),
+});
+export type QobuzStatus = z.infer<typeof qobuzStatusSchema>;
+
 // ─── from controller/src/schemas/request.ts ──────────────────────────────
 
 // Shared listener-request schema — POST /request's `{ text, name }`. Run at the

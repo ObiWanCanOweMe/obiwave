@@ -203,6 +203,7 @@ export const DEFAULTS = {
   // Listener-request gates, all applied live. They bound the rate from several
   // angles at once: queue depth, requests/hour station-wide, per-track repeat
   // cooldown (0 = off), minimum gap between any two, and a single IP's share.
+  qobuz: { enabled: false, cacheMaxGb: 5 },
   requests: {
     enabled: true,
     maxPending: 6,
