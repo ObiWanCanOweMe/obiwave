@@ -77,6 +77,14 @@ jobs:
             console.log(`zod ${c} on both sides`);
           '
 
+      - name: Install controller audio test dependencies
+        if: matrix.package == 'controller'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
       - name: Install analyzer Python test dependencies
         if: matrix.package == 'controller'
         run: |

@@ -59,3 +59,7 @@ Deferred minors: none. Declined-to-judge items: none.
 - retained crash orphans count toward actual disk admission and failed publication removes uncommitted generation files — prevents cache-cap bypass after crashes or manifest errors — extra bounded filesystem accounting on admission/cleanup, never on polling.
 - cached raster artwork follows the existing public library-cover policy instead of adding station-password authentication — unchanged web/native helpers omit station passwords, and the approved spec requires compatibility without a mobile release — cached cover art remains publicly retrievable by opaque track ID, as library artwork already is; audio/settings authentication is unchanged.
 - extend the shared asynchronous atomic writer with an optional final synchronous authorization/rename boundary — stage file I/O asynchronously and prevent credential revision changes between authorization and publication — one synchronous rename per guarded cache manifest commit; ordinary writers retain their existing async path.
+
+## Release CI dependency correction
+
+The first Linux PR runs failed only because the controller quality runner lacked ffmpeg, which the new full FLAC validation test requires. The production controller image already installs it. The controller CI job now explicitly installs ffmpeg (including ffprobe) before the full suite and reports both versions. A workflow-contract regression reproduced the missing prerequisite before the fix. Audio validation remains enabled, rather than being skipped.
