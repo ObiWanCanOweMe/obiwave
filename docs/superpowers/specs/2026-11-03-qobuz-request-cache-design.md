@@ -1,6 +1,6 @@
 # Qobuz fallback for listener song requests
 
-Status: approved by the operator on 2026-11-03; implemented on the feature branch and undergoing final verification.
+Status: approved by the operator on 2026-11-03; implemented and verified on the feature branch; delivered as a reviewable PR to develop.
 
 ## Intent and agreed requirements
 
