@@ -40,7 +40,9 @@ const mixer = createServer((socket: Socket) => {
     const command = data.toString().trim();
     commands.push(command);
     if (!command.startsWith('path_readable ')) return void socket.end('OK\nEND\n');
-    socket.end(missing.has(command.slice('path_readable '.length)) ? NO : reply);
+    // A delayed peer keeps the background-recheck isolation regression real.
+    const response = missing.has(command.slice('path_readable '.length)) ? NO : reply;
+    setTimeout(() => socket.end(response), 50);
   });
 });
 await new Promise<void>(resolve => mixer.listen(0, '127.0.0.1', resolve));
@@ -96,7 +98,10 @@ async function waitFor(check: () => boolean, ms = 3000) {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // A missing pick launches a background mount recheck. Settle it before
+  // resetting proof generation or the next case can join the old request.
+  await proveLibraryMount();
   _resetLibraryMount();
   reply = YES;
   missing.clear();
