@@ -5,6 +5,7 @@ import express from 'express';
 import { config } from './config.js';
 import { envIssues } from './util/env.js';
 import * as settings from './settings.js';
+import { initializeQobuz } from './music/qobuz/runtime.js';
 import { logCompatDetection } from './routes/settings/core.js';
 import * as blocklist from './music/blocklist.js';
 import * as jingles from './broadcast/jingles.js';
@@ -304,7 +305,10 @@ app.listen(config.server.port, async (err?: Error) => {
 
   // Before the watcher starts, so tracks already handed to Liquidsoap stay
   // tracked across a restart.
-  queue.recover();
+  queue.recover({ drain: false });
+  try { await initializeQobuz(() => queue.qobuzReferences()); }
+  catch { console.warn('[qobuz] cache initialization unavailable; ordinary library playback continues'); }
+  if (queue.upcoming.some(item => !item.sent)) void queue.drainToLiquidsoap();
 
   // Terminate a tagger/analyzer child orphaned by a restart: it is detached and
   // keeps running, so a second Start would double-write the library DB.

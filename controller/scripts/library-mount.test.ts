@@ -516,12 +516,13 @@ test('only Liquidsoap-bound callers go through getLocalPath', () => {
     }
   };
   walk(src);
-  assert.deepEqual(callers.sort(), ['broadcast/queue.ts', 'music/subsonic.ts']);
+  assert.deepEqual(callers.sort(), ['music/subsonic.ts', 'music/track-source.ts']);
 
   const queue = readFileSync(join(src, 'broadcast/queue.ts'), 'utf8');
-  assert.equal(queue.match(/\bgetLocalPath\(/g)?.length, 1, 'the drain decides once, and the URI is built from that decision');
-  assert.match(queue, /const onMount = subsonic\.getLocalPath\(item\.track\);\n\s*let localPath = await libraryMount\.mixerReadablePath\(onMount, /);
-  assert.match(queue, /item\.resolveProbeId = localPath \? undefined : randomBytes/);
+  const source = readFileSync(join(src, 'music/track-source.ts'), 'utf8');
+  assert.equal(source.match(/\bgetLocalPath\(/g)?.length, 1, 'source resolution decides once');
+  assert.match(queue, /resolveTrackPlayback\(item\.track/);
+  assert.match(source, /mixerReadablePath\(onMount, opts.timeoutMs\)/);
   assert.match(queue, /source = subsonic\.findLibraryFile\(item\.track\)/, 'ffprobe reads it from this container');
 });
 

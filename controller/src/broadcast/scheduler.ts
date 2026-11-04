@@ -1,3 +1,4 @@
+import { qobuzService } from '../music/qobuz/runtime.js';
 import { prepareEpisodeContext, showPreparation, onPreparationChange, preparationIdentity, preparationSkillAt } from './show-preparation.js';
 import { autoPlaylistShowKey } from './auto-playlist-show.js';
 // Scheduler: the auto-playlist refresh, the per-minute talk tick over
@@ -1440,6 +1441,9 @@ async function overrideJanitor() {
 }
 
 export function startScheduler() {
+  cron.schedule('*/15 * * * *', async () => {
+    try { await qobuzService.cleanup(); } catch { console.warn('[qobuz] cache cleanup unavailable; retrying next interval'); }
+  }, { noOverlap: true });
   refreshAutoPlaylist({ automatic: true }).catch(err => queue.log('error', `Initial playlist failed: ${err.message}`));
 
   const refreshCron = autoPlaylistRefreshCron(config.show.autoQueueRefreshMinutes);
