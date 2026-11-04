@@ -1,3 +1,4 @@
+import { fetchQobuzArtwork } from './artwork.js';
 import { createQobuzClient, type QobuzClient } from './client.js';
 import { downloadQobuzAudio } from './download.js';
 import { selectExactRecording } from '../request-recording.js';
@@ -66,7 +67,9 @@ export function createQobuzService(deps: {
               if (resource.sample || Math.abs(resource.duration - metadata.duration) > Math.max(3, metadata.duration * 0.02)) throw new QobuzError('preview or unavailable recording');
               const audio = await (deps.download ?? downloadQobuzAudio)(resource.url, reservation.path, metadata.duration, caller);
               if (!stillValid(authority) || !deps.allowed(metadata)) throw new QobuzError('credentials or policy changed');
-              const lease = await deps.cache.publish(metadata, { path: reservation.path, audio }, authority);
+              const artwork = metadata.artworkUrl ? await fetchQobuzArtwork(metadata.artworkUrl, caller).catch(() => null) : null;
+              if (!stillValid(authority)) throw new QobuzError('credentials changed');
+              const lease = await deps.cache.publish(metadata, { path: reservation.path, audio, artwork }, authority);
               const ref = lease.track.providerRef; lease.release(); return ref;
             } finally { reservation.release(); await unlink(reservation.path).catch(() => {}); }
           })().finally(() => { active--; tracks.delete(trackKey); });
@@ -88,6 +91,9 @@ export function createQobuzService(deps: {
       throw new QobuzError(lastError.code);
     }
   }
-  return { acquire, cleanup: () => deps.cache.cleanup(), status: () => ({ cache: deps.cache.status(), lastError }), stillValid };
+  return { acquire: async (...args: Parameters<typeof acquire>) => {
+    try { return await acquire(...args); }
+    catch (error) { lastError = { code: error instanceof QobuzError ? error.code : 'acquisition failed', at: Date.now() }; throw new QobuzError(lastError.code); }
+  }, cleanup: () => deps.cache.cleanup(), status: () => ({ cache: deps.cache.status(), lastError }), stillValid };
 }
 export type QobuzService = ReturnType<typeof createQobuzService>;

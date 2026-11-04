@@ -4507,7 +4507,7 @@ class Queue {
     // not enough evidence to mutate the library, so the recovery probes the
     // stored ID and its deterministic canonical image before it starts the
     // existing authoritative reconcile walk.
-    void this._considerIdRotationRecovery(item.track)
+    if (!isExternalTrackId(item.track?.id)) void this._considerIdRotationRecovery(item.track)
       .catch((err: unknown) => this.log('error',
         `Navidrome ID-rotation check failed: ${err instanceof Error ? err.message : String(err)}`));
 

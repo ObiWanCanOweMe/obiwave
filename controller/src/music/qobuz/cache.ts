@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { rasterArtwork, type QobuzArtwork } from './artwork.js';
 import { writeFileAtomic } from '../../util/atomic-file.js';
 import { selectExactRecording } from '../request-recording.js';
 import type { RequestMatch } from '../request-match.js';
@@ -16,6 +17,7 @@ const entrySchema = z.object({
   generation: z.string().uuid(), accountKey: z.string().regex(/^[a-f0-9]{64}$/),
   metadata: z.object({ id: z.string().regex(/^\d{1,20}$/), title: z.string().min(1).max(512), artist: z.string().min(1).max(512), album: z.string().max(512), duration: z.number().positive().finite(), explicit: z.boolean(), isrc: z.string().max(64).optional() }),
   audio: z.object({ bytes: z.number().int().positive().max(MAX_AUDIO_BYTES), duration: z.number().positive().finite(), suffix: z.literal('flac'), samplingRate: z.literal(44100), bitDepth: z.literal(16), channelCount: z.number().int().min(1).max(8) }),
+  coverBytes: z.number().int().min(0).max(2 * 1024 * 1024).optional(),
   completedAt: z.number().finite(), lastHitAt: z.number().finite().nullable(), expiresAt: z.number().finite(),
 });
 type Entry = z.infer<typeof entrySchema>;
@@ -110,29 +112,51 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
       return entry && await validFile(entry) ? leaseFor(entry, true) : null;
     }); },
     lease(ref: QobuzRef, renew = false): Promise<CacheLease | null> { return serial(async () => { const entry = entries.find(e => same(e, ref)); return entry && entry.expiresAt > now() && await validFile(entry) ? leaseFor(entry, renew) : null; }); },
-    reserve(bytes = MAX_AUDIO_BYTES): Promise<{ path: string; release(): void }> { return serial(async () => {
+    reserve(bytes = MAX_AUDIO_BYTES + 2 * 1024 * 1024): Promise<{ path: string; release(): void }> { return serial(async () => {
       await cleanupInner();
-      const used = entries.reduce((n, e) => n + e.audio.bytes, 0);
+      const used = entries.reduce((n, e) => n + (e.audio.bytes + (e.coverBytes || 0)), 0);
       const free = await (deps.freeBytes ? deps.freeBytes() : statfs(root).then(s => s.bavail * s.bsize));
-      if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
+      if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_BYTES + 2 * 1024 * 1024 || used + reserved + bytes > deps.capacityBytes() || !Number.isFinite(free) || free - reserved - bytes < 512 * 1024 * 1024) throw new QobuzError('cache capacity unavailable');
       reserved += bytes; const name = `${randomUUID()}.part`; activeParts.add(name); let released = false;
       return { path: join(root, name), release() { if (released) return; released = true; reserved -= bytes; activeParts.delete(name); } };
     }); },
-    publish(metadata: QobuzTrack, partial: { path: string; audio: ValidatedAudio }, authority: QobuzAuthority): Promise<CacheLease> { return serial(async () => {
+    publish(metadata: QobuzTrack, partial: { path: string; audio: ValidatedAudio; artwork?: QobuzArtwork | null }, authority: QobuzAuthority): Promise<CacheLease> { return serial(async () => {
       await safeRoot(); const name = partial.path.slice(root.length + 1);
       if (dirname(partial.path) !== root || !activeParts.has(name) || !owned.test(name)) throw new QobuzError('invalid cache publication');
       const stat = await lstat(partial.path);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== partial.audio.bytes) throw new QobuzError('incomplete audio');
       const entry = entrySchema.parse({ generation: randomUUID(), accountKey: authority.accountKey, metadata, audio: partial.audio, completedAt: now(), lastHitAt: null, expiresAt: now() + QOBUZ_RETENTION_MS });
       await rename(partial.path, pathFor(entry.generation)); await chmod(pathFor(entry.generation), 0o644);
+      if (partial.artwork) {
+        const artwork = rasterArtwork(partial.artwork.bytes);
+        const used = entries.reduce((sum, e) => sum + e.audio.bytes + (e.coverBytes || 0), 0) + entry.audio.bytes;
+        if (artwork && used + artwork.bytes.length <= deps.capacityBytes()) {
+          await writeFileAtomic(pathFor(entry.generation, 'cover'), artwork.bytes, { mode: 0o644 });
+          entry.coverBytes = artwork.bytes.length;
+        }
+      }
       entries.push(entry);
       try { await persist(); } catch (error) { entries = entries.filter(e => e !== entry); throw error; }
       return leaseFor(entry, false);
     }); },
     cleanup(): Promise<void> { return serial(cleanupInner); },
     async resolve(ref: QobuzRef): Promise<string | null> { const entry = entries.find(e => same(e, ref)); return entry && await validFile(entry) ? pathFor(entry.generation) : null; },
+    async cover(id: string, accountKey: string | undefined, generation?: string): Promise<QobuzArtwork | null> {
+      if (!accountKey) return null;
+      await safeRoot();
+      const protectedSet = protectedGenerations();
+      const entry = [...entries].reverse().find(e => `qobuz:${e.metadata.id}` === id && e.accountKey === accountKey && (!generation || e.generation === generation) && (e.expiresAt > now() || protectedSet.has(e.generation)));
+      if (!entry?.coverBytes) return null;
+      try {
+        const file = await open(pathFor(entry.generation, 'cover'), constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const stat = await file.stat(); if (!stat.isFile() || stat.size !== entry.coverBytes || stat.size > 2 * 1024 * 1024) return null;
+          return rasterArtwork(await file.readFile());
+        } finally { await file.close(); }
+      } catch { return null; }
+    },
     metadata(id: string, accountKey?: string) { const entry = [...entries].reverse().find(e => `qobuz:${e.metadata.id}` === id && (!accountKey || e.accountKey === accountKey)); return entry ? trackOf(entry) : null; },
-    status() { return { bytes: entries.reduce((sum, e) => sum + e.audio.bytes, 0), items: entries.length }; },
+    status() { return { bytes: entries.reduce((sum, e) => sum + (e.audio.bytes + (e.coverBytes || 0)), 0), items: entries.length }; },
   };
 }
 export type QobuzCache = ReturnType<typeof createQobuzCache>;

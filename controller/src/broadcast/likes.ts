@@ -1,3 +1,4 @@
+import { isExternalTrackId } from '../music/track-source-id.js';
 // Deduplicate likes per apparent listener and airing with a persisted HMAC secret; never store
 // raw IPs. Operator hearts are exempt from the time window and survive record trimming. Routes
 // own Navidrome star write-back. #991, #1253.
@@ -360,7 +361,7 @@ export type DjFavouritesConfig = { enabled?: boolean; influenceDj?: boolean; win
 // steer the DJ (#991).
 export function djFavourites(cfg: DjFavouritesConfig): TopLikedEntry[] {
   if (!cfg?.enabled || !cfg?.influenceDj) return [];
-  return topLiked({ windowDays: cfg.windowDays, limit: cfg.maxTracks });
+  return topLiked({ windowDays: cfg.windowDays, limit: cfg.maxTracks }).filter(row => !isExternalTrackId(row.track.id));
 }
 
 // The listener-favourites clause for the pick EVENT turn (#991). Deliberately NOT

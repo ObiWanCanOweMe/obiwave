@@ -1,3 +1,4 @@
+import { isExternalTrackId } from './track-source-id.js';
 import { z } from 'zod';
 // Subsonic API client for Navidrome. Salt+token auth, never plaintext.
 
@@ -23,6 +24,7 @@ function buildAuth() {
 }
 
 function buildUrl(endpoint, params = {}) {
+  if (Object.entries(params).some(([key, value]) => /^(id|songId|song_id|songIdToAdd)$/.test(key) && (Array.isArray(value) ? value.some(isExternalTrackId) : isExternalTrackId(value)))) throw new Error('External track has no Navidrome endpoint');
   const url = new URL(`${config.navidrome.url}/rest/${endpoint}`);
   const auth = buildAuth();
   url.searchParams.set('u', auth.u);
@@ -495,6 +497,7 @@ export async function resolveArtist(name, { artistCount = 10, signal }: { artist
 }
 
 export async function getSimilarSongs(id, { count = 20 } = {}) {
+  if (isExternalTrackId(id)) return [];
   const r = await call('getSimilarSongs2', { id, count }, RETRY_FAST_TRANSPORT);
   return rejectArchive(r.similarSongs2?.song || []);
 }
@@ -525,6 +528,7 @@ export async function supportsSonicSimilarity(): Promise<boolean> {
 }
 
 export async function getSonicSimilarTracks(id, { count = 20 } = {}) {
+  if (isExternalTrackId(id)) return [];
   const r = await call('getSonicSimilarTracks', { id, count }, RETRY_FAST_TRANSPORT);
   return rejectArchive(sonicSimilarSongs(r));
 }
@@ -537,10 +541,12 @@ export async function getStarred() {
 // Star write-back for the listener like feature (#991) — mirrors the player
 // heart into Navidrome. Idempotent server-side.
 export async function star(id) {
+  if (isExternalTrackId(id)) return ;
   await call('star', { id }, RETRY_FAST_TRANSPORT);
 }
 
 export async function unstar(id) {
+  if (isExternalTrackId(id)) return ;
   await call('unstar', { id }, RETRY_FAST_TRANSPORT);
 }
 
@@ -659,6 +665,7 @@ export async function getAlbum(id, { signal, includeBlocked = false }: { signal?
 // Single song lookup. The Child carries albumId, which is how manual album
 // tagging resolves a whole album from one track id.
 export async function getSong(id) {
+  if (isExternalTrackId(id)) return null;
   const r = await call('getSong', { id }, RETRY_FAST_TRANSPORT);
   return r.song || null;
 }
@@ -697,6 +704,7 @@ export async function getArtistLastfmTags(id, { count = 20 } = {}) {
 // Plain-text lyrics, or '' when none are indexed. Both the modern and legacy
 // response shapes normalise to a string.
 export async function getLyrics(songId) {
+  if (isExternalTrackId(songId)) return null;
   try {
     const r = await call('getLyricsBySongId', { id: songId }, RETRY_FAST_TRANSPORT);
     // Modern: { lyricsList: { structuredLyrics: [{ line: [{ value }] }] } }

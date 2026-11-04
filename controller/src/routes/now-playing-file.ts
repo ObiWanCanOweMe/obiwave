@@ -1,3 +1,6 @@
+import { isExternalTrackId } from '../music/track-source-id.js';
+import { qobuzCache } from '../music/qobuz/runtime.js';
+import { fileFormatOf } from '../music/file-format.js';
 // GET /now-playing/file: the playing file's own format, for the Dash.
 //
 // Admin-only by choice, not by sensitivity: it is an operator detail, and the
@@ -54,5 +57,8 @@ export function createNowPlayingFileRouter(deps: {
 
 export const router = createNowPlayingFileRouter({
   nowPlaying: () => queue.getNowPlaying(),
-  lookup: createFileFormatLookup({ getSong: subsonic.getSong }),
+  lookup: (() => {
+    const localLookup = createFileFormatLookup({ getSong: subsonic.getSong });
+    return async (id: string) => isExternalTrackId(id) ? fileFormatOf(qobuzCache.metadata(id)) : localLookup(id);
+  })(),
 });

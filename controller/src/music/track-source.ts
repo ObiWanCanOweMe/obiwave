@@ -5,7 +5,8 @@ import { pathReadable, onMixerRestart, type PathReadable } from '../broadcast/li
 import { qobuzCache } from './qobuz/runtime.js';
 import { QobuzError, type QobuzRef } from './qobuz/types.js';
 import type { Track } from '../broadcast/queue/types.js';
-export function isExternalTrackId(id: unknown): boolean { return typeof id === 'string' && id.startsWith('qobuz:'); }
+import { isExternalTrackId } from './track-source-id.js';
+export { isExternalTrackId };
 export function isQobuzTrack(track: unknown): track is Track & { providerRef: QobuzRef } {
   const value = track as Track | null;
   const ref = value?.providerRef;
