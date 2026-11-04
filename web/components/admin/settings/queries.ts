@@ -1,5 +1,6 @@
 'use client';
 
+import { qobuzStatusSchema } from '../../../lib/schemas.generated';
 import { useCallback, useRef } from 'react';
 import {
   useMutation,
@@ -228,4 +229,37 @@ export function useLlmSwapMutation<TSettings>({
   const runMutation = mutation.mutateAsync;
   const mutateAsync = useCallback(() => runMutation(), [runMutation]);
   return { isPending: mutation.isPending, mutateAsync };
+}
+
+export function useQobuzStatusQuery(adminFetch: AdminFetch) {
+  return useAdminQuery<import('../../../lib/schemas.generated').QobuzStatus>({
+    key: ['settings', 'qobuz'], adminFetch, enabled: true,
+    request: async (fetcher, signal) => qobuzStatusSchema.parse(await adminJson(fetcher, '/settings/qobuz', undefined, signal)),
+    toastOnError: false,
+  });
+}
+
+// Credentials live in a transient ref, never in MutationCache variables/data.
+export function useQobuzCredentialCommand(adminFetch: AdminFetch) {
+  const client = useQueryClient();
+  const payload = useRef<{ action: 'test' | 'save'; body: Record<string, unknown> } | null>(null);
+  const receipt = useRef<{ ok?: boolean; fullTrackAccess?: boolean; error?: string } | null>(null);
+  const mutation = useMutation<void, Error, void>({
+    mutationKey: ['settings', 'qobuz-command'],
+    mutationFn: async () => {
+      const current = payload.current;
+      if (!current) throw new Error('Credential command unavailable');
+      const result = await adminJson<{ ok?: boolean; fullTrackAccess?: boolean; error?: string }>(adminFetch,
+        current.action === 'test' ? '/settings/qobuz/test' : '/settings/qobuz/credentials',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(current.body) });
+      receipt.current = result;
+      if (current.action === 'save') await client.invalidateQueries({ queryKey: settingsKeys.all });
+    },
+  });
+  return { isPending: mutation.isPending, run: async (action: 'test' | 'save', body: Record<string, unknown>) => {
+    if (payload.current) throw new Error('Credential command already running');
+    payload.current = { action, body }; receipt.current = null;
+    try { await mutation.mutateAsync(); return receipt.current as { ok?: boolean; fullTrackAccess?: boolean; error?: string } | null; }
+    finally { payload.current = null; receipt.current = null; }
+  } };
 }

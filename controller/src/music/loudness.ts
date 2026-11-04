@@ -1,3 +1,4 @@
+import { isExternalTrackId } from './track-source-id.js';
 // Share gain resolution between real-track liq_amplify stamps and stem-render levels.
 // ReplayGain describes the whole file; analyzer LUFS describes its leading window. No usable
 // loudness means unity gain. #1240.
@@ -30,7 +31,7 @@ export async function resolveGainDb(
   let peakDb: number | null | undefined = null;
   if (source !== 'measured') {
     let rg = mix.loudnessFromReplayGain(track.replayGain);
-    if (!rg && track.replayGain === undefined && track.id) {
+    if (!rg && track.replayGain === undefined && track.id && !isExternalTrackId(track.id)) {
       try {
         const song = await subsonic.getSong(track.id);
         track.replayGain = song?.replayGain ?? null; // cache the answer either way

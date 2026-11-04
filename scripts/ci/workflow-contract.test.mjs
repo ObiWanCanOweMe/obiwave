@@ -1411,3 +1411,15 @@ test('fork release fetches only the requested canonical upstream tag before vali
   assert.ok(fetchIndex >= 0, 'missing exact canonical upstream tag fetch');
   assert.ok(validationIndex > fetchIndex, 'base tag must be fetched before it is validated');
 });
+
+test('controller quality provisions ffmpeg and ffprobe before full audio-validation tests', () => {
+  const start = ci.indexOf('      - name: Install controller audio test dependencies');
+  const command = ci.indexOf('      - run: ${{ matrix.command }}');
+  assert.ok(start >= 0 && start < command, 'controller audio tools must be installed before npm test');
+  const step = ci.slice(start, ci.indexOf('\n      - ', start + 1));
+  assert.match(step, /if: matrix\.package == 'controller'/);
+  assert.match(step, /sudo apt-get update/);
+  assert.match(step, /sudo apt-get install -y --no-install-recommends ffmpeg/);
+  assert.match(step, /ffmpeg -version/);
+  assert.match(step, /ffprobe -version/);
+});

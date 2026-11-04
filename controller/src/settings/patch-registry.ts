@@ -27,6 +27,7 @@
 // heard of, and refusing the patch would turn "one setting didn't come across"
 // into "the restore failed". So the inventory is enforced at the boundary the
 // operator types at, and update() stays tolerant of keys it doesn't know.
+import { qobuzPatchSchema } from '../schemas/qobuz.js';
 import { ZodError, type ZodType } from 'zod';
 import {
   archivePatchSchema,
@@ -161,6 +162,7 @@ export const SETTINGS_PATCH_KEYS = [
   'silenceTrim',
   'ui',
   'privacy',
+  'qobuz',
   'requests',
   'webhooks',
   'webhooksPolicy',
@@ -251,6 +253,7 @@ export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, S
   festivals: festivalsSchema,
   timezone: timezoneSchema,
   privacy: privacyPatchSchema,
+  qobuz: qobuzPatchSchema,
   requests: requestsPatchSchema,
   tts: ttsPatchSchema,
   // Both are validated by the SAME schema update() reaches through

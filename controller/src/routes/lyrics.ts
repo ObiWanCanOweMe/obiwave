@@ -1,3 +1,4 @@
+import { isExternalTrackId } from '../music/track-source-id.js';
 // Lyrics for listeners, and the operator's per-track timing fix.
 //
 //   GET /lyrics/current            public (station-gated on a private station),
@@ -93,6 +94,7 @@ router.get('/lyrics/current', lyricsEnabled, requireStationAuth, async (req, res
       return res.status(409).json({ error: 'That track is no longer on air', songId: onAirId });
     }
 
+    if (isExternalTrackId(songId)) return res.json(toPublicLyricsPayload(songId, null));
     let chosen;
     try {
       chosen = await listenerLyrics(songId);
@@ -123,6 +125,7 @@ router.get('/lyrics/current', lyricsEnabled, requireStationAuth, async (req, res
 });
 
 router.put('/lyrics/offsets/:trackId', requireAdmin, validateBody(lyricOffsetBodySchema), async (req, res) => {
+  if (isExternalTrackId(req.params.trackId)) return res.status(400).json({ error: 'Lyrics offsets require a library track' });
   const trackId = lyricsTrackIdSchema.safeParse(req.params.trackId);
   if (!trackId.success) return res.status(400).json({ error: 'trackId must be a track id' });
   try {

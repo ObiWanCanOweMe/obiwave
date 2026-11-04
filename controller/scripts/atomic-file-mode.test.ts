@@ -93,3 +93,12 @@ test('settings.json is written owner-only, and tightened from a legacy 0644', as
   assert.equal(modeOf(file), 0o600);
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).station, 'Mode Test 2');
 });
+
+test('an asynchronous atomic write can reject stale authority at its final commit boundary', async () => {
+  const file = path.join(stateRoot, 'guarded.json'); writeFileSync(file, 'old');
+  await assert.rejects(writeFileAtomic(file, 'new', { mode: 0o600, beforeCommit: () => { throw Error('stale authority'); } }), /stale authority/);
+  assert.equal(readFileSync(file, 'utf8'), 'old');
+  assert.deepEqual(readdirSync(stateRoot).filter(name => name.startsWith('guarded.json.')), []);
+  await writeFileAtomic(file, 'accepted', { beforeCommit: () => {} });
+  assert.equal(readFileSync(file, 'utf8'), 'accepted');
+});

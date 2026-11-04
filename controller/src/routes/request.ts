@@ -1,3 +1,6 @@
+import { probeRequestedRecording } from '../music/request-recording.js';
+import { tryQobuzRequest } from './request-qobuz.js';
+import * as blocklist from '../music/blocklist.js';
 // Listener track requests. POST returns a request id immediately; matching, the
 // pick cascade, intro generation and enqueue run in the background, and
 // GET /request/:id reports the outcome.
@@ -383,7 +386,39 @@ async function resolveRequest(entry) {
       }
     }
   };
-  if (strictRequests) await interpret();
+  const qobuzEnabled = settings.get().qobuz?.enabled === true;
+  if (strictRequests || qobuzEnabled) await interpret();
+  if (qobuzEnabled) {
+    const minutes = settings.get().requests.repeatCooldownMin ?? 120;
+    const preflightSignal = AbortSignal.timeout(30_000);
+    const probe = await probeRequestedRecording(matched, {
+      signal: preflightSignal,
+      text, catalog: { ...subsonic,
+        searchPage: (term, options) => subsonic.searchPage(term, { ...options, includeBlocked: true, signal: preflightSignal }),
+        resolveArtist: name => subsonic.resolveArtist(name, { signal: preflightSignal, requireComplete: true }),
+        getArtist: id => subsonic.getArtist(id, { signal: preflightSignal }),
+        getAlbum: id => subsonic.getAlbum(id, { includeBlocked: true, signal: preflightSignal }),
+      },
+      recentIds: minutes > 0 ? queue.recentlyPlayedIds(minutes / 60) : new Set<string>(), queuedIds: queue.queuedIds(), currentId: currentTrack?.id,
+      blocked: song => !!blocklist.hitOf(song), heldBack,
+    });
+    if (probe.kind === 'refused') return failed(sorryNoMatch(requester));
+    if (probe.kind === 'found' && probe.outcome !== 'matched') {
+      entry.outcome = probe.outcome; entry.refused = true;
+      return resolved({ ack: probe.outcome === 'cooldown' ? queue.cooldownAck(probe.track.id, probe.track.title || '') : queue.dedupAck(probe.track.id), track: { title: probe.track.title, artist: probe.track.artist }, queuePosition: null });
+    }
+    if (probe.kind === 'absent') {
+      const external = await tryQobuzRequest({ match: matched, text, requester, context: ctx, queue });
+      if (external.kind === 'refused') { entry.outcome = external.outcome || 'no-match'; return failed(external.message); }
+      if (external.kind === 'queued') {
+        const track = external.track;
+        const ack = `Queued "${track.title}" by ${track.artist}.`;
+        entry.path = 'qobuz'; entry.pickSource = 'qobuz'; entry.outcome = 'matched'; entry.pick = track; entry.introScript = external.introScript;
+        session.appendTurn({ role: 'dj', kind: 'request', text: external.introScript || ack, meta: { trackId: track.id, requester } });
+        return resolved({ ack: withWaitNotice(ack, track.id), track: { title: track.title, artist: track.artist, album: track.album }, queuePosition: external.queuePosition });
+      }
+    }
+  }
   const strictPlan = strictRequestPlan(strictRequests, matched);
 
   // Conversational DJ agent. On any failure fall through to the stateless
@@ -550,7 +585,7 @@ async function resolveRequest(entry) {
   if (strictPlan.target?.specific && !strictRequestSatisfied(strictPlan.target, pick)) {
     entry.pickSource = 'strict-no-match';
     entry.outcome = 'no-match';
-    return failed(strictFailureMessage(strictPlan.target));
+    return failed(strictFailureMessage(strictPlan.target, qobuzEnabled));
   }
   if (!pick) {
     entry.pickSource = pickSource;

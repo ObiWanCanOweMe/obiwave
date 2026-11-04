@@ -701,6 +701,7 @@ export default function SettingsPanel({ djBrainEnabled = false }: { djBrainEnabl
             )}
             {activeSection === 'station' && (
               <StationSection
+                adminFetch={adminFetch}
                 data={data} form={form} setForm={updateForm} busy={busy}
                 saveSettings={saveSettings} fieldErrors={fieldErrors}
               />

@@ -1,3 +1,4 @@
+import { isExternalTrackId } from '../music/track-source-id.js';
 // Pure decisions behind broadcast/scrobble.ts: no I/O, no settings, no clock of
 // its own (every entry point takes `nowMs`). The eligibility rule is shared by
 // all three backends; only Navidrome's gate differs, hence `planNavidrome`.
@@ -88,10 +89,10 @@ export function planNavidrome(input: NavidromePlanInput): NavidromePlan {
   const plan: NavidromePlan = { ...empty };
 
   const incomingId = String(input.incoming?.id || '').trim();
-  if (incomingId) plan.nowPlayingId = incomingId;
+  if (incomingId && !isExternalTrackId(incomingId)) plan.nowPlayingId = incomingId;
 
   const outgoingId = String(input.outgoing?.id || '').trim();
-  if (outgoingId && input.outgoingStartedAt) {
+  if (outgoingId && !isExternalTrackId(outgoingId) && input.outgoingStartedAt) {
     const startedMs = Date.parse(input.outgoingStartedAt);
     if (Number.isFinite(startedMs)) {
       const elapsed = elapsedSeconds(input.outgoingStartedAt, input.nowMs ?? Date.now());

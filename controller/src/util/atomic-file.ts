@@ -55,7 +55,7 @@ function sameOwner(owner: TempPlan['owner']): boolean {
 export async function writeFileAtomic(
   path: string,
   contents: string | Buffer,
-  { mode }: AtomicWriteOptions = {},
+  { mode, beforeCommit }: AtomicWriteOptions & { beforeCommit?: () => void } = {},
 ): Promise<void> {
   const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`;
   const plan = planFrom(await lstat(path).catch(() => null), mode);
@@ -72,7 +72,12 @@ export async function writeFileAtomic(
     } finally {
       await fh.close();
     }
-    await rename(tmp, path);
+    if (beforeCommit) {
+      // Stage asynchronously, then authorize and publish in one event-loop turn.
+      // An authority change cannot slip between this guard and the rename.
+      beforeCommit();
+      renameSync(tmp, path);
+    } else await rename(tmp, path);
   } catch (err) {
     if (created) await unlink(tmp).catch(() => {});
     throw err;

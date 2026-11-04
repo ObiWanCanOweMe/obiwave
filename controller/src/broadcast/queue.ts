@@ -1,3 +1,7 @@
+import { resolveTrackPlayback, isExternalTrackId, isQobuzTrack, qobuzPlaybackProofStands } from '../music/track-source.js';
+import { annotateTrackUri } from '../music/track-annotation.js';
+import type { QobuzRef } from '../music/qobuz/types.js';
+import { QobuzError } from '../music/qobuz/types.js';
 import { prepareEpisodeContext } from './show-preparation.js';
 // Queue class and public singleton; helper implementations live in queue/.
 
@@ -693,7 +697,7 @@ class Queue {
 
   // Recover sent requests and prime lastSeenKey from current to avoid replaying the same
   // track-start event. A changed track is reconciled normally.
-  recover() {
+  recover({ drain = true } = {}) {
     this.recoverPendingJingles();
     if (existsSync(config.queue.file)) try {
       const stored = JSON.parse(readFileSync(config.queue.file, 'utf8'));
@@ -736,7 +740,7 @@ class Queue {
       this.invalidateObsoleteHostSpeech();
 
       // Re-drain any items snapshotted as sent:false mid-TTS during a crash.
-      if (this.upcoming.some(i => !i.sent)) {
+      if (drain && this.upcoming.some(i => !i.sent)) {
         void this.drainToLiquidsoap();
       }
 
@@ -2326,18 +2330,16 @@ class Queue {
         // resolve probe, so a file the mixer can't open would leave dj_queue
         // unseen and hold the slot until the reconcile sweep clears it, several
         // coast tracks later.
-        const onMount = subsonic.getLocalPath(item.track);
-        let localPath = await libraryMount.mixerReadablePath(onMount, mountCheckBudgetMs(this.remainingUntilItemAirs(item)));
-        if (onMount && !localPath) {
-          this.log('mix', `"${item.track.title}" streams: the mixer did not confirm it can read ${onMount}`);
+        let playback;
+        try { playback = await resolveTrackPlayback(item.track, { timeoutMs: mountCheckBudgetMs(this.remainingUntilItemAirs(item)) }); }
+        catch (error) {
+          if (!isExternalTrackId(item.track.id)) throw error;
+          this.log('error', 'Qobuz cached recording unavailable to the mixer; request removed');
+          await this.removeUpcomingItem(item, 'Qobuz cache unavailable'); continue;
         }
-        // Stem-seam cue points: the blend's cut on the way out, the clip's
-        // hand-off on the way in (stamped when the INCOMING item drains).
-        // Per-attempt identity for proto_subhttp's explicit completion signal.
-        // A URL fragment carries it to Liquidsoap but is never sent to the
-        // Navidrome origin by curl. Local-file handoffs never enter that
-        // protocol, so do not poll a completion channel they cannot produce.
-        item.resolveProbeId = localPath ? undefined : randomBytes(8).toString('hex');
+        let localPath = playback.localPath;
+        if (playback.libraryPath && !localPath) this.log('mix', `"${item.track.title}" streams: the mixer did not confirm it can read ${playback.libraryPath}`);
+        item.resolveProbeId = playback.resolveProbeId;
         // A rendered blend's cut and the trimmed tail are both "stop early";
         // whichever comes first wins, exactly as getAnnotatedUri already
         // arbitrates those against the #447 cap. On the way in, the stem
@@ -2396,11 +2398,12 @@ class Queue {
           item.cueInSec = liveCueIns.length ? Math.max(...liveCueIns) : undefined;
           // The write waited on the previous handoff: a restart or a lost proof
           // since the mixer said yes streams the pick, with a probe to chase.
-          if (localPath && !libraryMount.libraryMountStands()) {
+          if (isExternalTrackId(item.track.id) && !qobuzPlaybackProofStands(playback)) throw new QobuzError('cached recording unavailable');
+          if (!isExternalTrackId(item.track.id) && localPath && !libraryMount.libraryMountStands()) {
             localPath = null;
             item.resolveProbeId = randomBytes(8).toString('hex');
           }
-          return subsonic.getAnnotatedUri(item.track, {
+          const annotation = {
             localPath,
             // The cap's cue only when this track actually runs past it — a stamp
             // past a short track's end defeats the crossfade (track-floor.ts).
@@ -2411,7 +2414,10 @@ class Queue {
             clipLeadSec: item.stemBlend ? stemBlend.CLIP_SEAM_CROSS_SEC : null,
             // Only while the cue it was probed for is still the live one.
             clipCueLateSec: clipCueLate && item.cueInSec === clipCueLate.cueSec ? clipCueLate.lateSec : null,
-          });
+          };
+          return isExternalTrackId(item.track.id)
+            ? annotateTrackUri(item.track, localPath!, annotation)
+            : subsonic.getAnnotatedUri(item.track, annotation);
         };
         if (trim.cueInSec != null || trim.cueOutSec != null) {
           this.log('mix', `silence trimmed on "${item.track.title}"${trim.cueInSec != null ? ` head ${trim.cueInSec}s` : ''}${trim.cueOutSec != null ? ` tail from ${trim.cueOutSec}s` : ''}`);
@@ -2437,6 +2443,10 @@ class Queue {
           });
         } catch (err) {
           await this.discardUnpublishedBlend(item);
+          if (isExternalTrackId(item.track.id)) {
+            this.log('error', 'Qobuz cached recording lost its mixer proof; request removed');
+            await this.removeUpcomingItem(item, 'Qobuz cache unavailable'); continue;
+          }
           throw err;
         }
         if (!written) {
@@ -4497,7 +4507,7 @@ class Queue {
     // not enough evidence to mutate the library, so the recovery probes the
     // stored ID and its deterministic canonical image before it starts the
     // existing authoritative reconcile walk.
-    void this._considerIdRotationRecovery(item.track)
+    if (!isExternalTrackId(item.track?.id)) void this._considerIdRotationRecovery(item.track)
       .catch((err: unknown) => this.log('error',
         `Navidrome ID-rotation check failed: ${err instanceof Error ? err.message : String(err)}`));
 
@@ -5376,6 +5386,17 @@ class Queue {
     void tick();
     setInterval(tick, NOW_PLAYING_POLL_MS);
     this.log('scheduler', 'Now-playing watcher started');
+  }
+
+  qobuzReferences(): QobuzRef[] {
+    const cutoff = Date.now() - 120_000;
+    return [...this.upcoming, this.current, ...this.history.filter(item => !item.endedAt || Date.parse(item.endedAt) > cutoff)]
+      .flatMap(item => {
+        if (!item) return [];
+        if (isQobuzTrack(item.track)) return [item.track.providerRef];
+        const opaque = /^qobuz:(\d{1,20})$/.exec(String(item.track?.id || ''));
+        return opaque ? [{ provider: 'qobuz' as const, trackId: opaque[1], accountKey: '*', generation: '*' }] : [];
+      });
   }
 
   snapshot() {

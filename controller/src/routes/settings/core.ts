@@ -151,6 +151,7 @@ router.get('/settings', requireAdmin, async (req, res) => {
         // privacy.password arrives redacted ('set'/'').
         privacy: s.privacy,
         requests: s.requests,
+        qobuz: s.qobuz,
       },
       defaults: {
         // Shown by the UI when djPrompt is "".

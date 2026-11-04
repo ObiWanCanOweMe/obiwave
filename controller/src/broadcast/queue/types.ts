@@ -3,6 +3,7 @@
 //
 // Part of the queue/ split - see ../queue.ts, which owns the Queue class.
 
+import type { QobuzRef } from '../../music/qobuz/types.js';
 import type { TrackOutro, TrackKeyRange } from '../../music/library-db.js';
 import type { HostSpeechStamp } from '../session.js';
 import type { ClipSeamCues } from '../stem-seam.js';
@@ -23,6 +24,7 @@ export interface Persona {
 // the transition-effect flags in place. Every field is optional so a partial
 // pick and a fully-analysed one share one type.
 export interface Track {
+  providerRef?: QobuzRef;
   id?: string | null;
   title?: string | null;
   artist?: string | null;

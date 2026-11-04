@@ -78,11 +78,12 @@ export function pickStrictCandidate(target: StrictRequestTarget | null, candidat
   return (candidates || []).find((track) => strictRequestSatisfied(target, track)) || null;
 }
 
-export function strictFailureMessage(target: StrictRequestTarget): string {
+export function strictFailureMessage(target: StrictRequestTarget, qobuzEnabled = false): string {
+  const sources = qobuzEnabled ? 'the library or Qobuz' : 'the library';
   if (target.title && target.artist) {
-    return `Couldn't find "${target.title}" by ${target.artist} in the library.`;
+    return `Couldn't find "${target.title}" by ${target.artist} in ${sources}.`;
   }
-  if (target.title) return `Couldn't find "${target.title}" in the library.`;
-  if (target.artist) return `Couldn't find ${target.artist} in the library.`;
-  return `Couldn't find an exact match in the library.`;
+  if (target.title) return `Couldn't find "${target.title}" in ${sources}.`;
+  if (target.artist) return `Couldn't find ${target.artist} in ${sources}.`;
+  return `Couldn't find an exact match in ${sources}.`;
 }

@@ -96,6 +96,7 @@ export function settingsForm(v: NonNullable<SettingsData['values']>): FormState 
       password: v.privacy?.password ?? '',
       publishPersonaSouls: v.privacy?.publishPersonaSouls ?? false,
     },
+    qobuz: { enabled: v.qobuz?.enabled === true, cacheMaxGb: String(v.qobuz?.cacheMaxGb ?? 5) },
     requests: {
       enabled: v.requests?.enabled !== false,
       maxPending: String(v.requests?.maxPending ?? 6),

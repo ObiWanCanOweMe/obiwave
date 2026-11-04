@@ -1,3 +1,4 @@
+import { isExternalTrackId } from './track-source-id.js';
 // Where a track's lyrics come from: the music server first, then LRCLIB
 // (music/lrclib.ts) for a track the music server has no TIMED lyrics for, when
 // the operator has switched the fallback on (`settings.lyrics.lrclib`).
@@ -57,6 +58,7 @@ const musicServerCache = new BoundedLyricsCache<StructuredLyricsInput>({
 
 /** The music server's lyrics for a track. Throws when it did not answer. */
 export function musicServerLyrics(songId: string): Promise<StructuredLyricsInput | null> {
+  if (isExternalTrackId(songId)) return Promise.resolve(null);
   return musicServerCache.get(songId, () => subsonic.fetchStructuredLyrics(songId));
 }
 
@@ -198,7 +200,7 @@ async function fetchLookup(trackId: string): Promise<void> {
 // has it timed. The stored answer is read first, so a track already settled
 // costs the music server nothing. Fire-and-forget.
 function lookupUnlessTimed(trackId: string | null | undefined, when: string, pastBackoff: boolean): void {
-  if (!trackId || !fallbackEnabled()) return;
+  if (!trackId || isExternalTrackId(trackId) || !fallbackEnabled()) return;
   void admitLookup(trackId, async () => {
     try {
       const stored = await library.getExternalLyrics(trackId);
@@ -248,6 +250,7 @@ export interface ListenerLyrics extends ChosenLyrics {
  * can stand in for it.
  */
 export async function listenerLyrics(songId: string): Promise<ListenerLyrics> {
+  if (isExternalTrackId(songId)) return { lyrics: null, source: 'music-server', pending: false };
   let fromServer: StructuredLyricsInput | null = null;
   let serverDown = false;
   try {

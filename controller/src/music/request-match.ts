@@ -56,6 +56,7 @@ export interface RequestSelection {
   source: string;
   outcome: 'matched' | 'substituted' | 'cooldown' | 'already-queued' | 'no-match' | 'unsupported';
   errors: string[];
+  incomplete?: boolean;
   unmetPreferences?: string[];
   unsupported?: string[];
   // The hard requirements in force, so a no-match can say what it could not verify.
@@ -480,6 +481,7 @@ export function requestReleaseRank(album: { year?: number; originalReleaseDate?:
 
 export async function resolveDirectRequest(match: RequestMatch, deps: {
   catalog: RequestCatalog;
+  identityOnly?: boolean;
   text?: string;
   recentIds: Set<string>;
   queuedIds: Set<string>;
@@ -496,6 +498,7 @@ export async function resolveDirectRequest(match: RequestMatch, deps: {
 }): Promise<RequestSelection> {
   const { catalog, recentIds, queuedIds, currentId } = deps;
   const errors: string[] = [];
+  let incomplete = false;
   const unsupported = deps.text === undefined ? classifyUnsupportedLabels(match.unsupported).conditions : directRequestUnsupported(deps.text, match);
   if (unsupported.length) return { track: null, source: 'unsupported', outcome: 'unsupported', errors, unsupported };
   // Model-supplied names can hide instructions just as literal names can.
@@ -579,6 +582,7 @@ export async function resolveDirectRequest(match: RequestMatch, deps: {
       const page = await safe('search', () => catalog.searchPage(term, { songCount: 25, songOffset }), { songs: [], rawCount: 0 });
       found.push(...page.songs);
       if (found.some(s => identity(s) && constraints(s, 'search') && (Boolean(title) || eligible(s))) || page.rawCount < 25) break;
+      if (songOffset === 75) incomplete = true;
     }
     return unique(found);
   };
@@ -641,7 +645,9 @@ export async function resolveDirectRequest(match: RequestMatch, deps: {
         if (exact) return exact;
       }
       const full = await safe('artist albums', () => catalog.getArtist(artist.id), null);
+      if (deps.identityOnly && !full) incomplete = true;
       let albums = full?.album || [];
+      if (deps.identityOnly && albums.length > 20) incomplete = true;
       if (match.album) albums = albums.filter(a => requestName(a.name || a.title) === requestName(match.album));
       if (match.sort === 'latest' || match.sort === 'oldest') {
         const direction = match.sort === 'latest' ? -1 : 1;
@@ -697,6 +703,8 @@ export async function resolveDirectRequest(match: RequestMatch, deps: {
   const identityRefusal = refusal();
   if (identityRefusal) return identityRefusal;
   if (unverifiedConditions.length) return { track: null, source: 'unsupported', outcome: 'unsupported', errors, unsupported: unverifiedConditions };
+
+  if (deps.identityOnly) return { track: null, source: 'no-match', outcome: 'no-match', errors, incomplete };
 
   if (!title && !match.album) {
     if (genre) {

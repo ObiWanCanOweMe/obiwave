@@ -1,3 +1,4 @@
+import { isExternalTrackId } from '../music/track-source-id.js';
 // Mirroring likes to Navidrome is fire-and-forget (#991). Deleting likes must not unstar
 // operator catalogue data; only their own un-heart with no remaining likes may do so.
 
@@ -82,7 +83,7 @@ router.post('/like', async (req, res) => {
     const result = await likes.recordLike({ track: on.track, startedAt: on.startedAt, ip });
     if (!result.ok) return res.status(409).json({ error: 'Nothing likeable on air right now' });
 
-    if (!result.duplicate && cfg.starInNavidrome) {
+    if (!result.duplicate && cfg.starInNavidrome && !isExternalTrackId(on.songId)) {
       subsonic.star(on.songId).catch((err) =>
         console.error(`[likes] Navidrome star failed for ${on.songId}:`, err.message),
       );
@@ -159,7 +160,7 @@ router.post('/likes/song/:id', requireAdmin, async (req, res) => {
     const track = await resolveSnapshot(id, req.body);
     const result = await likes.operatorLike(track);
     if (!result.ok) return res.status(400).json({ error: 'A song id is required' });
-    if (result.added && settings.get()?.likes?.starInNavidrome) {
+    if (result.added && settings.get()?.likes?.starInNavidrome && !isExternalTrackId(id)) {
       subsonic.star(id).catch((err) =>
         console.error(`[likes] Navidrome star failed for ${id}:`, err.message),
       );
@@ -176,7 +177,7 @@ router.delete('/likes/song/:id/operator', requireAdmin, async (req, res) => {
   try {
     const result = await likes.operatorUnlike(id);
     // Only when the operator's heart was the LAST like standing — see header.
-    if (result.removed && result.count === 0 && settings.get()?.likes?.starInNavidrome) {
+    if (result.removed && result.count === 0 && settings.get()?.likes?.starInNavidrome && !isExternalTrackId(id)) {
       subsonic.unstar(id).catch((err) =>
         console.error(`[likes] Navidrome unstar failed for ${id}:`, err.message),
       );

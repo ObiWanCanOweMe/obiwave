@@ -1,3 +1,4 @@
+import { qobuzService } from '../music/qobuz/runtime.js';
 import { prepareEpisodeContext, showPreparation, onPreparationChange, preparationIdentity, preparationSkillAt } from './show-preparation.js';
 import { autoPlaylistShowKey } from './auto-playlist-show.js';
 // Scheduler: the auto-playlist refresh, the per-minute talk tick over
@@ -1452,6 +1453,10 @@ export function startScheduler() {
       queue.log('error', `Periodic playlist failed: ${err.message}`);
     }
   });
+
+  cron.schedule('*/15 * * * *', async () => {
+    try { await qobuzService.cleanup(); } catch { console.warn('[qobuz] cache cleanup unavailable; retrying next interval'); }
+  }, { noOverlap: true });
 
   // Every spoken segment the station produces on its own, plus the
   // unconditional :00 session roll: one tick over one slot table (#1500).

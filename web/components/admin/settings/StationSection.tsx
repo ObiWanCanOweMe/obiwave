@@ -1,5 +1,8 @@
 'use client';
 
+import { QobuzRequestsCard } from './QobuzRequestsCard';
+import { qobuzSavePayload } from './save-payload';
+import type { AdminFetch } from '../../../lib/admin-query';
 import type { ChangeEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { fmtClockMinute, normalizeStationLocale, type StationLocale } from '../../../lib/format';
@@ -42,11 +45,12 @@ const ON_OFF = [
   { id: 'off', label: 'Off' },
 ] as const;
 
-export function StationSection({ data, form, setForm, busy, saveSettings, fieldErrors }: SectionProps) {
+export function StationSection({ data, form, setForm, busy, saveSettings, fieldErrors, adminFetch }: SectionProps & { adminFetch: AdminFetch }) {
   // Persisted state, for the "restart required" pill and the password placeholder.
   const authOnFile = data.values?.privacy?.listenerAuth === true;
   const passwordOnFile = data.values?.privacy?.password === 'set';
   const save = () => saveSettings({
+    ...qobuzSavePayload(form).patch,
     station: form.station,
     stationDescription: form.stationDescription,
     timezone: form.timezone,
@@ -539,13 +543,15 @@ export function StationSection({ data, form, setForm, busy, saveSettings, fieldE
       </Card>
       </Advanced>
 
+      <QobuzRequestsCard form={form} setForm={setForm} fieldErrors={fieldErrors} adminFetch={adminFetch} />
+
       <SaveBar
         note="Station name, location, timezone, locale, the private player, listener-request limits, and the public-API toggle apply live. Turning the stream password on or off needs a mixer restart."
         busy={busy}
         onSave={save}
         saveLabel="Save station settings"
         errors={fieldErrors}
-        ownedKeys={['station', 'stationDescription', 'timezone', 'locale', 'weather', 'privacy', 'requests']}
+        ownedKeys={['station', 'stationDescription', 'timezone', 'locale', 'weather', 'privacy', 'requests', 'qobuz']}
       />
     </>
   );

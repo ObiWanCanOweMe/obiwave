@@ -131,8 +131,8 @@ test('no landing stamp without a probe, or outside the bound the mixer accepts',
 test('radio.liq reads the landing only when the outgoing side is the clip, bounded by the lead', async () => {
   const { readFileSync } = await import('node:fs');
   const radio = readFileSync(new URL('../../liquidsoap/radio.liq', import.meta.url), 'utf8');
-  const subsonicSrc = readFileSync(new URL('../src/music/subsonic.ts', import.meta.url), 'utf8');
-  assert.ok(subsonicSrc.includes('liq_clip_cue_late='), 'the writer emits the key radio.liq reads');
+  const annotationSrc = readFileSync(new URL('../src/music/track-annotation.ts', import.meta.url), 'utf8');
+  assert.ok(annotationSrc.includes('liq_clip_cue_late='), 'the writer emits the key radio.liq reads');
   const reads = radio.match(/\w+\.metadata\["liq_clip_cue_late"\]/g) ?? [];
   assert.deepEqual(reads, ['b.metadata["liq_clip_cue_late"]'], 'read once, off the incoming side');
   const gate = /cue_late =\s*\n\s*if a\.metadata\["subwave_clip"\] == "1" then\s*\n\s*float_of_string\(default=0\., b\.metadata\["liq_clip_cue_late"\]\)\s*\n\s*else 0\. end/;
