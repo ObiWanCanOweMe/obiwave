@@ -1,6 +1,6 @@
 # Qobuz fallback for listener song requests
 
-Status: design for operator review; no product code implemented.
+Status: approved by the operator on 2026-11-03; no product code implemented.
 
 ## Intent and agreed requirements
 
