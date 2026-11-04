@@ -27,11 +27,11 @@ export function createQobuzService(deps: {
     })() };
     try { return await verification.promise; } finally { if (verification?.key === key) verification = null; }
   }
-  function stillValid(authority: QobuzAuthority) {
+  function stillValid(authority: QobuzAuthority | null) {
     const current = deps.authority();
-    return deps.enabled() && current?.accountKey === authority.accountKey && current.revision === authority.revision;
+    return !!authority && deps.enabled() && current?.accountKey === authority.accountKey && current.revision === authority.revision;
   }
-  async function acquire(match: RequestMatch, caller?: AbortSignal): Promise<CacheLease | null> {
+  async function acquire(match: RequestMatch, caller?: AbortSignal, admit?: (track: QobuzTrack) => void): Promise<CacheLease | null> {
     if (!deps.enabled() || !match.title?.trim() || match.kind === 'chat') return null;
     const credentials = deps.credentials(); if (!credentials) throw new QobuzError('credentials missing');
     const authority = await authorityFor(credentials);
@@ -39,6 +39,7 @@ export function createQobuzService(deps: {
     const cached = await deps.cache.lookup(match, authority);
     if (cached) {
       if (!stillValid(authority) || !deps.allowed({ ...cached.track, id: cached.track.providerRef.trackId } as QobuzTrack)) { cached.release(); throw new QobuzError('request unavailable'); }
+      try { admit?.(cached.track); } catch (error) { cached.release(); throw error; }
       return cached;
     }
     const key = JSON.stringify([authority.accountKey, authority.revision, requestName(match.title), requestName(match.artist), requestName(match.album)]);
@@ -51,6 +52,7 @@ export function createQobuzService(deps: {
         const pick = selectExactRecording(match, results);
         if (!pick) return null;
         const metadata = pick as unknown as QobuzTrack;
+        admit?.(metadata);
         if (!stillValid(authority) || !deps.allowed(metadata)) throw new QobuzError('request unavailable');
         const trackKey = `${authority.accountKey}:${authority.revision}:${metadata.id}`;
         let download = tracks.get(trackKey);
@@ -77,7 +79,10 @@ export function createQobuzService(deps: {
     try {
       const ref = await work;
       if (!stillValid(authority)) throw new QobuzError('credentials changed');
-      return ref ? await deps.cache.lease(ref) : null;
+      if (!ref) return null;
+      const lease = await deps.cache.lease(ref);
+      if (lease) { try { admit?.(lease.track); } catch (error) { lease.release(); throw error; } }
+      return lease;
     } catch (error) {
       lastError = { code: error instanceof QobuzError ? error.code : 'acquisition failed', at: Date.now() };
       throw new QobuzError(lastError.code);

@@ -42,7 +42,9 @@ export function createQobuzClient(credentials: QobuzCredentials, deps: { transpo
       return data.tracks.items.slice(0, 50).flatMap((track: any) => {
         const artist = track.performer?.name || track.album?.artist?.name;
         if (!/^\d+$/.test(String(track.id)) || typeof track.title !== 'string' || !track.title.trim() || typeof artist !== 'string' || !artist.trim() || !Number.isFinite(track.duration) || track.duration <= 0 || track.streamable === false) return [];
-        return [{ id: String(track.id), title: track.title.slice(0, 512), artist: artist.slice(0, 512), album: String(track.album?.title || '').slice(0, 512), duration: track.duration, explicit: track.parental_warning === true, ...(typeof track.isrc === 'string' ? { isrc: track.isrc } : {}), ...(typeof track.album?.image?.large === 'string' ? { artworkUrl: track.album.image.large } : {}) }];
+        const version = typeof track.version === 'string' ? track.version.trim().slice(0, 128) : '';
+        const title = version && !track.title.toLowerCase().includes(version.toLowerCase()) ? `${track.title} (${version})` : track.title;
+        return [{ id: String(track.id), title: title.slice(0, 512), artist: artist.slice(0, 512), album: String(track.album?.title || '').slice(0, 512), duration: track.duration, explicit: track.parental_warning === true, ...(typeof track.isrc === 'string' ? { isrc: track.isrc } : {}), ...(typeof track.album?.image?.large === 'string' ? { artworkUrl: track.album.image.large } : {}) }];
       });
     },
     async fileUrl(trackId: string, signal?: AbortSignal) {

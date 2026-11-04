@@ -305,7 +305,7 @@ export function isStationArchive(song: any): boolean {
 const rejectArchive = (arr: any[]) =>
   blocklist.rejectBlocked((arr || []).filter((s) => !isStationArchive(s)));
 
-// `includeBlocked` is for the admin search surface only (/dj/search), so the
+// `includeBlocked` is for admin review and internal absence proof only, so the
 // operator can review a blocked track; queue.push still refuses it. Every
 // airing path takes the default and never sees blocked songs.
 export async function search(query, { songCount = 20, songOffset = 0, includeBlocked = false } = {}) {
@@ -325,6 +325,7 @@ export async function searchPage(
     { query, songCount, songOffset, artistCount: 5, albumCount: 5 },
     { ...RETRY_FAST_TRANSPORT, signal },
   );
+  if (includeBlocked && (!r.searchResult3 || typeof r.searchResult3 !== 'object' || (r.searchResult3.song !== undefined && !Array.isArray(r.searchResult3.song)))) throw new Error('Invalid catalogue search response');
   const raw = r.searchResult3?.song || [];
   const songs = raw.filter((s) => !isStationArchive(s));
   return { songs: includeBlocked ? songs : blocklist.rejectBlocked(songs), rawCount: raw.length };
@@ -646,8 +647,12 @@ export async function getRecentSongsByArtist(
   return songs.slice(0, count);
 }
 
-export async function getAlbum(id, { signal }: { signal?: AbortSignal } = {}) {
+export async function getAlbum(id, { signal, includeBlocked = false }: { signal?: AbortSignal; includeBlocked?: boolean } = {}): Promise<any[]> {
   const r = await call('getAlbum', { id }, { ...RETRY_FAST_TRANSPORT, signal });
+  if (includeBlocked) {
+    if (!r.album || (r.album.song !== undefined && !Array.isArray(r.album.song))) throw new Error('Invalid catalogue album response');
+    return (r.album.song || []).filter((song: unknown) => !isStationArchive(song));
+  }
   return rejectArchive(r.album?.song || []);
 }
 

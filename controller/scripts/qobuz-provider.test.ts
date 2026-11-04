@@ -43,3 +43,8 @@ test('public HTTPS refuses unsafe destinations before transport and bounds redir
 test('API deadline includes an unresponsive transport', async () => {
   await assert.rejects(createQobuzClient(creds, { timeoutMs: 20, transport: () => new Promise(() => {}) }).search('song'), /timed out/);
 });
+test('provider edition metadata remains part of recording identity', async () => {
+  const client = createQobuzClient(creds, { transport: async () => reply({ tracks: { items: [{ id: 123, title: 'Song', version: 'Live', performer: { name: 'Artist' }, album: { title: 'Album' }, duration: 200, parental_warning: true }] } }) });
+  const [track] = await client.search('Song Artist');
+  assert.equal(track.title, 'Song (Live)'); assert.equal(track.explicit, true);
+});
