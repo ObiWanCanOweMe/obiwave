@@ -1,3 +1,4 @@
+import { ensureMainStationFileMode } from '../../util/main-station-file-mode.js';
 import { mkdir, lstat, realpath, rename, chmod, readdir, unlink, open, statfs } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -41,6 +42,7 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
     await safeRoot(); const body = JSON.stringify({ version: 1, entries });
     if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw new QobuzError('cache index capacity unavailable');
     await writeFileAtomic(join(root, 'index.json'), body, { mode: 0o600, beforeCommit });
+    await ensureMainStationFileMode(join(root, 'index.json'));
   }
   async function ownedDiskUsage(): Promise<number> {
     await safeRoot(); let bytes = 0;
@@ -111,6 +113,7 @@ export function createQobuzCache(deps: { root: string; now?: () => number; refer
         const decoded = z.array(entrySchema).parse(parsed.entries);
         if (new Set(decoded.map(e => e.generation)).size !== decoded.length) throw new QobuzError('invalid cache index');
         entries = decoded;
+        await ensureMainStationFileMode(join(root, 'index.json'));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
           // An invalid index cannot establish ownership. Keep its files and

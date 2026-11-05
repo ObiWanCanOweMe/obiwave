@@ -1,4 +1,4 @@
-// state/secrets.env — shell-style KEY=value, mode 0600, sourced into process.env
+// state/secrets.env — shell-style KEY=value, mode 0600 (0644 for stations/main), sourced into process.env
 // on boot. The first-run wizard writes cloud LLM / TTS API keys here.
 //
 // The file is deliberately hand-editable, so reading it goes through `dotenv`,
@@ -17,6 +17,7 @@ import { STATE_DIR } from '../config.js';
 import { LLM_KEY_ENV_VARS } from '../schemas/providers.js';
 import { SECRET_CONTROL_CHAR_RE, stripSecretControlChars } from '../schemas/settings.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
+import { ensureMainStationFileMode } from '../util/main-station-file-mode.js';
 
 const PATH = `${STATE_DIR}/secrets.env`;
 
@@ -112,6 +113,7 @@ export async function loadSecretsIntoEnv(): Promise<{ loaded: string[]; skipped:
   const skipped: string[] = [];
   if (!existsSync(PATH)) return { loaded, skipped, warnings: [] };
 
+  await ensureMainStationFileMode(PATH);
   const { values, warnings } = readSecretsFile(await readFile(PATH, 'utf8'));
   for (const [key, value] of Object.entries(values)) {
     if (process.env[key]) {
@@ -149,7 +151,7 @@ async function saveSecretsOnce(rawPatch: Record<string, string>): Promise<void> 
   }
   const body = [
     '# SUB/WAVE secrets — written by the first-run wizard.',
-    '# Sourced by the controller on boot. Mode 0600 enforced below.',
+    '# Sourced by the controller on boot. Mode 0644 for stations/main, otherwise 0600.',
     '',
     ...Object.entries(current).map(([k, v]) => `${k}=${envEscape(v)}`),
     '',
@@ -158,6 +160,7 @@ async function saveSecretsOnce(rawPatch: Record<string, string>): Promise<void> 
   // crash mid-write can't truncate existing secrets.
   await writeFileAtomic(PATH, body, { mode: 0o600 });
   await chmod(PATH, 0o600);
+  await ensureMainStationFileMode(PATH);
   // Only after the file is on disk, so a value envEscape rejected never takes
   // effect in-process while being absent from the file. Live env and disk stay in
   // lockstep, and a later AI SDK call sees the new key without a restart.
