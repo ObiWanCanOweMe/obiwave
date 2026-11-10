@@ -349,7 +349,7 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   let searchProvider: string | undefined;
   if (key === 'SEARCH_API_KEY') {
     const savedProvider = settings.get().search?.provider || '';
-    const usesSharedKey = (id: string) => searchProviderEntry(id)?.envVar === key;
+    const usesSharedKey = (id: string | undefined) => !!id && searchProviderEntry(id)?.envVar === key;
     searchProvider = requestedProvider || (usesSharedKey(savedProvider) ? savedProvider : 'tavily');
     if (!usesSharedKey(searchProvider)) {
       return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
