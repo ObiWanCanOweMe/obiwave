@@ -212,3 +212,11 @@ The provider catalogue in `controller/src/schemas/providers.ts` owns provider na
 ### v1.30 integration notes
 
 Firecrawl uses its own saved `search.apiKeys.firecrawl` slot with `SEARCH_API_KEY` as an environment fallback. All search readiness, diagnostics, probes and UI warnings inspect the selected provider's own credential; known foreign prefixes are rejected before requests. Stream reconnection backs off even when connections briefly reach playing, and successful station-password checks resume only playback held by that station's gate. Library replacement acceptance and mass-clear confirmation remain explicit operator actions; see `docs/internals/music.md` for local-file proof, two-window vocal classification, sound-vector invalidation and clean-show filtering.
+
+### v1.31 integration contracts
+
+- Run heavy commands one at a time: lint, typechecking, test suites, installs and builds each get the machine to themselves. Scale benches are outside the test suite; run them only when asked or after changing their read paths, with temporary storage on real disk. Tests use `npm test` for isolated station state and `removeTempDir` for cleanup after asynchronous writes.
+- Scheduled tagging (`tagger.auto`, off by default) owns one station-day run through `music/tag-schedule-policy.ts`; its driver never duplicates policy or answers replaced-file holds. See `docs/internals/music.md`.
+- Whole-file loudness and peak (`loudness` v2) may never be overwritten by a shorter measurement. Tagger audio evidence enters only through `tagInputFor`; `recordTagAnswer` owns untaggable markers and measured-evidence stamps. See `docs/internals/music.md`.
+- Operator steer changes pick and opted-in talk context without changing the on-air show. Pick paths use `resolvePickShow`; prompt text uses `steerClause` or the steer's own `quotedSteer`.
+- Hosted restrictions are opt-in through `SUBWAVE_HOSTED`; they filter managed connections before writes and leave ordinary self-hosted settings unchanged. Responses still use the fork's secret-free receipt and public-feed allowlists.

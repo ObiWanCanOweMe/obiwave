@@ -1,29 +1,8 @@
-// Web search helper — backs the `searchArtistNews` segment tool (llm/
-// segment-tools.js). There is no standalone "web-search skill" object — the
-// segment-director agent (skills/_agent.js) decides when artist news airs.
-//
-// Seven backends, chosen via settings.search.provider:
-//   - duckduckgo (default) — DuckDuckGo's Instant Answer API. Free, no key,
-//     officially documented. Returns useful results only for entity / definition
-//     queries; for most artist queries it returns nothing, which the segment
-//     director already treats as a valid (silent) outcome.
-//   - tavily — paid API for richer web results. Its provider-owned saved key
-//     falls back to SEARCH_API_KEY.
-//   - brave — Brave Search API. Real web results for artist-name queries
-//     (issue #623). Its provider-owned saved key also falls back to
-//     SEARCH_API_KEY; metered billing makes the 30-min memo matter here too.
-//   - searxng — self-hosted meta-search, keyless, needs settings.search.baseUrl.
-//     settings.search.searxngEngines optionally pins the engine set for these
-//     calls only (#1353), leaving the instance's browser traffic on its defaults.
-//   - keenable — keyless web search, optional provider-owned KEENABLE_API_KEY.
-//   - kagi — paid privacy-oriented web search, with a dedicated saved key or
-//     KAGI_API_KEY fallback.
-//
-// All backends return the same shape — { answer, results: [{ title, content }] }
-// — so callers don't have to branch. searchWeb() wraps every call in a 30-min
-// memo to keep the homelab polite under DDG's unofficial fair-use limits and
-// to avoid burning metered-provider credits on duplicate ticks.
-// Firecrawl uses a provider-owned saved key or SEARCH_API_KEY (fc- prefix required).
+// All providers return { answer, results: [{ title, content }] } behind a 30-minute memo.
+// DDG instant answers may be empty; Tavily/Brave need keys; SearXNG needs a base URL;
+// Keenable is keyless, with an optional key that raises its rate limit; Firecrawl and
+// Outcrawl need a key.
+// Brave supports artist-name queries (#623); searxngEngines pins only these calls (#1353).
 
 import * as settings from '../settings.js';
 import { SETTINGS_SEARCH_PROVIDERS } from '../schemas/settings.js';
@@ -39,6 +18,7 @@ const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const KEENABLE_ENDPOINT = 'https://api.keenable.ai/v1/search';
 const KAGI_ENDPOINT = 'https://kagi.com/api/v1/search';
 const FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev/v2/search';
+const OUTCRAWL_ENDPOINT = 'https://api.outcrawl.ai/v1/search';
 
 type SearchResult = { title: string; content: string };
 type SearchResponse = { answer: string; results: SearchResult[] };
@@ -654,6 +634,64 @@ export function parseFirecrawlResponse(data: unknown): SearchResponse {
   return { answer: '', results };
 }
 
+// Outcrawl uses its provider-owned saved key, then SEARCH_API_KEY.
+// The shared fallback may hold another provider's key, so anything but an `ock_`
+// value is refused here and reads as not ready in searchReady(). Outcrawl's
+// search takes no time window, so recency is not sent.
+export async function outcrawlSearch(query: string): Promise<SearchResponse> {
+  const apiKey = settings.searchKeyFor('outcrawl');
+  if (!apiKey) throw new Error('Outcrawl API key not configured');
+  const refusal = keyOnFileRefusal('outcrawl', apiKey);
+  if (refusal) throw new Error(refusal);
+  const { url, init } = buildOutcrawlRequest({ query, apiKey });
+  const res = await fetchWithTimeout(url, { ...init, timeoutMs: 30_000 });
+  if (!res.ok) throw new Error(`Outcrawl HTTP ${res.status}`);
+  const data = await res.json();
+  return parseOutcrawlResponse(data);
+}
+
+// Pure request builder for an Outcrawl search, exported so endpoint, headers
+// and body can be pinned without mocking fetch. Keys are `ock_<keyId>.<secret>`
+// (search-key-policy.ts holds the rule). A search asks for 5 results; the admin
+// "Test key" probe asks for 1, because Outcrawl charges per result returned.
+export function buildOutcrawlRequest(opts: {
+  query: string;
+  apiKey: string;
+  limit?: number;
+}): { url: string; init: RequestInit } {
+  return {
+    url: OUTCRAWL_ENDPOINT,
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.apiKey.trim()}` },
+      body: JSON.stringify({ query: opts.query, limit: opts.limit ?? 5 }),
+    },
+  };
+}
+
+// Pure parser for Outcrawl's search JSON (hits[] of url/title/snippet/rank).
+// Snippets go through the same cleanup as Brave's and Firecrawl's, then
+// whitespace is collapsed before the 300-char cap. There is no answer field.
+// Any shape mismatch yields { answer: '', results: [] }.
+export function parseOutcrawlResponse(data: unknown): SearchResponse {
+  if (!data || typeof data !== 'object') return { answer: '', results: [] };
+  const raw = (data as Record<string, unknown>).hits;
+
+  const text = (v: unknown): string => cleanSnippet(v).replace(/\s+/g, ' ').trim();
+  const results: SearchResult[] = [];
+  for (const r of Array.isArray(raw) ? raw : []) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    const title = text(rec.title);
+    const content = text(rec.snippet).slice(0, 300);
+    if (!title || !content) continue;
+    results.push({ title, content });
+    if (results.length >= 5) break;
+  }
+
+  return { answer: '', results };
+}
+
 // Provider dispatcher — reads the active provider from live settings on every
 // call so admin-UI changes take effect immediately. Wraps the backend in a
 // 30-min memo. Cache key includes recency so two callsites with different
@@ -672,6 +710,7 @@ export async function searchWeb(
     if (provider === 'keenable') return keenableSearch(query, recency);
     if (provider === 'kagi') return kagiSearch(query, recency);
     if (provider === 'firecrawl') return firecrawlSearch(query, recency);
+    if (provider === 'outcrawl') return outcrawlSearch(query);
     return duckduckgoSearch(query);
   });
 }
@@ -680,7 +719,9 @@ export async function searchWeb(
 //   duckduckgo:   always ready (no key, no URL)
 //   tavily/brave: needs a provider-owned saved key, or SEARCH_API_KEY env
 //   kagi:        needs a provider-owned saved key, or KAGI_API_KEY env
-//   firecrawl:    needs a provider-owned key or SEARCH_API_KEY with fc- prefix
+//   firecrawl:   needs a provider-owned key or SEARCH_API_KEY with fc- prefix
+//   outcrawl:    needs a provider-owned key or SEARCH_API_KEY with ock_ prefix
+//   keenable:    always ready (an optional key raises the rate limit)
 //   searxng:      needs settings.search.baseUrl (no env fallback by design)
 export function searchReady(): boolean {
   const s = settings.get().search;

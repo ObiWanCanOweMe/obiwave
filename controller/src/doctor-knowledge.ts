@@ -117,6 +117,7 @@ news segments can't fetch — tell them to save the provider's key in Admin → 
 or switch to the keyless DuckDuckGo/SearXNG alternatives. Credentials are
 provider-specific and are never shared between search providers.
 Firecrawl uses its provider-owned saved key or SEARCH_API_KEY and requires an fc- key. Tavily and Brave refuse known foreign key prefixes before any request. A diagnostic timeout is not proof that all searches fail, and no provider is guaranteed never to time out.
+Outcrawl uses its own saved key or SEARCH_API_KEY and requires an ock_ key; other providers reject that prefix before sending.
 
 ## Backups
 There is a Backup feature (Admin → Backup) that exports settings, personas, custom
@@ -190,6 +191,9 @@ regular cadence — it's cheap insurance.
     in-process): switch the single container's image to
     \`ghcr.io/perminder-klair/subwave-aio-heavy\`, or on an NVIDIA host
     \`ghcr.io/perminder-klair/subwave-aio-cuda\` (same heavy features on the GPU)
+    at the tag named for the card's architecture (\`:pascal\` for a GTX 10-series,
+    \`:ampere\` for an RTX 30-series; \`:latest\` needs Turing / RTX 20-series or
+    newer, and older cards fail on it)
     with GPU passthrough — \`--gpus all\`, or on Unraid the nvidia runtime plus
     NVIDIA_VISIBLE_DEVICES / NVIDIA_DRIVER_CAPABILITIES. There is no compose
     overlay for the AIO; the GPU rides on the image. Do NOT point an AIO install

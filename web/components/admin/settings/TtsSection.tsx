@@ -482,9 +482,13 @@ function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'P
 interface TtsSectionProps extends SectionProps {
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
   refresh: () => Promise<void>;
+  // Run by SUB/WAVE Cloud: the engine (and each engine's provider config) is the
+  // box agent's, so only what the operator still owns is shown. The controller
+  // drops managed keys on save regardless (setup/hosted.ts).
+  hosted?: boolean;
 }
 
-export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch, refresh }: TtsSectionProps) {
+export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch, refresh, hosted = false }: TtsSectionProps) {
   const levellingAria = fieldAria('tts-voice-levelling', undefined, { hasDescription: true });
   const [cloudKeyInput, setCloudKeyInput] = useState('');
   const [cloudKeyTest, setCloudKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
@@ -878,8 +882,12 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     <>
       <SectionHeader
         eyebrow="tts voice"
-        title="Pick a voice engine, then configure it."
-        sub={<>
+        title={hosted ? 'Your DJ’s voice.' : 'Pick a voice engine, then configure it.'}
+        sub={hosted ? <>
+          SUB/WAVE Cloud runs the voice engine for this station. Here you choose whether
+          the DJ speaks and tune how it sounds; each persona’s own voice is set on the
+          Personas page.
+        </> : <>
           Every spoken segment is voiced by the <strong>persona on air</strong>. Set each
           persona’s engine and voice on the Personas page. Here you pick the station’s
           default engine (used for jingles and as the fallback) and configure whichever
@@ -931,6 +939,12 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
       <Card title="Voice engine" sub="active default">
         <div className="grid gap-[18px]">
+          {hosted ? (
+            <NowBanner label={<>Voice engine · {savedEngineLabel}</>}>
+              Managed by SUB/WAVE Cloud. The engine and its provider settings are set for you
+              and can’t be changed here.
+            </NowBanner>
+          ) : (<>
           <NowBanner label={<>Default engine now · {savedEngineLabel}</>}>
             {activeDetail} {ttsDirty ? 'Your edits below aren’t live until you Save.' : 'This is the saved, running config.'}
             {savedEngineMissing && (
@@ -963,6 +977,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 : <>The station default. Renders jingles and is the fallback when a persona’s own engine fails. Per-segment voice still comes from the persona on air.</>}
             </div>
           </div>
+          </>)}
 
           <div className="field">
             <Label {...levellingAria.labelledByProps}>Voice levelling</Label>
@@ -977,7 +992,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             </p>
           </div>
 
-        {form.tts.defaultEngine === 'piper' && (
+        {!hosted && form.tts.defaultEngine === 'piper' && (
           <>
             <div className="field mt-4">
               <div className="field-hint">
@@ -987,6 +1002,17 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             </div>
             <TtsGainField engineId="piper" form={form} setForm={setForm} />
             <TtsSpeedField engineId="piper" form={form} setForm={setForm} />
+          </>
+        )}
+
+        {/* Hosted: the engine's own panel is the box agent's, but its level and
+            pace stay the operator's (tts.gainDb / tts.speed aren't managed).
+            Kokoro's panel below carries them already. */}
+        {hosted && form.tts.defaultEngine !== 'kokoro'
+          && (TTS_GAIN_ENGINES as readonly string[]).includes(form.tts.defaultEngine) && (
+          <>
+            <TtsGainField engineId={form.tts.defaultEngine} form={form} setForm={setForm} />
+            <TtsSpeedField engineId={form.tts.defaultEngine} form={form} setForm={setForm} />
           </>
         )}
 
@@ -1084,7 +1110,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           );
         })()}
 
-        {form.tts.defaultEngine === 'chatterbox' && (
+        {!hosted && form.tts.defaultEngine === 'chatterbox' && (
           <>
             <div className="field mt-4">
               <Label>Chatterbox reference voice</Label>
@@ -1130,7 +1156,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           </>
         )}
 
-        {form.tts.defaultEngine === 'pocket-tts' && (
+        {!hosted && form.tts.defaultEngine === 'pocket-tts' && (
           <>
             <div className="field mt-4">
               <Label>PocketTTS voice</Label>
@@ -1180,6 +1206,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           </>
         )}
 
+        {!hosted && (<>
         {geminiSelected && (() => {
           const geminiAvail = data.tts?.available?.gemini;
           // Keyed off the shared TtsForm shape rather than restating the three
@@ -1576,8 +1603,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           </div>
           );
         })()}
+        </>)}
 
-        {form.tts.defaultEngine === 'remote' && (() => {
+        {!hosted && form.tts.defaultEngine === 'remote' && (() => {
           const remoteAvail = available.remote;
           return (
           <div className="mt-4">
@@ -1656,6 +1684,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
+      {!hosted && (
       <Advanced note="the rescue voice for a persona whose own engine fails">
       <Card
         title="Fallback voice"
@@ -1718,6 +1747,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         )}
       </Card>
       </Advanced>
+      )}
 
       <SaveBar
         note={ttsDirty

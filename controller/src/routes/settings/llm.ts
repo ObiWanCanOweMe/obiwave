@@ -8,10 +8,11 @@ import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { SECRET_ENV_KEYS, secretValueIssue } from '../../setup/secrets.js';
 import { OPENAI_COMPATIBLE_GATEWAYS } from '../../schemas/providers.js';
+import { searchProviderEntry } from '../../schemas/settings.js';
 import { applyCustomHeadersPatch } from '../../settings/vocab.js';
 import type { EmbeddingCfg } from '../../llm/provider.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
-import { isFirecrawlKey, isKeenableKey } from '../../skills/web-search.js';
+import { buildOutcrawlRequest, isFirecrawlKey, isKeenableKey } from '../../skills/web-search.js';
 import { searchKeyMismatch } from '../../skills/search-key-policy.js';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -61,15 +62,12 @@ function briefLlmError(err: unknown, secrets: string[] = []): string {
   return sentence.slice(0, 80) || 'Request failed';
 }
 
-// `hint` scopes search-key probes to their provider. The admin UI tests the key
-// before saving, so the saved setting can't be trusted mid-edit. The UI passes
-// the provider it's editing; absent a hint we fall back to the saved provider,
-// then Tavily (the original sole owner of SEARCH_API_KEY).
-//
-// Probe budget: OpenAI's Responses API (the default path for
-// createOpenAI()(model)) rejects max_output_tokens below 16 — a smaller test
-// budget fails key validation with "integer below minimum value" and blocks
-// saving the key entirely. 32 clears the floor on every provider.
+// Non-mutating probe of one secret; builds a one-off client and never writes
+// process.env or secrets.env. `hint` disambiguates a key shared by several
+// providers (SEARCH_API_KEY is Tavily, Brave, Firecrawl or Outcrawl) because the UI tests before
+// saving, so the stored provider can't be trusted mid-edit; it falls back to
+// the saved provider, then Tavily. maxOutputTokens stays at 32: OpenAI's
+// Responses API rejects anything below 16.
 async function probeKey(
   key: (typeof SECRET_ENV_KEYS)[number],
   value: string,
@@ -217,6 +215,32 @@ async function probeKey(
         if (left <= 0) return { ok: false, message: 'Firecrawl key valid, but it has no credits left' };
         return { ok: true, message: `✓ Firecrawl key valid · ${left} credit${left === 1 ? '' : 's'} left` };
       }
+      if (provider === 'outcrawl') {
+        // Outcrawl searches refuse anything but an ock_ key, so the probe does too.
+        const refusal = refused('outcrawl');
+        if (refusal) return refusal;
+        // A one-result search, the cheapest call that proves the key.
+        const { url, init } = buildOutcrawlRequest({ query: 'test', apiKey: value, limit: 1 });
+        const r = await fetch(url, { ...init, signal: AbortSignal.timeout(10000) });
+        if (!r.ok) {
+          // Outcrawl's error body is { code, message, details }, and its docs map
+          // no HTTP status to a code, so a documented code decides first.
+          // `quota_exceeded` is a plan ceiling, either requests per minute or
+          // monthly credits, so the message names both. A body without a code
+          // falls back to the status.
+          const j = await r.json().catch(() => ({})) as { code?: unknown };
+          const code = typeof j?.code === 'string' ? j.code : '';
+          if (code === 'unauthorized' || r.status === 401 || r.status === 403) {
+            return { ok: false, message: 'Key rejected — check it\'s correct and active' };
+          }
+          if (code === 'quota_exceeded') {
+            return { ok: false, message: 'Outcrawl key valid, but the account is over its plan limit (monthly credits or requests per minute)' };
+          }
+          if (r.status === 402) return { ok: false, message: 'Outcrawl key valid, but it has no credits left' };
+          return { ok: false, message: `Request failed (${r.status})` };
+        }
+        return { ok: true, message: '✓ Outcrawl key valid' };
+      }
       const refusal = refused('tavily');
       if (refusal) return refusal;
       const r = await fetch('https://api.tavily.com/search', {
@@ -325,9 +349,9 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   let searchProvider: string | undefined;
   if (key === 'SEARCH_API_KEY') {
     const savedProvider = settings.get().search?.provider || '';
-    searchProvider = requestedProvider
-      || (savedProvider === 'tavily' || savedProvider === 'brave' || savedProvider === 'firecrawl' ? savedProvider : 'tavily');
-    if (searchProvider !== 'tavily' && searchProvider !== 'brave' && searchProvider !== 'firecrawl') {
+    const usesSharedKey = (id: string | undefined) => !!id && searchProviderEntry(id)?.envVar === key;
+    searchProvider = requestedProvider || (usesSharedKey(savedProvider) ? savedProvider : 'tavily');
+    if (!usesSharedKey(searchProvider)) {
       return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
     }
   } else if (key === 'KEENABLE_API_KEY') {

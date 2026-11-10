@@ -114,7 +114,10 @@ const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
   },
   localColour: {
     low: 'Keep it universal; skip local references and place-specific colour.',
-    high: 'Lean on the local setting (the town, the weather, the hour) as texture.',
+    // No weather here: links, idents and handoffs are given none (#471), so a
+    // dial that invited it had the DJ invent it ("the sun is blazing" under
+    // full cloud). The weather skill brings its own.
+    high: 'Lean on the local setting (the town, the hour) as texture.',
   },
   warmth: {
     low: 'Keep a cool, dry distance; let the music carry the warmth.',
@@ -611,6 +614,7 @@ export const TTS_CLOUD_PROVIDERS: readonly string[] = TTS_CLOUD_PROVIDER_VALUES;
 // `kagi` provides its own paid API. `searxng` is keyless self-hosted meta-search
 // via settings.search.baseUrl.
 // Firecrawl uses its provider-owned saved key or SEARCH_API_KEY.
+// Outcrawl uses its provider-owned saved key or SEARCH_API_KEY (ock_).
 export const SEARCH_PROVIDERS = SETTINGS_SEARCH_PROVIDERS;
 export const SEARCH_KEY_PROVIDERS = SETTINGS_SEARCH_KEY_PROVIDERS;
 export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
@@ -621,6 +625,7 @@ const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
   kagi: '',
   keenable: '',
   firecrawl: '',
+  outcrawl: '',
 });
 
 export function normalizeSearchApiKeys(raw: unknown): Record<SearchKeyProvider, string> {
