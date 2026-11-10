@@ -204,7 +204,8 @@ in-process. See [`docs/tts-heavy.md`](docs/tts-heavy.md#turning-the-analyzer-off
 
 GPU analyzer images remain immutable upstream mirrors in ObiWave's eleven-image
 release pipeline. The CUDA analyzer uses torch/torchaudio 2.7.1 with CUDA 12.8
-wheels, including RTX 50-series Blackwell support. Operators who manage host
+wheels for Turing (RTX 20-series) through RTX 50-series Blackwell GPUs. Older
+cards have no split-stack CUDA build. Operators who manage host
 GPU passthrough can layer the `docker-compose.analyzer-gpu.yml` overlay:
 
 ```bash
@@ -218,8 +219,12 @@ To keep the overlay across normal rebuilds and restarts, set `COMPOSE_FILE` in
 `.env` to `docker-compose.yml:docker-compose.analyzer-gpu.yml`.
 
 All-in-one installs have no `analyzer` service to swap, so they take the GPU on
-the image instead: pull `subwave-aio-cuda` and hand the container the card
-(`--gpus all`, or the Unraid steps in [`docs/unraid.md`](docs/unraid.md)).
+the image instead: pull upstream `ghcr.io/perminder-klair/subwave-aio-cuda` at the tag named for your card's
+architecture (`:pascal` for a GTX 10-series, `:ampere` for an RTX 30-series;
+[every tag](docs/internals/infrastructure.md#aio-cuda-tags)) and hand the
+container the card (`--gpus all`, or the Unraid steps in
+[`docs/unraid.md`](docs/unraid.md)). `:latest` needs Turing (RTX 20-series) or
+newer.
 
 ### Local dev (contributors)
 

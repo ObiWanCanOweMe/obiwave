@@ -11,7 +11,8 @@ import {
 } from '../../ui/select';
 import {
   SEARCH_PROVIDER_CATALOG, SEARCH_PROVIDER_GROUPS, SETTINGS_SEARCH_PROVIDERS, SETTINGS_SEARXNG_ENGINES_MAX,
-  type SearchProviderEntry, type SearchProviderGroup,
+  searchProviderEntry, withIndefiniteArticle,
+  type SearchProviderGroup,
 } from '@/lib/schemas.generated';
 import { Card, Btn, Pill } from '../ui';
 import {
@@ -28,14 +29,32 @@ import {
   type SearchKeyDraft,
 } from './search-provider-state';
 
-const searchProvider = (id: string | undefined): SearchProviderEntry | undefined => SEARCH_PROVIDER_CATALOG.find(p => p.id === id);
-const SEARCH_GROUP_LABELS: Record<SearchProviderGroup, string> = { keyless: 'No key needed', keyed: 'Needs an API key', 'self-hosted': 'Self-hosted' };
-export function groupSearchProviders(ids: readonly string[]): { label: string; ids: string[] }[] {
-  return [...SEARCH_PROVIDER_GROUPS.map(group => ({ label: SEARCH_GROUP_LABELS[group], ids: ids.filter(id => searchProvider(id)?.group === group) })), { label: 'Other', ids: ids.filter(id => !searchProvider(id)) }].filter(g => g.ids.length > 0);
-}
+// Labels, hints and key fields come from the search catalogue
+// (controller/src/schemas/settings.ts, mirrored by gen:schemas), read through
+// its searchProviderEntry.
 
 const searchProviderLabel = (id: string | undefined): string =>
-  (id && SEARCH_PROVIDER_META[id as keyof typeof SEARCH_PROVIDER_META]?.label) || id || '—';
+  searchProviderEntry(id)?.label || id || '—';
+
+const SEARCH_GROUP_LABELS: Record<SearchProviderGroup, string> = {
+  keyless: 'No key needed',
+  keyed: 'Needs an API key',
+  'self-hosted': 'Self-hosted',
+};
+
+// The server's providers under their Select groups, in SEARCH_PROVIDER_GROUPS
+// order, each keeping the server's order. An id the catalogue doesn't know
+// goes last, under "Other".
+export function groupSearchProviders(ids: readonly string[]): { label: string; ids: string[] }[] {
+  const known = new Set<string>(SEARCH_PROVIDER_CATALOG.map(p => p.id));
+  return [
+    ...SEARCH_PROVIDER_GROUPS.map(group => ({
+      label: SEARCH_GROUP_LABELS[group],
+      ids: ids.filter(id => searchProviderEntry(id)?.group === group),
+    })),
+    { label: 'Other', ids: ids.filter(id => !known.has(id)) },
+  ].filter(g => g.ids.length > 0);
+}
 
 // True when a key is on file but the picked provider's searches would refuse it,
 // because it is another provider's (a Firecrawl key under Tavily, a Tavily key
@@ -49,6 +68,14 @@ export function searchKeyIsForeign(
   refusedBy: string[] | undefined,
 ): boolean {
   return keyOnFile && !!refusedBy?.includes(provider);
+}
+
+// The banner's sentence when the key on file is another provider's. The article
+// comes from the catalogue's one rule, which the controller's messages share
+// ("an Outcrawl key", "a Tavily key").
+export function foreignSearchKeyDetail(keyName: string): string {
+  const key = `${withIndefiniteArticle(keyName)} key`;
+  return `The key on file is not ${key}, so searches won't run. Paste ${key} in the field above and save.`;
 }
 
 interface SearchSectionProps extends SectionProps {
@@ -165,7 +192,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
         sub={<>
           The segment director can air a single line of recent artist context between
           tracks, when the active backend returns something worth saying. DuckDuckGo
-          and Keenable are free and keyless; Tavily, Brave, Kagi, and Firecrawl return web results; SearXNG is
+          and Keenable are free and keyless; Tavily, Brave, Kagi, Firecrawl and Outcrawl return web results; SearXNG is
           keyless if you self-host it. Switching here reroutes the next call, no restart.
         </>}
         metrics={[{ n: String(providers.length), l: 'providers' }]}
@@ -253,7 +280,7 @@ export function SearchSection({ data, form, setForm, busy, saveSettings, adminFe
                   one or the other, not both.
                 </div>
               </div>
-              {(keyed.key !== 'optional' || keySource !== 'missing') && <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing' && !foreignKey} detail={foreignKey ? <>The key on file is not a {keyed.keyName} key. Paste a {keyed.keyName} key and save.</> : undefined} source={keySource} />}
+              {(keyed.key !== 'optional' || keySource !== 'missing') && <KeyStatus envVar={keyed.envVar} present={keySource !== 'missing' && !foreignKey} detail={foreignKey ? foreignSearchKeyDetail(keyed.keyName || provider) : undefined} source={keySource} />}
               {keyTest && <KeyTestResult result={keyTest} />}
             </>
           )}

@@ -203,6 +203,12 @@ services:
         condition: service_healthy
     environment:
       - NODE_ENV=production
+      # Hosted controls stay opt-in and agree with the controller's root .env.
+      - SUBWAVE_HOSTED=${SUBWAVE_HOSTED:-}
+      - SUBWAVE_MAX_BITRATE=${SUBWAVE_MAX_BITRATE:-}
+      - SUBWAVE_LISTENER_CAP=${SUBWAVE_LISTENER_CAP:-}
+      - SUBWAVE_MUSIC_UPLOAD_URL=${SUBWAVE_MUSIC_UPLOAD_URL:-}
+      - SUBWAVE_MUSIC_LIBRARY_URL=${SUBWAVE_MUSIC_LIBRARY_URL:-}
       - SUBWAVE_HOMEPAGE=${SUBWAVE_HOMEPAGE:-player}
       - SUBWAVE_DISCOVERY_BENCH=${SUBWAVE_DISCOVERY_BENCH:-}
       - SUBWAVE_DJ_BRAIN_ENABLED=${SUBWAVE_DJ_BRAIN_ENABLED:-false}
@@ -333,6 +339,9 @@ services:
       - ANALYZE_SECONDS=${ANALYZE_SECONDS:-}
       - ANALYZE_CONCURRENCY=${ANALYZE_CONCURRENCY:-}
       - ANALYZE_MAX_BYTES=${ANALYZE_MAX_BYTES:-}
+      # Whole-file facets (loudness v2, edges): their own lane width on this host.
+      - ANALYZE_WHOLE_FILE_CONCURRENCY=${ANALYZE_WHOLE_FILE_CONCURRENCY:-}
+      - ANALYZE_WHOLE_FILE_TIMEOUT_S=${ANALYZE_WHOLE_FILE_TIMEOUT_S:-}
       - ANALYZE_CLAP_WINDOWS=${ANALYZE_CLAP_WINDOWS:-}
       - ANALYZE_OUTRO_SECONDS=${ANALYZE_OUTRO_SECONDS:-}
       # Anonymous HF downloads are rate-limited; same var as tts-heavy.

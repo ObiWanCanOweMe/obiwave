@@ -141,6 +141,9 @@ jobs:
       # images the CLI's compose files reference are on GHCR at this version.
       # Adding or renaming one of those images here means updating its IMAGES
       # list too (the aio images are deliberately not waited on).
+      #
+      # The fork publishes one immutable exact tag per image. CI verifies
+      # matrix shape; repository contracts enforce the eleven-image release set.
       matrix:
         include:
           - image: subwave-caddy

@@ -135,8 +135,9 @@ services:
       # Enables the production-only admin gate (refuses to boot without
       # ADMIN_USER + ADMIN_PASS).
       - NODE_ENV=production
-      # Schedule slots are day-of-week + hour via date.getHours(); without TZ
-      # the container runs UTC and fires shows an hour early during BST.
+      # Schedule slots follow the station timezone (Settings, `timezone`);
+      # left on Auto they follow this TZ, and without it the container runs
+      # UTC and fires shows an hour early during BST.
       - TZ=${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
@@ -216,6 +217,12 @@ services:
         condition: service_healthy
     environment:
       - NODE_ENV=production
+      # Hosted controls stay opt-in and agree with the controller's root .env.
+      - SUBWAVE_HOSTED=${SUBWAVE_HOSTED:-}
+      - SUBWAVE_MAX_BITRATE=${SUBWAVE_MAX_BITRATE:-}
+      - SUBWAVE_LISTENER_CAP=${SUBWAVE_LISTENER_CAP:-}
+      - SUBWAVE_MUSIC_UPLOAD_URL=${SUBWAVE_MUSIC_UPLOAD_URL:-}
+      - SUBWAVE_MUSIC_LIBRARY_URL=${SUBWAVE_MUSIC_LIBRARY_URL:-}
       - SUBWAVE_HOMEPAGE=${SUBWAVE_HOMEPAGE:-player}
       - SUBWAVE_DISCOVERY_BENCH=${SUBWAVE_DISCOVERY_BENCH:-}
       - SUBWAVE_DJ_BRAIN_ENABLED=${SUBWAVE_DJ_BRAIN_ENABLED:-false}
@@ -366,6 +373,9 @@ services:
       - ANALYZE_SECONDS=${ANALYZE_SECONDS:-}
       - ANALYZE_CONCURRENCY=${ANALYZE_CONCURRENCY:-}
       - ANALYZE_MAX_BYTES=${ANALYZE_MAX_BYTES:-}
+      # Whole-file facets (loudness v2, edges): their own lane width on this host.
+      - ANALYZE_WHOLE_FILE_CONCURRENCY=${ANALYZE_WHOLE_FILE_CONCURRENCY:-}
+      - ANALYZE_WHOLE_FILE_TIMEOUT_S=${ANALYZE_WHOLE_FILE_TIMEOUT_S:-}
       - ANALYZE_CLAP_WINDOWS=${ANALYZE_CLAP_WINDOWS:-}
       - ANALYZE_OUTRO_SECONDS=${ANALYZE_OUTRO_SECONDS:-}
       # CLAP isn't gated, but anonymous HF downloads are rate-limited. Same var

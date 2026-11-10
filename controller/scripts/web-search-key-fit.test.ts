@@ -25,6 +25,9 @@ const {
   tavilySearch, braveSearch, kagiSearch, searchWeb, searchReady, searchKeyProblem, searchKeyRefusedBy,
 } = await import('../src/skills/web-search.js');
 const { checkCapabilities } = await import('../src/doctor/checks-station.js');
+const {
+  SEARCH_PROVIDER_CATALOG, searchProviderEntry, withIndefiniteArticle,
+} = await import('../src/schemas/settings.js');
 await settings.load();
 
 // Stubs fetch for one test, records every outbound call with both credential
@@ -51,30 +54,42 @@ function stubSearch(t: TestContext) {
 
 test('searchKeyFits: each provider takes its own key and refuses the others', () => {
   const table: Array<[string, string, boolean]> = [
-    // Firecrawl and Keenable: only their own prefix.
+    // Firecrawl, Keenable and Outcrawl: only their own prefix.
     ['firecrawl', 'fc-abc', true],
     ['firecrawl', 'tvly-abc', false],
     ['firecrawl', 'BSAabc', false],
+    ['firecrawl', 'ock_abc.def', false],
     ['keenable', 'keen_abc', true],
     ['keenable', 'fc-abc', false],
+    ['keenable', 'ock_abc.def', false],
+    ['outcrawl', 'ock_abc.def', true],
+    ['outcrawl', 'fc-abc', false],
+    ['outcrawl', 'tvly-abc', false],
+    ['outcrawl', 'keen_abc', false],
+    ['outcrawl', 'BSAabc', false],
+    ['outcrawl', 'legacy-unprefixed', false],
+    ['outcrawl', 'OCK_abc.def', false],
+    ['outcrawl', 'xock_abc.def', false],
     // Tavily: anything but another provider's known prefix.
     ['tavily', 'tvly-abc', true],
     ['tavily', 'legacy-unprefixed', true],
     ['tavily', 'BSAabc', true],
     ['tavily', 'fc-abc', false],
     ['tavily', 'keen_abc', false],
+    ['tavily', 'ock_abc.def', false],
     // Brave: the same, and a Tavily key is foreign too.
     ['brave', 'BSAabc', true],
     ['brave', 'legacy-unprefixed', true],
     ['brave', 'fc-abc', false],
     ['brave', 'keen_abc', false],
     ['brave', 'tvly-abc', false],
+    ['brave', 'ock_abc.def', false],
   ];
   for (const [provider, key, fits] of table) {
     assert.equal(searchKeyFits(provider, key), fits, `${provider} ${key}`);
     assert.equal(searchKeyFits(provider, ` ${key} `), fits, `${provider} ${key}, padded`);
   }
-  for (const provider of ['tavily', 'brave', 'firecrawl', 'keenable']) {
+  for (const provider of ['tavily', 'brave', 'firecrawl', 'keenable', 'outcrawl']) {
     assert.equal(searchKeyFits(provider, ''), false, `${provider} empty`);
     assert.equal(searchKeyFits(provider, '   '), false, `${provider} blank`);
   }
@@ -85,15 +100,39 @@ test('searchKeyMismatch names whose key it is, and an empty key is not a mismatc
   assert.equal(searchKeyMismatch('brave', 'tvly-abc'), 'a Tavily key, not a Brave Search key');
   assert.equal(searchKeyMismatch('brave', 'keen_abc'), 'a Keenable key, not a Brave Search key');
   assert.equal(searchKeyMismatch('firecrawl', 'BSAabc'), 'not a Firecrawl key (they start with fc-)');
+  assert.equal(searchKeyMismatch('firecrawl', 'ock_abc.def'), 'not a Firecrawl key (they start with fc-)');
+  assert.equal(searchKeyMismatch('outcrawl', 'fc-abc'), 'not an Outcrawl key (they start with ock_)');
+  assert.equal(searchKeyMismatch('tavily', 'ock_abc.def'), 'an Outcrawl key, not a Tavily key');
+  assert.equal(searchKeyMismatch('brave', 'ock_abc.def'), 'an Outcrawl key, not a Brave Search key');
+  assert.equal(searchKeyMismatch('outcrawl', 'ock_abc.def'), null);
   assert.equal(searchKeyMismatch('tavily', 'tvly-abc'), null);
   assert.equal(searchKeyMismatch('tavily', ''), null);
 });
 
+// The catalogue's one article rule, which the policy's sentences, Run now and the
+// Settings banner all take their "a"/"an" from.
+test('withIndefiniteArticle and searchProviderEntry read the catalogue', () => {
+  assert.equal(withIndefiniteArticle('Outcrawl'), 'an Outcrawl');
+  assert.equal(withIndefiniteArticle('Tavily'), 'a Tavily');
+  assert.equal(withIndefiniteArticle('Brave Search'), 'a Brave Search');
+  assert.equal(withIndefiniteArticle('Keenable'), 'a Keenable');
+  assert.equal(searchProviderEntry('outcrawl')?.keyName, 'Outcrawl');
+  assert.equal(searchProviderEntry('outcrawl')?.keyUrl, 'https://outcrawl.ai/console');
+  assert.equal(searchProviderEntry('nope'), undefined);
+  assert.equal(searchProviderEntry(undefined), undefined);
+  for (const p of SEARCH_PROVIDER_CATALOG) {
+    if (p.key !== 'required' || !('keyName' in p)) continue;
+    const sentence = searchKeyMismatch(p.id, 'keen_abc') ?? '';
+    assert.ok(sentence.includes(`${withIndefiniteArticle(p.keyName)} key`), `${p.id}: ${sentence}`);
+  }
+});
+
 test('searchProvidersRefusing lists the keyed providers that would refuse a key', () => {
-  assert.deepEqual(searchProvidersRefusing('fc-abc'), ['tavily', 'brave', 'kagi']);
-  assert.deepEqual(searchProvidersRefusing('tvly-abc'), ['brave', 'kagi', 'firecrawl']);
-  assert.deepEqual(searchProvidersRefusing('keen_abc'), ['tavily', 'brave', 'kagi', 'firecrawl']);
-  assert.deepEqual(searchProvidersRefusing('BSAabc'), ['firecrawl']);
+  assert.deepEqual(searchProvidersRefusing('fc-abc'), ['tavily', 'brave', 'kagi', 'outcrawl']);
+  assert.deepEqual(searchProvidersRefusing('tvly-abc'), ['brave', 'kagi', 'firecrawl', 'outcrawl']);
+  assert.deepEqual(searchProvidersRefusing('keen_abc'), ['tavily', 'brave', 'kagi', 'firecrawl', 'outcrawl']);
+  assert.deepEqual(searchProvidersRefusing('BSAabc'), ['firecrawl', 'outcrawl']);
+  assert.deepEqual(searchProvidersRefusing('ock_abc.def'), ['tavily', 'brave', 'kagi', 'firecrawl']);
   assert.deepEqual(searchProvidersRefusing(''), []);
   assert.equal(searchKeyRequired('tavily'), true);
   assert.equal(searchKeyRequired('keenable'), false);
@@ -104,8 +143,10 @@ const FOREIGN: Array<[provider: 'tavily' | 'brave', key: string, sentence: strin
   ['tavily', 'fc-firecrawl-secret', 'The key on file is a Firecrawl key, not a Tavily key'],
   ['tavily', 'keen_keenable-secret', 'The key on file is a Keenable key, not a Tavily key'],
   ['brave', 'fc-firecrawl-secret', 'The key on file is a Firecrawl key, not a Brave Search key'],
+  ['tavily', 'ock_outcrawl.secret', 'The key on file is an Outcrawl key, not a Tavily key'],
   ['brave', 'tvly-tavily-secret', 'The key on file is a Tavily key, not a Brave Search key'],
   ['brave', 'keen_keenable-secret', 'The key on file is a Keenable key, not a Brave Search key'],
+  ['brave', 'ock_outcrawl.secret', 'The key on file is an Outcrawl key, not a Brave Search key'],
 ];
 const searcher = { tavily: tavilySearch, brave: braveSearch };
 
@@ -191,9 +232,9 @@ test('searchKeyRefusedBy follows the key on file, saved or env', async (t) => {
   await settings.update({ search: { provider: 'duckduckgo' } });
   assert.deepEqual(searchKeyRefusedBy(), []);
   process.env.SEARCH_API_KEY = 'fc-env';
-  assert.deepEqual(searchKeyRefusedBy(), ['tavily', 'brave']);
+  assert.deepEqual(searchKeyRefusedBy(), ['tavily', 'brave', 'outcrawl']);
   await settings.update({ search: { apiKeys: { firecrawl: 'tvly-saved' } } });
-  assert.deepEqual(searchKeyRefusedBy(), ['tavily', 'brave', 'firecrawl']);
+  assert.deepEqual(searchKeyRefusedBy(), ['tavily', 'brave', 'firecrawl', 'outcrawl']);
 });
 
 test('GET /settings serves keyRefusedBy', async (t) => {
@@ -207,8 +248,10 @@ test('GET /settings serves keyRefusedBy', async (t) => {
   app.use(router);
   const { server, url } = await listenHttp(app);
   server.unref();
-  const body = await (await fetch(`${url}/settings`)).json() as { search: { keyRefusedBy: unknown } };
-  assert.deepEqual(body.search.keyRefusedBy, ['tavily', 'brave']);
+  const response = await fetch(`${url}/settings`);
+  const body = await response.json() as { search: { keyRefusedBy: unknown } };
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(body.search.keyRefusedBy, ['tavily', 'brave', 'outcrawl']);
 });
 
 

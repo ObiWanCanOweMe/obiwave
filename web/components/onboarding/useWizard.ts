@@ -85,6 +85,10 @@ export const DEFAULT_DATA: WizardData = {
 export type StepId = 'navidrome' | 'llm' | 'tts' | 'dj' | 'review';
 
 export const STEP_ORDER: StepId[] = ['navidrome', 'llm', 'tts', 'dj', 'review'];
+// A station run by SUB/WAVE Cloud (status.hosted): its box agent manages the
+// LLM route and the voice engine, so those steps would only offer choices the
+// controller then ignores (setup/hosted.ts).
+export const HOSTED_STEP_ORDER: StepId[] = ['navidrome', 'dj', 'review'];
 
 export const STEP_LABELS: Record<StepId, string> = {
   navidrome: 'Navidrome',
@@ -104,7 +108,7 @@ function fetchErrorMsg(err: unknown): string {
   return `could not reach the controller${m ? ` (${m})` : ''}`;
 }
 
-export function useWizard() {
+export function useWizard(hosted = false) {
   const auth = useAdminAuth();
   const [data, setData] = useState<WizardData>(DEFAULT_DATA);
   const [stepIdx, setStepIdx] = useState(0);
@@ -112,13 +116,14 @@ export function useWizard() {
   const llmDiscoveryGeneration = useRef(new AsyncResultGeneration());
   const providerDrafts = useRef<ProviderDrafts>({});
 
-  const step = STEP_ORDER[stepIdx];
-  const next = useCallback(() => setStepIdx(i => Math.min(i + 1, STEP_ORDER.length - 1)), []);
+  const steps = hosted ? HOSTED_STEP_ORDER : STEP_ORDER;
+  const step = steps[stepIdx];
+  const next = useCallback(() => setStepIdx(i => Math.min(i + 1, steps.length - 1)), [steps]);
   const back = useCallback(() => setStepIdx(i => Math.max(i - 1, 0)), []);
   const goto = useCallback((id: StepId) => {
-    const i = STEP_ORDER.indexOf(id);
+    const i = steps.indexOf(id);
     if (i >= 0) setStepIdx(i);
-  }, []);
+  }, [steps]);
 
   // Provider drafts outlive the LLM step's RHF instance, so Back/Next and
   // provider switches never reuse another provider's URL or bearer and never
@@ -271,19 +276,24 @@ export function useWizard() {
       timezone: data.dj.timezone,
       apiKeys,
     };
+    // Hosted: never send the LLM, the voice engine or provider keys. The box
+    // agent owns them, and the controller drops them anyway.
+    const { llm: _llm, tts: _tts, apiKeys: _keys, ...hostedBody } = body;
     const r = await auth.adminFetch('/onboarding/save', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(hosted ? hostedBody : body),
     });
     const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     return { ok: !!j.ok, error: j.error };
-  }, [auth, data]);
+  }, [auth, data, hosted]);
 
   return {
     auth,
     data,
     patch,
+    hosted,
+    steps,
     step,
     stepIdx,
     next,

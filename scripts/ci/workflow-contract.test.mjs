@@ -990,6 +990,13 @@ test('consolidated CI verifies the generated theme-token mirror', () => {
   assert.match(ci, /git diff --exit-code \.\.\/web\/lib\/theme-tokens\.generated\.ts/);
 });
 
+test('consolidated CI checks publication matrix shape without restoring duplicate lint CI', () => {
+  assert.match(ci, /- name: Verify the publish-images matrix\n        if: matrix\.package == 'controller'\n        run: npm run check:publish-matrix/);
+  const build = jobBlock(publish, 'build');
+  assert.match(build, /tags: ghcr\.io\/obiwancanoweme\/\$\{\{ matrix\.image \}\}:\$\{\{ github\.ref_name \}\}/);
+  assert.doesNotMatch(build, /metadata-action|cuda_family|arch_tags|type=semver|value=latest/);
+});
+
 test('controller quality provisions the pinned NumPy prerequisite for vocal-gate tests', () => {
   const dependencyStep = ci.slice(
     ci.indexOf('      - name: Install analyzer Python test dependencies'),

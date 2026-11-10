@@ -11,6 +11,8 @@ import {
   SILENCE_TRIM_MIN_GAP_MS_BOUNDS,
   BACKUP_KEEP_BOUNDS,
   BACKUP_KEEP_DEFAULT,
+  TAGGER_AUTO_DEFAULTS,
+  type TaggerAutoSettings,
   BEDS_THRESHOLD_SEC_BOUNDS,
   SHORTLIST_PASSES_DEFAULT,
   CROSSFADE_DURATION_BOUNDS,
@@ -81,6 +83,14 @@ export const DEFAULTS = {
   // so an upgrade that changes nothing must produce byte-identical behaviour —
   // no zips written, no zips pruned. `keep` is inert until a cadence is picked.
   backups: { cadence: 'off' as const, keep: BACKUP_KEEP_DEFAULT },
+  // Scheduled tagging (#2282). OFF by default: an upgrade that changes nothing
+  // never starts a tagger run on its own. When on, one run a station day at
+  // `time` (station clock), with the Run tab's steps and `limit` (0 = all
+  // untagged). Policy: music/tag-schedule-policy.ts.
+  tagger: {
+    // Copies: the frozen shared constant must never be the live settings object.
+    auto: { ...TAGGER_AUTO_DEFAULTS, steps: { ...TAGGER_AUTO_DEFAULTS.steps } } as TaggerAutoSettings,
+  },
   stream: {
     // Secondary Ogg-Opus mount (/stream.opus). Off by default — only Blink
     // selects it (web/hooks/usePlayer.ts), and it costs a continuous encoder
@@ -291,6 +301,9 @@ export const DEFAULTS = {
   // Timed takeover (#930): an epoch-ms window that outranks the weekly grid in
   // resolveActiveShow while live. Persisted in schedule.json.
   scheduleOverride: null,
+  // Operator steer: a bounded lean on the music and the talk that leaves the
+  // schedule alone (schemas/steer.ts). Read through persona.ts:activeSteer().
+  steer: null,
   tts: {
     // Station-wide voice switch. false = music only: no links, idents, hourly
     // checks, segments, banter, mic-passes, programme beats or request intros —
@@ -642,9 +655,10 @@ export const DEFAULTS = {
   // Web-search backend for the segment director's web-search capability.
   // Default `duckduckgo` works out of the box with no key. Keys belong to the
   // provider that consumes them, so changing providers never reuses a key.
+  // Outcrawl uses its own saved slot or prefix-validated SEARCH_API_KEY.
   search: {
     provider: 'duckduckgo',
-    apiKeys: { tavily: '', brave: '', kagi: '', keenable: '' },
+    apiKeys: { tavily: '', brave: '', kagi: '', keenable: '', firecrawl: '', outcrawl: '' },
     baseUrl: '',
     // Optional comma-separated SearXNG engine pin (#1353). Empty means "send no
     // engines= param", i.e. the instance's own default engine set.

@@ -77,6 +77,10 @@ jobs:
             console.log(`zod ${c} on both sides`);
           '
 
+      - name: Verify the publish-images matrix
+        if: matrix.package == 'controller'
+        run: npm run check:publish-matrix
+
       - name: Install controller audio test dependencies
         if: matrix.package == 'controller'
         run: |
