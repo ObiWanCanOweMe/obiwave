@@ -62,7 +62,9 @@ function setSearch(t: TestContext, search: Record<string, unknown>) {
   });
   const { apiKey, ...rest } = search;
   const provider = String(rest.provider || settings.get().search.provider);
-  return settings.update({ search: { ...rest, apiKeys: { [provider]: apiKey || null } } });
+  return settings.update({ search: { ...rest,
+    ...(settings.SEARCH_KEY_PROVIDERS.some(id => id === provider) ? { apiKeys: { [provider]: apiKey || null } } : {}),
+  } });
 }
 
 const row = (name: string) => {
@@ -175,7 +177,7 @@ test('Outcrawl names a refused key the same way, and an ock_ key clears it', asy
   }
   await assert.rejects(runCapability('web-search', {}), /not an Outcrawl key.*Settings → Web search/);
 
-  await settings.update({ search: { provider: 'outcrawl', apiKey: 'ock_a-real.one' } });
+  await settings.update({ search: { provider: 'outcrawl', apiKeys: { outcrawl: 'ock_a-real.one' } } });
   assert.equal(searchKeyProblem(), null);
   assert.equal(row('web-search').ready, true);
   assert.equal(row('web-search').keyUrl, 'https://outcrawl.ai/console');
@@ -199,13 +201,13 @@ test('a missing key names each keyed provider and links its key page, from the c
   ];
   await setSearch(t, { provider: 'duckduckgo', apiKey: '' });
   for (const [provider, hint, keyUrl] of cases) {
-    await settings.update({ search: { provider, apiKey: '' } });
+    await settings.update({ search: { provider, apiKeys: { [provider]: null } } });
     await assert.rejects(runCapability('web-search', {}), { message: `skill "web-search" is not ready — ${hint}` });
     assert.equal(row('web-search').requiresKey, 'SEARCH_API_KEY', provider);
     assert.equal(row('web-search').keyUrl, keyUrl, provider);
   }
   for (const provider of ['duckduckgo', 'keenable', 'searxng']) {
-    await settings.update({ search: { provider, apiKey: '' } });
+    await settings.update({ search: { provider } });
     assert.equal(row('web-search').requiresKey, null, provider);
     assert.equal(row('web-search').keyUrl, null, provider);
   }

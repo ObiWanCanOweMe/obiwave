@@ -8,6 +8,7 @@ import { probeEmbeddingConfig } from '../../music/embeddings.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { SECRET_ENV_KEYS, secretValueIssue } from '../../setup/secrets.js';
 import { OPENAI_COMPATIBLE_GATEWAYS } from '../../schemas/providers.js';
+import { searchProviderEntry } from '../../schemas/settings.js';
 import { applyCustomHeadersPatch } from '../../settings/vocab.js';
 import type { EmbeddingCfg } from '../../llm/provider.js';
 import { listenbrainzApiBase } from '../../broadcast/scrobble.js';
@@ -348,9 +349,9 @@ router.post('/settings/secrets/test', requireAdmin, async (req, res) => {
   let searchProvider: string | undefined;
   if (key === 'SEARCH_API_KEY') {
     const savedProvider = settings.get().search?.provider || '';
-    searchProvider = requestedProvider
-      || (savedProvider === 'tavily' || savedProvider === 'brave' || savedProvider === 'firecrawl' ? savedProvider : 'tavily');
-    if (searchProvider !== 'tavily' && searchProvider !== 'brave' && searchProvider !== 'firecrawl') {
+    const usesSharedKey = (id: string) => searchProviderEntry(id)?.envVar === key;
+    searchProvider = requestedProvider || (usesSharedKey(savedProvider) ? savedProvider : 'tavily');
+    if (!usesSharedKey(searchProvider)) {
       return res.status(400).json({ ok: false, message: `${key} does not match provider ${searchProvider}`, latencyMs: 0 });
     }
   } else if (key === 'KEENABLE_API_KEY') {

@@ -106,6 +106,7 @@ test('a key with a control character is refused before any probe, without echoin
     { key: 'REQUESTY_API_KEY' },
     { key: 'SEARCH_API_KEY', provider: 'tavily' },
     { key: 'SEARCH_API_KEY', provider: 'brave' },
+    { key: 'KAGI_API_KEY', provider: 'kagi' },
     { key: 'KEENABLE_API_KEY', provider: 'keenable' },
     { key: 'SEARCH_API_KEY', provider: 'firecrawl' },
     { key: 'SEARCH_API_KEY', provider: 'outcrawl' },
@@ -315,5 +316,34 @@ test("Outcrawl: another provider's key is refused without a request", async (t) 
   const r = await testKey({ key: 'SEARCH_API_KEY', value: 'fc-left-over', provider: 'outcrawl' });
   assert.equal(r.ok, false);
   assert.equal(r.message, 'Not an Outcrawl key (they start with ock_)');
+  assert.equal(outbound.length, 0);
+});
+
+
+test('Outcrawl: probes its own saved slot, then the shared environment fallback', async (t) => {
+  const outbound = stubProvider(t, 200, { hits: [] });
+  t.after(async () => {
+    delete process.env.SEARCH_API_KEY;
+    await settings.update({ search: { provider: 'duckduckgo', apiKeys: { outcrawl: null, tavily: null } } });
+  });
+  process.env.SEARCH_API_KEY = 'ock_env.secret';
+  await settings.update({ search: { provider: 'outcrawl', apiKeys: { outcrawl: 'ock_saved.secret', tavily: 'tvly_other' } } });
+  const saved = await testKey({ key: 'SEARCH_API_KEY' });
+  assert.equal(saved.ok, true);
+  assert.equal(outbound[0].headers.get('authorization'), 'Bearer ock_saved.secret');
+  await settings.update({ search: { apiKeys: { outcrawl: null } } });
+  const env = await testKey({ key: 'SEARCH_API_KEY', provider: 'outcrawl' });
+  assert.equal(env.ok, true);
+  assert.equal(outbound[1].headers.get('authorization'), 'Bearer ock_env.secret');
+});
+
+test('Outcrawl: an environment key with a control character never reaches the provider', async (t) => {
+  const outbound = stubProvider(t, 200);
+  process.env.SEARCH_API_KEY = 'ock_SECRET\npart2';
+  t.after(() => { delete process.env.SEARCH_API_KEY; });
+  const result = await testKey({ key: 'SEARCH_API_KEY', provider: 'outcrawl' });
+  assert.equal(result.ok, false);
+  assert.equal(result.message, MALFORMED_KEY_MESSAGE);
+  assert.doesNotMatch(result.message, /SECRET/);
   assert.equal(outbound.length, 0);
 });
