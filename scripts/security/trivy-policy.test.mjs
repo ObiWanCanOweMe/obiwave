@@ -863,6 +863,7 @@ test('a CUDA platform image ID cannot substitute for the pinned repository diges
 });
 
 test('each supported release accepts only its pinned CUDA repository digest', () => {
+  assert.equal(PINNED_CUDA_IMAGE_DIGESTS['v1.32.0-obiwave.1'], 'sha256:06ef1d4be402766a756f04597fc222c439b7e5025d5440fb4375d1dc722c55fd');
   assert.equal(PINNED_CUDA_IMAGE_DIGESTS['v1.31.0-obiwave.1'], 'sha256:9e0ec6e6ac9d35f08ae3a5febf43d7d793140c7b954ad68f32ebd8c1d6b8d5d6');
   assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_TAG], V17_CUDA_DIGEST);
   assert.equal(PINNED_CUDA_IMAGE_DIGESTS[V17_REVISION_2_TAG], V17_REVISION_2_CUDA_DIGEST);
@@ -877,6 +878,7 @@ test('each supported release accepts only its pinned CUDA repository digest', ()
     [V17_TAG, V17_CUDA_DIGEST],
     [V17_REVISION_2_TAG, V17_REVISION_2_CUDA_DIGEST],
     [V18_TAG, V18_CUDA_DIGEST],
+    ['v1.32.0-obiwave.1', 'sha256:06ef1d4be402766a756f04597fc222c439b7e5025d5440fb4375d1dc722c55fd'],
     ['v1.31.0-obiwave.1', 'sha256:9e0ec6e6ac9d35f08ae3a5febf43d7d793140c7b954ad68f32ebd8c1d6b8d5d6'],
   ]) {
     const summary = validateReports({
@@ -907,6 +909,7 @@ test('cross-release CUDA digests fail closed', () => {
     [V17_TAG, V16_CUDA_DIGEST],
     [V17_REVISION_2_TAG, V16_CUDA_DIGEST],
     [V18_TAG, V17_CUDA_DIGEST],
+    ['v1.32.0-obiwave.1', V18_CUDA_DIGEST],
     ['v1.31.0-obiwave.1', V18_CUDA_DIGEST],
     [V18_TAG, V16_CUDA_DIGEST],
   ]) {

@@ -42,6 +42,8 @@ export const SECRET_ENV_KEYS = [
   'LASTFM_SESSION_KEY',
   'LISTENBRAINZ_USER_TOKEN',
   'LISTENBRAINZ_API_URL',
+  // Discogs personal access token: the original-year fallback (music/discogs.ts).
+  'DISCOGS_TOKEN',
 ];
 
 // Capture actual startup overrides before loadSecretsIntoEnv installs saved values.

@@ -48,4 +48,21 @@ assert.deepEqual(
 assert.equal(rows.find((r) => r.id === 'namesake')?.originalYear, undefined,
   'a same-title album outside the server response must remain untouched');
 
-console.log('authoritative era-year cache patching passed');
+// The Era tab's album track list shows the saved year at once, not its old
+// one until the refetch (the field falls back to the album year meanwhile).
+const eraKey = libraryKeys.eraAlbum('greatest-hits');
+qc.setQueryData(eraKey, { tracks: [
+  { id: 'target', originalYear: null, originalYearSource: null, yearState: 'unchecked' },
+  { id: 'other', originalYear: 1990, originalYearSource: 'musicbrainz', yearState: 'resolved' },
+] });
+applyEraYearEvent(qc, { tracks: [{ id: 'target', originalYear: 1975, originalYearSource: 'manual' }] });
+const era = qc.getQueryData<{ tracks: Array<{ id: string; originalYear: number | null; originalYearSource: string | null; yearState: string }> }>(eraKey);
+assert.deepEqual(era?.tracks.find((t) => t.id === 'target'),
+  { id: 'target', originalYear: 1975, originalYearSource: 'manual', yearState: 'resolved' });
+assert.equal(era?.tracks.find((t) => t.id === 'other')?.originalYear, 1990, 'another line keeps its year');
+// A clear uses the server's resolved result, including an automatic fallback.
+applyEraYearEvent(qc, { tracks: [{ id: 'target', originalYear: 1972, originalYearSource: 'musicbrainz' }] });
+assert.deepEqual(qc.getQueryData<{ tracks: Array<{ id: string; originalYear: number | null; originalYearSource: string | null; yearState: string }> }>(eraKey)?.tracks[0],
+  { id: 'target', originalYear: 1972, originalYearSource: 'musicbrainz', yearState: 'resolved' });
+
+console.log('era-year cache targeting passed');

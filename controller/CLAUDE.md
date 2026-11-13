@@ -121,3 +121,7 @@ Theme token descriptors include closed `texture` and `finish` keyword sets, alon
 ### Qobuz requests
 
 `music/qobuz/` is the standalone bounded provider/cache layer; `routes/request-qobuz.ts` uses shared admission and the existing queue. Read `docs/qobuz-requests.md` and the Qobuz section in `docs/internals/music.md` before changing it. Accepted cache hits renew a seven-day deadline; inspection/refusal never renews. Namespaced external IDs retain the mixer metadata key `subsonic_id` for compatibility but must never reach Navidrome endpoints. Queue recovery restores pins before cache cleanup/draining. The feature defaults off and ordinary tests mock the provider.
+
+## v1.32 backup contract
+
+- `backup/zip.ts` is the one archive assembly. Retention may only name the anchored `subwave-auto-backup-…` grammar (`backup/pure.ts`), because `GET /backup/restorable` lists every `*.zip` in the state dir. Restore routes sidecars through their owners (`jingles.restoreMeta`, `sfx.restoreMeta`, `blocklist.restore`, `skills/install.ts`).

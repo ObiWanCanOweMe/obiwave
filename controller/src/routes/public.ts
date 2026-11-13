@@ -300,7 +300,7 @@ router.get('/now-playing', async (req, res) => {
         // the running mounts were rendered with, not a setting saved since (#2142).
         bufferSeconds: advertisedBufferSeconds(),
         bufferSecondsByFormat: streamBufferSecondsByFormat(advertisedBufferSeconds()),
-        // The mounts the mixer runs: under a hosted plan's bitrate ceiling
+        // The mounts the mixer runs: under a hosted station's bitrate ceiling
         // FLAC (and AAC below its floor) is off whatever was saved, so a
         // client is never offered a mount that isn't there.
         ...advertisedMounts(stationSettings.stream),
