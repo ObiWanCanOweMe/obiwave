@@ -22,6 +22,7 @@ export const EXPECTED_IMAGES = Object.freeze([
 
 export const CANONICAL_IMAGE_NAMESPACE = 'ghcr.io/obiwancanoweme';
 export const PINNED_CUDA_IMAGE_DIGESTS = Object.freeze({
+  'v1.32.0-obiwave.1': 'sha256:06ef1d4be402766a756f04597fc222c439b7e5025d5440fb4375d1dc722c55fd',
   'v1.31.0-obiwave.1': 'sha256:9e0ec6e6ac9d35f08ae3a5febf43d7d793140c7b954ad68f32ebd8c1d6b8d5d6',
   'v1.3.0-obiwave.2': 'sha256:c6964797b8a88dd2fa9291778543c27594350aba84c7c2f2d25560cd5150bb72',
   'v1.5.0-obiwave.1': 'sha256:a69d2f866eb9d991a69212b5605c15a3631d4d21cec8c4608a6cb29f9d7c9cc2',
