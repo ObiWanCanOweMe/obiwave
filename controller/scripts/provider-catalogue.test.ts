@@ -19,12 +19,14 @@ process.env.STATE_DIR = stateRoot;
 const {
   LLM_PROVIDER_CATALOG, OPENAI_COMPATIBLE_GATEWAYS, PROVIDER_GROUPS,
 } = await import('../src/schemas/providers.js');
-const { SEARCH_PROVIDER_CATALOG, SETTINGS_SEARCH_PROVIDERS } = await import('../src/schemas/settings.js');
+const { SEARCH_PROVIDER_CATALOG, SETTINGS_SEARCH_PROVIDERS, SETTINGS_SEARCH_KEY_PROVIDERS } = await import('../src/schemas/settings.js');
 const settings = await import('../src/settings.js');
 const { SECRET_ENV_KEYS } = await import('../src/setup/secrets.js');
 const { capabilitiesFor, reasoningFor, REASONING_RULES, embeddingSharesChatCredential } =
   await import('../src/llm/internal/provider/capabilities.js');
 const { languageModel } = await import('../src/llm/internal/provider/registry.js');
+const { generateText } = await import('ai');
+const { chatCompletion } = await import('./test-utils/llm.js');
 
 const DEFAULT_CAPS = capabilitiesFor('no-such-provider');
 
@@ -92,6 +94,14 @@ const GATEWAY_REASONING: Record<string, Record<string, string | undefined>> = {
     'openai/gpt-5.4-mini|off': 'minimal', 'openai/gpt-5.4-mini|on': undefined, 'openai/gpt-5.4-mini|forced': 'minimal',
     'anthropic/claude-sonnet-5.5|off': 'minimal', 'gpt-4o-mini|off': 'minimal',
   },
+  // Bare OpenAI ids, so OpenAI's own rule: a dotted GPT-5 turns thinking off
+  // with 'none' (it rejects 'minimal'), an undotted one with 'minimal', and a
+  // GPT-4-class or non-OpenAI id gets no field at all.
+  cheaperinference: {
+    'gpt-5.4-mini|off': 'none', 'gpt-5.4-mini|on': 'medium', 'gpt-5.4-mini|forced': 'medium',
+    'gpt-5-mini|off': 'minimal', 'gpt-4o-mini|off': undefined,
+    'claude-sonnet-4-5|off': undefined, 'claude-sonnet-5-5|off': undefined,
+  },
 };
 
 test('each gateway reasoning rule is pinned', () => {
@@ -106,9 +116,42 @@ test('each gateway reasoning rule is pinned', () => {
   }
 });
 
+// The same rows on the wire: what the strategies pass as `reasoning` (text.ts,
+// object.ts) is what reaches the gateway as reasoning_effort, and an undefined
+// level sends no field at all.
+test('each gateway reasoning rule reaches the wire as reasoning_effort', async (t) => {
+  for (const [id, cases] of Object.entries(GATEWAY_REASONING)) {
+    const gw = OPENAI_COMPATIBLE_GATEWAYS.find(g => g.id === id)!;
+    for (const [key, want] of Object.entries(cases)) {
+      const [model, mode] = key.split('|');
+      const cfg = { provider: id, model, apiKey: 'k', reasoning: mode === 'on' || mode === 'forced' };
+      const sent: { url: string; body: Record<string, unknown> }[] = [];
+      t.mock.method(globalThis, 'fetch', (async (url: string | URL | Request, init?: RequestInit) => {
+        sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        return new Response(JSON.stringify(chatCompletion({ model,
+          message: { role: 'assistant', content: 'ok' },
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch);
+      await generateText({
+        model: languageModel(cfg), prompt: 'hi', maxRetries: 0,
+        reasoning: reasoningFor(cfg, { forceNoThink: mode === 'forced' }),
+      });
+      t.mock.restoreAll();
+      assert.equal(sent.length, 1, `${id} ${key}`);
+      assert.equal(sent[0].url, `${gw.openaiCompatible.baseUrl}/chat/completions`, `${id} ${key}`);
+      if (want === undefined) assert.equal('reasoning_effort' in sent[0].body, false, `${id} ${key} sent ${sent[0].body.reasoning_effort}`);
+      else assert.equal(sent[0].body.reasoning_effort, want, `${id} ${key}`);
+    }
+  }
+});
+
 test('every search provider says how it takes a key', () => {
   for (const p of SEARCH_PROVIDER_CATALOG) {
     assert.ok(p.label && p.hint, `${p.id}: label and hint are required`);
-    if (p.key !== 'none') assert.ok(p.keyName && p.keyPlaceholder && p.keyUrl, `${p.id}: a keyed provider names its key`);
+    if (p.key !== 'none') {
+      assert.ok(p.keyName && p.keyPlaceholder && p.keyUrl && p.envVar, `${p.id}: a keyed provider names its key and fallback`);
+      assert.ok(SETTINGS_SEARCH_KEY_PROVIDERS.includes(p.id as typeof SETTINGS_SEARCH_KEY_PROVIDERS[number]), `${p.id}: a keyed provider owns a saved slot`);
+    }
   }
 });

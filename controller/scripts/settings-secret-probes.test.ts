@@ -84,6 +84,62 @@ test('Requesty: a 401 or 403 reads as a rejected key, anything else as the statu
   assert.equal(failed.message, 'Request failed (502)');
 });
 
+// Cheaper Inference's GET /v1/models, as it answered a made-up bearer and no
+// bearer at all on 2026-11-10: 401 with this body. A list that took any bearer
+// would pass every key, so the rejection is what makes Test key mean anything.
+const CHEAPER_INFERENCE_BAD_KEY = {
+  error: { message: 'Invalid API key.', type: 'authentication_error', param: null, code: 'invalid_api_key' },
+};
+
+test('Cheaper Inference: a listed model set means the key is valid', async (t) => {
+  const outbound = stubProvider(t, 200, { data: [{ id: 'gpt-5.4-mini' }] });
+  const r = await testKey({ key: 'CHEAPER_INFERENCE_API_KEY', value: 'ci-good' });
+  assert.equal(r.ok, true);
+  assert.equal(r.message, '✓ Cheaper Inference key valid');
+  assert.equal(outbound.length, 1);
+  assert.equal(outbound[0].url, 'https://api.cheaperinference.com/v1/models');
+  assert.equal(outbound[0].method, 'GET');
+  assert.equal(outbound[0].headers.get('authorization'), 'Bearer ci-good');
+});
+
+test('Cheaper Inference: its 401 invalid_api_key reads as a rejected key', async (t) => {
+  stubProvider(t, 401, CHEAPER_INFERENCE_BAD_KEY);
+  const r = await testKey({ key: 'CHEAPER_INFERENCE_API_KEY', value: 'ci-bad' });
+  assert.equal(r.ok, false);
+  assert.equal(r.message, 'Key rejected — check it\'s correct and active');
+});
+
+// The admin model picker lists from the same endpoint with the saved key.
+test('Cheaper Inference: the model list is read with the saved key, and a refused key is an error', async (t) => {
+  const models = async (owner: 'chat' | 'embedding' = 'chat') => {
+    const res = await fetch(`${base}/settings/llm/models`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner, ...(owner === 'chat' ? { leg: 'primary' } : {}), provider: 'cheaperinference' }),
+    });
+    assert.equal(res.status, 200);
+    return await res.json() as { ok: boolean; models: string[]; error?: string };
+  };
+  process.env.CHEAPER_INFERENCE_API_KEY = 'ci-saved';
+  try {
+    const outbound = stubProvider(t, 200, { data: [{ id: 'gpt-5.4-mini' }, { id: 'claude-sonnet-4-5' }, { id: 'text-embedding-3-small' }] });
+    const listed = await models();
+    assert.deepEqual(listed, { ok: true, models: ['claude-sonnet-4-5', 'gpt-5.4-mini'], provider: 'cheaperinference' });
+    assert.equal(outbound[0].url, 'https://api.cheaperinference.com/v1/models');
+    assert.equal(outbound[0].headers.get('authorization'), 'Bearer ci-saved');
+    // One mixed list with no type flag, so the embedding picker keeps the name heuristic's matches.
+    assert.deepEqual((await models('embedding')).models, ['text-embedding-3-small']);
+    t.mock.restoreAll();
+
+    stubProvider(t, 401, CHEAPER_INFERENCE_BAD_KEY);
+    const refused = await models();
+    assert.equal(refused.ok, false);
+    assert.equal(refused.error, 'HTTP 401');
+  } finally {
+    delete process.env.CHEAPER_INFERENCE_API_KEY;
+  }
+});
+
 // keenableSearch sends only a keen_ value, so a Tavily or Brave key left in the
 // shared SEARCH_API_KEY slot is unused, not wrong: it must never reach Keenable
 // or come back as "Key rejected".
@@ -110,6 +166,7 @@ test('a key with a control character is refused before any probe, without echoin
     { key: 'KEENABLE_API_KEY', provider: 'keenable' },
     { key: 'SEARCH_API_KEY', provider: 'firecrawl' },
     { key: 'SEARCH_API_KEY', provider: 'outcrawl' },
+    { key: 'SEARCH_API_KEY', provider: 'specstream' },
     { key: 'ELEVENLABS_API_KEY' },
     { key: 'LISTENBRAINZ_USER_TOKEN' },
     { key: 'EMBEDDING_API_KEY' },
@@ -203,6 +260,8 @@ test("Tavily and Brave: another provider's key is refused without a request", as
     ['brave', 'keen_left-over', 'A Keenable key, not a Brave Search key'],
     ['tavily', 'ock_left.over', 'An Outcrawl key, not a Tavily key'],
     ['brave', 'ock_left.over', 'An Outcrawl key, not a Brave Search key'],
+    ['tavily', 'ss_live_left-over', 'A SpecStream key, not a Tavily key'],
+    ['brave', 'ss_live_left-over', 'A SpecStream key, not a Brave Search key'],
   ];
   for (const [provider, value, message] of cases) {
     const outbound = stubProvider(t, 200);
@@ -348,6 +407,44 @@ test('Outcrawl: an environment key with a control character never reaches the pr
   assert.equal(outbound.length, 0);
 });
 
+test('SpecStream: a key is probed with a one-result search; 401 reads as rejected, and 402 and 403 never call the key valid', async (t) => {
+  const outbound = stubProvider(t, 200, { data: { sources: [] } });
+  const r = await testKey({ key: 'SEARCH_API_KEY', value: 'ss_live_good', provider: 'specstream' });
+  assert.equal(r.ok, true);
+  assert.equal(r.message, '✓ SpecStream key valid');
+  assert.equal(outbound.length, 1);
+  const sent = new URL(outbound[0].url);
+  assert.equal(sent.origin + sent.pathname, 'https://api.specstream.ai/v1/web-search');
+  assert.equal(sent.searchParams.get('num'), '1');
+  assert.equal(outbound[0].method, 'GET');
+  assert.equal(outbound[0].headers.get('authorization'), 'Bearer ss_live_good');
+  t.mock.restoreAll();
+
+  const cases: Array<[number, string]> = [
+    [401, 'Key rejected — check it\'s correct and active'],
+    [402, 'SpecStream would not charge for the search (402) — check the account\'s balance and spending limits'],
+    [403, 'SpecStream refused this key (403) — check it\'s active and allowed to spend'],
+    [500, 'Request failed (500)'],
+  ];
+  for (const [status, message] of cases) {
+    stubProvider(t, status, { error: { code: 'unavailable', message: 'no' } });
+    const res = await testKey({ key: 'SEARCH_API_KEY', value: 'ss_live_any', provider: 'specstream' });
+    assert.equal(res.ok, false, `${status}`);
+    assert.equal(res.message, message, `${status}`);
+    // The status proves a refusal, not a valid key: no error message may say so.
+    assert.doesNotMatch(res.message, /valid/i, `${status}`);
+    t.mock.restoreAll();
+  }
+});
+
+test("SpecStream: another provider's key is refused without a request", async (t) => {
+  const outbound = stubProvider(t, 200);
+  const r = await testKey({ key: 'SEARCH_API_KEY', value: 'ock_left.over', provider: 'specstream' });
+  assert.equal(r.ok, false);
+  assert.equal(r.message, 'Not a SpecStream key (they start with ss_)');
+  assert.equal(outbound.length, 0);
+});
+
 test('Discogs: the identity call with the token in the header names the user', async (t) => {
   const outbound = stubProvider(t, 200, { username: 'crate-digger' });
   const r = await testKey({ key: 'DISCOGS_TOKEN', value: 'dg-good' });
@@ -372,4 +469,28 @@ test('Discogs: a 401 or 403 reads as a rejected token, anything else as the stat
   const r = await testKey({ key: 'DISCOGS_TOKEN', value: 'dg-any' });
   assert.equal(r.ok, false);
   assert.equal(r.message, 'Request failed (502)');
+});
+
+
+test('SpecStream: probes its own saved key, then validates the environment fallback', async (t) => {
+  const outbound = stubProvider(t, 200, { data: { sources: [] } });
+  t.after(async () => {
+    delete process.env.SEARCH_API_KEY;
+    await settings.update({ search: { provider: 'duckduckgo', apiKeys: { specstream: null, tavily: null } } });
+  });
+  process.env.SEARCH_API_KEY = 'ss_test_env';
+  await settings.update({ search: { provider: 'specstream', apiKeys: { specstream: 'ss_live_saved', tavily: 'tvly_other' } } });
+  assert.equal((await testKey({ key: 'SEARCH_API_KEY' })).ok, true);
+  assert.equal(outbound[0].headers.get('authorization'), 'Bearer ss_live_saved');
+  await settings.update({ search: { apiKeys: { specstream: null } } });
+  assert.equal((await testKey({ key: 'SEARCH_API_KEY', provider: 'specstream' })).ok, true);
+  assert.equal(outbound[1].headers.get('authorization'), 'Bearer ss_test_env');
+  process.env.SEARCH_API_KEY = 'ock_foreign';
+  assert.equal((await testKey({ key: 'SEARCH_API_KEY', provider: 'specstream' })).ok, false);
+  process.env.SEARCH_API_KEY = 'ss_test_SECRET\npart2';
+  const malformed = await testKey({ key: 'SEARCH_API_KEY', provider: 'specstream' });
+  assert.equal(malformed.ok, false);
+  assert.equal(malformed.message, MALFORMED_KEY_MESSAGE);
+  assert.doesNotMatch(malformed.message, /SECRET/);
+  assert.equal(outbound.length, 2, 'invalid fallback keys never reach the provider');
 });

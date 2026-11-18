@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { parseForkTag } from './fork-tag.mjs';
+import { PINNED_CUDA_IMAGE_DIGESTS } from '../security/trivy-policy.mjs';
 
 const SOURCE_REPOSITORY = 'ghcr.io/perminder-klair/subwave-analyzer-cuda';
 const DESTINATION_REPOSITORY = 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda';
@@ -48,9 +49,15 @@ function destinationIsExplicitlyAbsent(result, destination) {
 
 export function mirrorCudaAnalyzer(releaseTag, { run = commandRunner } = {}) {
   const { source, destination } = cudaMirrorRefs(releaseTag);
+  const expectedDigest = PINNED_CUDA_IMAGE_DIGESTS[releaseTag];
+  if (!expectedDigest) throw new Error(`No pinned CUDA analyzer digest for ${releaseTag}`);
+  const pinnedSource = `${SOURCE_REPOSITORY}@${expectedDigest}`;
   const sourceResult = run('docker', ['buildx', 'imagetools', 'inspect', source, '--format', DIGEST_FORMAT]);
   const sourceDigest = inspectedDigest(sourceResult);
   if (!sourceDigest) throw new Error(`Could not inspect source image: ${source}`);
+  if (sourceDigest !== expectedDigest) {
+    throw new Error(`Pinned CUDA analyzer digest mismatch for ${source}`);
+  }
 
   const destinationResult = run('docker', ['buildx', 'imagetools', 'inspect', destination]);
   if (destinationResult.status === 0) {
@@ -60,7 +67,7 @@ export function mirrorCudaAnalyzer(releaseTag, { run = commandRunner } = {}) {
     throw new Error(`Could not prove destination image is absent: ${destination}`);
   }
 
-  const copyResult = run('docker', ['buildx', 'imagetools', 'create', '--tag', destination, source]);
+  const copyResult = run('docker', ['buildx', 'imagetools', 'create', '--tag', destination, pinnedSource]);
   if (copyResult.status !== 0) throw new Error(`Could not mirror CUDA analyzer: ${source} -> ${destination}`);
 
   const destinationDigestResult = run(

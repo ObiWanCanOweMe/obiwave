@@ -64,6 +64,8 @@ import {
   stripSecretControlChars,
 } from '../schemas/settings.js';
 import { EMBEDDING_PROVIDER_IDS, LLM_PROVIDER_IDS } from '../schemas/providers.js';
+import { REASONING_EFFORTS, isReasoningEffort } from '../schemas/reasoning.js';
+import { validateLlmBodyParams } from './compat-params.js';
 
 export { normalizeGeminiSafety } from '../schemas/settings.js';
 
@@ -428,8 +430,25 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
   if (l.headers !== undefined) {
     target.headers = applyCustomHeadersPatch(target.headers, l.headers, label);
   }
+  // Extra request-body fields (#2296). Whole-list REPLACE, like headers: the
+  // editor always sends the full set. Reserved keys are refused in both.
+  if (l.bodyParams !== undefined) {
+    target.bodyParams = validateLlmBodyParams(l.bodyParams, `${label}.bodyParams`);
+  }
+  if (l.toolCallBodyParams !== undefined) {
+    target.toolCallBodyParams = validateLlmBodyParams(l.toolCallBodyParams, `${label}.toolCallBodyParams`);
+  }
   if (l.reasoning !== undefined) {
     target.reasoning = !!l.reasoning;
+  }
+  // The level "On" asks for (#2296). A bad value is a config error, like
+  // compatibleMode; it is stored whatever the provider, and read only where
+  // the leg can express a level (schemas/reasoning.ts).
+  if (l.reasoningEffort !== undefined) {
+    if (!isReasoningEffort(l.reasoningEffort)) {
+      throw new Error(`${label}.reasoningEffort must be one of ${REASONING_EFFORTS.map((e) => `"${e}"`).join(', ')}`);
+    }
+    target.reasoningEffort = l.reasoningEffort;
   }
   if (l.numCtx !== undefined) {
     target.numCtx = clampNumCtx(Number(l.numCtx), target.numCtx as number);
@@ -615,6 +634,7 @@ export const TTS_CLOUD_PROVIDERS: readonly string[] = TTS_CLOUD_PROVIDER_VALUES;
 // via settings.search.baseUrl.
 // Firecrawl uses its provider-owned saved key or SEARCH_API_KEY.
 // Outcrawl uses its provider-owned saved key or SEARCH_API_KEY (ock_).
+
 export const SEARCH_PROVIDERS = SETTINGS_SEARCH_PROVIDERS;
 export const SEARCH_KEY_PROVIDERS = SETTINGS_SEARCH_KEY_PROVIDERS;
 export type SearchKeyProvider = (typeof SEARCH_KEY_PROVIDERS)[number];
@@ -625,7 +645,7 @@ const emptySearchApiKeys = (): Record<SearchKeyProvider, string> => ({
   kagi: '',
   keenable: '',
   firecrawl: '',
-  outcrawl: '',
+  outcrawl: '', specstream: '',
 });
 
 export function normalizeSearchApiKeys(raw: unknown): Record<SearchKeyProvider, string> {

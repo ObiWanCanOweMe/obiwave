@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 
 import { cudaMirrorRefs, mirrorCudaAnalyzer } from './mirror-cuda-analyzer.mjs';
 
-const releaseTag = 'v1.0.0-obiwave.2';
-const source = 'ghcr.io/perminder-klair/subwave-analyzer-cuda:1.0.0';
-const destination = 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.0.0-obiwave.2';
-const digest = `sha256:${'a'.repeat(64)}`;
+const releaseTag = 'v1.33.0-obiwave.1';
+const source = 'ghcr.io/perminder-klair/subwave-analyzer-cuda:1.33.0';
+const destination = 'ghcr.io/obiwancanoweme/subwave-analyzer-cuda:v1.33.0-obiwave.1';
+const digest = 'sha256:8f4bf4c0e06489990c083976ce01449e216bb40d44f02eaf485d7daa29ac2b6c';
+const pinnedSource = `ghcr.io/perminder-klair/subwave-analyzer-cuda@${digest}`;
 const otherDigest = `sha256:${'b'.repeat(64)}`;
 const digestFormat = '{{json .Manifest.Digest}}';
 
@@ -29,13 +30,13 @@ function expectedCalls() {
   return [
     ['docker', ['buildx', 'imagetools', 'inspect', source, '--format', digestFormat]],
     ['docker', ['buildx', 'imagetools', 'inspect', destination]],
-    ['docker', ['buildx', 'imagetools', 'create', '--tag', destination, source]],
+    ['docker', ['buildx', 'imagetools', 'create', '--tag', destination, pinnedSource]],
     ['docker', ['buildx', 'imagetools', 'inspect', destination, '--format', digestFormat]],
   ];
 }
 
 test('derives exact upstream and mirror references from a fork release', () => {
-  assert.deepEqual(cudaMirrorRefs('v1.0.0-obiwave.2'), { source, destination });
+  assert.deepEqual(cudaMirrorRefs(releaseTag), { source, destination });
 });
 
 test('rejects non-fork and floating release tags', () => {
@@ -112,4 +113,17 @@ test('rejects copy failure and source/destination digest mismatch', () => {
   );
   assert.throws(() => mirrorCudaAnalyzer(releaseTag, { run: mismatch.run }), /digest mismatch/i);
   assert.deepEqual(mismatch.calls, expectedCalls());
+});
+
+
+test('rejects an upstream tag that no longer matches the reviewed digest before publishing', () => {
+  const command = runner(result(0, JSON.stringify(otherDigest)));
+  assert.throws(() => mirrorCudaAnalyzer(releaseTag, { run: command.run }), /pinned.*digest.*mismatch/i);
+  assert.deepEqual(command.calls, [expectedCalls()[0]]);
+});
+
+test('a release without a reviewed CUDA digest fails before any registry action', () => {
+  const command = runner();
+  assert.throws(() => mirrorCudaAnalyzer('v9.9.9-obiwave.1', { run: command.run }), /no pinned.*digest/i);
+  assert.deepEqual(command.calls, []);
 });

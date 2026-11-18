@@ -21,10 +21,11 @@ import {
 export async function checkCapabilities(s: StationSettings | null): Promise<Finding[]> {
   const out: Finding[] = [];
 
-  // Web search — backs the DJ's artist-news segments. DuckDuckGo and SearXNG
-  // are keyless; keyed providers own their API keys. Report config readiness,
-  // then do a short live probe so "is it actually working?" is answered, not
-  // just "is it configured?".
+  // Web search — backs the DJ's artist-news segments. DuckDuckGo, Keenable and
+  // Parallel are keyless; Tavily, Brave, Kagi, Firecrawl, Outcrawl and SpecStream need a
+  // key; SearXNG needs its server URL.
+  // Report config readiness, then do a short live probe so "is it actually
+  // working?" is answered, not just "is it configured?".
   const provider = s?.search?.provider || 'duckduckgo';
   let ready = true;
   try { ready = searchReady(); } catch { ready = true; }
@@ -79,7 +80,7 @@ export function webSearchNotReadyFinding(provider: string): Finding {
     label: 'web search',
     status: 'warn',
     detail: `${provider} selected but no API key`,
-    hint: `Artist-news segments can't fetch. Add the ${provider} key (${envVar}), save it in Settings → Web search, or select DuckDuckGo/SearXNG (keyless).`,
+    hint: `Artist-news segments can't fetch. Add the ${provider} key (${envVar}) in Settings → Web search. Tavily, Brave, Kagi, Firecrawl, Outcrawl and SpecStream each use their own saved key; SearXNG needs its server URL. Or switch to DuckDuckGo, Keenable or Parallel (all keyless).`,
   };
 }
 
