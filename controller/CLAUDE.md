@@ -125,3 +125,7 @@ Theme token descriptors include closed `texture` and `finish` keyword sets, alon
 ## v1.32 backup contract
 
 - `backup/zip.ts` is the one archive assembly. Retention may only name the anchored `subwave-auto-backup-…` grammar (`backup/pure.ts`), because `GET /backup/restorable` lists every `*.zip` in the state dir. Restore routes sidecars through their owners (`jingles.restoreMeta`, `sfx.restoreMeta`, `blocklist.restore`, `skills/install.ts`).
+
+## v1.33 integration contracts
+
+- The rescue chain after a failed render is: the persona's own `fallbackVoice` (#2029) → `settings.tts.fallback` → `defaultEngine` → piper → kokoro (`audio/tts-fallback.ts`). The persona rescue is gated on `GLOBAL_VOICE_KINDS` and passed to every `resolveEngine()` caller. It carries voice identity only: never forward the persona's own `tts` to a rescue (#1793); credentials stay station-wide.

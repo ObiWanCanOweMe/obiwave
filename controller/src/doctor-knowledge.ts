@@ -96,6 +96,23 @@ when a control is hidden.
 - Rule of thumb: tight resources → Piper (maybe Kokoro). GPU box → Chatterbox via the
   sidecar. Want best quality, happy to pay → Cloud.
 
+## Rescue voices (Personas → Voice → Rescue voice; Settings → TTS voice → Fallback voice)
+When a host's own voice engine fails mid-line, the line is re-rendered rather than
+dropped: first in that persona's own Rescue voice (if set), then the station-wide
+Fallback voice, then the default engine, Piper and Kokoro. The station Fallback voice
+is ONE voice for every persona, so on a show with co-hosts a rescued line can air in
+a voice that sounds like the other host. The "co-host rescue voices" finding flags
+that: give each host on a co-hosted show a Rescue voice that
+- can speak (a cloud rescue needs that provider's key; Kokoro or Piper always work
+  locally and are the safest choice),
+- sits on a different engine from the host's own voice (a rescue on the engine that
+  just failed is skipped), and
+- differs from every co-host's own voice and rescue voice (Piper with no voice picked
+  is the same built-in voice for everyone; pick a different Kokoro voice per host
+  instead).
+Credentials always come from Settings → TTS voice; a Rescue voice only picks the
+engine and voice.
+
 ## Pause DJ when empty (Settings → LLM provider → Idle behaviour)
 Optional setting: when listeners hit zero it stops the AI work (picks, links, IDs)
 while a fallback playlist keeps music flowing, then wakes the DJ when someone tunes
@@ -109,8 +126,8 @@ aren't matched by feel. If coverage is zero/low, recommend running the tagger.
 ## Web search (Settings → Web search)
 Backs the DJ's artist-news segments. 'duckduckgo' is the keyless default; 'tavily'
 and 'brave' give richer results but need provider-owned saved keys or SEARCH_API_KEY
-(Brave is metered with $5/mo free credits and requires a card on file); 'kagi' needs
-its dedicated provider-owned saved key or KAGI_API_KEY; 'keenable' is keyless
+(Brave is metered with $5/mo free credits and requires a card on file); Kagi ('kagi') needs
+its dedicated provider-owned saved key or KAGI_API_KEY; Keenable ('keenable') is keyless
 with an optional dedicated saved key or KEENABLE_API_KEY to raise its limit; 'searxng' is keyless but
 needs a self-hosted instance URL. If a keyed provider is selected without its key,
 news segments can't fetch — tell them to save the provider's key in Admin → Search
@@ -118,6 +135,8 @@ or switch to the keyless DuckDuckGo/SearXNG alternatives. Credentials are
 provider-specific and are never shared between search providers.
 Firecrawl uses its provider-owned saved key or SEARCH_API_KEY and requires an fc- key. Tavily and Brave refuse known foreign key prefixes before any request. A diagnostic timeout is not proof that all searches fail, and no provider is guaranteed never to time out.
 Outcrawl uses its own saved key or SEARCH_API_KEY and requires an ock_ key; other providers reject that prefix before sending.
+Parallel ('parallel') uses anonymous MCP web search with no key (free-tier rate limits apply).
+SpecStream uses its own saved key or SEARCH_API_KEY and requires an ss_ key; other keyed providers reject that prefix before sending.
 
 ## Backups
 There is a Backup feature (Admin → Backup) that exports settings, personas, custom
@@ -185,8 +204,13 @@ regular cadence — it's cheap insurance.
     (\`docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d\`;
     \`ANALYZER_HEAVY\` is irrelevant while it's applied), or on non-compose installs
     point the container at \`ghcr.io/perminder-klair/subwave-analyzer-cuda\` with GPU
-    passthrough (\`--gpus all\`). Needs the NVIDIA driver + Container Toolkit; without
-    a visible GPU the worker logs a warning and runs on CPU.
+    passthrough (\`--gpus all\`). Its default build needs Turing / RTX 20-series or
+    newer; an older card takes the tag named for its architecture (\`:pascal\` for a
+    GTX 10-series), which on compose is \`ANALYZER_CUDA_TAG=pascal\` in .env.
+    Needs the NVIDIA driver + Container Toolkit; without
+    a visible GPU, or on a card the image has no kernels for (a "CUDA self-test
+    failed" log line naming the card and its image tag), the worker logs a warning
+    and runs on CPU.
   - **All-in-one image** (\`analyzer local\` — the AIO bundles the analyzer
     in-process): switch the single container's image to
     \`ghcr.io/perminder-klair/subwave-aio-heavy\`, or on an NVIDIA host

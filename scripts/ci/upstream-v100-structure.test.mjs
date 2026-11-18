@@ -19,9 +19,10 @@ assert.ok(
   // v1.24 adds explicit selection routes and compatibility-mode migration;
   // v1.28 adds lyrics and jingle placement (23 entry-point lines);
   // v1.30 adds library/source settings; v1.31 adds steer and scheduled tagging.
+  // v1.33 adds request overrides, reasoning effort, audio energy and fade controls.
   // The split remains intact.
-  settings.split('\n').length <= 3000,
-  'settings entry must not exceed 3,000 lines',
+  settings.split('\n').length <= 3050,
+  'settings entry must not exceed 3,050 lines',
 );
 
 for (const module of ['core', 'llm', 'tts', 'station']) {

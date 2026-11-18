@@ -132,6 +132,9 @@ services:
         - SUBWAVE_BUILD_VERSION=\${SUBWAVE_BUILD_VERSION:-}
     container_name: sub-wave-controller
     restart: unless-stopped
+    # tini as PID 1: reaps orphans (a health-check curl killed on timeout, a
+    # \`docker exec … tsx\` helper) that Node would leave as zombies.
+    init: true
     logging: *default-logging
     depends_on:
       broadcast:
@@ -218,6 +221,8 @@ services:
         - SUBWAVE_BUILD_VERSION=\${SUBWAVE_BUILD_VERSION:-}
     container_name: sub-wave-web
     restart: unless-stopped
+    # tini as PID 1, as on the controller: reaps orphaned children.
+    init: true
     logging: *default-logging
     depends_on:
       # The homepage renders per-request against the controller — starting web
@@ -530,6 +535,9 @@ services:
         - SUBWAVE_BUILD_VERSION=\${SUBWAVE_BUILD_VERSION:-}
     container_name: sub-wave-controller
     restart: unless-stopped
+    # tini as PID 1: reaps orphans (a health-check curl killed on timeout, a
+    # \`docker exec … tsx\` helper) that Node would leave as zombies.
+    init: true
     logging: *default-logging
     depends_on:
       broadcast:
@@ -609,6 +617,8 @@ services:
         - SUBWAVE_BUILD_VERSION=\${SUBWAVE_BUILD_VERSION:-}
     container_name: sub-wave-web
     restart: unless-stopped
+    # tini as PID 1, as on the controller: reaps orphaned children.
+    init: true
     logging: *default-logging
     depends_on:
       # The homepage renders per-request against the controller — starting web
@@ -877,6 +887,9 @@ services:
     platform: linux/amd64
     container_name: sub-wave-controller
     restart: unless-stopped
+    # tini as PID 1: reaps orphans (a health-check curl killed on timeout, a
+    # \`docker exec … tsx\` helper) that Node would leave as zombies.
+    init: true
     logging: *default-logging
     depends_on:
       broadcast:
@@ -1138,18 +1151,28 @@ export const COMPOSE_ANALYZER_GPU_YML = `# GPU opt-in overlay for the analyzer �
 #
 # Requirements: NVIDIA driver + Container Toolkit only (cu128 wheels vendor the
 # CUDA runtime). The worker picks the device itself (ANALYZE_DEVICE=auto: cuda
-# when torch sees a GPU, else cpu with a warning — a misconfigured host
-# degrades, not fails). ANALYZE_DEVICE=cpu in .env forces CPU without dropping
-# the overlay.
+# when torch sees a GPU and a test op runs on it, else cpu with a warning — a
+# misconfigured host, or a card this build has no kernels for, degrades, not
+# fails). An explicit ANALYZE_DEVICE=cuda falls back the same way, and
+# ANALYZE_DEVICE=cpu in .env forces CPU without dropping the overlay.
 #
 # After ~5 idle minutes the worker drops its models out of VRAM so a
 # co-resident TTS/LLM gets the card back (ANALYZE_IDLE_UNLOAD_S tunes it;
 # 0 keeps them resident). A few hundred MB of CUDA context remain until the
 # container stops.
+#
+# The image is built once per torch wheel (#2280). Unset, ANALYZER_CUDA_TAG
+# follows SUBWAVE_VERSION like every other image: the cu128 build, for Turing
+# (RTX 20-series, GTX 16-series) and newer. An older card needs the cu124
+# build: set ANALYZER_CUDA_TAG in .env to its architecture tag (maxwell,
+# pascal or volta), or to <version>-cu124 to pin a release. The tag table is in
+# docs/internals/infrastructure.md (#aio-cuda-tags).
 services:
   analyzer:
-    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${SUBWAVE_VERSION:-latest}
-    # Local build with this overlay applied mirrors the published cuda image.
+    image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${ANALYZER_CUDA_TAG:-\${SUBWAVE_VERSION:-latest}}
+    # Local build with this overlay applied mirrors the published cu128 image,
+    # whatever ANALYZER_CUDA_TAG says; for the cu124 one, build with
+    # --build-arg TORCH_CUDA=cu124.
     build:
       args:
         WITH_CLAP: 1
@@ -1227,6 +1250,14 @@ SITE_URL=
 # release) and moves it forward on \`subwave update\`. Published tags are bare
 # semver (e.g. 0.35.0 or 0.35), plus \`latest\`.
 # SUBWAVE_VERSION=latest
+
+# The CUDA analyzer's tag, read only by docker-compose.analyzer-gpu.yml. Unset
+# follows SUBWAVE_VERSION: the cu128 build, for Turing (RTX 20-series, GTX
+# 16-series) and newer. A Maxwell, Pascal (GTX 10-series) or Volta card needs
+# the cu124 build: set its architecture tag, which moves with each release, or
+# <version>-cu124 to pin one (\`subwave update\` does not move that pin). Tags:
+# docs/internals/infrastructure.md#aio-cuda-tags.
+# ANALYZER_CUDA_TAG=pascal
 
 # ───────── Ports (byo-proxy compose only) ─────────
 # CADDY_PORT=7700
@@ -1363,6 +1394,7 @@ SITE_URL=
 # GOOGLE_GENERATIVE_AI_API_KEY=
 # OPENROUTER_API_KEY=
 # REQUESTY_API_KEY=
+# CHEAPER_INFERENCE_API_KEY=
 # DEEPSEEK_API_KEY=
 # AI_GATEWAY_API_KEY=
 # ELEVENLABS_API_KEY=
@@ -1370,19 +1402,28 @@ SITE_URL=
 # SEARCH_API_KEY=tvly-...           # Tavily or Brave Search key (optional, paid/metered)
 # KEENABLE_API_KEY=keen_...        # Optional dedicated Keenable key (raises its free limit)
 # KAGI_API_KEY=...                  # Kagi Search API environment fallback
-# Firecrawl uses SEARCH_API_KEY=fc-...; Outcrawl uses SEARCH_API_KEY=ock-...
-# (or each provider's own saved key).
+# Firecrawl uses SEARCH_API_KEY=fc-...; Outcrawl uses SEARCH_API_KEY=ock_...
+# SpecStream uses SEARCH_API_KEY=ss_... (or each provider's own saved key).
 # SearXNG: no env var. Configure base URL in admin UI → Settings → Search.
 # Embedding key — only when embeddings use a different provider/key than chat
 # (e.g. OpenRouter for embeddings, a local proxy for chat). Blank → inherit the
 # chat key. OpenRouter embeddings also fall back to OPENROUTER_API_KEY above.
 # EMBEDDING_API_KEY=
 
+# ───────── Last.fm (optional — also configurable in admin UI) ─────────
+# Tags need only the API key. Paste it in Settings → Listeners → Last.fm, or
+# set it here; from there Last.fm tags are on by default (Library tagger →
+# Advanced → Enrichment is Auto). Scrobbling is separate and stays off until
+# you enable it in that card; only then are the secret and session key needed.
+# LASTFM_API_KEY=
+# LASTFM_API_SECRET=                # scrobbling only
+# LASTFM_SESSION_KEY=               # scrobbling only; or use Connect in the card
+
 # ───────── Scrobbling (optional — also configurable in admin UI) ─────────
 # LISTENBRAINZ_USER_TOKEN=          # ListenBrainz or LB-compatible scrobbler token
 # LISTENBRAINZ_API_URL=             # optional full submit-listens URL override
 #                                   # e.g. http://koito:4110/apis/listenbrainz/1/submit-listens
-#                                   # otherwise set base URL in admin → Settings → Scrobbling
+#                                   # otherwise set base URL in admin → Settings → Listeners → ListenBrainz
 
 # ───────── Original years (optional — also configurable in admin UI) ─────────
 # Era-bounded shows ask MusicBrainz (keyless) for the original year of reissues
@@ -1490,7 +1531,9 @@ SITE_URL=
 #                         # still found within this window. Lower it if you start
 #                         # analyzers by hand and want them picked up sooner.
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
-#                    # only meaningful on the cuda analyzer flavour
+#                    # only meaningful on the cuda analyzer flavour. auto and
+#                    # cuda both fall back to cpu, with a warning, when the card
+#                    # fails a one-op self-test (no GPU, or no kernels for it)
 # ANALYZE_IDLE_UNLOAD_S=  # seconds of no CLAP/Demucs use before the models are
 #                         # dropped (0 = keep resident). Defaults per device:
 #                         # 300 on cuda (frees the GPU for co-resident TTS/LLM
@@ -1535,8 +1578,12 @@ SITE_URL=
 # CLAP_MODEL=laion-clap
 # DEMUCS_MODEL=htdemucs   # vocal separation is the slow pass, and the default
 #                         # is also the fastest on CPU we've measured — the
-#                         # mdx*/*_q alternatives are bags of 4 sub-models and
-#                         # run ~3x SLOWER despite the smaller download
+#                         # mdx* alternatives are bags of 4 sub-models and
+#                         # run ~3x SLOWER. The quantised *_q models (mdx_q,
+#                         # mdx_extra_q) aren't supported: the analyzer doesn't
+#                         # ship diffq, so a *_q name loads htdemucs instead
+#                         # and logs one line saying so. mdx and mdx_extra are
+#                         # the same models unquantised
 # DEMUCS_OVERLAP=0.25     # share of each Demucs chunk that overlaps the next
 #                         # (0-0.9; anything else warns and uses 0.25). 0.1
 #                         # measured ~14% faster on CPU with near-identical
@@ -1659,4 +1706,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.32.0`; // x-release-please-version
+export const CLI_VERSION = `1.33.0`; // x-release-please-version
