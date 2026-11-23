@@ -129,3 +129,7 @@ Theme token descriptors include closed `texture` and `finish` keyword sets, alon
 ## v1.33 integration contracts
 
 - The rescue chain after a failed render is: the persona's own `fallbackVoice` (#2029) → `settings.tts.fallback` → `defaultEngine` → piper → kokoro (`audio/tts-fallback.ts`). The persona rescue is gated on `GLOBAL_VOICE_KINDS` and passed to every `resolveEngine()` caller. It carries voice identity only: never forward the persona's own `tts` to a rescue (#1793); credentials stay station-wide.
+
+## v1.34 integration contracts
+
+- Jingles: `broadcast/jingles.ts` `rewritePlaylist` is the one write of `jingles.m3u`, and it schedules the debounced `jingles.reload` itself. The file is the on-air show's jingle list (`jingle-playlist-policy.ts`): `jingle-show-sync.ts` picks the show and calls `jingles.applyShowList`, which reloads at once and writes nothing when the bytes are unchanged; `jingles.ts` never imports the session (#2367). Never gate that reload on the controller's own `jingleRatio`/`jingleRotate`: the mixer built its rotate from the ratio it read at startup. `scripts/generate-jingles.sh` writes no `jingles.json`, so its list lasts only until the controller's next rebuild. A repeated press is de-duplicated (409 while pending), never rate-limited, and pending entries expire on their own, so a mixer restart can never wedge the button.

@@ -29,6 +29,7 @@ import {
   type ModelOwner,
 } from './model-discovery.js';
 import { probeFishKey } from '../../llm/speech.js';
+import { checkDjBrain } from '../../llm/dj-brain.js';
 
 // Mounted onto the parent settings router in ../settings.ts.
 export const router = express.Router();
@@ -682,6 +683,29 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
   } catch (err: unknown) {
     res.json({ ok: false, message: briefLlmError(err, probeSecrets), latencyMs: Date.now() - t0 });
   }
+});
+
+// What a DJ Brain key includes (brain only, or brain + studio voice), so the
+// one-key setup wires the voice only for a plan that has one. A blank key reads
+// the provider key only at a saved endpoint. Always 200s; never saves.
+router.post('/settings/dj-brain/check', requireAdmin, async (req, res) => {
+  const { apiKey, baseUrl } = req.body || {};
+  if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
+    return res.status(400).json({ ok: false, voice: false, message: 'baseUrl is required', latencyMs: 0 });
+  }
+  let key = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (!key) {
+    await settings.load();
+    if (req.body?.leg !== 'onboarding'
+      && savedProviderEndpoints('openai-compatible').has(normalizedProviderEndpoint(baseUrl))) {
+      key = settings.llmKeyFor('openai-compatible');
+    }
+  }
+  const keyIssue = key ? secretValueIssue(key) : null;
+  if (keyIssue) return res.json({ ok: false, voice: false, message: keyIssue, latencyMs: 0 });
+  const result = await checkDjBrain(baseUrl, key);
+  if (!result.ok) result.message = briefLlmError({ message: result.message }, [key]);
+  res.json(result);
 });
 
 // Discovery is POST-only: URL/key form values must never enter access logs.

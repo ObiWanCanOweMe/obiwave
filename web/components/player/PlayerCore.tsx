@@ -15,10 +15,13 @@ import {
   type RefObject,
   type SetStateAction,
 } from 'react';
-import { useStationFeed, type StationFeed } from '@/hooks/useStationFeed';
+import { useStationFeed } from '@/hooks/useStationFeed';
 import { usePlayer, type PlayerStatus } from '@/hooks/usePlayer';
 import { useSignal, type Signal } from '@/hooks/useSignal';
 import { useMediaSession } from '@/hooks/useMediaSession';
+import { useClockZone } from '@/hooks/useClockZone';
+import { displayTimezone } from '@/lib/clockZone';
+import { FeedContext, useOptionalPlayerFeed, type PlayerFeed } from './feedContext';
 import { useStationClient, type LikeResult, type LikeStatus } from '@/lib/stationClient';
 import { listenerLeadMsForFormat, streamEnablementFor, type AudioFormat, type FormatAvailability } from '@/lib/audioFormat';
 import { listenerRequestSchema } from '@/lib/schemas.generated';
@@ -67,7 +70,7 @@ export interface PlayerActions {
   likeStatus: () => Promise<LikeStatus | null>;
 }
 
-const FeedContext = createContext<StationFeed | null>(null);
+export type { PlayerFeed };
 const AudioContext = createContext<PlayerAudio | null>(null);
 const ActionsContext = createContext<PlayerActions | null>(null);
 
@@ -77,9 +80,11 @@ function useRequired<T>(ctx: React.Context<T | null>, name: string): T {
   return value;
 }
 
-export function usePlayerFeed(): StationFeed {
+export function usePlayerFeed(): PlayerFeed {
   return useRequired(FeedContext, 'usePlayerFeed');
 }
+
+export { useOptionalPlayerFeed };
 
 export function usePlayerAudio(): PlayerAudio {
   return useRequired(AudioContext, 'usePlayerAudio');
@@ -220,13 +225,17 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
     llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs,
   } = feed;
-  const feedValue = useMemo<StationFeed>(
+  const { zone: clockZone } = useClockZone();
+  const shownTimezone = displayTimezone(timezone, clockZone);
+  const feedValue = useMemo<PlayerFeed>(
     () => ({
       nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-      llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs,
+      llmTokens, state, session, trackStartedAt, timezone: shownTimezone, locale, leadMs, bufferMs,
+      stationTimezone: timezone, clockZone,
     }),
     [nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
-     llmTokens, state, session, trackStartedAt, timezone, locale, leadMs, bufferMs],
+     llmTokens, state, session, trackStartedAt, shownTimezone, locale, leadMs, bufferMs,
+     timezone, clockZone],
   );
 
   const { latencyMs, quality } = signal;

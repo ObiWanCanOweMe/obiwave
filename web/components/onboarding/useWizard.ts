@@ -11,6 +11,7 @@ import {
 } from './providerState';
 import { fishAudioIssue } from '@/lib/schemas.generated';
 import { LLM_ENV_VARS } from '../admin/llm/providerMeta';
+import { djBrainSettingsPatch, isDjBrainUrl, type DjBrainCheckResult } from '@/lib/djBrain';
 
 // Every step reads and writes through the `set` updater rather than its own
 // state, so the Review step can show the whole picture without prop-drilling.
@@ -26,6 +27,10 @@ export interface WizardData {
     ollamaUrl: string;
   };
   llmTest: { ok: boolean | null; msg?: string };
+  // The DJ Brain key's plan includes the studio voice (the brain's answer,
+  // read when the LLM step moves on). While true and the LLM is the brain,
+  // save wires the voice from the same key and the TTS step shows it as done.
+  djBrainVoice: boolean;
 
   tts: {
     defaultEngine: 'piper' | 'kokoro' | 'cloud' | 'chatterbox' | 'pocket-tts' | 'remote' | 'gemini';
@@ -65,6 +70,7 @@ export const DEFAULT_DATA: WizardData = {
     ollamaUrl: 'http://host.docker.internal:11434',
   },
   llmTest: { ok: null },
+  djBrainVoice: false,
   tts: {
     defaultEngine: 'piper',
     heavyEnabled: false,
@@ -209,6 +215,22 @@ export function useWizard(hosted = false) {
     }
   }, [auth, patch]);
 
+  // What a DJ Brain key includes. Never throws.
+  const checkDjBrain = useCallback(async (baseUrl: string, apiKey: string): Promise<DjBrainCheckResult> => {
+    try {
+      const r = await auth.adminFetch('/settings/dj-brain/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseUrl, apiKey, leg: 'onboarding' }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const j = (await r.json().catch(() => ({}))) as Partial<DjBrainCheckResult>;
+      return { ok: !!j.ok, voice: !!j.voice, message: j.message || `controller returned HTTP ${r.status}`, latencyMs: j.latencyMs ?? 0 };
+    } catch (err: unknown) {
+      return { ok: false, voice: false, message: fetchErrorMsg(err), latencyMs: 0 };
+    }
+  }, [auth]);
+
   // Probe a custom endpoint for its loaded model list so the operator can pick
   // the model instead of typing it. LiteLLM resolves a blank URL from the
   // controller environment; openai-compatible still requires an explicit URL.
@@ -254,10 +276,25 @@ export function useWizard(hosted = false) {
     const fishIssue = fishAudioIssue(data.tts.cloud);
     if (fishIssue) return { ok: false, error: fishIssue };
 
+    // A DJ Brain key with the studio voice wires the LLM and the voice from
+    // one key, the same patch Settings → DJ Brain saves.
+    const brainVoice = data.djBrainVoice
+      && data.llm.provider === 'openai-compatible'
+      && isDjBrainUrl(data.llm.baseUrl);
+    const brainTts = brainVoice
+      ? djBrainSettingsPatch({
+        baseUrl: data.llm.baseUrl,
+        token: data.llm.apiKey,
+        chatModel: data.llm.model,
+        voice: true,
+        stationEngine: 'piper',
+      }).tts
+      : undefined;
+
     const body = {
       navidrome: data.navidrome,
       llm: llmForSubmission(data.llm),
-      tts: {
+      tts: brainTts ? { ...brainTts, heavyEnabled: data.tts.heavyEnabled } : {
         defaultEngine: data.tts.defaultEngine,
         heavyEnabled: data.tts.heavyEnabled,
         cloud: data.tts.cloud.enabled
@@ -303,6 +340,7 @@ export function useWizard(hosted = false) {
     testNavidrome,
     testLlm,
     discoverCustomModels,
+    checkDjBrain,
     save,
   };
 }

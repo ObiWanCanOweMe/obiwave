@@ -239,7 +239,6 @@ services:
       - SUBWAVE_MUSIC_LIBRARY_URL=\${SUBWAVE_MUSIC_LIBRARY_URL:-}
       - SUBWAVE_HOMEPAGE=\${SUBWAVE_HOMEPAGE:-player}
       - SUBWAVE_DISCOVERY_BENCH=\${SUBWAVE_DISCOVERY_BENCH:-}
-      - SUBWAVE_DJ_BRAIN_ENABLED=\${SUBWAVE_DJ_BRAIN_ENABLED:-false}
       # RUNTIME source of truth for absolute URLs (canonicals, og:url,
       # robots.txt, sitemap.xml) — the generic image serves any domain.
       - SITE_URL=\${SITE_URL:-}
@@ -635,7 +634,6 @@ services:
       - SUBWAVE_MUSIC_LIBRARY_URL=\${SUBWAVE_MUSIC_LIBRARY_URL:-}
       - SUBWAVE_HOMEPAGE=\${SUBWAVE_HOMEPAGE:-player}
       - SUBWAVE_DISCOVERY_BENCH=\${SUBWAVE_DISCOVERY_BENCH:-}
-      - SUBWAVE_DJ_BRAIN_ENABLED=\${SUBWAVE_DJ_BRAIN_ENABLED:-false}
       - SITE_URL=\${SITE_URL:-}
       # Set to 1 to keep the shared product pages (landing, docs, news,
       # catalogs) self-canonical + in this install's sitemap instead of
@@ -1233,8 +1231,6 @@ SITE_URL=
 # TZ=Europe/London
 
 # Web
-# SUBWAVE_DJ_BRAIN_ENABLED=false   # true reveals the alpha DJ Brain admin settings
-#                                  # Runtime flag; recreate the web container after changing.
 # SUBWAVE_HOMEPAGE=player          # or 'landing' for the marketing host
 # SUBWAVE_INDEX_ALL=1              # index the shared docs/news/catalog pages on
 #                                  # THIS domain too; default points their
@@ -1706,4 +1702,4 @@ SITE_URL=
 
 // cli/package.json#version (embedded so the compiled binary can self-identify
 // — used by `subwave --version`).
-export const CLI_VERSION = `1.33.0`; // x-release-please-version
+export const CLI_VERSION = `1.34.0`; // x-release-please-version

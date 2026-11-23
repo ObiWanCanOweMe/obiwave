@@ -10,6 +10,7 @@ import type { SettingsData } from '../components/admin/settings/shared.tsx';
 
 const storage = new Map<string, string>([['subwave_admin_auth', 'test-admin-token']]);
 const storageWrites: Array<[string, string]> = [];
+let finishBrainProbe: ((response: Response) => void) | null = null;
 const requests: Array<{ url: string; method: string; owner?: string }> = [];
 const localStorage = {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -88,6 +89,9 @@ Object.defineProperty(globalThis, 'fetch', {
     // Count only redacted request metadata. Draft credentials remain solely in
     // the component and transient Request body, never in this behavior ledger.
     requests.push({ url, method: init.method || 'GET', ...(owner ? { owner } : {}) });
+    if (url.endsWith('/settings/dj-brain/check')) {
+      return new Promise<Response>(resolve => { finishBrainProbe = resolve; });
+    }
     if (url.endsWith('/settings/navidrome/players')) {
       return Response.json({ state: 'not-read', reason: null, server: null, switched: 0, autoEnable: false, players: [] });
     }
@@ -338,6 +342,24 @@ async function main() {
     await navigate(renderer, 'LLM provider');
     assert.equal(sectionRoots(renderer, 'llm')[0], llmRoot, 'LLM revisit reuses the same component root');
     assert.equal(discoveryRequests('/settings/llm/models', 'chat').length, 2);
+    // A slow Brain key check cannot label an edited token with the old answer.
+    const sourceButton = (label: string) => llmRoot.findAllByType('button')
+      .find(node => textContent(node) === label)!;
+    await act(async () => { sourceButton('DJ Brain').props.onClick(); });
+    await type(passwordInputs(renderer, 'llm')[0]!, 'brain-old-draft');
+    const probeButton = llmRoot.findAllByType('button')
+      .find(node => textContent(node) === 'Test key')!;
+    await act(async () => { void probeButton.props.onClick(); });
+    await waitFor(() => finishBrainProbe !== null, 'Brain probe never started');
+    await type(passwordInputs(renderer, 'llm')[0]!, 'brain-new-draft');
+    await act(async () => {
+      finishBrainProbe!(Response.json({ ok: true, voice: true, message: 'stale Brain key accepted', latencyMs: 1 }));
+      finishBrainProbe = null;
+    });
+    assert.doesNotMatch(textContent(llmRoot), /stale Brain key accepted/);
+    assert.equal(passwordInputs(renderer, 'llm')[0]!.props.value, 'brain-new-draft');
+    await act(async () => { sourceButton('Your own provider').props.onClick(); });
+
     let llmPasswords = passwordInputs(renderer, 'llm');
     assert.equal(llmPasswords.length, 1, 'the real primary compatibility-key field is mounted');
     await type(llmPasswords[0]!, 'llm-primary-secret');
