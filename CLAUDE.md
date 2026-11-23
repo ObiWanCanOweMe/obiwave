@@ -241,3 +241,7 @@ Firecrawl uses its own saved `search.apiKeys.firecrawl` slot with `SEARCH_API_KE
 - Sound-vector dirtiness tracks words stored with each vector. New-track first moods are judged before the pass writes.
 - Stem usage is trusted only at a journal position covering every change. Missing or unwritable journals require a walk.
 - Default native-Anthropic reasoning on manual-thinking Claude models uses `MANUAL_THINKING_DEFAULT_BUDGET` of 1,024 tokens. Per-leg reasoning and body overrides preserve provider-owned credentials and Gemini safety.
+
+## v1.34 integration contracts
+
+- **The mixer's jingle list is the on-air show's, and becomes the incoming show's at the confirmed final outgoing track**, so the stinger at the seam between them is the incoming show's; the roll only re-applies it. Between stingers `jingles.reload` replaces the mixer's playlist, because a reload in place airs the old list's prepared clip first (`show-boundary-handoffs.md`, #2367).

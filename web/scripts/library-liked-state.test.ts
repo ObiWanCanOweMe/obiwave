@@ -221,6 +221,8 @@ async function verifyLibraryPanelOwnsAsyncResultsAndClearMutations() {
   };
 
   const fakeWindow = {
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
     location: {
       search: '?view=liked',
       pathname: '/admin/library',

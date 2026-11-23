@@ -494,3 +494,57 @@ test('SpecStream: probes its own saved key, then validates the environment fallb
   assert.doesNotMatch(malformed.message, /SECRET/);
   assert.equal(outbound.length, 2, 'invalid fallback keys never reach the provider');
 });
+
+async function checkBrain(payload: Record<string, string>) {
+  const response = await fetch(`${base}/settings/dj-brain/check`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(response.status, 200);
+  return await response.json() as { ok: boolean; voice: boolean; message: string };
+}
+
+test('DJ Brain: saved keys stay at saved endpoints and never enter onboarding probes', async (t) => {
+  const savedUrl = 'https://saved-brain.example.test/v1';
+  await settings.update({ llm: {
+    provider: 'openai-compatible', model: 'dj-brain', baseUrl: savedUrl, apiKey: 'brain-saved-token',
+  } });
+  const outbound = stubProvider(t, 200, { data: [{ id: 'dj-brain' }, { id: 'dj-brain-voice' }] });
+
+  for (const payload of [
+    { baseUrl: 'https://unknown-brain.example.test/v1', apiKey: '' },
+    { baseUrl: savedUrl, apiKey: '', leg: 'onboarding' },
+  ] as Record<string, string>[]) {
+    const result = await checkBrain(payload);
+    assert.equal(result.ok, false, JSON.stringify(payload));
+    assert.equal(result.voice, false);
+    assert.equal(outbound.length, 0, 'a blank probe outside its saved owner must not send any credential');
+    assert.doesNotMatch(JSON.stringify(result), /brain-saved-token/);
+  }
+
+  const saved = await checkBrain({ baseUrl: ` ${savedUrl}/ `, apiKey: '' });
+  assert.deepEqual([saved.ok, saved.voice], [true, true]);
+  assert.equal(outbound.length, 1);
+  assert.equal(outbound[0].url, `${savedUrl}/models`);
+  assert.equal(outbound[0].headers.get('authorization'), 'Bearer brain-saved-token');
+
+  const typed = await checkBrain({ baseUrl: 'https://new-brain.example.test/v1', apiKey: 'brain-new-token', leg: 'onboarding' });
+  assert.equal(typed.ok, true);
+  assert.equal(outbound[1].headers.get('authorization'), 'Bearer brain-new-token');
+});
+
+test('DJ Brain: echoed credentials are redacted before errors are shortened', async (t) => {
+  const token = 'brain_SECRET.part2';
+  const realFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', (async (input: string | URL | Request, init?: RequestInit) => {
+    const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (target.startsWith(base)) return realFetch(input, init);
+    throw new Error(`Provider echoed ${token}. Please retry`);
+  }) as typeof fetch);
+  const result = await checkBrain({ baseUrl: 'https://brain.example.test/v1', apiKey: token });
+  assert.equal(result.ok, false);
+  assert.equal(result.voice, false);
+  assert.doesNotMatch(JSON.stringify(result), /brain_SECRET|part2/);
+  assert.match(result.message, /\[redacted\]/);
+});

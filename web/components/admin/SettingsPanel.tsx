@@ -47,7 +47,6 @@ import { deepLinkJump, type SettingsQuery } from './settings/settings-link';
 import { TtsSection } from './settings/TtsSection';
 import { DjBehaviourSection } from './settings/DjBehaviourSection';
 import { LlmSection } from './settings/LlmSection';
-import { BrainSection } from './settings/BrainSection';
 import { SearchSection } from './settings/SearchSection';
 import { reconcileSearchKeyDraftsAfterSave } from './settings/search-provider-state';
 import { LibrarySection } from './settings/LibrarySection';
@@ -125,7 +124,7 @@ const JUMP_MAX_FRAMES = 60;
 // Defer each expensive section until its first visit, then keep it mounted for
 // the life of SettingsPanel so navigation and search cannot destroy a draft.
 // Nothing here is persisted to TanStack Query or browser storage.
-const RETAINED_DRAFT_SECTIONS = new Set<SectionId>(['music', 'llm', 'tts', 'library', 'brain']);
+const RETAINED_DRAFT_SECTIONS = new Set<SectionId>(['music', 'llm', 'tts', 'library']);
 
 interface RetainedDraftSectionProps {
   section: SectionId;
@@ -172,7 +171,7 @@ function RetainedDraftSection({
   );
 }
 
-export default function SettingsPanel({ djBrainEnabled = false, hosted = false }: { djBrainEnabled?: boolean; hosted?: boolean }) {
+export default function SettingsPanel({ hosted = false }: { hosted?: boolean }) {
   // Hosted: the box agent owns max listeners (no editable field, and no number:
   // the listener and bitrate ceilings are guards for the box's shared port,
   // not published plan limits, so no copy presents them as one). The
@@ -184,8 +183,8 @@ export default function SettingsPanel({ djBrainEnabled = false, hosted = false }
   // Hosted (SUB/WAVE Cloud): the LLM provider page is the agent's, so it goes;
   // the voice page stays for what the operator still owns (see TtsSection).
   const sections = useMemo(
-    () => SECTIONS.filter(s => (s.id !== 'brain' || djBrainEnabled) && (s.id !== 'llm' || !hosted)),
-    [djBrainEnabled, hosted],
+    () => SECTIONS.filter(s => s.id !== 'llm' || !hosted),
+    [hosted],
   );
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const settingsQuery = useSettingsQuery<SettingsData>({
@@ -262,11 +261,12 @@ export default function SettingsPanel({ djBrainEnabled = false, hosted = false }
       return;
     }
     // Retired tab ids, so an old bookmark or doc link still lands somewhere.
-    const RENAMED: Record<string, SectionId> = { danger: 'broadcast', likes: 'listeners', scrobble: 'listeners', orphans: 'stems' };
+    // `brain` was DJ Brain's own tab; it is a source on LLM provider now. A
+    // hosted station has no LLM page, so the link falls through to Station.
+    const RENAMED: Record<string, SectionId> = { danger: 'broadcast', likes: 'listeners', scrobble: 'listeners', orphans: 'stems', brain: 'llm' };
     const s = requested && RENAMED[requested] ? RENAMED[requested] : requested;
-    if (s === 'brain' && !djBrainEnabled) { activateSection('station'); return; }
     if (s && sections.some(x => x.id === s)) activateSection(s as SectionId);
-  }, [activateSection, router, searchParams, djBrainEnabled, sections]);
+  }, [activateSection, router, searchParams, sections]);
 
   useEffect(() => {
     if (!data?.values) return;
@@ -687,17 +687,6 @@ export default function SettingsPanel({ djBrainEnabled = false, hosted = false }
                 data={data} form={form} setForm={updateForm} busy={busy}
                 saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
-            )}
-            {djBrainEnabled && retainedSections.brain && (
-              <RetainedDraftSection
-                section="brain" active={activeSection === 'brain'} saveSlot={saveSlot}
-                reportDirty={reportDirty} advOpen={!!advOpen.brain} setAdvOpen={setSectionAdvOpen}
-              >
-              <BrainSection
-                data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
-              />
-              </RetainedDraftSection>
             )}
             {!hosted && retainedSections.llm && data.llm && (
               <RetainedDraftSection

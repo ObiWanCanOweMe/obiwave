@@ -190,6 +190,15 @@ const allowed = new Map([
       path: /^\/library\/era\/csv$/,
     }],
   ])],
+  ['library/LibraryCounts.tsx', new Map([
+    // The tracks behind Needs you as a one-shot CSV blob, like era-csv-export;
+    // nothing cached reads it.
+    ['needs-you-csv-export', {
+      callee: 'adminResponse',
+      method: 'GET',
+      path: /^\/library\/attention\/csv$/,
+    }],
+  ])],
   ['library/useTaggerRunLog.ts', new Map([
     // One run's log file as a download, byte for byte; nothing cached reads it.
     ['tagger-log-download', {
@@ -209,9 +218,6 @@ const allowed = new Map([
     ['generation-job-start', { callee: 'rawFetcher', method: 'POST', path: /^\/playlists\/generate\/jobs$/ }],
     ['generation-sync-fallback', { callee: 'rawFetcher', method: 'POST', path: /^\/playlists\/generate$/ }],
     ['generation-job-poll', { callee: 'rawFetcher', method: 'GET', path: /^\/playlists\/generate\/jobs\/\$\{\}$/ }],
-  ])],
-  ['settings/BrainSection.tsx', new Map([
-    ['brain-connection-probe', { callee: 'adminResponse', method: 'POST', path: /^\/settings\/llm\/probe-compat$/ }],
   ])],
   ['settings/LlmSection.tsx', new Map([
     // The swap confirm dialog's preview: read once per dialog open, against

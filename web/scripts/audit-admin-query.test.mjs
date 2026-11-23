@@ -60,6 +60,10 @@ const validImperativeFixtures = {
   // admin-query-imperative: era-csv-export
   return adminResponse(adminFetch, '/library/era/csv');
 }\n`,
+  'library/LibraryCounts.tsx': `export async function run(adminFetch) {
+  // admin-query-imperative: needs-you-csv-export
+  return adminResponse(adminFetch, '/library/attention/csv');
+}\n`,
   'library/useTaggerRunLog.ts': `export async function run(adminFetch, id) {
   // admin-query-imperative: tagger-log-download
   return adminResponse(adminFetch, \`/library/tagger/logs/\${id}\`);
@@ -76,10 +80,6 @@ const validImperativeFixtures = {
   await fetcher('/playlists/generate', init);
   // admin-query-imperative: generation-job-poll
   return fetcher(\`/playlists/generate/jobs/\${id}\`);
-}\n`,
-  'settings/BrainSection.tsx': `export async function run(adminFetch) {
-  // admin-query-imperative: brain-connection-probe
-  return adminResponse(adminFetch, '/settings/llm/probe-compat', { method: 'POST' });
 }\n`,
   'settings/LlmSection.tsx': `export async function run(adminFetch) {
   // admin-query-imperative: llm-swap-fit-preview
