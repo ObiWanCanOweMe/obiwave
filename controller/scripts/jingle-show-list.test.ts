@@ -257,8 +257,12 @@ test('every music start offers the track on air to the jingle sync', async () =>
   const seen: unknown[] = [];
   const real = queue._onMusicStartedForJingles;
   const realRunner = queue.runArmedBoundaryHandoff;
+  const realPickCycle = queue.runPickCycle;
   queue._onMusicStartedForJingles = (track => { seen.push(track); return Promise.resolve(false); }) as typeof real;
   queue.runArmedBoundaryHandoff = (async () => {}) as typeof realRunner;
+  // This test owns the jingle hook, not the asynchronous DJ cycle. A real
+  // pick can roll the session while the next test is arming its boundary.
+  queue.runPickCycle = () => {};
   try {
     queue.onTrackStarted({ title: FINAL.title, artist: FINAL.artist, subsonic_id: FINAL.id, timestamp: Math.floor(Date.now() / 1000) } as never);
     assert.equal(seen.length, 1);
@@ -266,6 +270,7 @@ test('every music start offers the track on air to the jingle sync', async () =>
   } finally {
     queue._onMusicStartedForJingles = real;
     queue.runArmedBoundaryHandoff = realRunner;
+    queue.runPickCycle = realPickCycle;
   }
 });
 
